@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Local project-owned tool/cache directories
+.local/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Build outputs
+dist/
+build/
+coverage/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# Desktop/mobile outputs
+release/
+*.asar
+.expo/
+.expo-shared/
+android/
+ios/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json

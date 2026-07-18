@@ -1,0 +1,39 @@
+{
+  "name": "qiuai-workos",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@10.8.2",
+  "engines": {
+    "node": ">=20.19.0",
+    "npm": ">=10.8.2"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev:web",
+    "dev:server": "npm run dev -w @qiuai/server",
+    "dev:web": "npm run dev -w @qiuai/web-console",
+    "dev:pc": "npm run dev -w @qiuai/pc-app",
+    "dev:mobile": "npm run dev -w @qiuai/mobile-app",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "infra:up": "docker compose -f infra/docker/compose.local.yml up -d",
+    "infra:down": "docker compose -f infra/docker/compose.local.yml down",
+    "check:local-tooling": "node tools/check-local-tooling.mjs"
+  },
+  "devDependencies": {
+    "@types/node": ">=20.0.0 <21",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "eslint": ">=9.0.0 <10",
+    "prettier": ">=3.0.0 <4",
+    "prisma": "6.19.3",
+    "typescript": ">=5.0.0 <6"
+  }
+}

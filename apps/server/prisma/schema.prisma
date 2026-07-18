@@ -1,0 +1,243 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantType {
+  PERSONAL
+  ENTERPRISE
+  PLATFORM
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum AccountStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum WorkspaceType {
+  PERSONAL
+  ENTERPRISE
+}
+
+enum WorkspaceStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum WorkspaceMemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum PlanCode {
+  PERSONAL_FREE
+  ENTERPRISE_MONTHLY
+  ENTERPRISE_ANNUAL
+  ENTERPRISE_CUSTOM
+}
+
+enum BillingCycle {
+  FREE
+  MONTHLY
+  ANNUAL
+  CUSTOM
+}
+
+enum PlanStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum SubscriptionStatus {
+  FREE
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+}
+
+model Account {
+  id           String        @id @default(uuid()) @db.Uuid
+  primaryEmail String        @unique @map("primary_email")
+  phone        String?
+  passwordHash String?       @map("password_hash")
+  status       AccountStatus @default(ACTIVE)
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  ownedWorkspaces Workspace[]       @relation("WorkspaceOwner")
+  memberships     WorkspaceMember[]
+
+  @@map("accounts")
+}
+
+model Tenant {
+  id        String       @id @default(uuid()) @db.Uuid
+  name      String
+  type      TenantType
+  status    TenantStatus @default(ACTIVE)
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  workspaces Workspace[]
+
+  @@map("tenants")
+}
+
+model Workspace {
+  id             String          @id @default(uuid()) @db.Uuid
+  tenantId       String          @map("tenant_id") @db.Uuid
+  type           WorkspaceType
+  name           String
+  ownerAccountId String          @map("owner_account_id") @db.Uuid
+  status         WorkspaceStatus @default(ACTIVE)
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+
+  tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  ownerAccount  Account           @relation("WorkspaceOwner", fields: [ownerAccountId], references: [id], onDelete: Restrict)
+  organization  Organization?
+  memberships   WorkspaceMember[]
+  subscriptions Subscription[]
+  usageMeters   UsageMeter[]
+
+  @@index([tenantId])
+  @@index([ownerAccountId])
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String              @id @default(uuid()) @db.Uuid
+  workspaceId String              @map("workspace_id") @db.Uuid
+  accountId   String              @map("account_id") @db.Uuid
+  role        WorkspaceMemberRole @default(MEMBER)
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account   Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, accountId])
+  @@index([accountId])
+  @@map("workspace_members")
+}
+
+model Organization {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  workspaceId String   @unique @map("workspace_id") @db.Uuid
+  name        String
+  industry    String?
+  size        String?
+  settings    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  departments Department[]
+
+  @@index([tenantId])
+  @@map("organizations")
+}
+
+model Department {
+  id                 String   @id @default(uuid()) @db.Uuid
+  organizationId     String   @map("organization_id") @db.Uuid
+  parentDepartmentId String?  @map("parent_department_id") @db.Uuid
+  name               String
+  ownerMemberId      String?  @map("owner_member_id") @db.Uuid
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parentDepartment Department?  @relation("DepartmentHierarchy", fields: [parentDepartmentId], references: [id], onDelete: SetNull)
+  childDepartments Department[] @relation("DepartmentHierarchy")
+
+  @@index([organizationId])
+  @@index([parentDepartmentId])
+  @@map("departments")
+}
+
+model Plan {
+  id           String       @id @default(uuid()) @db.Uuid
+  code         PlanCode     @unique
+  name         String
+  billingCycle BillingCycle @map("billing_cycle")
+  priceCents   Int?         @map("price_cents")
+  currency     String?
+  status       PlanStatus   @default(ACTIVE)
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  entitlements  Entitlement[]
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Entitlement {
+  id         String   @id @default(uuid()) @db.Uuid
+  planId     String   @map("plan_id") @db.Uuid
+  featureKey String   @map("feature_key")
+  enabled    Boolean  @default(true)
+  limitValue Int?     @map("limit_value")
+  limitUnit  String?  @map("limit_unit")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, featureKey])
+  @@map("entitlements")
+}
+
+model Subscription {
+  id                 String             @id @default(uuid()) @db.Uuid
+  workspaceId        String             @map("workspace_id") @db.Uuid
+  planId             String             @map("plan_id") @db.Uuid
+  status             SubscriptionStatus
+  billingCycle       BillingCycle       @map("billing_cycle")
+  currentPeriodStart DateTime?          @map("current_period_start")
+  currentPeriodEnd   DateTime?          @map("current_period_end")
+  cancelAtPeriodEnd  Boolean            @default(false) @map("cancel_at_period_end")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  plan      Plan      @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId])
+  @@index([planId])
+  @@index([status])
+  @@map("subscriptions")
+}
+
+model UsageMeter {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  metricKey   String    @map("metric_key")
+  period      String
+  usedValue   Int       @default(0) @map("used_value")
+  resetAt     DateTime? @map("reset_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, metricKey, period])
+  @@map("usage_meters")
+}

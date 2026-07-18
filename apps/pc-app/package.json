@@ -1,0 +1,13 @@
+{
+  "name": "@qiuai/pc-app",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node -e \"console.log('Electron app scaffold ready. Electron dependencies are not installed yet.')\"",
+    "build": "node -e \"console.log('Electron build placeholder.')\"",
+    "typecheck": "node -e \"console.log('Electron typecheck placeholder.')\"",
+    "lint": "node -e \"console.log('Electron lint placeholder.')\"",
+    "test": "node -e \"console.log('Electron test placeholder.')\""
+  }
+}

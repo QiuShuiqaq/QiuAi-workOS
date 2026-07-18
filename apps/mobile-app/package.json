@@ -1,0 +1,13 @@
+{
+  "name": "@qiuai/mobile-app",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node -e \"console.log('Mobile app scaffold ready. Expo dependencies are not installed yet.')\"",
+    "build": "node -e \"console.log('Mobile build placeholder.')\"",
+    "typecheck": "node -e \"console.log('Mobile typecheck placeholder.')\"",
+    "lint": "node -e \"console.log('Mobile lint placeholder.')\"",
+    "test": "node -e \"console.log('Mobile test placeholder.')\""
+  }
+}

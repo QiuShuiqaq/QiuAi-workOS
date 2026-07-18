@@ -1,0 +1,133 @@
+import type {
+  ApiErrorResponse,
+  CreateTaskRequest,
+  CreateTaskResponse,
+  GetRoleInstanceResponse,
+  GetTaskResponse,
+  CurrentAccountResponse,
+  KernelStatusResponse,
+  ListRoleInstancesResponse,
+  ListRoleTemplatesResponse,
+  ListPlansResponse,
+  ListTasksResponse,
+  InstallRoleRequest,
+  InstallRoleResponse,
+  PlatformOverviewResponse
+} from '@qiuai/api-contract';
+
+export interface QiuApiClientOptions {
+  baseUrl: string;
+  fetchImpl?: typeof fetch;
+}
+
+export class QiuApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: ApiErrorResponse
+  ) {
+    super(body.error.message);
+  }
+}
+
+export class QiuApiClient {
+  private readonly baseUrl: string;
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(options: QiuApiClientOptions) {
+    this.baseUrl = options.baseUrl.replace(/\/$/, '');
+    this.fetchImpl = options.fetchImpl ?? fetch;
+  }
+
+  getKernelStatus(): Promise<KernelStatusResponse> {
+    return this.get('/api/v1/kernel/status');
+  }
+
+  getCurrentAccount(): Promise<CurrentAccountResponse> {
+    return this.get('/api/v1/workspaces/current');
+  }
+
+  listPlans(): Promise<ListPlansResponse> {
+    return this.get('/api/v1/commercial/plans');
+  }
+
+  getPlatformOverview(workspaceId: string): Promise<PlatformOverviewResponse> {
+    return this.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/overview`);
+  }
+
+  listRoleTemplates(workspaceId: string): Promise<ListRoleTemplatesResponse> {
+    return this.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/roles/templates`);
+  }
+
+  listRoles(workspaceId: string): Promise<ListRoleInstancesResponse> {
+    return this.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/roles`);
+  }
+
+  getRole(workspaceId: string, roleId: string): Promise<GetRoleInstanceResponse> {
+    return this.get(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/roles/${encodeURIComponent(roleId)}`
+    );
+  }
+
+  installRole(workspaceId: string, input: InstallRoleRequest): Promise<InstallRoleResponse> {
+    return this.post(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/roles/install`, input);
+  }
+
+  listTasks(workspaceId: string): Promise<ListTasksResponse> {
+    return this.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/tasks`);
+  }
+
+  getTask(workspaceId: string, taskId: string): Promise<GetTaskResponse> {
+    return this.get(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/tasks/${encodeURIComponent(taskId)}`
+    );
+  }
+
+  createTask(workspaceId: string, input: CreateTaskRequest): Promise<CreateTaskResponse> {
+    return this.post(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/tasks`, input);
+  }
+
+  runTask(workspaceId: string, taskId: string): Promise<GetTaskResponse> {
+    return this.post(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/tasks/${encodeURIComponent(taskId)}/run`,
+      {}
+    );
+  }
+
+  private async get<TResponse>(path: string): Promise<TResponse> {
+    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      method: 'GET',
+      headers: {
+        accept: 'application/json'
+      },
+      cache: 'no-store'
+    });
+
+    const body = (await response.json()) as TResponse | ApiErrorResponse;
+
+    if (!response.ok) {
+      throw new QiuApiError(response.status, body as ApiErrorResponse);
+    }
+
+    return body as TResponse;
+  }
+
+  private async post<TResponse>(path: string, payload: unknown): Promise<TResponse> {
+    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(payload),
+      cache: 'no-store'
+    });
+
+    const body = (await response.json()) as TResponse | ApiErrorResponse;
+
+    if (!response.ok) {
+      throw new QiuApiError(response.status, body as ApiErrorResponse);
+    }
+
+    return body as TResponse;
+  }
+}

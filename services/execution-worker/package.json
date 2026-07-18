@@ -1,0 +1,13 @@
+{
+  "name": "@qiuai/execution-worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node -e \"console.log('Execution worker scaffold ready.')\"",
+    "build": "node -e \"console.log('Execution worker build placeholder.')\"",
+    "typecheck": "node -e \"console.log('Execution worker typecheck placeholder.')\"",
+    "lint": "node -e \"console.log('Execution worker lint placeholder.')\"",
+    "test": "node -e \"console.log('Execution worker test placeholder.')\""
+  }
+}

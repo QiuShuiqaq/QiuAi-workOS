@@ -1,0 +1,13 @@
+{
+  "name": "@qiuai/admin-console",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node -e \"console.log('Admin console is a later-stage app placeholder.')\"",
+    "build": "node -e \"console.log('Admin console build placeholder.')\"",
+    "typecheck": "node -e \"console.log('Admin console typecheck placeholder.')\"",
+    "lint": "node -e \"console.log('Admin console lint placeholder.')\"",
+    "test": "node -e \"console.log('Admin console test placeholder.')\""
+  }
+}
