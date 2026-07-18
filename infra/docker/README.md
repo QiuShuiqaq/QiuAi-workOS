@@ -20,6 +20,7 @@ Local data is stored under `.local/docker/`.
 `compose.deploy.yml` starts the Web console, API server, PostgreSQL, and Redis:
 
 ```bash
+npm run check:deploy
 docker compose -f infra/docker/compose.deploy.yml up -d --build
 docker compose -f infra/docker/compose.deploy.yml ps
 ```

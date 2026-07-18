@@ -54,6 +54,7 @@ POSTGRES_PASSWORD=replace_with_strong_password
 启动完整部署栈：
 
 ```bash
+npm run check:deploy
 docker compose -f infra/docker/compose.deploy.yml up -d --build
 ```
 
@@ -68,6 +69,7 @@ docker compose -f infra/docker/compose.deploy.yml up -d --build
 服务启动后检查：
 
 ```bash
+npm run check:deploy
 docker compose -f infra/docker/compose.deploy.yml ps
 curl http://127.0.0.1:4000/api/v1/health
 curl http://127.0.0.1:3000/api/v1/health
@@ -91,6 +93,7 @@ http://服务器IP:3000
 ## 常用命令
 
 ```bash
+npm run check:deploy
 docker compose -f infra/docker/compose.deploy.yml logs -f --tail=100
 docker compose -f infra/docker/compose.deploy.yml restart server
 docker compose -f infra/docker/compose.deploy.yml restart web
