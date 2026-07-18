@@ -14,6 +14,7 @@ import Link from 'next/link';
 import { useMemo } from 'react';
 
 import { ConsoleShell } from '../../shared/console/ConsoleShell';
+import { withWorkspaceId } from '../common/workspace-href';
 import { taskPriorityLabel, taskStatusLabel, taskStatusTone } from '../tasks/task-format';
 
 export interface ApprovalsPageClientProps {
@@ -27,6 +28,7 @@ export function ApprovalsPageClient({
   taskDetails,
   isApiFallback
 }: ApprovalsPageClientProps) {
+  const workspaceId = currentAccount.activeWorkspaceId;
   const waitingTasks = useMemo(
     () => taskDetails.filter((task) => task.status === 'waiting_approval'),
     [taskDetails]
@@ -60,7 +62,7 @@ export function ApprovalsPageClient({
               renderItem={(task) => (
                 <List.Item
                   actions={[
-                    <Link key="detail" href={`/tasks/${task.id}`}>
+                    <Link key="detail" href={withWorkspaceId(`/tasks/${task.id}`, workspaceId)}>
                       查看任务
                     </Link>
                   ]}

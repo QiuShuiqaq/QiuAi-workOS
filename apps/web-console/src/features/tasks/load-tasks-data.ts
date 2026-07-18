@@ -7,6 +7,7 @@ import type {
 
 import { createServerApiClient } from '../../shared/api/server-api';
 import { loadCurrentAccount } from '../common/load-current-account';
+import { resolveWorkspaceId } from '../common/resolve-workspace-id';
 import { fallbackRoles } from '../roles/fallback-data';
 import { fallbackTaskDetail, fallbackTaskDetails, fallbackTasks } from './fallback-data';
 
@@ -17,9 +18,9 @@ export interface TasksPageData {
   isApiFallback: boolean;
 }
 
-export async function loadTasksPageData(): Promise<TasksPageData> {
+export async function loadTasksPageData(requestedWorkspaceId?: string): Promise<TasksPageData> {
   const currentAccount = await loadCurrentAccount();
-  const workspaceId = currentAccount.activeWorkspaceId;
+  const workspaceId = resolveWorkspaceId(currentAccount, requestedWorkspaceId);
   const apiClient = createServerApiClient();
 
   try {
@@ -27,9 +28,25 @@ export async function loadTasksPageData(): Promise<TasksPageData> {
       apiClient.listRoles(workspaceId),
       apiClient.listTasks(workspaceId)
     ]);
-    return { currentAccount, roles, tasks, isApiFallback: false };
+    return {
+      currentAccount: {
+        ...currentAccount,
+        activeWorkspaceId: workspaceId
+      },
+      roles,
+      tasks,
+      isApiFallback: false
+    };
   } catch {
-    return { currentAccount, roles: fallbackRoles, tasks: fallbackTasks, isApiFallback: true };
+    return {
+      currentAccount: {
+        ...currentAccount,
+        activeWorkspaceId: workspaceId
+      },
+      roles: fallbackRoles,
+      tasks: fallbackTasks,
+      isApiFallback: true
+    };
   }
 }
 
@@ -39,15 +56,32 @@ export interface TaskDetailPageData {
   isApiFallback: boolean;
 }
 
-export async function loadTaskDetailPageData(taskId: string): Promise<TaskDetailPageData> {
+export async function loadTaskDetailPageData(
+  taskId: string,
+  requestedWorkspaceId?: string
+): Promise<TaskDetailPageData> {
   const currentAccount = await loadCurrentAccount();
-  const workspaceId = currentAccount.activeWorkspaceId;
+  const workspaceId = resolveWorkspaceId(currentAccount, requestedWorkspaceId);
 
   try {
     const response = await createServerApiClient().getTask(workspaceId, taskId);
-    return { currentAccount, task: response.data, isApiFallback: false };
+    return {
+      currentAccount: {
+        ...currentAccount,
+        activeWorkspaceId: workspaceId
+      },
+      task: response.data,
+      isApiFallback: false
+    };
   } catch {
-    return { currentAccount, task: fallbackTaskDetail(taskId), isApiFallback: true };
+    return {
+      currentAccount: {
+        ...currentAccount,
+        activeWorkspaceId: workspaceId
+      },
+      task: fallbackTaskDetail(taskId),
+      isApiFallback: true
+    };
   }
 }
 
@@ -57,9 +91,9 @@ export interface TaskDetailsPageData {
   isApiFallback: boolean;
 }
 
-export async function loadTaskDetailsForWorkspace(): Promise<TaskDetailsPageData> {
+export async function loadTaskDetailsForWorkspace(requestedWorkspaceId?: string): Promise<TaskDetailsPageData> {
   const currentAccount = await loadCurrentAccount();
-  const workspaceId = currentAccount.activeWorkspaceId;
+  const workspaceId = resolveWorkspaceId(currentAccount, requestedWorkspaceId);
   const apiClient = createServerApiClient();
 
   try {
@@ -70,8 +104,22 @@ export async function loadTaskDetailsForWorkspace(): Promise<TaskDetailsPageData
         return response.data;
       })
     );
-    return { currentAccount, taskDetails: details, isApiFallback: false };
+    return {
+      currentAccount: {
+        ...currentAccount,
+        activeWorkspaceId: workspaceId
+      },
+      taskDetails: details,
+      isApiFallback: false
+    };
   } catch {
-    return { currentAccount, taskDetails: fallbackTaskDetails, isApiFallback: true };
+    return {
+      currentAccount: {
+        ...currentAccount,
+        activeWorkspaceId: workspaceId
+      },
+      taskDetails: fallbackTaskDetails,
+      isApiFallback: true
+    };
   }
 }

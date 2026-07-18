@@ -7,6 +7,7 @@ import type {
 
 import { createServerApiClient } from '../../shared/api/server-api';
 import { loadCurrentAccount } from '../common/load-current-account';
+import { resolveWorkspaceId } from '../common/resolve-workspace-id';
 import { fallbackRoleDetail, fallbackRoles, fallbackRoleTemplates } from './fallback-data';
 
 export interface RolesPageData {
@@ -16,9 +17,9 @@ export interface RolesPageData {
   isApiFallback: boolean;
 }
 
-export async function loadRolesPageData(): Promise<RolesPageData> {
+export async function loadRolesPageData(requestedWorkspaceId?: string): Promise<RolesPageData> {
   const currentAccount = await loadCurrentAccount();
-  const workspaceId = currentAccount.activeWorkspaceId;
+  const workspaceId = resolveWorkspaceId(currentAccount, requestedWorkspaceId);
   const apiClient = createServerApiClient();
 
   try {
@@ -26,9 +27,25 @@ export async function loadRolesPageData(): Promise<RolesPageData> {
       apiClient.listRoles(workspaceId),
       apiClient.listRoleTemplates(workspaceId)
     ]);
-    return { currentAccount, roles, templates, isApiFallback: false };
+    return {
+      currentAccount: {
+        ...currentAccount,
+        activeWorkspaceId: workspaceId
+      },
+      roles,
+      templates,
+      isApiFallback: false
+    };
   } catch {
-    return { currentAccount, roles: fallbackRoles, templates: fallbackRoleTemplates, isApiFallback: true };
+    return {
+      currentAccount: {
+        ...currentAccount,
+        activeWorkspaceId: workspaceId
+      },
+      roles: fallbackRoles,
+      templates: fallbackRoleTemplates,
+      isApiFallback: true
+    };
   }
 }
 
@@ -38,14 +55,31 @@ export interface RoleDetailPageData {
   isApiFallback: boolean;
 }
 
-export async function loadRoleDetailPageData(roleId: string): Promise<RoleDetailPageData> {
+export async function loadRoleDetailPageData(
+  roleId: string,
+  requestedWorkspaceId?: string
+): Promise<RoleDetailPageData> {
   const currentAccount = await loadCurrentAccount();
-  const workspaceId = currentAccount.activeWorkspaceId;
+  const workspaceId = resolveWorkspaceId(currentAccount, requestedWorkspaceId);
 
   try {
     const role = await createServerApiClient().getRole(workspaceId, roleId);
-    return { currentAccount, role: role.data, isApiFallback: false };
+    return {
+      currentAccount: {
+        ...currentAccount,
+        activeWorkspaceId: workspaceId
+      },
+      role: role.data,
+      isApiFallback: false
+    };
   } catch {
-    return { currentAccount, role: fallbackRoleDetail(roleId), isApiFallback: true };
+    return {
+      currentAccount: {
+        ...currentAccount,
+        activeWorkspaceId: workspaceId
+      },
+      role: fallbackRoleDetail(roleId),
+      isApiFallback: true
+    };
   }
 }

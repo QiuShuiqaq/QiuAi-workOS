@@ -19,6 +19,7 @@ import { useMemo, useState } from 'react';
 
 import { createBrowserApiClient } from '../../shared/api/browser-api';
 import { ConsoleShell } from '../../shared/console/ConsoleShell';
+import { withWorkspaceId } from '../common/workspace-href';
 import { formatCurrency, taskPriorityLabel, taskStatusLabel, taskStatusTone } from './task-format';
 
 export interface TaskDetailPageClientProps {
@@ -85,7 +86,7 @@ export function TaskDetailPageClient({
         description={`${task.roleName} · ${task.taskType}`}
         actions={
           <Space>
-            <Link href="/tasks">返回任务中心</Link>
+            <Link href={withWorkspaceId('/tasks', workspaceId)}>返回任务中心</Link>
             <Button type="primary" onClick={runTask} loading={isRunning}>
               Mock 执行
             </Button>

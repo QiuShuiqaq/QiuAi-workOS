@@ -1,0 +1,5 @@
+export type PlanCode =
+  | 'PERSONAL_FREE'
+  | 'ENTERPRISE_MONTHLY'
+  | 'ENTERPRISE_ANNUAL'
+  | 'ENTERPRISE_CUSTOM';

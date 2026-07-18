@@ -2,6 +2,7 @@ import type { CurrentAccountResponse, ListPlansResponse } from '@qiuai/api-contr
 
 import { createServerApiClient } from '../../shared/api/server-api';
 import { loadCurrentAccount } from '../common/load-current-account';
+import { resolveWorkspaceId } from '../common/resolve-workspace-id';
 import { fallbackPlans } from './fallback-data';
 
 export interface SettingsPageData {
@@ -10,13 +11,28 @@ export interface SettingsPageData {
   isApiFallback: boolean;
 }
 
-export async function loadSettingsPageData(): Promise<SettingsPageData> {
+export async function loadSettingsPageData(requestedWorkspaceId?: string): Promise<SettingsPageData> {
   const currentAccount = await loadCurrentAccount();
+  const workspaceId = resolveWorkspaceId(currentAccount, requestedWorkspaceId);
 
   try {
     const plans = await createServerApiClient().listPlans();
-    return { currentAccount, plans, isApiFallback: false };
+    return {
+      currentAccount: {
+        ...currentAccount,
+        activeWorkspaceId: workspaceId
+      },
+      plans,
+      isApiFallback: false
+    };
   } catch {
-    return { currentAccount, plans: fallbackPlans, isApiFallback: true };
+    return {
+      currentAccount: {
+        ...currentAccount,
+        activeWorkspaceId: workspaceId
+      },
+      plans: fallbackPlans,
+      isApiFallback: true
+    };
   }
 }

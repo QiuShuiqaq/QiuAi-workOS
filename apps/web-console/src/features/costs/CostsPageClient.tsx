@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { useMemo } from 'react';
 
 import { ConsoleShell } from '../../shared/console/ConsoleShell';
+import { withWorkspaceId } from '../common/workspace-href';
 import { formatCurrency } from '../tasks/task-format';
 
 export interface CostsPageClientProps {
@@ -28,6 +29,7 @@ interface CostRow extends CostRecordSummary {
 }
 
 export function CostsPageClient({ currentAccount, taskDetails, isApiFallback }: CostsPageClientProps) {
+  const workspaceId = currentAccount.activeWorkspaceId;
   const rows = useMemo(
     () =>
       taskDetails.flatMap((task) =>
@@ -51,7 +53,7 @@ export function CostsPageClient({ currentAccount, taskDetails, isApiFallback }: 
       title: '任务',
       dataIndex: 'taskTitle',
       render: (_value, row) => (
-        <Link href={`/tasks/${row.taskId}`}>
+        <Link href={withWorkspaceId(`/tasks/${row.taskId}`, workspaceId)}>
           <Typography.Text strong>{row.taskTitle}</Typography.Text>
         </Link>
       )

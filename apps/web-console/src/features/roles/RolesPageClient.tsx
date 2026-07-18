@@ -19,6 +19,7 @@ import { useMemo, useState } from 'react';
 
 import { ConsoleShell } from '../../shared/console/ConsoleShell';
 import { createBrowserApiClient } from '../../shared/api/browser-api';
+import { withWorkspaceId } from '../common/workspace-href';
 
 export interface RolesPageClientProps {
   currentAccount: CurrentAccountResponse;
@@ -52,6 +53,7 @@ export function RolesPageClient({
   const [roles, setRoles] = useState(initialRoles);
   const [installingTemplateId, setInstallingTemplateId] = useState<string | null>(null);
   const workspaceId = currentAccount.activeWorkspaceId;
+  const workspaceHref = (href: string) => withWorkspaceId(href, workspaceId);
 
   const roleCount = roles.length;
   const runningCount = useMemo(() => roles.filter((role) => role.status === 'running').length, [roles]);
@@ -91,7 +93,7 @@ export function RolesPageClient({
                 renderItem={(role) => (
                   <List.Item
                     actions={[
-                      <Link key="detail" href={`/roles/${role.id}`}>
+                      <Link key="detail" href={workspaceHref(`/roles/${role.id}`)}>
                         查看
                       </Link>
                     ]}

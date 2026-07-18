@@ -1,4 +1,5 @@
 export * from './commercial';
+export * from './enterprise';
 export * from './entitlement';
 export * from './errors';
 export * from './execution';

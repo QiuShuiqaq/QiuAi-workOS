@@ -25,6 +25,7 @@ import { useMemo, useState } from 'react';
 
 import { createBrowserApiClient } from '../../shared/api/browser-api';
 import { ConsoleShell } from '../../shared/console/ConsoleShell';
+import { withWorkspaceId } from '../common/workspace-href';
 import { taskPriorityLabel, taskStatusLabel, taskStatusTone } from './task-format';
 
 export interface TasksPageClientProps {
@@ -60,6 +61,7 @@ export function TasksPageClient({
   const [isCreating, setIsCreating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const workspaceId = currentAccount.activeWorkspaceId;
+  const workspaceHref = (href: string) => withWorkspaceId(href, workspaceId);
 
   const metrics = useMemo(() => {
     const running = tasks.filter((task) => task.status === 'running' || task.status === 'queued').length;
@@ -74,7 +76,7 @@ export function TasksPageClient({
       dataIndex: 'title',
       render: (_value, task) => (
         <Space direction="vertical" size={2}>
-          <Link href={`/tasks/${task.id}`}>
+          <Link href={workspaceHref(`/tasks/${task.id}`)}>
             <Typography.Text strong>{task.title}</Typography.Text>
           </Link>
           <Typography.Text type="secondary">{task.taskType}</Typography.Text>
@@ -107,7 +109,7 @@ export function TasksPageClient({
     {
       title: '操作',
       key: 'actions',
-      render: (_value, task) => <Link href={`/tasks/${task.id}`}>查看</Link>
+      render: (_value, task) => <Link href={workspaceHref(`/tasks/${task.id}`)}>查看</Link>
     }
   ];
 
@@ -133,7 +135,7 @@ export function TasksPageClient({
         ...current
       ]);
       form.resetFields();
-      router.push(`/tasks/${createdTask.id}`);
+      router.push(workspaceHref(`/tasks/${createdTask.id}`));
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : '创建任务失败，请确认后端服务已启动。');
     } finally {
@@ -182,7 +184,10 @@ export function TasksPageClient({
                 >
                   <Select
                     placeholder="选择 AI 岗位"
-                    options={roles.map((role) => ({ label: `${role.name} / ${role.departmentName || '未分配'}`, value: role.id }))}
+                    options={roles.map((role) => ({
+                      label: `${role.name} / ${role.departmentName || '未分配'}`,
+                      value: role.id
+                    }))}
                   />
                 </Form.Item>
                 <Form.Item name="title" label="任务标题" rules={[{ required: true, message: '请输入任务标题' }]}>

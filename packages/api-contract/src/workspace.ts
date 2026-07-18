@@ -1,3 +1,5 @@
+import type { PlanCode } from './entitlement';
+
 export interface WorkspaceSummary {
   id: string;
   tenantId: string;
@@ -5,7 +7,7 @@ export interface WorkspaceSummary {
   name: string;
   ownerAccountId: string;
   status: 'active' | 'suspended' | 'archived';
-  planCode: string;
+  planCode: PlanCode;
 }
 
 export interface CurrentAccountResponse {

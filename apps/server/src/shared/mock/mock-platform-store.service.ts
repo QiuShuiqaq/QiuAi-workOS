@@ -3,12 +3,23 @@ import { Injectable } from '@nestjs/common';
 import {
   demoRoleTemplates,
   demoRoles,
+  demoPlans,
   demoTasks,
   demoWorkspaces,
   type MockRoleInstanceDetail,
   type MockRoleTemplateSummary,
   type MockTaskDetail
 } from './platform-seed';
+import {
+  demoDepartments,
+  demoMembers,
+  demoOrganizations,
+  demoSubscriptions,
+  type MockDepartmentSummary,
+  type MockMemberSummary,
+  type MockOrganizationSummary,
+  type MockSubscriptionSummary
+} from './enterprise-seed';
 
 export interface MockCreateTaskRequest {
   roleInstanceId: string;
@@ -23,9 +34,87 @@ export class MockPlatformStore {
   private readonly roleTemplates: MockRoleTemplateSummary[] = [...demoRoleTemplates];
   private readonly roles: MockRoleInstanceDetail[] = demoRoles.map((role) => ({ ...role }));
   private readonly tasks: MockTaskDetail[] = demoTasks.map((task) => ({ ...task }));
+  private readonly organizations: MockOrganizationSummary[] = demoOrganizations.map((item) => ({ ...item }));
+  private readonly departments: MockDepartmentSummary[] = demoDepartments.map((item) => ({ ...item }));
+  private readonly members: MockMemberSummary[] = demoMembers.map((item) => ({ ...item }));
+  private readonly subscriptions: MockSubscriptionSummary[] = demoSubscriptions.map((item) => ({ ...item }));
 
   listRoleTemplates(): MockRoleTemplateSummary[] {
     return this.roleTemplates;
+  }
+
+  getWorkspace(workspaceId: string) {
+    return demoWorkspaces.find((workspace) => workspace.id === workspaceId);
+  }
+
+  getPlan(workspaceId: string) {
+    const workspace = this.getWorkspace(workspaceId);
+    if (!workspace) {
+      return undefined;
+    }
+    return demoPlans.find((plan) => plan.code === workspace.planCode);
+  }
+
+  getOrganization(workspaceId: string) {
+    return this.organizations.find((organization) => organization.workspaceId === workspaceId);
+  }
+
+  getSubscription(workspaceId: string) {
+    return this.subscriptions.find((subscription) => subscription.workspaceId === workspaceId);
+  }
+
+  listDepartments(workspaceId: string) {
+    const organization = this.getOrganization(workspaceId);
+    if (!organization) {
+      return [];
+    }
+    return this.departments.filter((department) => department.organizationId === organization.id);
+  }
+
+  listMembers(workspaceId: string) {
+    return this.members.filter((member) => member.workspaceId === workspaceId);
+  }
+
+  getMember(workspaceId: string, memberId: string) {
+    return this.listMembers(workspaceId).find((member) => member.id === memberId);
+  }
+
+  getDepartment(workspaceId: string, departmentId: string) {
+    const organization = this.getOrganization(workspaceId);
+    if (!organization) {
+      return undefined;
+    }
+    return this.departments.find(
+      (department) => department.organizationId === organization.id && department.id === departmentId
+    );
+  }
+
+  createDepartment(
+    workspaceId: string,
+    input: { name: string; parentDepartmentId?: string; ownerUserId?: string }
+  ) {
+    const organization = this.getOrganization(workspaceId);
+    if (!organization) {
+      return undefined;
+    }
+
+    const now = new Date().toISOString();
+    const department = {
+      id: `dept_${Date.now()}`,
+      organizationId: organization.id,
+      parentDepartmentId: input.parentDepartmentId,
+      name: input.name.trim(),
+      ownerUserId: input.ownerUserId,
+      createdAt: now
+    };
+
+    this.departments.unshift(department);
+    return department;
+  }
+
+  hasEntitlement(workspaceId: string, featureKey: string) {
+    const plan = this.getPlan(workspaceId);
+    return plan?.entitlements.find((item) => item.featureKey === featureKey);
   }
 
   listRoles(workspaceId: string): MockRoleInstanceDetail[] {

@@ -2,8 +2,11 @@ import type {
   ApiErrorResponse,
   CreateTaskRequest,
   CreateTaskResponse,
+  CreateDepartmentRequest,
+  CreateDepartmentResponse,
   GetRoleInstanceResponse,
   GetTaskResponse,
+  GetEnterpriseWorkspaceOverviewResponse,
   CurrentAccountResponse,
   KernelStatusResponse,
   ListRoleInstancesResponse,
@@ -54,6 +57,10 @@ export class QiuApiClient {
     return this.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/overview`);
   }
 
+  getEnterpriseWorkspaceOverview(workspaceId: string): Promise<GetEnterpriseWorkspaceOverviewResponse> {
+    return this.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/organization/overview`);
+  }
+
   listRoleTemplates(workspaceId: string): Promise<ListRoleTemplatesResponse> {
     return this.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/roles/templates`);
   }
@@ -70,6 +77,16 @@ export class QiuApiClient {
 
   installRole(workspaceId: string, input: InstallRoleRequest): Promise<InstallRoleResponse> {
     return this.post(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/roles/install`, input);
+  }
+
+  createDepartment(
+    workspaceId: string,
+    input: CreateDepartmentRequest
+  ): Promise<CreateDepartmentResponse> {
+    return this.post(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/organization/departments`,
+      input
+    );
   }
 
   listTasks(workspaceId: string): Promise<ListTasksResponse> {

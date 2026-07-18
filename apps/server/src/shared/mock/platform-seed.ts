@@ -1,3 +1,5 @@
+import type { PlanCode } from '../types/plan-code';
+
 export interface MockWorkspaceSummary {
   id: string;
   tenantId: string;
@@ -5,7 +7,7 @@ export interface MockWorkspaceSummary {
   name: string;
   ownerAccountId: string;
   status: 'active' | 'suspended' | 'archived';
-  planCode: string;
+  planCode: PlanCode;
 }
 
 export interface MockPlanDetail {

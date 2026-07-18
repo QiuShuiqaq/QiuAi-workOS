@@ -1,5 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 
+import type { PlanCode } from '../../../shared/types/plan-code';
+
 export class CurrentAccountDto {
   @ApiProperty({ example: 'account_demo' })
   id!: string;
@@ -31,7 +33,7 @@ export class WorkspaceSummaryDto {
   status!: 'active' | 'suspended' | 'archived';
 
   @ApiProperty({ example: 'ENTERPRISE_MONTHLY' })
-  planCode!: string;
+  planCode!: PlanCode;
 }
 
 export class CurrentAccountResponseDto {

@@ -1,8 +1,15 @@
 import { loadSettingsPageData } from '../../features/settings/load-settings-data';
 import { SettingsPageClient } from '../../features/settings/SettingsPageClient';
 
-export default async function SettingsPage() {
-  const { currentAccount, plans, isApiFallback } = await loadSettingsPageData();
+export default async function SettingsPage({
+  searchParams
+}: {
+  searchParams?: Promise<{ workspaceId?: string }>;
+}) {
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const { currentAccount, plans, isApiFallback } = await loadSettingsPageData(
+    resolvedSearchParams?.workspaceId
+  );
 
   return (
     <SettingsPageClient

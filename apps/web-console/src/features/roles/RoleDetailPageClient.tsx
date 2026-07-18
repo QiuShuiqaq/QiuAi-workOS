@@ -12,6 +12,7 @@ import Space from 'antd/es/space';
 import Link from 'next/link';
 
 import { ConsoleShell } from '../../shared/console/ConsoleShell';
+import { withWorkspaceId } from '../common/workspace-href';
 
 export function RoleDetailPageClient({
   currentAccount,
@@ -24,7 +25,11 @@ export function RoleDetailPageClient({
 }) {
   return (
     <ConsoleShell currentAccount={currentAccount}>
-      <QiuPage title={role.name} description={role.businessGoal} actions={<Link href="/tasks">查看任务</Link>}>
+      <QiuPage
+        title={role.name}
+        description={role.businessGoal}
+        actions={<Link href={withWorkspaceId('/tasks', currentAccount.activeWorkspaceId)}>查看任务</Link>}
+      >
         {isApiFallback ? <Alert showIcon type="warning" message="后端 API 未连接，当前显示 fallback 数据。" /> : null}
         <Row gutter={[16, 16]}>
           <Col xs={24} md={6}><QiuMetricCard title="完成任务" value={String(role.kpis.taskCompleted)} /></Col>

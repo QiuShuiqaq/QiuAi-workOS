@@ -6,6 +6,7 @@ import {
   DollarOutlined,
   RobotOutlined,
   SettingOutlined,
+  TeamOutlined,
   UnorderedListOutlined
 } from '@ant-design/icons';
 import type { CurrentAccountResponse } from '@qiuai/api-contract';
@@ -14,7 +15,7 @@ import Layout from 'antd/es/layout';
 import Menu from 'antd/es/menu';
 import Typography from 'antd/es/typography';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import type { ReactNode } from 'react';
 
 export interface ConsoleShellProps {
@@ -27,12 +28,23 @@ function selectedKey(pathname: string) {
   if (pathname.startsWith('/tasks')) return 'tasks';
   if (pathname.startsWith('/approvals')) return 'approvals';
   if (pathname.startsWith('/costs')) return 'costs';
+  if (pathname.startsWith('/enterprise')) return 'enterprise';
   if (pathname.startsWith('/settings')) return 'settings';
   return 'dashboard';
 }
 
 export function ConsoleShell({ currentAccount, children }: ConsoleShellProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const activeWorkspaceId = searchParams.get('workspaceId') ?? currentAccount.activeWorkspaceId;
+
+  function withWorkspaceId(href: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('workspaceId', activeWorkspaceId);
+    const query = params.toString();
+    return query ? `${href}?${query}` : href;
+  }
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -45,24 +57,57 @@ export function ConsoleShell({ currentAccount, children }: ConsoleShellProps) {
         </div>
         <div style={{ padding: '0 16px 16px' }}>
           <QiuWorkspaceSwitcher
-            value={currentAccount.activeWorkspaceId}
+            value={activeWorkspaceId}
             workspaces={currentAccount.workspaces.map((workspace) => ({
               id: workspace.id,
               name: workspace.name
             }))}
-            onChange={() => {}}
+            onChange={(workspaceId) => {
+              const params = new URLSearchParams(searchParams.toString());
+              params.set('workspaceId', workspaceId);
+              router.push(`${pathname}?${params.toString()}`);
+            }}
           />
         </div>
         <Menu
           mode="inline"
           selectedKeys={[selectedKey(pathname)]}
           items={[
-            { key: 'dashboard', icon: <ApartmentOutlined />, label: <Link href="/">工作台</Link> },
-            { key: 'roles', icon: <RobotOutlined />, label: <Link href="/roles">AI 岗位</Link> },
-            { key: 'tasks', icon: <UnorderedListOutlined />, label: <Link href="/tasks">任务中心</Link> },
-            { key: 'approvals', icon: <AuditOutlined />, label: <Link href="/approvals">审批中心</Link> },
-            { key: 'costs', icon: <DollarOutlined />, label: <Link href="/costs">成本中心</Link> },
-            { key: 'settings', icon: <SettingOutlined />, label: <Link href="/settings">企业设置</Link> }
+            {
+              key: 'dashboard',
+              icon: <ApartmentOutlined />,
+              label: <Link href={withWorkspaceId('/')}>工作台</Link>
+            },
+            {
+              key: 'roles',
+              icon: <RobotOutlined />,
+              label: <Link href={withWorkspaceId('/roles')}>AI 岗位</Link>
+            },
+            {
+              key: 'tasks',
+              icon: <UnorderedListOutlined />,
+              label: <Link href={withWorkspaceId('/tasks')}>任务中心</Link>
+            },
+            {
+              key: 'approvals',
+              icon: <AuditOutlined />,
+              label: <Link href={withWorkspaceId('/approvals')}>审批中心</Link>
+            },
+            {
+              key: 'costs',
+              icon: <DollarOutlined />,
+              label: <Link href={withWorkspaceId('/costs')}>成本中心</Link>
+            },
+            {
+              key: 'enterprise',
+              icon: <TeamOutlined />,
+              label: <Link href={withWorkspaceId('/enterprise')}>企业控制面</Link>
+            },
+            {
+              key: 'settings',
+              icon: <SettingOutlined />,
+              label: <Link href={withWorkspaceId('/settings')}>企业设置</Link>
+            }
           ]}
         />
       </Layout.Sider>
