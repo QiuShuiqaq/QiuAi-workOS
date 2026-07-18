@@ -41,3 +41,15 @@ Use the wrapper for npm commands on Windows:
 - `services/execution-worker`: async execution worker placeholder
 - `infra`: deployment and local infrastructure
 - `tools`: project-local scripts
+
+## Deployment
+
+Docker deployment files live under `infra/docker`.
+
+```bat
+.\tools\npm-local.cmd run deploy:up
+.\tools\npm-local.cmd run deploy:logs
+.\tools\npm-local.cmd run deploy:down
+```
+
+See `docs/SERVER_DEPLOYMENT.md` before deploying to a server.

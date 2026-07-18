@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "paths": {
+      "@qiuai/design-tokens": ["../design-tokens/dist/index.d.ts"]
+    }
+  }
+}
