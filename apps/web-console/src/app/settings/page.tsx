@@ -7,7 +7,7 @@ export default async function SettingsPage({
   searchParams?: Promise<{ workspaceId?: string }>;
 }) {
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const { currentAccount, plans, isApiFallback } = await loadSettingsPageData(
+  const { currentAccount, plans, billing, isApiFallback } = await loadSettingsPageData(
     resolvedSearchParams?.workspaceId
   );
 
@@ -15,6 +15,7 @@ export default async function SettingsPage({
     <SettingsPageClient
       currentAccount={currentAccount}
       plans={plans.data}
+      billing={billing.data}
       isApiFallback={isApiFallback}
     />
   );

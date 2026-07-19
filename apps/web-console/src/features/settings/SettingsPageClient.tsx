@@ -1,6 +1,13 @@
 'use client';
 
-import type { CurrentAccountResponse, EntitlementSummary, PlanDetail } from '@qiuai/api-contract';
+import type {
+  BillingOrderSummary,
+  BillingOverview,
+  CurrentAccountResponse,
+  EntitlementSummary,
+  PaymentProviderConfigStatus,
+  PlanDetail
+} from '@qiuai/api-contract';
 import { QiuMetricCard, QiuPage, QiuStatusTag } from '@qiuai/ui';
 import Alert from 'antd/es/alert';
 import Card from 'antd/es/card';
@@ -17,6 +24,7 @@ import { ConsoleShell } from '../../shared/console/ConsoleShell';
 export interface SettingsPageClientProps {
   currentAccount: CurrentAccountResponse;
   plans: PlanDetail[];
+  billing: BillingOverview;
   isApiFallback: boolean;
 }
 
@@ -50,15 +58,49 @@ function entitlementValue(entitlement: EntitlementSummary) {
   return `${entitlement.limitValue.toLocaleString('zh-CN')} ${entitlement.limitUnit ?? ''}`.trim();
 }
 
+function formatCurrency(amountCents: number, currency: string) {
+  return new Intl.NumberFormat('zh-CN', {
+    style: 'currency',
+    currency
+  }).format(amountCents / 100);
+}
+
+function formatDateTime(value?: string) {
+  if (!value) return '-';
+  return new Intl.DateTimeFormat('zh-CN', {
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  }).format(new Date(value));
+}
+
+function paymentProviderLabel(provider: string) {
+  return provider === 'ALIPAY' ? '\u652f\u4ed8\u5b9d' : provider;
+}
+
+function orderStatusTone(status: string): 'default' | 'success' | 'warning' | 'danger' | 'processing' {
+  if (status === 'PAID') return 'success';
+  if (status === 'FAILED' || status === 'CANCELLED') return 'danger';
+  if (status === 'CLOSED') return 'default';
+  return 'processing';
+}
+
+function configStatusText(provider?: PaymentProviderConfigStatus) {
+  if (!provider) return '\u672a\u914d\u7f6e';
+  return provider.isConfigured ? '\u5df2\u914d\u7f6e' : '\u672a\u5b8c\u6210';
+}
+
 export function SettingsPageClient({
   currentAccount,
   plans,
+  billing,
   isApiFallback
 }: SettingsPageClientProps) {
   const activeWorkspace = currentAccount.workspaces.find(
     (workspace) => workspace.id === currentAccount.activeWorkspaceId
   ) ?? currentAccount.workspaces[0];
   const currentPlan = plans.find((plan) => plan.code === activeWorkspace.planCode) ?? plans[0];
+  const alipayStatus = billing.paymentProviders.find((provider) => provider.provider === 'ALIPAY');
+  const missingAlipayKeys = alipayStatus?.missingEnvKeys.join(', ') || '-';
 
   const entitlementColumns: ColumnsType<EntitlementSummary> = [
     {
@@ -109,6 +151,47 @@ export function SettingsPageClient({
     }
   ];
 
+  const billingOrderColumns: ColumnsType<BillingOrderSummary> = [
+    {
+      title: '\u8ba2\u5355\u53f7',
+      dataIndex: 'orderNo',
+      render: (value: string) => <Typography.Text copyable>{value}</Typography.Text>
+    },
+    {
+      title: '\u8ba2\u5355\u5185\u5bb9',
+      dataIndex: 'subject',
+      responsive: ['md']
+    },
+    {
+      title: '\u91d1\u989d',
+      key: 'amount',
+      render: (_value, order) => formatCurrency(order.amountCents, order.currency)
+    },
+    {
+      title: '\u72b6\u6001',
+      dataIndex: 'status',
+      render: (status: string) => <QiuStatusTag tone={orderStatusTone(status)}>{status}</QiuStatusTag>
+    },
+    {
+      title: '\u652f\u4ed8',
+      key: 'payment',
+      render: (_value, order) =>
+        order.paymentUrl ? (
+          <Typography.Link href={order.paymentUrl} target="_blank">
+            {'\u6253\u5f00'}
+          </Typography.Link>
+        ) : (
+          <Typography.Text type="secondary">{'\u672a\u751f\u6210'}</Typography.Text>
+        )
+    },
+    {
+      title: '\u521b\u5efa\u65f6\u95f4',
+      dataIndex: 'createdAt',
+      responsive: ['lg'],
+      render: (value: string) => formatDateTime(value)
+    }
+  ];
+
   return (
     <ConsoleShell currentAccount={currentAccount}>
       <QiuPage title="企业设置" description="管理工作空间、账户和商业版本边界。">
@@ -149,6 +232,65 @@ export function SettingsPageClient({
             </Card>
           </Col>
         </Row>
+
+        <Card title="计费与支付" bordered={false}>
+          <Row gutter={[16, 16]}>
+            <Col xs={24} xl={12}>
+              <Descriptions column={1} title="订阅与付款主体">
+                <Descriptions.Item label="计费主体">
+                  {billing.billingAccount?.billingName ?? '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="联系邮箱">
+                  {billing.billingAccount?.contactEmail ?? '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="订阅状态">
+                  <QiuStatusTag tone="processing">
+                    {billing.subscription?.status ?? '-'}
+                  </QiuStatusTag>
+                </Descriptions.Item>
+                <Descriptions.Item label="当前周期">
+                  {`${formatDateTime(billing.subscription?.currentPeriodStart)} - ${formatDateTime(
+                    billing.subscription?.currentPeriodEnd
+                  )}`}
+                </Descriptions.Item>
+                <Descriptions.Item label="当前套餐">
+                  {billing.currentPlan?.name ?? currentPlan.name}
+                </Descriptions.Item>
+              </Descriptions>
+            </Col>
+            <Col xs={24} xl={12}>
+              <Descriptions column={1} title="支付通道">
+                <Descriptions.Item label="默认通道">
+                  {paymentProviderLabel(alipayStatus?.provider ?? 'ALIPAY')}
+                </Descriptions.Item>
+                <Descriptions.Item label="配置状态">
+                  <QiuStatusTag tone={alipayStatus?.isConfigured ? 'success' : 'warning'}>
+                    {configStatusText(alipayStatus)}
+                  </QiuStatusTag>
+                </Descriptions.Item>
+                <Descriptions.Item label="网关地址">
+                  {alipayStatus?.gatewayUrl ?? '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="异步回调">
+                  {alipayStatus?.notifyPath ?? '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="缺失配置">
+                  <Typography.Text type="secondary" style={{ wordBreak: 'break-word' }}>
+                    {missingAlipayKeys}
+                  </Typography.Text>
+                </Descriptions.Item>
+              </Descriptions>
+            </Col>
+          </Row>
+
+          <Table
+            rowKey="id"
+            columns={billingOrderColumns}
+            dataSource={billing.recentOrders}
+            pagination={false}
+            locale={{ emptyText: '暂无订单记录' }}
+          />
+        </Card>
 
         <Card title="商业版本" bordered={false}>
           <Table rowKey="code" columns={planColumns} dataSource={plans} pagination={false} />

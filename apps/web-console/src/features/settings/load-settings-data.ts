@@ -1,13 +1,18 @@
-import type { CurrentAccountResponse, ListPlansResponse } from '@qiuai/api-contract';
+import type {
+  CurrentAccountResponse,
+  GetBillingOverviewResponse,
+  ListPlansResponse
+} from '@qiuai/api-contract';
 
 import { createServerApiClient } from '../../shared/api/server-api';
 import { loadCurrentAccount } from '../common/load-current-account';
 import { resolveWorkspaceId } from '../common/resolve-workspace-id';
-import { fallbackPlans } from './fallback-data';
+import { createFallbackBillingOverview, fallbackPlans } from './fallback-data';
 
 export interface SettingsPageData {
   currentAccount: CurrentAccountResponse;
   plans: ListPlansResponse;
+  billing: GetBillingOverviewResponse;
   isApiFallback: boolean;
 }
 
@@ -16,13 +21,18 @@ export async function loadSettingsPageData(requestedWorkspaceId?: string): Promi
   const workspaceId = resolveWorkspaceId(currentAccount, requestedWorkspaceId);
 
   try {
-    const plans = await (await createServerApiClient()).listPlans();
+    const apiClient = await createServerApiClient();
+    const [plans, billing] = await Promise.all([
+      apiClient.listPlans(),
+      apiClient.getBillingOverview(workspaceId)
+    ]);
     return {
       currentAccount: {
         ...currentAccount,
         activeWorkspaceId: workspaceId
       },
       plans,
+      billing,
       isApiFallback: false
     };
   } catch {
@@ -32,6 +42,7 @@ export async function loadSettingsPageData(requestedWorkspaceId?: string): Promi
         activeWorkspaceId: workspaceId
       },
       plans: fallbackPlans,
+      billing: createFallbackBillingOverview(workspaceId),
       isApiFallback: true
     };
   }
