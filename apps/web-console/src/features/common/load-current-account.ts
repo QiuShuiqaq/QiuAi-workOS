@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 
 import { createServerApiClient } from '../../shared/api/server-api';
 import { fallbackCurrentAccount } from '../dashboard/fallback-data';
+import { rethrowIfFrontendFallbackDisabled } from './api-fallback';
 
 export async function loadCurrentAccount(): Promise<CurrentAccountResponse> {
   try {
@@ -13,6 +14,7 @@ export async function loadCurrentAccount(): Promise<CurrentAccountResponse> {
       redirect('/login');
     }
 
+    rethrowIfFrontendFallbackDisabled(error);
     return fallbackCurrentAccount;
   }
 }

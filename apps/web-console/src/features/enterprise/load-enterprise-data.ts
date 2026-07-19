@@ -1,6 +1,7 @@
 import type { CurrentAccountResponse, EnterpriseWorkspaceOverview } from '@qiuai/api-contract';
 
 import { createServerApiClient } from '../../shared/api/server-api';
+import { rethrowIfFrontendFallbackDisabled } from '../common/api-fallback';
 import { loadCurrentAccount } from '../common/load-current-account';
 import { resolveWorkspaceId } from '../common/resolve-workspace-id';
 import { buildFallbackEnterpriseOverview } from './fallback-data';
@@ -25,7 +26,9 @@ export async function loadEnterprisePageData(requestedWorkspaceId?: string): Pro
       overview: response.data,
       isApiFallback: false
     };
-  } catch {
+  } catch (error) {
+    rethrowIfFrontendFallbackDisabled(error);
+
     return {
       currentAccount: {
         ...currentAccount,

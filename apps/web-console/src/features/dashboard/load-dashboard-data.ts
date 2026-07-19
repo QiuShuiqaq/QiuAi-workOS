@@ -1,6 +1,7 @@
 import type { CurrentAccountResponse, PlatformOverviewResponse } from '@qiuai/api-contract';
 
 import { createServerApiClient } from '../../shared/api/server-api';
+import { rethrowIfFrontendFallbackDisabled } from '../common/api-fallback';
 import { resolveWorkspaceId } from '../common/resolve-workspace-id';
 import { fallbackCurrentAccount, fallbackOverview } from './fallback-data';
 
@@ -26,7 +27,9 @@ export async function loadDashboardData(requestedWorkspaceId?: string): Promise<
       overview,
       isApiFallback: false
     };
-  } catch {
+  } catch (error) {
+    rethrowIfFrontendFallbackDisabled(error);
+
     const activeWorkspaceId = resolveWorkspaceId(fallbackCurrentAccount, requestedWorkspaceId);
     return {
       currentAccount: {

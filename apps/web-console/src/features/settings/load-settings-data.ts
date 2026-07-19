@@ -3,10 +3,9 @@ import type {
   GetBillingOverviewResponse,
   ListPlansResponse
 } from '@qiuai/api-contract';
-import { QiuApiError } from '@qiuai/api-client';
-import { redirect } from 'next/navigation';
 
 import { createServerApiClient } from '../../shared/api/server-api';
+import { rethrowIfFrontendFallbackDisabled } from '../common/api-fallback';
 import { loadCurrentAccount } from '../common/load-current-account';
 import { resolveWorkspaceId } from '../common/resolve-workspace-id';
 import { createFallbackBillingOverview, fallbackPlans } from './fallback-data';
@@ -38,9 +37,7 @@ export async function loadSettingsPageData(requestedWorkspaceId?: string): Promi
       isApiFallback: false
     };
   } catch (error) {
-    if (error instanceof QiuApiError && error.status === 401) {
-      redirect('/login');
-    }
+    rethrowIfFrontendFallbackDisabled(error);
 
     return {
       currentAccount: {

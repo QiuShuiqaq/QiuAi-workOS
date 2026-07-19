@@ -6,6 +6,7 @@ import type {
 } from '@qiuai/api-contract';
 
 import { createServerApiClient } from '../../shared/api/server-api';
+import { rethrowIfFrontendFallbackDisabled } from '../common/api-fallback';
 import { loadCurrentAccount } from '../common/load-current-account';
 import { resolveWorkspaceId } from '../common/resolve-workspace-id';
 import { fallbackRoleDetail, fallbackRoles, fallbackRoleTemplates } from './fallback-data';
@@ -36,7 +37,9 @@ export async function loadRolesPageData(requestedWorkspaceId?: string): Promise<
       templates,
       isApiFallback: false
     };
-  } catch {
+  } catch (error) {
+    rethrowIfFrontendFallbackDisabled(error);
+
     return {
       currentAccount: {
         ...currentAccount,
@@ -72,7 +75,9 @@ export async function loadRoleDetailPageData(
       role: role.data,
       isApiFallback: false
     };
-  } catch {
+  } catch (error) {
+    rethrowIfFrontendFallbackDisabled(error);
+
     return {
       currentAccount: {
         ...currentAccount,
