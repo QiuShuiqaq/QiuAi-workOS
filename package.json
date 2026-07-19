@@ -31,6 +31,7 @@
     "deploy:up": "docker compose -f infra/docker/compose.deploy.yml up -d --build",
     "deploy:down": "docker compose -f infra/docker/compose.deploy.yml down",
     "deploy:logs": "docker compose -f infra/docker/compose.deploy.yml logs -f --tail=100",
+    "check:smoke": "node tools/check-smoke.mjs",
     "check:deploy": "node tools/check-deploy-readiness.mjs",
     "check:local-tooling": "node tools/check-local-tooling.mjs"
   },

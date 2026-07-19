@@ -102,6 +102,7 @@ On the server:
 curl http://127.0.0.1:4100/api/v1/health
 curl http://127.0.0.1:3100/api/v1/health
 curl -I http://workos.qiuaihub.com
+WORKOS_API_URL=http://127.0.0.1:4100 WORKOS_WEB_URL=http://127.0.0.1:3100 npm run check:smoke
 ```
 
 Expected:
