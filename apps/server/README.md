@@ -32,6 +32,18 @@ Kernel status:
 GET /api/v1/kernel/status
 ```
 
+Entitlement check:
+
+```text
+POST /api/v1/entitlements/check
+```
+
+Enterprise workspace overview:
+
+```text
+GET /api/v1/workspaces/:workspaceId/organization/overview
+```
+
 ## Database Commands
 
 Platform kernel persistence uses Prisma migrations under `prisma/migrations`.

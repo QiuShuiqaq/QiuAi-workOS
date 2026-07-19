@@ -142,19 +142,22 @@ model Workspace {
 }
 
 model WorkspaceMember {
-  id          String              @id @default(uuid()) @db.Uuid
-  workspaceId String              @map("workspace_id") @db.Uuid
-  accountId   String              @map("account_id") @db.Uuid
-  role        WorkspaceMemberRole @default(MEMBER)
-  createdAt   DateTime            @default(now()) @map("created_at")
-  updatedAt   DateTime            @updatedAt @map("updated_at")
+  id           String              @id @default(uuid()) @db.Uuid
+  workspaceId  String              @map("workspace_id") @db.Uuid
+  accountId    String              @map("account_id") @db.Uuid
+  departmentId String?             @map("department_id") @db.Uuid
+  role         WorkspaceMemberRole @default(MEMBER)
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
 
   workspace        Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   account          Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  department       Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   ownedDepartments Department[] @relation("DepartmentOwner")
 
   @@unique([workspaceId, accountId])
   @@index([accountId])
+  @@index([departmentId])
   @@map("workspace_members")
 }
 
@@ -186,10 +189,11 @@ model Department {
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
-  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  parentDepartment Department?      @relation("DepartmentHierarchy", fields: [parentDepartmentId], references: [id], onDelete: SetNull)
-  childDepartments Department[]     @relation("DepartmentHierarchy")
-  ownerMember      WorkspaceMember? @relation("DepartmentOwner", fields: [ownerMemberId], references: [id], onDelete: SetNull)
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parentDepartment Department?       @relation("DepartmentHierarchy", fields: [parentDepartmentId], references: [id], onDelete: SetNull)
+  childDepartments Department[]      @relation("DepartmentHierarchy")
+  ownerMember      WorkspaceMember?  @relation("DepartmentOwner", fields: [ownerMemberId], references: [id], onDelete: SetNull)
+  members          WorkspaceMember[]
 
   @@index([organizationId])
   @@index([parentDepartmentId])

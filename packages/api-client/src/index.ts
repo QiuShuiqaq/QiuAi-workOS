@@ -8,6 +8,8 @@ import type {
   CreateTaskResponse,
   CreateDepartmentRequest,
   CreateDepartmentResponse,
+  EntitlementCheckRequest,
+  EntitlementCheckResult,
   GetRoleInstanceResponse,
   GetTaskResponse,
   GetEnterpriseWorkspaceOverviewResponse,
@@ -70,6 +72,10 @@ export class QiuApiClient {
 
   listPlans(): Promise<ListPlansResponse> {
     return this.get('/api/v1/commercial/plans');
+  }
+
+  checkEntitlement(input: EntitlementCheckRequest): Promise<EntitlementCheckResult> {
+    return this.post('/api/v1/entitlements/check', input);
   }
 
   getPlatformOverview(workspaceId: string): Promise<PlatformOverviewResponse> {

@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 
 import { AuthModule } from './auth/auth.module';
 import { CommercialModule } from './commercial/commercial.module';
+import { EntitlementModule } from './entitlement/entitlement.module';
 import { HealthModule } from './health/health.module';
 import { KernelModule } from './kernel/kernel.module';
 import { OrganizationModule } from './organization/organization.module';
@@ -19,6 +20,7 @@ import { MockPlatformStoreModule } from '../shared/mock/mock-platform-store.modu
     AuthModule,
     MockPlatformStoreModule,
     CommercialModule,
+    EntitlementModule,
     HealthModule,
     KernelModule,
     OrganizationModule,

@@ -21,12 +21,18 @@ export interface SettingsPageClientProps {
 }
 
 const featureLabels: Record<string, string> = {
-  maxRoleInstances: 'AI 岗位数量',
-  maxTasksPerMonth: '月任务额度',
-  canCreateDepartment: '部门管理',
-  canInviteMember: '成员邀请',
-  canUseAuditLog: '审计日志',
-  canUseCostBudget: '成本预算'
+  maxRoleInstances: 'AI \u5c97\u4f4d\u6570\u91cf',
+  maxTasksPerMonth: '\u6708\u4efb\u52a1\u989d\u5ea6',
+  maxKnowledgeBases: '\u77e5\u8bc6\u5e93\u6570\u91cf',
+  maxStorageGB: '\u5b58\u50a8\u7a7a\u95f4',
+  maxMembers: '\u6210\u5458\u6570\u91cf',
+  canCreateDepartment: '\u90e8\u95e8\u7ba1\u7406',
+  canInviteMember: '\u6210\u5458\u9080\u8bf7',
+  canUseApprovalPolicy: '\u5ba1\u6279\u7b56\u7565',
+  canUseAuditLog: '\u5ba1\u8ba1\u65e5\u5fd7',
+  canUseAdvancedToolConnector: '\u9ad8\u7ea7\u5de5\u5177\u8fde\u63a5\u5668',
+  canUseCostBudget: '\u6210\u672c\u9884\u7b97',
+  canUseEnterpriseKPIDashboard: '\u4f01\u4e1a KPI \u770b\u677f'
 };
 
 function billingCycleLabel(value: string) {

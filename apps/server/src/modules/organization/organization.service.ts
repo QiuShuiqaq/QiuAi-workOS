@@ -5,8 +5,10 @@ import {
   Injectable,
   NotFoundException
 } from '@nestjs/common';
+import type { AccountStatus, BillingCycle, SubscriptionStatus, WorkspaceStatus, WorkspaceType } from '@prisma/client';
 
 import { PlanDetailDto } from '../commercial/dto/list-plans-response.dto';
+import { EntitlementService } from '../entitlement/entitlement.service';
 import { WorkspaceSummaryDto } from '../workspace/dto/current-account-response.dto';
 import {
   CreateDepartmentResponseDto,
@@ -19,6 +21,8 @@ import {
   UsageMeterSummaryDto
 } from './dto/enterprise-workspace-overview-response.dto';
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
+import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
+import { PrismaService } from '../../shared/prisma/prisma.service';
 
 interface CreateDepartmentInput {
   name: string;
@@ -28,17 +32,29 @@ interface CreateDepartmentInput {
 
 @Injectable()
 export class OrganizationService {
-  constructor(private readonly store: MockPlatformStore) {}
+  constructor(
+    private readonly store: MockPlatformStore,
+    private readonly prismaService: PrismaService,
+    private readonly entitlementService: EntitlementService
+  ) {}
 
-  getOverview(workspaceId: string): GetEnterpriseWorkspaceOverviewResponseDto {
-    const overview = this.buildOverview(workspaceId);
+  async getOverview(workspaceId: string): Promise<GetEnterpriseWorkspaceOverviewResponseDto> {
+    const overview = isDatabasePersistenceEnabled()
+      ? await this.buildDatabaseOverview(workspaceId)
+      : this.buildMockOverview(workspaceId);
     return { data: overview };
   }
 
-  createDepartment(
+  async createDepartment(
     workspaceId: string,
     input: CreateDepartmentInput
-  ): CreateDepartmentResponseDto {
+  ): Promise<CreateDepartmentResponseDto> {
+    if (isDatabasePersistenceEnabled()) {
+      return {
+        data: await this.createDatabaseDepartment(workspaceId, input)
+      };
+    }
+
     const workspace = this.store.getWorkspace(workspaceId);
     if (!workspace) {
       throw new NotFoundException({
@@ -148,7 +164,7 @@ export class OrganizationService {
     };
   }
 
-  private buildOverview(workspaceId: string): EnterpriseWorkspaceOverviewResponseDto {
+  private buildMockOverview(workspaceId: string): EnterpriseWorkspaceOverviewResponseDto {
     const workspace = this.store.getWorkspace(workspaceId);
     if (!workspace) {
       throw new NotFoundException({
@@ -202,6 +218,315 @@ export class OrganizationService {
       members: members.map((member) => this.toMemberSummary(member, departmentById)),
       usage: this.buildUsageSummary(plan, members.length, departments.length, roles.length, tasks.length)
     };
+  }
+
+  private async buildDatabaseOverview(workspaceId: string): Promise<EnterpriseWorkspaceOverviewResponseDto> {
+    const workspace = await this.prismaService.workspace.findUnique({
+      where: { id: workspaceId },
+      include: {
+        memberships: {
+          include: {
+            account: true,
+            department: true
+          },
+          orderBy: {
+            createdAt: 'asc'
+          }
+        },
+        subscriptions: {
+          include: {
+            plan: {
+              include: {
+                entitlements: {
+                  orderBy: {
+                    featureKey: 'asc'
+                  }
+                }
+              }
+            }
+          },
+          orderBy: {
+            createdAt: 'desc'
+          },
+          take: 1
+        },
+        usageMeters: {
+          orderBy: [
+            {
+              metricKey: 'asc'
+            },
+            {
+              period: 'desc'
+            },
+            {
+              createdAt: 'desc'
+            }
+          ]
+        }
+      }
+    });
+
+    if (!workspace) {
+      throw new NotFoundException({
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Workspace was not found.',
+          details: { workspaceId }
+        }
+      });
+    }
+
+    const subscription = workspace.subscriptions[0];
+    if (!subscription) {
+      throw new NotFoundException({
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Workspace subscription was not found.',
+          details: { workspaceId }
+        }
+      });
+    }
+
+    const organization = await this.prismaService.organization.findUnique({
+      where: { workspaceId },
+      include: {
+        departments: {
+          include: {
+            parentDepartment: true,
+            ownerMember: {
+              include: {
+                account: true
+              }
+            }
+          },
+          orderBy: {
+            createdAt: 'asc'
+          }
+        }
+      }
+    });
+
+    const latestUsageByMetric = new Map<string, number>();
+    for (const usageMeter of workspace.usageMeters) {
+      if (!latestUsageByMetric.has(usageMeter.metricKey)) {
+        latestUsageByMetric.set(usageMeter.metricKey, usageMeter.usedValue);
+      }
+    }
+
+    const memberCountByDepartment = new Map<string, number>();
+    for (const member of workspace.memberships) {
+      if (member.departmentId) {
+        memberCountByDepartment.set(
+          member.departmentId,
+          (memberCountByDepartment.get(member.departmentId) ?? 0) + 1
+        );
+      }
+    }
+
+    const roleCount = latestUsageByMetric.get('roleInstances.count') ?? 0;
+    const taskCount = latestUsageByMetric.get('tasks.monthlyCount') ?? 0;
+    const departments = organization?.departments ?? [];
+
+    return {
+      workspace: {
+        id: workspace.id,
+        tenantId: workspace.tenantId,
+        workspaceType: this.toWorkspaceType(workspace.type),
+        name: workspace.name,
+        ownerAccountId: workspace.ownerAccountId,
+        status: this.toWorkspaceStatus(workspace.status),
+        planCode: subscription.plan.code
+      },
+      organization: organization
+        ? {
+            id: organization.id,
+            tenantId: organization.tenantId,
+            workspaceId: organization.workspaceId,
+            name: organization.name,
+            industry: organization.industry ?? undefined,
+            size: organization.size ?? undefined,
+            status: 'active',
+            createdAt: organization.createdAt.toISOString()
+          }
+        : null,
+      plan: {
+        code: subscription.plan.code,
+        name: subscription.plan.name,
+        billingCycle: subscription.plan.billingCycle,
+        priceCents: subscription.plan.priceCents ?? undefined,
+        currency: subscription.plan.currency ?? undefined,
+        description: subscription.plan.description ?? undefined,
+        entitlements: subscription.plan.entitlements.map((entitlement) => ({
+          featureKey: entitlement.featureKey,
+          enabled: entitlement.enabled,
+          limitValue: entitlement.limitValue ?? undefined,
+          limitUnit: entitlement.limitUnit ?? undefined
+        }))
+      },
+      subscription: {
+        id: subscription.id,
+        workspaceId: subscription.workspaceId,
+        planCode: subscription.plan.code,
+        status: this.toSubscriptionStatus(subscription.status),
+        billingCycle: this.toBillingCycle(subscription.billingCycle),
+        currentPeriodStart: subscription.currentPeriodStart?.toISOString(),
+        currentPeriodEnd: subscription.currentPeriodEnd?.toISOString(),
+        cancelAtPeriodEnd: subscription.cancelAtPeriodEnd
+      },
+      departments: departments.map((department) =>
+        this.toDatabaseDepartmentSummary(
+          department,
+          memberCountByDepartment.get(department.id) ?? 0,
+          0
+        )
+      ),
+      members: workspace.memberships.map((member) => this.toDatabaseMemberSummary(member)),
+      usage: this.buildUsageSummary(
+        {
+          entitlements: subscription.plan.entitlements.map((entitlement) => ({
+            featureKey: entitlement.featureKey,
+            enabled: entitlement.enabled,
+            limitValue: entitlement.limitValue ?? undefined,
+            limitUnit: entitlement.limitUnit ?? undefined
+          }))
+        },
+        workspace.memberships.length,
+        departments.length,
+        roleCount,
+        taskCount
+      )
+    };
+  }
+
+  private async createDatabaseDepartment(
+    workspaceId: string,
+    input: CreateDepartmentInput
+  ): Promise<DepartmentSummaryDto> {
+    await this.entitlementService.requireAllowed(
+      {
+        workspaceId,
+        featureKey: 'canCreateDepartment'
+      },
+      'Department management requires an Enterprise plan.'
+    );
+
+    const organization = await this.prismaService.organization.findUnique({
+      where: { workspaceId }
+    });
+
+    if (!organization) {
+      throw new NotFoundException({
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Organization was not found.',
+          details: { workspaceId }
+        }
+      });
+    }
+
+    const name = input.name.trim();
+    if (!name) {
+      throw new BadRequestException({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Department name is required.'
+        }
+      });
+    }
+
+    const existingDepartment = await this.prismaService.department.findFirst({
+      where: {
+        organizationId: organization.id,
+        name: {
+          equals: name,
+          mode: 'insensitive'
+        }
+      }
+    });
+    if (existingDepartment) {
+      throw new ConflictException({
+        error: {
+          code: 'CONFLICT',
+          message: 'Department already exists.',
+          details: {
+            workspaceId,
+            name
+          }
+        }
+      });
+    }
+
+    let ownerMember:
+      | {
+          id: string;
+          account: { primaryEmail: string };
+        }
+      | null = null;
+    if (input.ownerUserId) {
+      ownerMember = await this.prismaService.workspaceMember.findFirst({
+        where: {
+          id: input.ownerUserId,
+          workspaceId
+        },
+        include: {
+          account: true
+        }
+      });
+
+      if (!ownerMember) {
+        throw new NotFoundException({
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Department owner was not found.',
+            details: {
+              workspaceId,
+              ownerUserId: input.ownerUserId
+            }
+          }
+        });
+      }
+    }
+
+    if (input.parentDepartmentId) {
+      const parentDepartment = await this.prismaService.department.findFirst({
+        where: {
+          id: input.parentDepartmentId,
+          organizationId: organization.id
+        }
+      });
+
+      if (!parentDepartment) {
+        throw new NotFoundException({
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Parent department was not found.',
+            details: {
+              workspaceId,
+              parentDepartmentId: input.parentDepartmentId
+            }
+          }
+        });
+      }
+    }
+
+    const department = await this.prismaService.department.create({
+      data: {
+        organizationId: organization.id,
+        parentDepartmentId: input.parentDepartmentId ?? null,
+        name,
+        ownerMemberId: ownerMember?.id ?? null
+      },
+      include: {
+        parentDepartment: true,
+        ownerMember: {
+          include: {
+            account: true
+          }
+        }
+      }
+    });
+
+    return this.toDatabaseDepartmentSummary(department, 0, 0);
   }
 
   private toDepartmentSummary(
@@ -266,6 +591,131 @@ export class OrganizationService {
       status: member.status,
       joinedAt: member.joinedAt
     };
+  }
+
+  private toDatabaseDepartmentSummary(
+    department: {
+      id: string;
+      organizationId: string;
+      parentDepartmentId: string | null;
+      name: string;
+      ownerMemberId: string | null;
+      createdAt: Date;
+      parentDepartment?: { name: string } | null;
+      ownerMember?: { account: { primaryEmail: string } } | null;
+    },
+    memberCount: number,
+    roleInstanceCount: number
+  ): DepartmentSummaryDto {
+    return {
+      id: department.id,
+      organizationId: department.organizationId,
+      parentDepartmentId: department.parentDepartmentId ?? undefined,
+      parentDepartmentName: department.parentDepartment?.name,
+      name: department.name,
+      ownerUserId: department.ownerMemberId ?? undefined,
+      ownerName: department.ownerMember
+        ? this.displayNameFromEmail(department.ownerMember.account.primaryEmail)
+        : undefined,
+      memberCount,
+      roleInstanceCount,
+      createdAt: department.createdAt.toISOString()
+    };
+  }
+
+  private toDatabaseMemberSummary(member: {
+    id: string;
+    accountId: string;
+    departmentId: string | null;
+    role: string;
+    createdAt: Date;
+    account: {
+      primaryEmail: string;
+      status: AccountStatus;
+    };
+    department?: {
+      name: string;
+    } | null;
+  }): MemberSummaryDto {
+    return {
+      id: member.id,
+      accountId: member.accountId,
+      name: this.displayNameFromEmail(member.account.primaryEmail),
+      email: member.account.primaryEmail,
+      departmentId: member.departmentId ?? undefined,
+      departmentName: member.department?.name,
+      systemRole: this.toSystemRole(member.role),
+      status: this.toMemberStatus(member.account.status),
+      joinedAt: member.createdAt.toISOString()
+    };
+  }
+
+  private toWorkspaceType(value: WorkspaceType): 'personal' | 'enterprise' {
+    return value === 'ENTERPRISE' ? 'enterprise' : 'personal';
+  }
+
+  private toWorkspaceStatus(value: WorkspaceStatus): 'active' | 'suspended' | 'archived' {
+    switch (value) {
+      case 'SUSPENDED':
+        return 'suspended';
+      case 'ARCHIVED':
+        return 'archived';
+      default:
+        return 'active';
+    }
+  }
+
+  private toSubscriptionStatus(
+    value: SubscriptionStatus
+  ): 'free' | 'trialing' | 'active' | 'past_due' | 'cancelled' | 'expired' {
+    switch (value) {
+      case 'FREE':
+        return 'free';
+      case 'TRIALING':
+        return 'trialing';
+      case 'ACTIVE':
+        return 'active';
+      case 'PAST_DUE':
+        return 'past_due';
+      case 'CANCELLED':
+        return 'cancelled';
+      case 'EXPIRED':
+        return 'expired';
+    }
+  }
+
+  private toBillingCycle(value: BillingCycle): 'free' | 'monthly' | 'annual' | 'custom' {
+    switch (value) {
+      case 'FREE':
+        return 'free';
+      case 'MONTHLY':
+        return 'monthly';
+      case 'ANNUAL':
+        return 'annual';
+      case 'CUSTOM':
+        return 'custom';
+    }
+  }
+
+  private toSystemRole(value: string): 'owner' | 'admin' | 'member' | 'viewer' {
+    switch (value) {
+      case 'OWNER':
+        return 'owner';
+      case 'ADMIN':
+        return 'admin';
+      case 'VIEWER':
+        return 'viewer';
+      default:
+        return 'member';
+    }
+  }
+
+  private toMemberStatus(value: AccountStatus): 'active' | 'invited' | 'disabled' {
+    return value === 'DISABLED' ? 'disabled' : 'active';
+  }
+
+  private displayNameFromEmail(email: string): string {
+    return email.split('@')[0] || email;
   }
 
   private buildUsageSummary(

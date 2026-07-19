@@ -13,6 +13,7 @@ Planned modules:
 - kernel
 - workspace
 - commercial
+- entitlement
 - organization
 - iam
 - role

@@ -18,7 +18,7 @@ export class OrganizationController {
 
   @Get('overview')
   @ApiOkResponse({ type: GetEnterpriseWorkspaceOverviewResponseDto })
-  getOverview(@Param('workspaceId') workspaceId: string): GetEnterpriseWorkspaceOverviewResponseDto {
+  getOverview(@Param('workspaceId') workspaceId: string): Promise<GetEnterpriseWorkspaceOverviewResponseDto> {
     return this.organizationService.getOverview(workspaceId);
   }
 
@@ -27,7 +27,7 @@ export class OrganizationController {
   createDepartment(
     @Param('workspaceId') workspaceId: string,
     @Body() body: CreateDepartmentRequestDto
-  ): CreateDepartmentResponseDto {
+  ): Promise<CreateDepartmentResponseDto> {
     return this.organizationService.createDepartment(workspaceId, body);
   }
 }

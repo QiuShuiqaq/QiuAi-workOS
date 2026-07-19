@@ -108,6 +108,10 @@ Verify database-backed kernel status:
 ```bash
 curl http://127.0.0.1:4100/api/v1/kernel/status
 curl http://127.0.0.1:4100/api/v1/commercial/plans
+curl -sS -H 'content-type: application/json' \
+  -d '{"workspaceId":"20000000-0000-4000-8000-000000000002","featureKey":"canCreateDepartment"}' \
+  http://127.0.0.1:4100/api/v1/entitlements/check
+curl http://127.0.0.1:4100/api/v1/workspaces/20000000-0000-4000-8000-000000000002/organization/overview
 ```
 
 Expected:
@@ -115,6 +119,8 @@ Expected:
 - `kernel/status` returns `persistenceMode: "database"`
 - `kernel/status` returns `databaseReady: true`
 - `commercial/plans` returns seeded plans and entitlements
+- `entitlements/check` returns `allowed: true` for enterprise department management
+- `organization/overview` returns seeded departments and members
 - `https://workos.qiuaihub.com/login` opens the login page
 - `admin@qiuai.local` can sign in with the bootstrap password you set in `.env`
 

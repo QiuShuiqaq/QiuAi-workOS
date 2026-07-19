@@ -146,9 +146,16 @@ export const demoPlans: MockPlanDetail[] = [
     entitlements: [
       { featureKey: 'maxRoleInstances', enabled: true, limitValue: 3, limitUnit: 'count' },
       { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100, limitUnit: 'count' },
+      { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 1, limitUnit: 'count' },
+      { featureKey: 'maxStorageGB', enabled: true, limitValue: 5, limitUnit: 'GB' },
+      { featureKey: 'maxMembers', enabled: true, limitValue: 1, limitUnit: 'count' },
       { featureKey: 'canCreateDepartment', enabled: false },
       { featureKey: 'canInviteMember', enabled: false },
-      { featureKey: 'canUseAuditLog', enabled: false }
+      { featureKey: 'canUseApprovalPolicy', enabled: false },
+      { featureKey: 'canUseAuditLog', enabled: false },
+      { featureKey: 'canUseAdvancedToolConnector', enabled: false },
+      { featureKey: 'canUseCostBudget', enabled: false },
+      { featureKey: 'canUseEnterpriseKPIDashboard', enabled: false }
     ]
   },
   {
@@ -161,9 +168,16 @@ export const demoPlans: MockPlanDetail[] = [
     entitlements: [
       { featureKey: 'maxRoleInstances', enabled: true, limitValue: 50, limitUnit: 'count' },
       { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 10000, limitUnit: 'count' },
+      { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 10, limitUnit: 'count' },
+      { featureKey: 'maxStorageGB', enabled: true, limitValue: 200, limitUnit: 'GB' },
+      { featureKey: 'maxMembers', enabled: true, limitValue: 50, limitUnit: 'count' },
       { featureKey: 'canCreateDepartment', enabled: true },
       { featureKey: 'canInviteMember', enabled: true },
-      { featureKey: 'canUseAuditLog', enabled: true }
+      { featureKey: 'canUseApprovalPolicy', enabled: true },
+      { featureKey: 'canUseAuditLog', enabled: true },
+      { featureKey: 'canUseAdvancedToolConnector', enabled: true },
+      { featureKey: 'canUseCostBudget', enabled: true },
+      { featureKey: 'canUseEnterpriseKPIDashboard', enabled: true }
     ]
   },
   {
@@ -176,9 +190,16 @@ export const demoPlans: MockPlanDetail[] = [
     entitlements: [
       { featureKey: 'maxRoleInstances', enabled: true, limitValue: 120, limitUnit: 'count' },
       { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 50000, limitUnit: 'count' },
+      { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 50, limitUnit: 'count' },
+      { featureKey: 'maxStorageGB', enabled: true, limitValue: 1000, limitUnit: 'GB' },
+      { featureKey: 'maxMembers', enabled: true, limitValue: 120, limitUnit: 'count' },
       { featureKey: 'canCreateDepartment', enabled: true },
       { featureKey: 'canInviteMember', enabled: true },
-      { featureKey: 'canUseAuditLog', enabled: true }
+      { featureKey: 'canUseApprovalPolicy', enabled: true },
+      { featureKey: 'canUseAuditLog', enabled: true },
+      { featureKey: 'canUseAdvancedToolConnector', enabled: true },
+      { featureKey: 'canUseCostBudget', enabled: true },
+      { featureKey: 'canUseEnterpriseKPIDashboard', enabled: true }
     ]
   },
   {
@@ -191,10 +212,16 @@ export const demoPlans: MockPlanDetail[] = [
     entitlements: [
       { featureKey: 'maxRoleInstances', enabled: true },
       { featureKey: 'maxTasksPerMonth', enabled: true },
+      { featureKey: 'maxKnowledgeBases', enabled: true },
+      { featureKey: 'maxStorageGB', enabled: true },
+      { featureKey: 'maxMembers', enabled: true },
       { featureKey: 'canCreateDepartment', enabled: true },
       { featureKey: 'canInviteMember', enabled: true },
+      { featureKey: 'canUseApprovalPolicy', enabled: true },
       { featureKey: 'canUseAuditLog', enabled: true },
-      { featureKey: 'canUseCostBudget', enabled: true }
+      { featureKey: 'canUseAdvancedToolConnector', enabled: true },
+      { featureKey: 'canUseCostBudget', enabled: true },
+      { featureKey: 'canUseEnterpriseKPIDashboard', enabled: true }
     ]
   }
 ];
