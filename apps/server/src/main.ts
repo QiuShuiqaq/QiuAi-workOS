@@ -7,21 +7,17 @@ import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fa
 import { AppModule } from './modules/app.module';
 import { AllExceptionsFilter } from './shared/filters/all-exceptions.filter';
 
-async function bootstrap() {
+export async function createApplication(): Promise<NestFastifyApplication> {
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter(), {
     bufferLogs: true
   });
-  app
-    .getHttpAdapter()
-    .getInstance()
-    .addContentTypeParser(
-      'application/x-www-form-urlencoded',
-      { parseAs: 'string' },
-      (_request, body, done) => {
-        done(null, body);
-      }
-    );
 
+  configureApplication(app);
+
+  return app;
+}
+
+export function configureApplication(app: NestFastifyApplication): void {
   app.setGlobalPrefix('api');
   app.enableVersioning({
     type: VersioningType.URI,
@@ -35,6 +31,10 @@ async function bootstrap() {
     })
   );
   app.useGlobalFilters(new AllExceptionsFilter());
+}
+
+export async function bootstrap() {
+  const app = await createApplication();
 
   const host = process.env.SERVER_HOST ?? '127.0.0.1';
   const port = Number(process.env.SERVER_PORT ?? 4000);
@@ -43,4 +43,6 @@ async function bootstrap() {
   Logger.log(`QiuAI WorkOS server is running at http://${host}:${port}/api/v1`, 'Bootstrap');
 }
 
-void bootstrap();
+if (require.main === module) {
+  void bootstrap();
+}
