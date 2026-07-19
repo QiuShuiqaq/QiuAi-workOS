@@ -24,7 +24,7 @@ export const fallbackCurrentAccount: CurrentAccountResponse = {
       name: '秋艾科技',
       ownerAccountId: 'account_demo',
       status: 'active',
-      planCode: 'ENTERPRISE_MONTHLY'
+      planCode: 'ENTERPRISE_BASIC_MONTHLY'
     }
   ]
 };

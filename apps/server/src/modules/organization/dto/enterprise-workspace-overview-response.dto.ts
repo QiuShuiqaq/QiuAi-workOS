@@ -98,7 +98,7 @@ export class SubscriptionSummaryDto {
   @ApiProperty({ example: 'enterprise' })
   workspaceId!: string;
 
-  @ApiProperty({ example: 'ENTERPRISE_MONTHLY' })
+  @ApiProperty({ example: 'ENTERPRISE_BASIC_MONTHLY' })
   planCode!: PlanCode;
 
   @ApiProperty({ example: 'active' })

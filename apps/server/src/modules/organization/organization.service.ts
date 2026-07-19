@@ -74,7 +74,7 @@ export class OrganizationService {
           message: 'Department management requires an Enterprise plan.',
           details: {
             featureKey: 'canCreateDepartment',
-            requiredPlan: 'ENTERPRISE_MONTHLY'
+            requiredPlan: 'ENTERPRISE_BASIC_MONTHLY'
           }
         }
       });

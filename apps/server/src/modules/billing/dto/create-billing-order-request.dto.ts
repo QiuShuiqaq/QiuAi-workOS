@@ -2,7 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
 export class CreateBillingOrderRequestDto {
-  @ApiProperty({ example: 'ENTERPRISE_MONTHLY' })
+  @ApiProperty({ example: 'ENTERPRISE_BASIC_MONTHLY' })
   @IsString()
   planCode!: string;
 
@@ -22,7 +22,7 @@ export class CreateBillingOrderRequestDto {
   @IsString()
   currency?: string;
 
-  @ApiProperty({ example: 'QiuAI WorkOS Enterprise Monthly', required: false })
+  @ApiProperty({ example: 'QiuAI WorkOS Enterprise Basic Monthly', required: false })
   @IsOptional()
   @IsString()
   subject?: string;

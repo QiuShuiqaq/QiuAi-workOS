@@ -219,8 +219,6 @@ Required production environment variables:
 ```bash
 WORKOS_DEPLOY_TARGET=alicloud-ecs
 WORKOS_PUBLIC_BASE_URL=https://workos.qiuaihub.com
-WORKOS_ENTERPRISE_MONTHLY_PRICE_CENTS=REPLACE_WITH_MONTHLY_PRICE_IN_CENTS
-WORKOS_ENTERPRISE_ANNUAL_PRICE_CENTS=REPLACE_WITH_ANNUAL_PRICE_IN_CENTS
 PAYMENT_ALIPAY_APP_ID=REPLACE_IN_SERVER_ENV_ONLY
 PAYMENT_ALIPAY_PRIVATE_KEY=REPLACE_IN_SERVER_ENV_ONLY
 PAYMENT_ALIPAY_PUBLIC_KEY=REPLACE_IN_SERVER_ENV_ONLY
@@ -229,12 +227,12 @@ PAYMENT_ALIPAY_NOTIFY_PATH=/api/v1/billing/alipay/notify
 PAYMENT_ALIPAY_RETURN_PATH=/billing/alipay/return
 PAYMENT_ALIPAY_KEY_TYPE=PKCS8
 PAYMENT_ALIPAY_SELLER_ID=OPTIONAL_PID_VALIDATION
-WORKOS_ALLOW_MANUAL_BILLING_AMOUNT=false
 ```
 
 Production behavior:
 
-- Enterprise monthly/annual order amounts come from server-side plan prices. If a plan price is not configured, the web UI disables online payment for that plan and the API refuses paid orders unless `WORKOS_ALLOW_MANUAL_BILLING_AMOUNT=true` is explicitly enabled for controlled manual tests.
+- Online subscription prices are seeded from the production plan catalog: Basic ¥299/month or ¥2,990/year, Standard ¥599/month or ¥5,990/year, Professional ¥980/month or ¥9,800/year.
+- Paid order amounts come from server-side plan prices. If a plan price is not configured, the web UI disables online payment for that plan and the API refuses paid orders.
 - Paid order creation fails with `ALIPAY_NOT_CONFIGURED` if required keys are missing.
 - Paid order creation returns `paymentUrl` when Alipay is configured.
 - Alipay notify returns plain text `success` only after signature, app ID, seller ID, and amount validation.

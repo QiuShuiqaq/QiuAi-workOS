@@ -32,7 +32,7 @@ export class WorkspaceSummaryDto {
   @ApiProperty({ example: 'active' })
   status!: 'active' | 'suspended' | 'archived';
 
-  @ApiProperty({ example: 'ENTERPRISE_MONTHLY' })
+  @ApiProperty({ example: 'ENTERPRISE_BASIC_MONTHLY' })
   planCode!: PlanCode;
 }
 

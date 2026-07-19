@@ -114,15 +114,6 @@ function requirePath(key, expected) {
   return value;
 }
 
-function requirePositiveInteger(key) {
-  const value = requireValue(key);
-  if (!/^\d+$/.test(value) || Number(value) <= 0) {
-    fail(`${key} must be a positive integer amount in cents.`);
-  }
-
-  return Number(value);
-}
-
 function requireFile(relativePath, label) {
   const resolved = path.resolve(root, relativePath);
   if (!existsSync(resolved)) {
@@ -200,12 +191,6 @@ function checkPaymentEnvironment() {
     return;
   }
 
-  if (env.WORKOS_ALLOW_MANUAL_BILLING_AMOUNT === 'true') {
-    fail('WORKOS_ALLOW_MANUAL_BILLING_AMOUNT must be false for production payment readiness.');
-  }
-
-  requirePositiveInteger('WORKOS_ENTERPRISE_MONTHLY_PRICE_CENTS');
-  requirePositiveInteger('WORKOS_ENTERPRISE_ANNUAL_PRICE_CENTS');
   requireValue('PAYMENT_ALIPAY_APP_ID');
   requireValue('PAYMENT_ALIPAY_PRIVATE_KEY');
   requireValue('PAYMENT_ALIPAY_PUBLIC_KEY');
@@ -246,35 +231,49 @@ async function checkDatabase() {
 
   try {
     await prisma.$connect();
+    const expectedPaidPlans = new Map([
+      ['ENTERPRISE_BASIC_MONTHLY', 29900],
+      ['ENTERPRISE_BASIC_ANNUAL', 299000],
+      ['ENTERPRISE_STANDARD_MONTHLY', 59900],
+      ['ENTERPRISE_STANDARD_ANNUAL', 599000],
+      ['ENTERPRISE_PRO_MONTHLY', 98000],
+      ['ENTERPRISE_PRO_ANNUAL', 980000]
+    ]);
+
     const [planCount, workspaceCount, enterprisePlans] = await Promise.all([
       prisma.plan.count(),
       prisma.workspace.count(),
       prisma.plan.findMany({
         where: {
           code: {
-            in: ['ENTERPRISE_MONTHLY', 'ENTERPRISE_ANNUAL']
+            in: [...expectedPaidPlans.keys()]
           }
         },
         select: {
           code: true,
           priceCents: true,
-          currency: true
+          currency: true,
+          status: true
         }
       })
     ]);
 
-    const unpricedPlans = enterprisePlans.filter((plan) => !plan.priceCents || plan.priceCents <= 0);
-    if (enterprisePlans.length !== 2) {
+    if (enterprisePlans.length !== expectedPaidPlans.size) {
       fail(
         'Enterprise paid plans are not fully seeded in the database.',
-        `Expected ENTERPRISE_MONTHLY and ENTERPRISE_ANNUAL, received ${enterprisePlans.length}.`
+        `Expected ${[...expectedPaidPlans.keys()].join(', ')}, received ${enterprisePlans.length}.`
       );
     }
 
-    if (unpricedPlans.length > 0) {
+    const mispricedPlans = enterprisePlans.filter(
+      (plan) => plan.priceCents !== expectedPaidPlans.get(plan.code)
+    );
+    if (mispricedPlans.length > 0) {
       fail(
-        'Enterprise paid plan prices are not seeded in the database.',
-        unpricedPlans.map((plan) => `${plan.code}: ${plan.priceCents ?? 'null'}`).join('\n')
+        'Enterprise paid plan prices do not match the production catalog.',
+        mispricedPlans
+          .map((plan) => `${plan.code}: ${plan.priceCents ?? 'null'} expected ${expectedPaidPlans.get(plan.code)}`)
+          .join('\n')
       );
     }
 
@@ -283,6 +282,14 @@ async function checkDatabase() {
       fail(
         'Enterprise paid plan currency must be CNY.',
         nonCnyPlans.map((plan) => `${plan.code}: ${plan.currency ?? 'null'}`).join('\n')
+      );
+    }
+
+    const inactivePlans = enterprisePlans.filter((plan) => plan.status !== 'ACTIVE');
+    if (inactivePlans.length > 0) {
+      fail(
+        'Enterprise paid plans must be ACTIVE.',
+        inactivePlans.map((plan) => `${plan.code}: ${plan.status}`).join('\n')
       );
     }
 

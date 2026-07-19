@@ -68,6 +68,6 @@ WorkOS now uses Alipay computer website payment for paid Enterprise orders:
 - Future payment provider support should add new providers behind the same `PaymentProvider`, `BillingOrder`, and `PaymentTransaction` boundary.
 - Alipay must be configured with `WORKOS_PUBLIC_BASE_URL`, `PAYMENT_ALIPAY_APP_ID`, `PAYMENT_ALIPAY_PRIVATE_KEY`, `PAYMENT_ALIPAY_PUBLIC_KEY`, and optional seller ID validation.
 - Order creation fails with `ALIPAY_NOT_CONFIGURED` when the paid provider is incomplete; WorkOS does not create fake payable orders in database mode.
-- Order creation fails with `PLAN_PRICE_REQUIRED` for unpriced paid plans unless manual test amounts are explicitly enabled through `WORKOS_ALLOW_MANUAL_BILLING_AMOUNT=true`.
+- Order creation fails with `PLAN_PRICE_REQUIRED` for unpriced paid plans. Client-submitted amounts are only accepted as an optional consistency check against the server-side plan price.
 - Alipay notification processing validates signature, app ID, seller ID, and amount before marking `BillingOrder` as `PAID` and activating or updating `Subscription`.
 - Alipay return synchronization requires normal workspace access; only signed provider notifications can update payments without a user session.

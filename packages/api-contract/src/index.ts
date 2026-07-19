@@ -11,3 +11,4 @@ export * from './platform-overview';
 export * from './role';
 export * from './task';
 export * from './workspace';
+export * from './plan-catalog';

@@ -108,6 +108,81 @@ export interface MockPlatformMetricSummary {
   trend?: string;
 }
 
+const personalFreeEntitlements = [
+  { featureKey: 'maxRoleInstances', enabled: true, limitValue: 3, limitUnit: 'count' },
+  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100, limitUnit: 'count' },
+  { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 1, limitUnit: 'count' },
+  { featureKey: 'maxStorageGB', enabled: true, limitValue: 5, limitUnit: 'GB' },
+  { featureKey: 'maxMembers', enabled: true, limitValue: 1, limitUnit: 'count' },
+  { featureKey: 'canCreateDepartment', enabled: false },
+  { featureKey: 'canInviteMember', enabled: false },
+  { featureKey: 'canUseApprovalPolicy', enabled: false },
+  { featureKey: 'canUseAuditLog', enabled: false },
+  { featureKey: 'canUseAdvancedToolConnector', enabled: false },
+  { featureKey: 'canUseCostBudget', enabled: false },
+  { featureKey: 'canUseEnterpriseKPIDashboard', enabled: false }
+];
+
+const enterpriseBasicEntitlements = [
+  { featureKey: 'maxRoleInstances', enabled: true, limitValue: 10, limitUnit: 'count' },
+  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 2000, limitUnit: 'count' },
+  { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 3, limitUnit: 'count' },
+  { featureKey: 'maxStorageGB', enabled: true, limitValue: 50, limitUnit: 'GB' },
+  { featureKey: 'maxMembers', enabled: true, limitValue: 10, limitUnit: 'count' },
+  { featureKey: 'canCreateDepartment', enabled: true },
+  { featureKey: 'canInviteMember', enabled: true },
+  { featureKey: 'canUseApprovalPolicy', enabled: true },
+  { featureKey: 'canUseAuditLog', enabled: true },
+  { featureKey: 'canUseAdvancedToolConnector', enabled: false },
+  { featureKey: 'canUseCostBudget', enabled: true },
+  { featureKey: 'canUseEnterpriseKPIDashboard', enabled: false }
+];
+
+const enterpriseStandardEntitlements = [
+  { featureKey: 'maxRoleInstances', enabled: true, limitValue: 30, limitUnit: 'count' },
+  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 10000, limitUnit: 'count' },
+  { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 10, limitUnit: 'count' },
+  { featureKey: 'maxStorageGB', enabled: true, limitValue: 200, limitUnit: 'GB' },
+  { featureKey: 'maxMembers', enabled: true, limitValue: 50, limitUnit: 'count' },
+  { featureKey: 'canCreateDepartment', enabled: true },
+  { featureKey: 'canInviteMember', enabled: true },
+  { featureKey: 'canUseApprovalPolicy', enabled: true },
+  { featureKey: 'canUseAuditLog', enabled: true },
+  { featureKey: 'canUseAdvancedToolConnector', enabled: true },
+  { featureKey: 'canUseCostBudget', enabled: true },
+  { featureKey: 'canUseEnterpriseKPIDashboard', enabled: true }
+];
+
+const enterpriseProEntitlements = [
+  { featureKey: 'maxRoleInstances', enabled: true, limitValue: 80, limitUnit: 'count' },
+  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 50000, limitUnit: 'count' },
+  { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 50, limitUnit: 'count' },
+  { featureKey: 'maxStorageGB', enabled: true, limitValue: 1000, limitUnit: 'GB' },
+  { featureKey: 'maxMembers', enabled: true, limitValue: 120, limitUnit: 'count' },
+  { featureKey: 'canCreateDepartment', enabled: true },
+  { featureKey: 'canInviteMember', enabled: true },
+  { featureKey: 'canUseApprovalPolicy', enabled: true },
+  { featureKey: 'canUseAuditLog', enabled: true },
+  { featureKey: 'canUseAdvancedToolConnector', enabled: true },
+  { featureKey: 'canUseCostBudget', enabled: true },
+  { featureKey: 'canUseEnterpriseKPIDashboard', enabled: true }
+];
+
+const enterpriseCustomEntitlements = [
+  { featureKey: 'maxRoleInstances', enabled: true },
+  { featureKey: 'maxTasksPerMonth', enabled: true },
+  { featureKey: 'maxKnowledgeBases', enabled: true },
+  { featureKey: 'maxStorageGB', enabled: true },
+  { featureKey: 'maxMembers', enabled: true },
+  { featureKey: 'canCreateDepartment', enabled: true },
+  { featureKey: 'canInviteMember', enabled: true },
+  { featureKey: 'canUseApprovalPolicy', enabled: true },
+  { featureKey: 'canUseAuditLog', enabled: true },
+  { featureKey: 'canUseAdvancedToolConnector', enabled: true },
+  { featureKey: 'canUseCostBudget', enabled: true },
+  { featureKey: 'canUseEnterpriseKPIDashboard', enabled: true }
+];
+
 export const demoAccount = {
   id: 'account_demo',
   primaryEmail: 'admin@qiuai.local',
@@ -118,20 +193,20 @@ export const demoWorkspaces: MockWorkspaceSummary[] = [
   {
     id: 'personal',
     tenantId: 'tenant_personal',
-    workspaceType: 'personal' as const,
-    name: '个人工作空间',
+    workspaceType: 'personal',
+    name: 'Personal Workspace',
     ownerAccountId: demoAccount.id,
-    status: 'active' as const,
+    status: 'active',
     planCode: 'PERSONAL_FREE'
   },
   {
     id: 'enterprise',
     tenantId: 'tenant_enterprise',
-    workspaceType: 'enterprise' as const,
-    name: '秋艾科技',
+    workspaceType: 'enterprise',
+    name: 'QiuAI Demo Enterprise',
     ownerAccountId: demoAccount.id,
-    status: 'active' as const,
-    planCode: 'ENTERPRISE_MONTHLY'
+    status: 'active',
+    planCode: 'ENTERPRISE_BASIC_MONTHLY'
   }
 ];
 
@@ -142,114 +217,97 @@ export const demoPlans: MockPlanDetail[] = [
     billingCycle: 'FREE',
     priceCents: 0,
     currency: 'CNY',
-    description: '个人免费版，支持基础 AI 员工搭建。',
-    entitlements: [
-      { featureKey: 'maxRoleInstances', enabled: true, limitValue: 3, limitUnit: 'count' },
-      { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100, limitUnit: 'count' },
-      { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 1, limitUnit: 'count' },
-      { featureKey: 'maxStorageGB', enabled: true, limitValue: 5, limitUnit: 'GB' },
-      { featureKey: 'maxMembers', enabled: true, limitValue: 1, limitUnit: 'count' },
-      { featureKey: 'canCreateDepartment', enabled: false },
-      { featureKey: 'canInviteMember', enabled: false },
-      { featureKey: 'canUseApprovalPolicy', enabled: false },
-      { featureKey: 'canUseAuditLog', enabled: false },
-      { featureKey: 'canUseAdvancedToolConnector', enabled: false },
-      { featureKey: 'canUseCostBudget', enabled: false },
-      { featureKey: 'canUseEnterpriseKPIDashboard', enabled: false }
-    ]
+    description: 'Free personal workspace for basic AI employee setup.',
+    entitlements: personalFreeEntitlements
   },
   {
-    code: 'ENTERPRISE_MONTHLY',
-    name: 'Enterprise Monthly',
+    code: 'ENTERPRISE_BASIC_MONTHLY',
+    name: 'Enterprise Basic Monthly',
     billingCycle: 'MONTHLY',
-    priceCents: undefined,
+    priceCents: 29900,
     currency: 'CNY',
-    description: '企业月付版，以企业、部门和岗位为核心。',
-    entitlements: [
-      { featureKey: 'maxRoleInstances', enabled: true, limitValue: 50, limitUnit: 'count' },
-      { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 10000, limitUnit: 'count' },
-      { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 10, limitUnit: 'count' },
-      { featureKey: 'maxStorageGB', enabled: true, limitValue: 200, limitUnit: 'GB' },
-      { featureKey: 'maxMembers', enabled: true, limitValue: 50, limitUnit: 'count' },
-      { featureKey: 'canCreateDepartment', enabled: true },
-      { featureKey: 'canInviteMember', enabled: true },
-      { featureKey: 'canUseApprovalPolicy', enabled: true },
-      { featureKey: 'canUseAuditLog', enabled: true },
-      { featureKey: 'canUseAdvancedToolConnector', enabled: true },
-      { featureKey: 'canUseCostBudget', enabled: true },
-      { featureKey: 'canUseEnterpriseKPIDashboard', enabled: true }
-    ]
+    description: 'Basic enterprise workspace for small teams.',
+    entitlements: enterpriseBasicEntitlements
   },
   {
-    code: 'ENTERPRISE_ANNUAL',
-    name: 'Enterprise Annual',
+    code: 'ENTERPRISE_BASIC_ANNUAL',
+    name: 'Enterprise Basic Annual',
     billingCycle: 'ANNUAL',
-    priceCents: undefined,
+    priceCents: 299000,
     currency: 'CNY',
-    description: '企业年付版，提供更高额度和实施权益。',
-    entitlements: [
-      { featureKey: 'maxRoleInstances', enabled: true, limitValue: 120, limitUnit: 'count' },
-      { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 50000, limitUnit: 'count' },
-      { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 50, limitUnit: 'count' },
-      { featureKey: 'maxStorageGB', enabled: true, limitValue: 1000, limitUnit: 'GB' },
-      { featureKey: 'maxMembers', enabled: true, limitValue: 120, limitUnit: 'count' },
-      { featureKey: 'canCreateDepartment', enabled: true },
-      { featureKey: 'canInviteMember', enabled: true },
-      { featureKey: 'canUseApprovalPolicy', enabled: true },
-      { featureKey: 'canUseAuditLog', enabled: true },
-      { featureKey: 'canUseAdvancedToolConnector', enabled: true },
-      { featureKey: 'canUseCostBudget', enabled: true },
-      { featureKey: 'canUseEnterpriseKPIDashboard', enabled: true }
-    ]
+    description: 'Annual basic enterprise workspace.',
+    entitlements: enterpriseBasicEntitlements
+  },
+  {
+    code: 'ENTERPRISE_STANDARD_MONTHLY',
+    name: 'Enterprise Standard Monthly',
+    billingCycle: 'MONTHLY',
+    priceCents: 59900,
+    currency: 'CNY',
+    description: 'Standard enterprise workspace with advanced connectors and KPI dashboard.',
+    entitlements: enterpriseStandardEntitlements
+  },
+  {
+    code: 'ENTERPRISE_STANDARD_ANNUAL',
+    name: 'Enterprise Standard Annual',
+    billingCycle: 'ANNUAL',
+    priceCents: 599000,
+    currency: 'CNY',
+    description: 'Annual standard enterprise workspace.',
+    entitlements: enterpriseStandardEntitlements
+  },
+  {
+    code: 'ENTERPRISE_PRO_MONTHLY',
+    name: 'Enterprise Professional Monthly',
+    billingCycle: 'MONTHLY',
+    priceCents: 98000,
+    currency: 'CNY',
+    description: 'Professional enterprise workspace for higher volume operations.',
+    entitlements: enterpriseProEntitlements
+  },
+  {
+    code: 'ENTERPRISE_PRO_ANNUAL',
+    name: 'Enterprise Professional Annual',
+    billingCycle: 'ANNUAL',
+    priceCents: 980000,
+    currency: 'CNY',
+    description: 'Annual professional enterprise workspace.',
+    entitlements: enterpriseProEntitlements
   },
   {
     code: 'ENTERPRISE_CUSTOM',
     name: 'Enterprise Custom',
     billingCycle: 'CUSTOM',
-    priceCents: undefined,
     currency: 'CNY',
-    description: '企业定制版，支持专属部署、SLA 和高级治理。',
-    entitlements: [
-      { featureKey: 'maxRoleInstances', enabled: true },
-      { featureKey: 'maxTasksPerMonth', enabled: true },
-      { featureKey: 'maxKnowledgeBases', enabled: true },
-      { featureKey: 'maxStorageGB', enabled: true },
-      { featureKey: 'maxMembers', enabled: true },
-      { featureKey: 'canCreateDepartment', enabled: true },
-      { featureKey: 'canInviteMember', enabled: true },
-      { featureKey: 'canUseApprovalPolicy', enabled: true },
-      { featureKey: 'canUseAuditLog', enabled: true },
-      { featureKey: 'canUseAdvancedToolConnector', enabled: true },
-      { featureKey: 'canUseCostBudget', enabled: true },
-      { featureKey: 'canUseEnterpriseKPIDashboard', enabled: true }
-    ]
+    description: 'Industry custom and private deployment plan.',
+    entitlements: enterpriseCustomEntitlements
   }
 ];
 
 export const demoRoleTemplates: MockRoleTemplateSummary[] = [
   {
     id: 'template_case_ops',
-    name: 'AI案例运营专员',
-    industry: '保健品和私域运营',
-    scenario: '案例素材识别、筛选、剪辑和发布',
-    description: '自动处理客户案例素材，生成筛选结果、内容建议和运营产物。',
+    name: 'AI Case Operations Specialist',
+    industry: 'Health products and private domain operations',
+    scenario: 'Case material screening, editing, and publishing',
+    description: 'Processes customer case materials and creates reviewable operations output.',
     recommendedPlanCode: 'PERSONAL_FREE'
   },
   {
     id: 'template_customer_followup',
-    name: 'AI客户回访专员',
-    industry: '客户运营',
-    scenario: '回访记录整理、意向识别和后续动作建议',
-    description: '整理客户回访内容，识别客户意向和风险，并生成跟进建议。',
-    recommendedPlanCode: 'ENTERPRISE_MONTHLY'
+    name: 'AI Customer Follow-up Specialist',
+    industry: 'Customer operations',
+    scenario: 'Follow-up record cleanup, intent detection, and action suggestions',
+    description: 'Structures customer follow-up records and proposes next actions.',
+    recommendedPlanCode: 'ENTERPRISE_BASIC_MONTHLY'
   },
   {
     id: 'template_contract_review',
-    name: 'AI合同审核专员',
-    industry: '法律服务',
-    scenario: '合同条款审查和风险摘要',
-    description: '对合同进行初步风险识别，输出审查摘要和风险提示。',
-    recommendedPlanCode: 'ENTERPRISE_MONTHLY'
+    name: 'AI Contract Review Specialist',
+    industry: 'Legal services',
+    scenario: 'Contract clause review and risk summary',
+    description: 'Performs first-pass contract risk detection with review notes.',
+    recommendedPlanCode: 'ENTERPRISE_STANDARD_MONTHLY'
   }
 ];
 
@@ -258,15 +316,15 @@ export const demoRoles: MockRoleInstanceDetail[] = [
     id: 'role_case_ops',
     templateId: 'template_case_ops',
     workspaceId: 'enterprise',
-    name: 'AI案例运营专员',
-    departmentName: '运营部',
-    ownerName: '企业管理员',
-    status: 'running' as const,
+    name: 'AI Case Operations Specialist',
+    departmentName: 'Operations',
+    ownerName: 'Workspace Admin',
+    status: 'running',
     installedAt: '2026-07-18T00:00:00.000Z',
-    businessGoal: '提升案例素材处理效率，稳定完成案例筛选、内容生成和运营复盘。',
-    knowledgeSources: ['企业案例标准', '内容发布规范', '历史爆款案例'],
-    tools: ['素材库', '内容发布系统', '数据看板'],
-    approvalPolicy: '发布前需要运营负责人审批',
+    businessGoal: 'Improve case material handling efficiency and produce repeatable operations output.',
+    knowledgeSources: ['Case standard', 'Publishing guideline', 'Historical case library'],
+    tools: ['Asset library', 'Publishing system', 'Data dashboard'],
+    approvalPolicy: 'Publishing output requires operations approval.',
     recentTaskIds: ['task_case_screening'],
     kpis: {
       taskCompleted: 86,
@@ -279,15 +337,15 @@ export const demoRoles: MockRoleInstanceDetail[] = [
     id: 'role_customer_followup',
     templateId: 'template_customer_followup',
     workspaceId: 'enterprise',
-    name: 'AI客户回访专员',
-    departmentName: '客服部',
-    ownerName: '客服主管',
-    status: 'configuration_required' as const,
+    name: 'AI Customer Follow-up Specialist',
+    departmentName: 'Customer Success',
+    ownerName: 'Customer Lead',
+    status: 'configuration_required',
     installedAt: '2026-07-18T00:00:00.000Z',
-    businessGoal: '沉淀客户回访记录，识别客户意向并推动后续跟进。',
-    knowledgeSources: ['客户分层规则', '回访话术', '售后政策'],
-    tools: ['CRM', '回访记录表'],
-    approvalPolicy: '高风险客户建议需要人工确认',
+    businessGoal: 'Turn customer follow-up notes into structured intent and next actions.',
+    knowledgeSources: ['Customer segments', 'Follow-up scripts', 'After-sales policy'],
+    tools: ['CRM', 'Follow-up records'],
+    approvalPolicy: 'High-risk customer suggestions require human confirmation.',
     recentTaskIds: ['task_customer_notes'],
     kpis: {
       taskCompleted: 31,
@@ -300,15 +358,15 @@ export const demoRoles: MockRoleInstanceDetail[] = [
     id: 'role_contract_review',
     templateId: 'template_contract_review',
     workspaceId: 'enterprise',
-    name: 'AI合同审核专员',
-    departmentName: '法务部',
-    ownerName: '法务负责人',
-    status: 'trial' as const,
+    name: 'AI Contract Review Specialist',
+    departmentName: 'Legal',
+    ownerName: 'Legal Lead',
+    status: 'trial',
     installedAt: '2026-07-18T00:00:00.000Z',
-    businessGoal: '对合同进行初审，减少法务重复审查时间。',
-    knowledgeSources: ['合同模板库', '风险条款清单'],
-    tools: ['文档库'],
-    approvalPolicy: '所有合同结论必须经法务确认',
+    businessGoal: 'Reduce repeated legal review time by producing a first-pass risk summary.',
+    knowledgeSources: ['Contract templates', 'Risk clause checklist'],
+    tools: ['Document library'],
+    approvalPolicy: 'All contract conclusions require legal approval.',
     recentTaskIds: ['task_contract_summary'],
     kpis: {
       taskCompleted: 12,
@@ -324,36 +382,36 @@ export const demoTasks: MockTaskDetail[] = [
     id: 'task_case_screening',
     workspaceId: 'enterprise',
     roleInstanceId: 'role_case_ops',
-    title: '案例视频初筛',
-    roleName: 'AI案例运营专员',
+    title: 'Case video screening',
+    roleName: 'AI Case Operations Specialist',
     taskType: 'case_screening',
-    status: 'completed' as const,
-    priority: 'normal' as const,
-    input: '请筛选今天上传的 128 个案例视频，找出符合发布标准的素材。',
+    status: 'completed',
+    priority: 'normal',
+    input: 'Screen 128 uploaded case videos and identify materials suitable for publishing.',
     createdAt: '2026-07-18T01:00:00.000Z',
     updatedAt: '2026-07-18T01:08:00.000Z',
     artifacts: [
       {
         id: 'artifact_case_report',
-        type: 'report' as const,
-        title: '案例筛选报告',
-        content: '共识别 128 个视频，其中 23 个符合发布标准，建议优先处理 7 个高潜素材。',
+        type: 'report',
+        title: 'Case screening report',
+        content: '128 videos were checked. 23 match the publishing standard and 7 are high priority.',
         createdAt: '2026-07-18T01:08:00.000Z'
       }
     ],
     executionLogs: [
       {
         id: 'log_case_1',
-        level: 'info' as const,
+        level: 'info',
         eventType: 'TASK_STARTED',
-        message: 'AI案例运营专员开始处理案例视频初筛。',
+        message: 'AI Case Operations Specialist started case video screening.',
         createdAt: '2026-07-18T01:00:00.000Z'
       },
       {
         id: 'log_case_2',
-        level: 'info' as const,
+        level: 'info',
         eventType: 'ARTIFACT_CREATED',
-        message: '已生成案例筛选报告。',
+        message: 'Case screening report was created.',
         createdAt: '2026-07-18T01:08:00.000Z'
       }
     ],
@@ -372,7 +430,7 @@ export const demoTasks: MockTaskDetail[] = [
     currentRun: {
       id: 'run_case_1',
       taskId: 'task_case_screening',
-      status: 'completed' as const,
+      status: 'completed',
       startedAt: '2026-07-18T01:00:00.000Z',
       finishedAt: '2026-07-18T01:08:00.000Z'
     }
@@ -381,21 +439,21 @@ export const demoTasks: MockTaskDetail[] = [
     id: 'task_customer_notes',
     workspaceId: 'enterprise',
     roleInstanceId: 'role_customer_followup',
-    title: '客户回访记录整理',
-    roleName: 'AI客户回访专员',
+    title: 'Customer follow-up notes cleanup',
+    roleName: 'AI Customer Follow-up Specialist',
     taskType: 'customer_followup',
-    status: 'running' as const,
-    priority: 'high' as const,
-    input: '整理今天的客户回访记录，标记高意向客户。',
+    status: 'running',
+    priority: 'high',
+    input: 'Clean up today customer follow-up notes and mark high-intent customers.',
     createdAt: '2026-07-18T02:00:00.000Z',
     updatedAt: '2026-07-18T02:05:00.000Z',
     artifacts: [],
     executionLogs: [
       {
         id: 'log_customer_1',
-        level: 'info' as const,
+        level: 'info',
         eventType: 'TASK_STARTED',
-        message: 'AI客户回访专员开始整理回访记录。',
+        message: 'AI Customer Follow-up Specialist started note cleanup.',
         createdAt: '2026-07-18T02:00:00.000Z'
       }
     ],
@@ -403,7 +461,7 @@ export const demoTasks: MockTaskDetail[] = [
     currentRun: {
       id: 'run_customer_1',
       taskId: 'task_customer_notes',
-      status: 'running' as const,
+      status: 'running',
       startedAt: '2026-07-18T02:00:00.000Z'
     }
   },
@@ -411,36 +469,36 @@ export const demoTasks: MockTaskDetail[] = [
     id: 'task_contract_summary',
     workspaceId: 'enterprise',
     roleInstanceId: 'role_contract_review',
-    title: '合同风险摘要',
-    roleName: 'AI合同审核专员',
+    title: 'Contract risk summary',
+    roleName: 'AI Contract Review Specialist',
     taskType: 'contract_review',
-    status: 'waiting_approval' as const,
-    priority: 'urgent' as const,
-    input: '请审查供应商合同，并列出需要法务重点确认的条款。',
+    status: 'waiting_approval',
+    priority: 'urgent',
+    input: 'Review the supplier contract and list clauses that need legal confirmation.',
     createdAt: '2026-07-18T03:00:00.000Z',
     updatedAt: '2026-07-18T03:18:00.000Z',
     artifacts: [
       {
         id: 'artifact_contract_risk',
-        type: 'report' as const,
-        title: '合同风险摘要',
-        content: '发现 4 项需确认条款：付款周期、违约责任、数据保密、自动续约。',
+        type: 'report',
+        title: 'Contract risk summary',
+        content: 'Four clauses need confirmation: payment cycle, breach liability, data confidentiality, and auto-renewal.',
         createdAt: '2026-07-18T03:18:00.000Z'
       }
     ],
     executionLogs: [
       {
         id: 'log_contract_1',
-        level: 'info' as const,
+        level: 'info',
         eventType: 'TASK_STARTED',
-        message: 'AI合同审核专员开始合同初审。',
+        message: 'AI Contract Review Specialist started first-pass review.',
         createdAt: '2026-07-18T03:00:00.000Z'
       },
       {
         id: 'log_contract_2',
-        level: 'warning' as const,
+        level: 'warning',
         eventType: 'APPROVAL_REQUIRED',
-        message: '合同风险摘要需要法务负责人审批。',
+        message: 'Contract risk summary requires legal approval.',
         createdAt: '2026-07-18T03:18:00.000Z'
       }
     ],
@@ -459,7 +517,7 @@ export const demoTasks: MockTaskDetail[] = [
     currentRun: {
       id: 'run_contract_1',
       taskId: 'task_contract_summary',
-      status: 'completed' as const,
+      status: 'completed',
       startedAt: '2026-07-18T03:00:00.000Z',
       finishedAt: '2026-07-18T03:18:00.000Z'
     }
@@ -467,10 +525,10 @@ export const demoTasks: MockTaskDetail[] = [
 ];
 
 export const demoMetrics: MockPlatformMetricSummary[] = [
-  { key: 'roles', title: 'AI 岗位', value: '12', trend: '+2 本月' },
-  { key: 'tasks', title: '今日任务', value: '128', trend: '92% 完成' },
-  { key: 'approvals', title: '待审批', value: '7', trend: '3 个高优先级' },
-  { key: 'cost', title: '本月成本', value: '¥842', trend: '预算内' }
+  { key: 'roles', title: 'AI Roles', value: '12', trend: '+2 this month' },
+  { key: 'tasks', title: 'Tasks Today', value: '128', trend: '92% completed' },
+  { key: 'approvals', title: 'Pending Approvals', value: '7', trend: '3 high priority' },
+  { key: 'cost', title: 'Monthly Cost', value: 'CNY 842', trend: 'within budget' }
 ];
 
 export const demoCurrentAccount = {

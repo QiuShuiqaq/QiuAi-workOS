@@ -1,10 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
 
 export class BillingPlanSummaryDto {
-  @ApiProperty({ example: 'ENTERPRISE_MONTHLY' })
+  @ApiProperty({ example: 'ENTERPRISE_BASIC_MONTHLY' })
   code!: string;
 
-  @ApiProperty({ example: 'Enterprise Monthly' })
+  @ApiProperty({ example: 'Enterprise Basic Monthly' })
   name!: string;
 
   @ApiProperty({ example: 'MONTHLY' })
@@ -16,7 +16,7 @@ export class BillingPlanSummaryDto {
   @ApiProperty({ example: 'CNY', required: false })
   currency?: string;
 
-  @ApiProperty({ example: 'Monthly enterprise workspace.', required: false })
+  @ApiProperty({ example: 'Basic enterprise workspace for small teams.', required: false })
   description?: string;
 }
 
@@ -56,10 +56,10 @@ export class BillingSubscriptionSummaryDto {
   @ApiProperty({ example: '20000000-0000-4000-8000-000000000002' })
   workspaceId!: string;
 
-  @ApiProperty({ example: 'ENTERPRISE_MONTHLY' })
+  @ApiProperty({ example: 'ENTERPRISE_BASIC_MONTHLY' })
   planCode!: string;
 
-  @ApiProperty({ example: 'Enterprise Monthly' })
+  @ApiProperty({ example: 'Enterprise Basic Monthly' })
   planName!: string;
 
   @ApiProperty({ example: 'ACTIVE' })
@@ -114,7 +114,7 @@ export class BillingOrderSummaryDto {
   @ApiProperty({ example: 'PENDING' })
   status!: string;
 
-  @ApiProperty({ example: 'QiuAI WorkOS Enterprise Monthly' })
+  @ApiProperty({ example: 'QiuAI WorkOS Enterprise Basic Monthly' })
   subject!: string;
 
   @ApiProperty({ example: 29900 })
@@ -126,10 +126,10 @@ export class BillingOrderSummaryDto {
   @ApiProperty({ example: 'MONTHLY' })
   billingCycle!: string;
 
-  @ApiProperty({ example: 'ENTERPRISE_MONTHLY' })
+  @ApiProperty({ example: 'ENTERPRISE_BASIC_MONTHLY' })
   planCode!: string;
 
-  @ApiProperty({ example: 'Enterprise Monthly' })
+  @ApiProperty({ example: 'Enterprise Basic Monthly' })
   planName!: string;
 
   @ApiProperty({ example: '2026-07-01T00:00:00.000Z', required: false })

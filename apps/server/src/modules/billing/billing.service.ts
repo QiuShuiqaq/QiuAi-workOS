@@ -43,11 +43,13 @@ import {
   PaymentProviderConfigStatusDto
 } from './dto/billing-overview-response.dto';
 
-const PLAN_CODES = [
-  'PERSONAL_FREE',
-  'ENTERPRISE_MONTHLY',
-  'ENTERPRISE_ANNUAL',
-  'ENTERPRISE_CUSTOM'
+const ONLINE_BILLING_PLAN_CODES = [
+  'ENTERPRISE_BASIC_MONTHLY',
+  'ENTERPRISE_BASIC_ANNUAL',
+  'ENTERPRISE_STANDARD_MONTHLY',
+  'ENTERPRISE_STANDARD_ANNUAL',
+  'ENTERPRISE_PRO_MONTHLY',
+  'ENTERPRISE_PRO_ANNUAL'
 ] as const;
 
 export interface AlipayNotifyProcessingResult {
@@ -370,6 +372,16 @@ export class BillingService {
     workspaceId: string,
     input: CreateBillingOrderRequestDto
   ): BillingOrderSummaryDto {
+    if (!this.isSupportedPlanCode(input.planCode)) {
+      throw new BadRequestException({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Unsupported planCode.',
+          details: { planCode: input.planCode }
+        }
+      });
+    }
+
     const workspace = this.store.getWorkspace(workspaceId);
     if (!workspace) {
       throw new NotFoundException({
@@ -391,6 +403,7 @@ export class BillingService {
         }
       });
     }
+    this.requirePurchasablePlan(plan);
 
     const amountCents = this.resolveOrderAmount(input.amountCents, plan.priceCents, plan.billingCycle);
     const now = new Date();
@@ -467,6 +480,7 @@ export class BillingService {
         }
       });
     }
+    this.requirePurchasablePlan(plan);
 
     const billingAccount =
       workspace.billingAccount ??
@@ -854,21 +868,7 @@ export class BillingService {
       });
     }
 
-    const amountCents = inputAmountCents ?? catalogAmountCents;
-    if (catalogAmountCents && catalogAmountCents > 0) {
-      if (inputAmountCents !== undefined && inputAmountCents !== catalogAmountCents) {
-        throw new BadRequestException({
-          error: {
-            code: 'PAYMENT_AMOUNT_MISMATCH',
-            message: 'The submitted amount does not match the configured plan price.'
-          }
-        });
-      }
-
-      return catalogAmountCents;
-    }
-
-    if (process.env.WORKOS_ALLOW_MANUAL_BILLING_AMOUNT !== 'true') {
+    if (!catalogAmountCents || catalogAmountCents <= 0) {
       throw new BadRequestException({
         error: {
           code: 'PLAN_PRICE_REQUIRED',
@@ -877,16 +877,53 @@ export class BillingService {
       });
     }
 
-    if (!amountCents || amountCents <= 0) {
+    if (inputAmountCents !== undefined && inputAmountCents !== catalogAmountCents) {
       throw new BadRequestException({
         error: {
-          code: 'PAYMENT_AMOUNT_REQUIRED',
-          message: 'A positive amountCents is required for this plan.'
+          code: 'PAYMENT_AMOUNT_MISMATCH',
+          message: 'The submitted amount does not match the configured plan price.'
         }
       });
     }
 
-    return amountCents;
+    return catalogAmountCents;
+  }
+
+  private requirePurchasablePlan(plan: {
+    code: string;
+    billingCycle: string;
+    priceCents?: number | null;
+    status?: string | null;
+  }): void {
+    if (plan.status && plan.status !== 'ACTIVE') {
+      throw new BadRequestException({
+        error: {
+          code: 'PLAN_NOT_PURCHASABLE',
+          message: 'This plan is not available for new billing orders.',
+          details: { planCode: plan.code, status: plan.status }
+        }
+      });
+    }
+
+    if (plan.billingCycle !== 'MONTHLY' && plan.billingCycle !== 'ANNUAL') {
+      throw new BadRequestException({
+        error: {
+          code: 'PLAN_NOT_PURCHASABLE',
+          message: 'This plan is not available for automatic online payment.',
+          details: { planCode: plan.code, billingCycle: plan.billingCycle }
+        }
+      });
+    }
+
+    if (!plan.priceCents || plan.priceCents <= 0) {
+      throw new BadRequestException({
+        error: {
+          code: 'PLAN_PRICE_REQUIRED',
+          message: 'A configured server-side plan price is required before creating paid orders.',
+          details: { planCode: plan.code }
+        }
+      });
+    }
   }
 
   private resolveSubject(inputSubject: string | undefined, planName: string): string {
@@ -926,7 +963,7 @@ export class BillingService {
   }
 
   private isSupportedPlanCode(planCode: string): planCode is PlanCode {
-    return PLAN_CODES.includes(planCode as (typeof PLAN_CODES)[number]);
+    return ONLINE_BILLING_PLAN_CODES.includes(planCode as (typeof ONLINE_BILLING_PLAN_CODES)[number]);
   }
 
   private toBillingAccountSummary(account: {

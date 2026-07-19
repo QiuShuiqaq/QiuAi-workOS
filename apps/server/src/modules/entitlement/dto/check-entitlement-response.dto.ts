@@ -17,7 +17,7 @@ export class CheckEntitlementResponseDto {
   @ApiProperty({ example: 'canCreateDepartment', required: false })
   featureKey?: EntitlementKey;
 
-  @ApiProperty({ example: 'ENTERPRISE_MONTHLY', required: false })
+  @ApiProperty({ example: 'ENTERPRISE_BASIC_MONTHLY', required: false })
   requiredPlan?: PlanCode;
 
   @ApiProperty({ example: 3, required: false })

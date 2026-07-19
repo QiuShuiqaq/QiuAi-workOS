@@ -173,7 +173,7 @@ export const demoSubscriptions: MockSubscriptionSummary[] = [
   {
     id: 'sub_enterprise',
     workspaceId: 'enterprise',
-    planCode: 'ENTERPRISE_MONTHLY',
+    planCode: 'ENTERPRISE_BASIC_MONTHLY',
     status: 'active',
     billingCycle: 'monthly',
     currentPeriodStart: '2026-07-01T00:00:00.000Z',

@@ -4,20 +4,6 @@ import { hashPassword } from '../src/shared/auth/password-hash';
 
 const prisma = new PrismaClient();
 
-function readPriceCentsFromEnv(key: string): number | null {
-  const rawValue = process.env[key]?.trim();
-  if (!rawValue) {
-    return null;
-  }
-
-  const value = Number(rawValue);
-  if (!Number.isInteger(value) || value <= 0) {
-    throw new Error(`${key} must be a positive integer amount in cents.`);
-  }
-
-  return value;
-}
-
 const ids = {
   accounts: {
     owner: '00000000-0000-4000-8000-000000000001',
@@ -50,7 +36,13 @@ const ids = {
     personalFree: '60000000-0000-4000-8000-000000000001',
     enterpriseMonthly: '60000000-0000-4000-8000-000000000002',
     enterpriseAnnual: '60000000-0000-4000-8000-000000000003',
-    enterpriseCustom: '60000000-0000-4000-8000-000000000004'
+    enterpriseCustom: '60000000-0000-4000-8000-000000000004',
+    enterpriseBasicMonthly: '60000000-0000-4000-8000-000000000005',
+    enterpriseBasicAnnual: '60000000-0000-4000-8000-000000000006',
+    enterpriseStandardMonthly: '60000000-0000-4000-8000-000000000007',
+    enterpriseStandardAnnual: '60000000-0000-4000-8000-000000000008',
+    enterpriseProMonthly: '60000000-0000-4000-8000-000000000009',
+    enterpriseProAnnual: '60000000-0000-4000-8000-000000000010'
   },
   subscriptions: {
     personal: '70000000-0000-4000-8000-000000000001',
@@ -62,6 +54,81 @@ const ids = {
   }
 };
 
+const personalFreeEntitlements = [
+  { featureKey: 'maxRoleInstances', enabled: true, limitValue: 3, limitUnit: 'count' },
+  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100, limitUnit: 'count' },
+  { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 1, limitUnit: 'count' },
+  { featureKey: 'maxStorageGB', enabled: true, limitValue: 5, limitUnit: 'GB' },
+  { featureKey: 'maxMembers', enabled: true, limitValue: 1, limitUnit: 'count' },
+  { featureKey: 'canCreateDepartment', enabled: false },
+  { featureKey: 'canInviteMember', enabled: false },
+  { featureKey: 'canUseApprovalPolicy', enabled: false },
+  { featureKey: 'canUseAuditLog', enabled: false },
+  { featureKey: 'canUseAdvancedToolConnector', enabled: false },
+  { featureKey: 'canUseCostBudget', enabled: false },
+  { featureKey: 'canUseEnterpriseKPIDashboard', enabled: false }
+] as const;
+
+const enterpriseBasicEntitlements = [
+  { featureKey: 'maxRoleInstances', enabled: true, limitValue: 10, limitUnit: 'count' },
+  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 2000, limitUnit: 'count' },
+  { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 3, limitUnit: 'count' },
+  { featureKey: 'maxStorageGB', enabled: true, limitValue: 50, limitUnit: 'GB' },
+  { featureKey: 'maxMembers', enabled: true, limitValue: 10, limitUnit: 'count' },
+  { featureKey: 'canCreateDepartment', enabled: true },
+  { featureKey: 'canInviteMember', enabled: true },
+  { featureKey: 'canUseApprovalPolicy', enabled: true },
+  { featureKey: 'canUseAuditLog', enabled: true },
+  { featureKey: 'canUseAdvancedToolConnector', enabled: false },
+  { featureKey: 'canUseCostBudget', enabled: true },
+  { featureKey: 'canUseEnterpriseKPIDashboard', enabled: false }
+] as const;
+
+const enterpriseStandardEntitlements = [
+  { featureKey: 'maxRoleInstances', enabled: true, limitValue: 30, limitUnit: 'count' },
+  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 10000, limitUnit: 'count' },
+  { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 10, limitUnit: 'count' },
+  { featureKey: 'maxStorageGB', enabled: true, limitValue: 200, limitUnit: 'GB' },
+  { featureKey: 'maxMembers', enabled: true, limitValue: 50, limitUnit: 'count' },
+  { featureKey: 'canCreateDepartment', enabled: true },
+  { featureKey: 'canInviteMember', enabled: true },
+  { featureKey: 'canUseApprovalPolicy', enabled: true },
+  { featureKey: 'canUseAuditLog', enabled: true },
+  { featureKey: 'canUseAdvancedToolConnector', enabled: true },
+  { featureKey: 'canUseCostBudget', enabled: true },
+  { featureKey: 'canUseEnterpriseKPIDashboard', enabled: true }
+] as const;
+
+const enterpriseProEntitlements = [
+  { featureKey: 'maxRoleInstances', enabled: true, limitValue: 80, limitUnit: 'count' },
+  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 50000, limitUnit: 'count' },
+  { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 50, limitUnit: 'count' },
+  { featureKey: 'maxStorageGB', enabled: true, limitValue: 1000, limitUnit: 'GB' },
+  { featureKey: 'maxMembers', enabled: true, limitValue: 120, limitUnit: 'count' },
+  { featureKey: 'canCreateDepartment', enabled: true },
+  { featureKey: 'canInviteMember', enabled: true },
+  { featureKey: 'canUseApprovalPolicy', enabled: true },
+  { featureKey: 'canUseAuditLog', enabled: true },
+  { featureKey: 'canUseAdvancedToolConnector', enabled: true },
+  { featureKey: 'canUseCostBudget', enabled: true },
+  { featureKey: 'canUseEnterpriseKPIDashboard', enabled: true }
+] as const;
+
+const enterpriseCustomEntitlements = [
+  { featureKey: 'maxRoleInstances', enabled: true },
+  { featureKey: 'maxTasksPerMonth', enabled: true },
+  { featureKey: 'maxKnowledgeBases', enabled: true },
+  { featureKey: 'maxStorageGB', enabled: true },
+  { featureKey: 'maxMembers', enabled: true },
+  { featureKey: 'canCreateDepartment', enabled: true },
+  { featureKey: 'canInviteMember', enabled: true },
+  { featureKey: 'canUseApprovalPolicy', enabled: true },
+  { featureKey: 'canUseAuditLog', enabled: true },
+  { featureKey: 'canUseAdvancedToolConnector', enabled: true },
+  { featureKey: 'canUseCostBudget', enabled: true },
+  { featureKey: 'canUseEnterpriseKPIDashboard', enabled: true }
+] as const;
+
 const plans = [
   {
     id: ids.plans.personalFree,
@@ -71,89 +138,107 @@ const plans = [
     billingCycle: 'FREE',
     priceCents: 0,
     currency: 'CNY',
-    entitlements: [
-      { featureKey: 'maxRoleInstances', enabled: true, limitValue: 3, limitUnit: 'count' },
-      { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100, limitUnit: 'count' },
-      { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 1, limitUnit: 'count' },
-      { featureKey: 'maxStorageGB', enabled: true, limitValue: 5, limitUnit: 'GB' },
-      { featureKey: 'maxMembers', enabled: true, limitValue: 1, limitUnit: 'count' },
-      { featureKey: 'canCreateDepartment', enabled: false },
-      { featureKey: 'canInviteMember', enabled: false },
-      { featureKey: 'canUseApprovalPolicy', enabled: false },
-      { featureKey: 'canUseAuditLog', enabled: false },
-      { featureKey: 'canUseAdvancedToolConnector', enabled: false },
-      { featureKey: 'canUseCostBudget', enabled: false },
-      { featureKey: 'canUseEnterpriseKPIDashboard', enabled: false }
-    ]
+    status: 'ACTIVE',
+    entitlements: personalFreeEntitlements
+  },
+  {
+    id: ids.plans.enterpriseBasicMonthly,
+    code: 'ENTERPRISE_BASIC_MONTHLY',
+    name: 'Enterprise Basic Monthly',
+    description: 'Basic enterprise workspace for small teams, departments, approvals, audit, and cost controls.',
+    billingCycle: 'MONTHLY',
+    priceCents: 29900,
+    currency: 'CNY',
+    status: 'ACTIVE',
+    entitlements: enterpriseBasicEntitlements
+  },
+  {
+    id: ids.plans.enterpriseBasicAnnual,
+    code: 'ENTERPRISE_BASIC_ANNUAL',
+    name: 'Enterprise Basic Annual',
+    description: 'Annual basic enterprise workspace for small teams, priced at CNY 2,990/year.',
+    billingCycle: 'ANNUAL',
+    priceCents: 299000,
+    currency: 'CNY',
+    status: 'ACTIVE',
+    entitlements: enterpriseBasicEntitlements
+  },
+  {
+    id: ids.plans.enterpriseStandardMonthly,
+    code: 'ENTERPRISE_STANDARD_MONTHLY',
+    name: 'Enterprise Standard Monthly',
+    description: 'Standard enterprise workspace for growing teams with advanced connectors and KPI dashboard.',
+    billingCycle: 'MONTHLY',
+    priceCents: 59900,
+    currency: 'CNY',
+    status: 'ACTIVE',
+    entitlements: enterpriseStandardEntitlements
+  },
+  {
+    id: ids.plans.enterpriseStandardAnnual,
+    code: 'ENTERPRISE_STANDARD_ANNUAL',
+    name: 'Enterprise Standard Annual',
+    description: 'Annual standard enterprise workspace, priced at CNY 5,990/year.',
+    billingCycle: 'ANNUAL',
+    priceCents: 599000,
+    currency: 'CNY',
+    status: 'ACTIVE',
+    entitlements: enterpriseStandardEntitlements
+  },
+  {
+    id: ids.plans.enterpriseProMonthly,
+    code: 'ENTERPRISE_PRO_MONTHLY',
+    name: 'Enterprise Professional Monthly',
+    description: 'Professional enterprise workspace for higher volume AI workforce operations.',
+    billingCycle: 'MONTHLY',
+    priceCents: 98000,
+    currency: 'CNY',
+    status: 'ACTIVE',
+    entitlements: enterpriseProEntitlements
+  },
+  {
+    id: ids.plans.enterpriseProAnnual,
+    code: 'ENTERPRISE_PRO_ANNUAL',
+    name: 'Enterprise Professional Annual',
+    description: 'Annual professional enterprise workspace, priced at CNY 9,800/year.',
+    billingCycle: 'ANNUAL',
+    priceCents: 980000,
+    currency: 'CNY',
+    status: 'ACTIVE',
+    entitlements: enterpriseProEntitlements
   },
   {
     id: ids.plans.enterpriseMonthly,
     code: 'ENTERPRISE_MONTHLY',
-    name: 'Enterprise Monthly',
-    description: 'Monthly enterprise workspace with organization, department, governance, and quota controls.',
+    name: 'Enterprise Monthly Legacy',
+    description: 'Archived legacy monthly enterprise plan kept for historical orders and subscriptions.',
     billingCycle: 'MONTHLY',
-    priceCents: readPriceCentsFromEnv('WORKOS_ENTERPRISE_MONTHLY_PRICE_CENTS'),
+    priceCents: 98000,
     currency: 'CNY',
-    entitlements: [
-      { featureKey: 'maxRoleInstances', enabled: true, limitValue: 50, limitUnit: 'count' },
-      { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 10000, limitUnit: 'count' },
-      { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 10, limitUnit: 'count' },
-      { featureKey: 'maxStorageGB', enabled: true, limitValue: 200, limitUnit: 'GB' },
-      { featureKey: 'maxMembers', enabled: true, limitValue: 50, limitUnit: 'count' },
-      { featureKey: 'canCreateDepartment', enabled: true },
-      { featureKey: 'canInviteMember', enabled: true },
-      { featureKey: 'canUseApprovalPolicy', enabled: true },
-      { featureKey: 'canUseAuditLog', enabled: true },
-      { featureKey: 'canUseAdvancedToolConnector', enabled: true },
-      { featureKey: 'canUseCostBudget', enabled: true },
-      { featureKey: 'canUseEnterpriseKPIDashboard', enabled: true }
-    ]
+    status: 'ARCHIVED',
+    entitlements: enterpriseProEntitlements
   },
   {
     id: ids.plans.enterpriseAnnual,
     code: 'ENTERPRISE_ANNUAL',
-    name: 'Enterprise Annual',
-    description: 'Annual enterprise workspace with higher quotas and implementation support.',
+    name: 'Enterprise Annual Legacy',
+    description: 'Archived legacy annual enterprise plan kept for historical orders and subscriptions.',
     billingCycle: 'ANNUAL',
-    priceCents: readPriceCentsFromEnv('WORKOS_ENTERPRISE_ANNUAL_PRICE_CENTS'),
+    priceCents: 980000,
     currency: 'CNY',
-    entitlements: [
-      { featureKey: 'maxRoleInstances', enabled: true, limitValue: 120, limitUnit: 'count' },
-      { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 50000, limitUnit: 'count' },
-      { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 50, limitUnit: 'count' },
-      { featureKey: 'maxStorageGB', enabled: true, limitValue: 1000, limitUnit: 'GB' },
-      { featureKey: 'maxMembers', enabled: true, limitValue: 120, limitUnit: 'count' },
-      { featureKey: 'canCreateDepartment', enabled: true },
-      { featureKey: 'canInviteMember', enabled: true },
-      { featureKey: 'canUseApprovalPolicy', enabled: true },
-      { featureKey: 'canUseAuditLog', enabled: true },
-      { featureKey: 'canUseAdvancedToolConnector', enabled: true },
-      { featureKey: 'canUseCostBudget', enabled: true },
-      { featureKey: 'canUseEnterpriseKPIDashboard', enabled: true }
-    ]
+    status: 'ARCHIVED',
+    entitlements: enterpriseProEntitlements
   },
   {
     id: ids.plans.enterpriseCustom,
     code: 'ENTERPRISE_CUSTOM',
     name: 'Enterprise Custom',
-    description: 'Custom enterprise deployment for dedicated rollout, SLA, and advanced governance.',
+    description: 'Industry custom and private deployment plan. Implementation service starts from CNY 9,800; industry custom starts from CNY 29,800.',
     billingCycle: 'CUSTOM',
     priceCents: null,
     currency: 'CNY',
-    entitlements: [
-      { featureKey: 'maxRoleInstances', enabled: true },
-      { featureKey: 'maxTasksPerMonth', enabled: true },
-      { featureKey: 'maxKnowledgeBases', enabled: true },
-      { featureKey: 'maxStorageGB', enabled: true },
-      { featureKey: 'maxMembers', enabled: true },
-      { featureKey: 'canCreateDepartment', enabled: true },
-      { featureKey: 'canInviteMember', enabled: true },
-      { featureKey: 'canUseApprovalPolicy', enabled: true },
-      { featureKey: 'canUseAuditLog', enabled: true },
-      { featureKey: 'canUseAdvancedToolConnector', enabled: true },
-      { featureKey: 'canUseCostBudget', enabled: true },
-      { featureKey: 'canUseEnterpriseKPIDashboard', enabled: true }
-    ]
+    status: 'ACTIVE',
+    entitlements: enterpriseCustomEntitlements
   }
 ] as const;
 
@@ -176,7 +261,7 @@ const roleTemplates = [
     industry: '客户运营',
     scenario: '回访记录整理、意向识别和后续动作建议',
     description: '整理客户回访内容，识别客户意向和风险，并生成跟进建议。',
-    recommendedPlanCode: 'ENTERPRISE_MONTHLY',
+    recommendedPlanCode: 'ENTERPRISE_BASIC_MONTHLY',
     businessGoal: '沉淀客户回访记录，识别客户意向并推动后续跟进。',
     knowledgeSources: ['客户分层规则', '回访话术', '售后政策'],
     tools: ['CRM', '回访记录表'],
@@ -188,7 +273,7 @@ const roleTemplates = [
     industry: '法律服务',
     scenario: '合同条款审查和风险摘要',
     description: '对合同进行初步风险识别，输出审查摘要和风险提示。',
-    recommendedPlanCode: 'ENTERPRISE_MONTHLY',
+    recommendedPlanCode: 'ENTERPRISE_STANDARD_MONTHLY',
     businessGoal: '对合同进行初审，减少法务重复审查时间。',
     knowledgeSources: ['合同模板库', '风险条款清单'],
     tools: ['文档库'],
@@ -308,7 +393,7 @@ async function seedPlans() {
         billingCycle: plan.billingCycle,
         priceCents: plan.priceCents,
         currency: plan.currency,
-        status: 'ACTIVE'
+        status: plan.status
       },
       create: {
         id: plan.id,
@@ -318,7 +403,7 @@ async function seedPlans() {
         billingCycle: plan.billingCycle,
         priceCents: plan.priceCents,
         currency: plan.currency,
-        status: 'ACTIVE'
+        status: plan.status
       }
     });
 
@@ -500,7 +585,7 @@ async function seedSubscriptionsAndUsage() {
     where: { id: ids.subscriptions.enterprise },
     update: {
       workspaceId: ids.workspaces.enterprise,
-      planId: ids.plans.enterpriseMonthly,
+      planId: ids.plans.enterpriseBasicMonthly,
       status: 'ACTIVE',
       billingCycle: 'MONTHLY',
       currentPeriodStart: new Date('2026-07-01T00:00:00.000Z'),
@@ -510,7 +595,7 @@ async function seedSubscriptionsAndUsage() {
     create: {
       id: ids.subscriptions.enterprise,
       workspaceId: ids.workspaces.enterprise,
-      planId: ids.plans.enterpriseMonthly,
+      planId: ids.plans.enterpriseBasicMonthly,
       status: 'ACTIVE',
       billingCycle: 'MONTHLY',
       currentPeriodStart: new Date('2026-07-01T00:00:00.000Z'),

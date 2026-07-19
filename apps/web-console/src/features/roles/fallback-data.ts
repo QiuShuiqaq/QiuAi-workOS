@@ -22,7 +22,7 @@ export const fallbackRoleTemplates: ListRoleTemplatesResponse = {
       industry: '客户运营',
       scenario: '回访记录整理、意向识别和后续动作建议',
       description: '整理客户回访内容，识别客户意向和风险，并生成跟进建议。',
-      recommendedPlanCode: 'ENTERPRISE_MONTHLY'
+      recommendedPlanCode: 'ENTERPRISE_BASIC_MONTHLY'
     },
     {
       id: 'template_contract_review',
@@ -30,7 +30,7 @@ export const fallbackRoleTemplates: ListRoleTemplatesResponse = {
       industry: '法律服务',
       scenario: '合同条款审查和风险摘要',
       description: '对合同进行初步风险识别，输出审查摘要和风险提示。',
-      recommendedPlanCode: 'ENTERPRISE_MONTHLY'
+      recommendedPlanCode: 'ENTERPRISE_STANDARD_MONTHLY'
     }
   ]
 };
