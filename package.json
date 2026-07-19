@@ -17,7 +17,12 @@
     "postcss": "8.5.10"
   },
   "dependencies": {
-    "tsx": "^4.0.0"
+    "@types/node": ">=20.0.0 <21",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "prisma": "6.19.3",
+    "tsx": "^4.0.0",
+    "typescript": ">=5.0.0 <6"
   },
   "scripts": {
     "dev": "npm run dev:web",
@@ -45,12 +50,7 @@
     "db:seed": "npm run prisma:seed -w @qiuai/server"
   },
   "devDependencies": {
-    "@types/node": ">=20.0.0 <21",
-    "@types/react": "19.2.17",
-    "@types/react-dom": "19.2.3",
     "eslint": ">=9.0.0 <10",
-    "prettier": ">=3.0.0 <4",
-    "prisma": "6.19.3",
-    "typescript": ">=5.0.0 <6"
+    "prettier": ">=3.0.0 <4"
   }
 }
