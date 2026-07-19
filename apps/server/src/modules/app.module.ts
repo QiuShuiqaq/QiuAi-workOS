@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 
 import { AuthModule } from './auth/auth.module';
+import { BillingModule } from './billing/billing.module';
 import { CommercialModule } from './commercial/commercial.module';
 import { EntitlementModule } from './entitlement/entitlement.module';
 import { HealthModule } from './health/health.module';
@@ -18,6 +19,7 @@ import { MockPlatformStoreModule } from '../shared/mock/mock-platform-store.modu
       isGlobal: true
     }),
     AuthModule,
+    BillingModule,
     MockPlatformStoreModule,
     CommercialModule,
     EntitlementModule,

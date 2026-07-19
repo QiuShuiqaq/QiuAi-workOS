@@ -1,5 +1,7 @@
 import type {
   AuthSessionResponse,
+  CreateBillingOrderRequest,
+  CreateBillingOrderResponse,
   LoginRequest,
   LoginResponse,
   LogoutResponse,
@@ -12,6 +14,7 @@ import type {
   EntitlementCheckResult,
   GetRoleInstanceResponse,
   GetTaskResponse,
+  GetBillingOverviewResponse,
   GetEnterpriseWorkspaceOverviewResponse,
   CurrentAccountResponse,
   KernelStatusResponse,
@@ -72,6 +75,17 @@ export class QiuApiClient {
 
   listPlans(): Promise<ListPlansResponse> {
     return this.get('/api/v1/commercial/plans');
+  }
+
+  getBillingOverview(workspaceId: string): Promise<GetBillingOverviewResponse> {
+    return this.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/billing/overview`);
+  }
+
+  createBillingOrder(
+    workspaceId: string,
+    input: CreateBillingOrderRequest
+  ): Promise<CreateBillingOrderResponse> {
+    return this.post(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/billing/orders`, input);
   }
 
   checkEntitlement(input: EntitlementCheckRequest): Promise<EntitlementCheckResult> {
