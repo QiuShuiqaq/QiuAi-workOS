@@ -71,6 +71,24 @@ if (apiHealth.status !== 'ok' || apiHealth.service !== 'qiuai-workos-server') {
   fail('API health payload is unexpected.', JSON.stringify(apiHealth, null, 2));
 }
 
+const kernelStatus = await fetchJson(new URL('/api/v1/kernel/status', apiBaseUrl), 'Kernel status');
+const smokeWorkspaceId =
+  process.env.WORKOS_SMOKE_WORKSPACE_ID ??
+  (kernelStatus.persistenceMode === 'database'
+    ? '20000000-0000-4000-8000-000000000002'
+    : 'enterprise');
+
+const billingOverview = await fetchJson(
+  new URL(`/api/v1/workspaces/${encodeURIComponent(smokeWorkspaceId)}/billing/overview`, apiBaseUrl),
+  'Billing overview'
+);
+if (
+  billingOverview.data?.workspaceId !== smokeWorkspaceId ||
+  !Array.isArray(billingOverview.data?.paymentProviders)
+) {
+  fail('Billing overview payload is unexpected.', JSON.stringify(billingOverview, null, 2));
+}
+
 const webHealth = await fetchJson(new URL('/api/v1/health', webBaseUrl), 'Web proxy health');
 if (webHealth.status !== apiHealth.status || webHealth.service !== apiHealth.service) {
   fail(
@@ -85,6 +103,7 @@ if (!webRoot.includes('QiuAI WorkOS')) {
 }
 
 console.log(`API health: ${apiHealth.status} (${apiHealth.service})`);
+console.log(`Billing overview: OK (${smokeWorkspaceId})`);
 console.log(`Web health proxy: ${webHealth.status} (${webHealth.service})`);
 console.log('Web root HTML: OK');
 console.log('Smoke checks passed.');
