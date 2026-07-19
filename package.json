@@ -33,7 +33,10 @@
     "deploy:logs": "docker compose -f infra/docker/compose.deploy.yml logs -f --tail=100",
     "check:smoke": "node tools/check-smoke.mjs",
     "check:deploy": "node tools/check-deploy-readiness.mjs",
-    "check:local-tooling": "node tools/check-local-tooling.mjs"
+    "check:local-tooling": "node tools/check-local-tooling.mjs",
+    "db:generate": "npm run prisma:generate -w @qiuai/server",
+    "db:migrate:deploy": "npm run prisma:migrate:deploy -w @qiuai/server",
+    "db:seed": "npm run prisma:seed -w @qiuai/server"
   },
   "devDependencies": {
     "@types/node": ">=20.0.0 <21",

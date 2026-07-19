@@ -31,3 +31,15 @@ Kernel status:
 ```text
 GET /api/v1/kernel/status
 ```
+
+## Database Commands
+
+Platform kernel persistence uses Prisma migrations under `prisma/migrations`.
+
+```bash
+npm run db:generate
+npm run db:migrate:deploy
+npm run db:seed
+```
+
+The server defaults to `WORKOS_PERSISTENCE_MODE=mock`. Set `WORKOS_PERSISTENCE_MODE=database` after the PostgreSQL database is created, migrated, and seeded.

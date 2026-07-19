@@ -93,7 +93,8 @@ model Tenant {
   createdAt DateTime     @default(now()) @map("created_at")
   updatedAt DateTime     @updatedAt @map("updated_at")
 
-  workspaces Workspace[]
+  workspaces    Workspace[]
+  organizations Organization[]
 
   @@map("tenants")
 }
@@ -128,8 +129,9 @@ model WorkspaceMember {
   createdAt   DateTime            @default(now()) @map("created_at")
   updatedAt   DateTime            @updatedAt @map("updated_at")
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  account   Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  workspace        Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account          Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  ownedDepartments Department[] @relation("DepartmentOwner")
 
   @@unique([workspaceId, accountId])
   @@index([accountId])
@@ -147,6 +149,7 @@ model Organization {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   departments Department[]
 
@@ -163,12 +166,14 @@ model Department {
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
-  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  parentDepartment Department?  @relation("DepartmentHierarchy", fields: [parentDepartmentId], references: [id], onDelete: SetNull)
-  childDepartments Department[] @relation("DepartmentHierarchy")
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parentDepartment Department?      @relation("DepartmentHierarchy", fields: [parentDepartmentId], references: [id], onDelete: SetNull)
+  childDepartments Department[]     @relation("DepartmentHierarchy")
+  ownerMember      WorkspaceMember? @relation("DepartmentOwner", fields: [ownerMemberId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([parentDepartmentId])
+  @@index([ownerMemberId])
   @@map("departments")
 }
 
@@ -176,6 +181,7 @@ model Plan {
   id           String       @id @default(uuid()) @db.Uuid
   code         PlanCode     @unique
   name         String
+  description  String?
   billingCycle BillingCycle @map("billing_cycle")
   priceCents   Int?         @map("price_cents")
   currency     String?

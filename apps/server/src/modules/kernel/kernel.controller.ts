@@ -14,7 +14,7 @@ export class KernelController {
 
   @Get('status')
   @ApiOkResponse({ type: KernelStatusResponse })
-  getStatus(): KernelStatusResponse {
+  async getStatus(): Promise<KernelStatusResponse> {
     return this.kernelService.getStatus();
   }
 }

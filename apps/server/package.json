@@ -9,7 +9,9 @@
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prisma:generate": "prisma generate --schema prisma/schema.prisma",
+    "prisma:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
     "prisma:migrate:dev": "prisma migrate dev --schema prisma/schema.prisma",
+    "prisma:seed": "tsx prisma/seed.ts",
     "prisma:studio": "prisma studio --schema prisma/schema.prisma",
     "lint": "node -e \"console.log('Server lint placeholder.')\"",
     "test": "node -e \"console.log('Server test placeholder.')\""

@@ -42,7 +42,7 @@ This avoids collisions with the existing platform's `/api/*` routes on `qiuaihub
 
 ## Database Policy
 
-The first WorkOS skeleton still uses mock business data, but the database landing plan should be independent:
+WorkOS must use an independent database namespace:
 
 ```text
 database: qiuai_workos
@@ -53,6 +53,67 @@ port: 5432
 
 Do not reuse the existing `qiu_commerce_license_platform` database for WorkOS business tables.
 If the current server database is named `qiuaihub_prod`, keep that database for the existing platform and create a separate WorkOS database.
+
+The first persistence slice covers the platform kernel tables:
+
+- accounts
+- tenants
+- workspaces
+- workspace_members
+- organizations
+- departments
+- plans
+- entitlements
+- subscriptions
+- usage_meters
+
+Role, task, artifact, execution log, and billing order tables are later slices.
+
+## Database Bootstrap
+
+On the ECS server, create a separate WorkOS database and user from the PostgreSQL administrator account:
+
+```bash
+sudo -iu postgres psql
+```
+
+Inside `psql`:
+
+```sql
+CREATE USER qiu_workos WITH PASSWORD 'REPLACE_WITH_STRONG_PASSWORD';
+CREATE DATABASE qiuai_workos OWNER qiu_workos;
+GRANT ALL PRIVILEGES ON DATABASE qiuai_workos TO qiu_workos;
+\q
+```
+
+Then update `/opt/qiuai-workos/.env`:
+
+```bash
+WORKOS_PERSISTENCE_MODE=database
+DATABASE_URL=postgresql://qiu_workos:REPLACE_WITH_STRONG_PASSWORD@127.0.0.1:5432/qiuai_workos?schema=public
+```
+
+Apply schema migrations and seed the platform kernel:
+
+```bash
+cd /opt/qiuai-workos
+npm run db:generate
+npm run db:migrate:deploy
+npm run db:seed
+```
+
+Verify database-backed kernel status:
+
+```bash
+curl http://127.0.0.1:4100/api/v1/kernel/status
+curl http://127.0.0.1:4100/api/v1/commercial/plans
+```
+
+Expected:
+
+- `kernel/status` returns `persistenceMode: "database"`
+- `kernel/status` returns `databaseReady: true`
+- `commercial/plans` returns seeded plans and entitlements
 
 ## Server Deployment
 
@@ -67,7 +128,7 @@ cp deploy/alicloud-ecs/env.qiuaihub.example .env
 vim .env
 ```
 
-At minimum, replace future database/password placeholders before persistence is enabled. Current mock-backed WorkOS can start without using PostgreSQL.
+Current mock-backed WorkOS can start with `WORKOS_PERSISTENCE_MODE=mock`. After the WorkOS database is created and migrated, set `WORKOS_PERSISTENCE_MODE=database` and replace the `DATABASE_URL` password placeholder.
 
 Start the app:
 

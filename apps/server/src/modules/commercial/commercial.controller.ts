@@ -14,7 +14,7 @@ export class CommercialController {
 
   @Get('plans')
   @ApiOkResponse({ type: ListPlansResponseDto })
-  listPlans(): ListPlansResponseDto {
+  async listPlans(): Promise<ListPlansResponseDto> {
     return this.commercialService.listPlans();
   }
 }
