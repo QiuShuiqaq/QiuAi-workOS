@@ -32,6 +32,7 @@ export interface QiuApiClientOptions {
   baseUrl: string;
   fetchImpl?: typeof fetch;
   defaultHeaders?: HeadersInit;
+  credentials?: RequestCredentials;
 }
 
 export class QiuApiError extends Error {
@@ -47,11 +48,13 @@ export class QiuApiClient {
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly defaultHeaders: HeadersInit | undefined;
+  private readonly credentials: RequestCredentials;
 
   constructor(options: QiuApiClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, '');
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.defaultHeaders = options.defaultHeaders;
+    this.credentials = options.credentials ?? 'same-origin';
   }
 
   getAuthSession(): Promise<AuthSessionResponse> {
@@ -160,6 +163,7 @@ export class QiuApiClient {
       headers: this.mergeHeaders({
         accept: 'application/json'
       }),
+      credentials: this.credentials,
       cache: 'no-store'
     });
 
@@ -180,6 +184,7 @@ export class QiuApiClient {
         'content-type': 'application/json'
       }),
       body: JSON.stringify(payload),
+      credentials: this.credentials,
       cache: 'no-store'
     });
 

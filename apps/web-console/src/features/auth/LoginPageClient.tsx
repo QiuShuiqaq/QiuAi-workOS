@@ -2,9 +2,8 @@
 
 import type { LoginRequest } from '@qiuai/api-contract';
 import { createBrowserApiClient } from '../../shared/api/browser-api';
-import { Button, Card, Checkbox, Flex, Form, Input, message, Space, Typography } from 'antd';
+import { Alert, Button, Card, Checkbox, Flex, Form, Input, message, Space, Typography } from 'antd';
 import { LockOutlined, LoginOutlined, MailOutlined } from '@ant-design/icons';
-import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 export interface LoginPageClientProps {
@@ -12,18 +11,27 @@ export interface LoginPageClientProps {
 }
 
 export function LoginPageClient({ nextPath }: LoginPageClientProps) {
-  const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string>();
 
   async function handleSubmit(values: LoginRequest) {
     setLoading(true);
+    setErrorMessage(undefined);
     try {
-      await createBrowserApiClient().login(values);
+      const apiClient = createBrowserApiClient();
+      await apiClient.login(values);
+      const session = await apiClient.getAuthSession();
+
+      if (!session.authenticated) {
+        throw new Error('登录成功，但浏览器会话没有生效。请确认使用 HTTPS 访问并允许本站 Cookie。');
+      }
+
       message.success('登录成功');
-      router.replace(nextPath);
-      router.refresh();
+      window.location.assign(nextPath.startsWith('/login') ? '/' : nextPath);
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '登录失败');
+      const messageText = error instanceof Error ? error.message : '登录失败';
+      setErrorMessage(messageText);
+      message.error(messageText);
     } finally {
       setLoading(false);
     }
@@ -47,6 +55,7 @@ export function LoginPageClient({ nextPath }: LoginPageClientProps) {
             </Typography.Title>
             <Typography.Text type="secondary">企业数字劳动力平台</Typography.Text>
           </div>
+          {errorMessage ? <Alert type="error" showIcon message={errorMessage} /> : null}
           <Form layout="vertical" onFinish={handleSubmit}>
             <Form.Item
               name="email"
