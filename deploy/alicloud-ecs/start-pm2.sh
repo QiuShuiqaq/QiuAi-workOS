@@ -16,6 +16,6 @@ echo "==> Building QiuAI WorkOS"
 npm run build
 
 echo "==> Starting PM2 processes"
-pm2 startOrReload deploy/alicloud-ecs/ecosystem.config.js --update-env
+pm2 startOrReload deploy/alicloud-ecs/ecosystem.config.cjs --update-env
 pm2 save
 pm2 status
