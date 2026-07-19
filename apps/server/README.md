@@ -43,3 +43,5 @@ npm run db:seed
 ```
 
 The server defaults to `WORKOS_PERSISTENCE_MODE=mock`. Set `WORKOS_PERSISTENCE_MODE=database` after the PostgreSQL database is created, migrated, and seeded.
+
+Set `WORKOS_BOOTSTRAP_ADMIN_PASSWORD` before running `npm run db:seed` to create the first `admin@qiuai.local` login password.

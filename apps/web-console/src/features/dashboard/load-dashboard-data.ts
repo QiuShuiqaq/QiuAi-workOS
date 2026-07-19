@@ -11,7 +11,7 @@ export interface DashboardData {
 }
 
 export async function loadDashboardData(requestedWorkspaceId?: string): Promise<DashboardData> {
-  const apiClient = createServerApiClient();
+  const apiClient = await createServerApiClient();
 
   try {
     const currentAccount = await apiClient.getCurrentAccount();

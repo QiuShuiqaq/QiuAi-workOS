@@ -21,7 +21,7 @@ export interface TasksPageData {
 export async function loadTasksPageData(requestedWorkspaceId?: string): Promise<TasksPageData> {
   const currentAccount = await loadCurrentAccount();
   const workspaceId = resolveWorkspaceId(currentAccount, requestedWorkspaceId);
-  const apiClient = createServerApiClient();
+  const apiClient = await createServerApiClient();
 
   try {
     const [roles, tasks] = await Promise.all([
@@ -64,7 +64,7 @@ export async function loadTaskDetailPageData(
   const workspaceId = resolveWorkspaceId(currentAccount, requestedWorkspaceId);
 
   try {
-    const response = await createServerApiClient().getTask(workspaceId, taskId);
+    const response = await (await createServerApiClient()).getTask(workspaceId, taskId);
     return {
       currentAccount: {
         ...currentAccount,
@@ -94,7 +94,7 @@ export interface TaskDetailsPageData {
 export async function loadTaskDetailsForWorkspace(requestedWorkspaceId?: string): Promise<TaskDetailsPageData> {
   const currentAccount = await loadCurrentAccount();
   const workspaceId = resolveWorkspaceId(currentAccount, requestedWorkspaceId);
-  const apiClient = createServerApiClient();
+  const apiClient = await createServerApiClient();
 
   try {
     const tasks = await apiClient.listTasks(workspaceId);

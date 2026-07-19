@@ -1,4 +1,8 @@
 import type {
+  AuthSessionResponse,
+  LoginRequest,
+  LoginResponse,
+  LogoutResponse,
   ApiErrorResponse,
   CreateTaskRequest,
   CreateTaskResponse,
@@ -21,6 +25,7 @@ import type {
 export interface QiuApiClientOptions {
   baseUrl: string;
   fetchImpl?: typeof fetch;
+  defaultHeaders?: HeadersInit;
 }
 
 export class QiuApiError extends Error {
@@ -35,10 +40,24 @@ export class QiuApiError extends Error {
 export class QiuApiClient {
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly defaultHeaders: HeadersInit | undefined;
 
   constructor(options: QiuApiClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, '');
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.defaultHeaders = options.defaultHeaders;
+  }
+
+  getAuthSession(): Promise<AuthSessionResponse> {
+    return this.get('/api/v1/auth/session');
+  }
+
+  login(input: LoginRequest): Promise<LoginResponse> {
+    return this.post('/api/v1/auth/login', input);
+  }
+
+  logout(): Promise<LogoutResponse> {
+    return this.post('/api/v1/auth/logout', {});
   }
 
   getKernelStatus(): Promise<KernelStatusResponse> {
@@ -113,9 +132,9 @@ export class QiuApiClient {
   private async get<TResponse>(path: string): Promise<TResponse> {
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method: 'GET',
-      headers: {
+      headers: this.mergeHeaders({
         accept: 'application/json'
-      },
+      }),
       cache: 'no-store'
     });
 
@@ -131,10 +150,10 @@ export class QiuApiClient {
   private async post<TResponse>(path: string, payload: unknown): Promise<TResponse> {
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method: 'POST',
-      headers: {
+      headers: this.mergeHeaders({
         accept: 'application/json',
         'content-type': 'application/json'
-      },
+      }),
       body: JSON.stringify(payload),
       cache: 'no-store'
     });
@@ -146,5 +165,13 @@ export class QiuApiClient {
     }
 
     return body as TResponse;
+  }
+
+  private mergeHeaders(headers: HeadersInit): Headers {
+    const merged = new Headers(this.defaultHeaders);
+    new Headers(headers).forEach((value, key) => {
+      merged.set(key, value);
+    });
+    return merged;
   }
 }

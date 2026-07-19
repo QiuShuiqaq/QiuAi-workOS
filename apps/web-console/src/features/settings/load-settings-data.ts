@@ -16,7 +16,7 @@ export async function loadSettingsPageData(requestedWorkspaceId?: string): Promi
   const workspaceId = resolveWorkspaceId(currentAccount, requestedWorkspaceId);
 
   try {
-    const plans = await createServerApiClient().listPlans();
+    const plans = await (await createServerApiClient()).listPlans();
     return {
       currentAccount: {
         ...currentAccount,

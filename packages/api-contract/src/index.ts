@@ -1,3 +1,4 @@
+export * from './auth';
 export * from './commercial';
 export * from './enterprise';
 export * from './entitlement';

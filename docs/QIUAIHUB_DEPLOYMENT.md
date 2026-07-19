@@ -90,7 +90,8 @@ Then update `/opt/qiuai-workos/.env`:
 
 ```bash
 WORKOS_PERSISTENCE_MODE=database
-DATABASE_URL=postgresql://qiu_workos:REPLACE_WITH_STRONG_PASSWORD@127.0.0.1:5432/qiuai_workos?schema=public
+DATABASE_URL=postgresql://qiu_workos:REPLACE_WITH_DB_PASSWORD@127.0.0.1:5432/qiuai_workos?schema=public
+WORKOS_BOOTSTRAP_ADMIN_PASSWORD=REPLACE_WITH_ADMIN_LOGIN_PASSWORD
 ```
 
 Apply schema migrations and seed the platform kernel:
@@ -114,6 +115,8 @@ Expected:
 - `kernel/status` returns `persistenceMode: "database"`
 - `kernel/status` returns `databaseReady: true`
 - `commercial/plans` returns seeded plans and entitlements
+- `https://workos.qiuaihub.com/login` opens the login page
+- `admin@qiuai.local` can sign in with the bootstrap password you set in `.env`
 
 ## Server Deployment
 

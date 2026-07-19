@@ -20,7 +20,7 @@ export interface RolesPageData {
 export async function loadRolesPageData(requestedWorkspaceId?: string): Promise<RolesPageData> {
   const currentAccount = await loadCurrentAccount();
   const workspaceId = resolveWorkspaceId(currentAccount, requestedWorkspaceId);
-  const apiClient = createServerApiClient();
+  const apiClient = await createServerApiClient();
 
   try {
     const [roles, templates] = await Promise.all([
@@ -63,7 +63,7 @@ export async function loadRoleDetailPageData(
   const workspaceId = resolveWorkspaceId(currentAccount, requestedWorkspaceId);
 
   try {
-    const role = await createServerApiClient().getRole(workspaceId, roleId);
+    const role = await (await createServerApiClient()).getRole(workspaceId, roleId);
     return {
       currentAccount: {
         ...currentAccount,

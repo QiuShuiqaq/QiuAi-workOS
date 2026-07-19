@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 
+import { AuthModule } from './auth/auth.module';
 import { CommercialModule } from './commercial/commercial.module';
 import { HealthModule } from './health/health.module';
 import { KernelModule } from './kernel/kernel.module';
@@ -15,6 +16,7 @@ import { MockPlatformStoreModule } from '../shared/mock/mock-platform-store.modu
     ConfigModule.forRoot({
       isGlobal: true
     }),
+    AuthModule,
     MockPlatformStoreModule,
     CommercialModule,
     HealthModule,

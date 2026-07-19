@@ -1,23 +1,38 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 
-import {
-  demoAccount,
-  demoWorkspaces
-} from '../../shared/mock/platform-seed';
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
+import { demoWorkspaces } from '../../shared/mock/platform-seed';
+import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
+import { AuthService } from '../auth/auth.service';
 import { CurrentAccountResponseDto } from './dto/current-account-response.dto';
 import { PlatformOverviewResponseDto } from './dto/platform-overview-response.dto';
 
 @Injectable()
 export class WorkspaceService {
-  constructor(private readonly store: MockPlatformStore) {}
+  constructor(
+    private readonly store: MockPlatformStore,
+    private readonly authService: AuthService
+  ) {}
 
-  getCurrentAccount(): CurrentAccountResponseDto {
-    return {
-      account: demoAccount,
-      workspaces: demoWorkspaces,
-      activeWorkspaceId: 'enterprise'
-    };
+  async getCurrentAccount(cookieHeader?: string): Promise<CurrentAccountResponseDto> {
+    if (!isDatabasePersistenceEnabled()) {
+      return this.authService.getCurrentAccount(cookieHeader);
+    }
+
+    try {
+      return await this.authService.getCurrentAccount(cookieHeader);
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+
+      throw new UnauthorizedException({
+        error: {
+          code: 'AUTHENTICATION_REQUIRED',
+          message: 'Authentication is required.'
+        }
+      });
+    }
   }
 
   getOverview(workspaceId: string): PlatformOverviewResponseDto {

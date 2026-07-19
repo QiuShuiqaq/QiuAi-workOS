@@ -16,7 +16,7 @@ export async function loadEnterprisePageData(requestedWorkspaceId?: string): Pro
   const activeWorkspaceId = resolveWorkspaceId(currentAccount, requestedWorkspaceId);
 
   try {
-    const response = await createServerApiClient().getEnterpriseWorkspaceOverview(activeWorkspaceId);
+    const response = await (await createServerApiClient()).getEnterpriseWorkspaceOverview(activeWorkspaceId);
     return {
       currentAccount: {
         ...currentAccount,

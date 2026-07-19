@@ -36,12 +36,19 @@ async function proxy(request: NextRequest, pathParts: string[]) {
 
   const response = await fetch(targetUrl, init);
   const body = await response.text();
+  const setCookie = response.headers.get('set-cookie');
+
+  const responseHeaders: Record<string, string> = {
+    'content-type': response.headers.get('content-type') ?? 'application/json'
+  };
+
+  if (setCookie) {
+    responseHeaders['set-cookie'] = setCookie;
+  }
 
   return new Response(body, {
     status: response.status,
-    headers: {
-      'content-type': response.headers.get('content-type') ?? 'application/json'
-    }
+    headers: responseHeaders
   });
 }
 

@@ -1,5 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 
+import { hashPassword } from '../src/shared/auth/password-hash';
+
 const prisma = new PrismaClient();
 
 const ids = {
@@ -114,7 +116,13 @@ const plans = [
 
 async function seedAccounts() {
   const accounts = [
-    { id: ids.accounts.owner, primaryEmail: 'admin@qiuai.local' },
+    {
+      id: ids.accounts.owner,
+      primaryEmail: 'admin@qiuai.local',
+      passwordHash: process.env.WORKOS_BOOTSTRAP_ADMIN_PASSWORD
+        ? hashPassword(process.env.WORKOS_BOOTSTRAP_ADMIN_PASSWORD)
+        : undefined
+    },
     { id: ids.accounts.opsLead, primaryEmail: 'ops@qiuai.local' },
     { id: ids.accounts.customerLead, primaryEmail: 'service@qiuai.local' },
     { id: ids.accounts.legalLead, primaryEmail: 'legal@qiuai.local' }
@@ -125,12 +133,14 @@ async function seedAccounts() {
       where: { id: account.id },
       update: {
         primaryEmail: account.primaryEmail,
-        status: 'ACTIVE'
+        status: 'ACTIVE',
+        passwordHash: account.passwordHash
       },
       create: {
         id: account.id,
         primaryEmail: account.primaryEmail,
-        status: 'ACTIVE'
+        status: 'ACTIVE',
+        passwordHash: account.passwordHash
       }
     });
   }
@@ -455,4 +465,3 @@ main()
     await prisma.$disconnect();
     process.exit(1);
   });
-
