@@ -13,13 +13,13 @@ export class TaskController {
   constructor(private readonly taskService: TaskService) {}
 
   @Get()
-  listTasks(@Param('workspaceId') workspaceId: string) {
+  async listTasks(@Param('workspaceId') workspaceId: string) {
     return this.taskService.listTasks(workspaceId);
   }
 
   @Get(':taskId')
-  getTask(@Param('workspaceId') workspaceId: string, @Param('taskId') taskId: string) {
-    const task = this.taskService.getTask(workspaceId, taskId);
+  async getTask(@Param('workspaceId') workspaceId: string, @Param('taskId') taskId: string) {
+    const task = await this.taskService.getTask(workspaceId, taskId);
     if (!task) {
       throw new NotFoundException({
         error: {
@@ -33,8 +33,8 @@ export class TaskController {
   }
 
   @Post()
-  createTask(@Param('workspaceId') workspaceId: string, @Body() body: CreateTaskRequestDto) {
-    const task = this.taskService.createTask(workspaceId, body);
+  async createTask(@Param('workspaceId') workspaceId: string, @Body() body: CreateTaskRequestDto) {
+    const task = await this.taskService.createTask(workspaceId, body);
     if (!task) {
       throw new NotFoundException({
         error: {
@@ -48,8 +48,8 @@ export class TaskController {
   }
 
   @Post(':taskId/run')
-  runTask(@Param('workspaceId') workspaceId: string, @Param('taskId') taskId: string) {
-    const task = this.taskService.runTask(workspaceId, taskId);
+  async runTask(@Param('workspaceId') workspaceId: string, @Param('taskId') taskId: string) {
+    const task = await this.taskService.runTask(workspaceId, taskId);
     if (!task) {
       throw new NotFoundException({
         error: {

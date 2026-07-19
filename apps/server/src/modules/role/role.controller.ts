@@ -13,18 +13,18 @@ export class RoleController {
   constructor(private readonly roleService: RoleService) {}
 
   @Get('templates')
-  listTemplates() {
+  async listTemplates() {
     return this.roleService.listTemplates();
   }
 
   @Get()
-  listRoles(@Param('workspaceId') workspaceId: string) {
+  async listRoles(@Param('workspaceId') workspaceId: string) {
     return this.roleService.listRoles(workspaceId);
   }
 
   @Get(':roleId')
-  getRole(@Param('workspaceId') workspaceId: string, @Param('roleId') roleId: string) {
-    const role = this.roleService.getRole(workspaceId, roleId);
+  async getRole(@Param('workspaceId') workspaceId: string, @Param('roleId') roleId: string) {
+    const role = await this.roleService.getRole(workspaceId, roleId);
     if (!role) {
       throw new NotFoundException({
         error: {
@@ -38,8 +38,8 @@ export class RoleController {
   }
 
   @Post('install')
-  installRole(@Param('workspaceId') workspaceId: string, @Body() body: InstallRoleRequestDto) {
-    const role = this.roleService.installRole(workspaceId, body);
+  async installRole(@Param('workspaceId') workspaceId: string, @Body() body: InstallRoleRequestDto) {
+    const role = await this.roleService.installRole(workspaceId, body);
     if (!role) {
       throw new NotFoundException({
         error: {
