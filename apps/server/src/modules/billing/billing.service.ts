@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type { BillingCycle, PaymentProvider, PlanCode } from '@prisma/client';
 
 import { demoPlans } from '../../shared/mock/platform-seed';
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import { AuthService } from '../auth/auth.service';
 import { CreateBillingOrderRequestDto } from './dto/create-billing-order-request.dto';
 import {
   AlipayNotifyResponseDto,
@@ -37,7 +38,8 @@ const ALIPAY_REQUIRED_ENV_KEYS = [
 export class BillingService {
   constructor(
     private readonly store: MockPlatformStore,
-    private readonly prismaService: PrismaService
+    private readonly prismaService: PrismaService,
+    private readonly authService: AuthService
   ) {}
 
   async getOverview(workspaceId: string): Promise<GetBillingOverviewResponseDto> {
@@ -50,8 +52,11 @@ export class BillingService {
 
   async createOrder(
     workspaceId: string,
-    input: CreateBillingOrderRequestDto
+    input: CreateBillingOrderRequestDto,
+    cookieHeader?: string
   ): Promise<CreateBillingOrderResponseDto> {
+    await this.requireWorkspaceAccess(workspaceId, cookieHeader);
+
     const data = isDatabasePersistenceEnabled()
       ? await this.createDatabaseOrder(workspaceId, input)
       : this.createMockOrder(workspaceId, input);
@@ -64,6 +69,21 @@ export class BillingService {
       success: false,
       message: 'Alipay notification verification is reserved and not enabled yet.'
     };
+  }
+
+  private async requireWorkspaceAccess(workspaceId: string, cookieHeader?: string) {
+    const currentAccount = await this.authService.getCurrentAccount(cookieHeader);
+    const canAccessWorkspace = currentAccount.workspaces.some((workspace) => workspace.id === workspaceId);
+
+    if (!canAccessWorkspace) {
+      throw new ForbiddenException({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'The current account cannot access this workspace.',
+          details: { workspaceId }
+        }
+      });
+    }
   }
 
   private buildMockOverview(workspaceId: string): BillingOverviewDto {

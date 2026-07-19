@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import type { FastifyRequest } from 'fastify';
 
 import { BillingService } from './billing.service';
 import { CreateBillingOrderRequestDto } from './dto/create-billing-order-request.dto';
@@ -27,9 +28,10 @@ export class WorkspaceBillingController {
   @ApiOkResponse({ type: CreateBillingOrderResponseDto })
   createOrder(
     @Param('workspaceId') workspaceId: string,
-    @Body() body: CreateBillingOrderRequestDto
+    @Body() body: CreateBillingOrderRequestDto,
+    @Req() request: FastifyRequest
   ): Promise<CreateBillingOrderResponseDto> {
-    return this.billingService.createOrder(workspaceId, body);
+    return this.billingService.createOrder(workspaceId, body, request.headers.cookie);
   }
 }
 
