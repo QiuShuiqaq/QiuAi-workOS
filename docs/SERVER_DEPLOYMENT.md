@@ -11,6 +11,8 @@
 
 当前业务数据仍由 mock store 提供；数据库容器已经纳入部署，但核心数据持久化会在下一阶段接入。
 
+如果部署到现有 `qiuaihub.com` ECS 服务器，优先参考 [QIUAIHUB_DEPLOYMENT.md](./QIUAIHUB_DEPLOYMENT.md)。该路线复用现有 PM2、Nginx、PostgreSQL 运维方式，但让 QiuAI WorkOS 使用独立进程、端口和数据库边界。
+
 ## 架构路径
 
 ```text
