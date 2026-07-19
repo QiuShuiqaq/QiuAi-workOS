@@ -11,7 +11,8 @@
   "scripts": {
     "prebuild": "npm run build -w @qiuai/api-contract",
     "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test src/index.test.ts"
   },
   "dependencies": {
     "@qiuai/api-contract": "0.0.0"

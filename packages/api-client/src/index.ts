@@ -52,7 +52,8 @@ export class QiuApiClient {
 
   constructor(options: QiuApiClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, '');
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    const resolvedFetch = options.fetchImpl ?? globalThis.fetch;
+    this.fetchImpl = ((input, init) => resolvedFetch.call(globalThis, input, init)) as typeof fetch;
     this.defaultHeaders = options.defaultHeaders;
     this.credentials = options.credentials ?? 'same-origin';
   }
