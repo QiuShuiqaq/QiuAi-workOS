@@ -89,6 +89,8 @@ GRANT ALL PRIVILEGES ON DATABASE qiuai_workos TO qiu_workos;
 Then update `/opt/qiuai-workos/.env`:
 
 ```bash
+NODE_ENV=production
+WORKOS_DEPLOY_TARGET=alicloud-ecs
 WORKOS_PERSISTENCE_MODE=database
 DATABASE_URL=postgresql://qiu_workos:REPLACE_WITH_DB_PASSWORD@127.0.0.1:5432/qiuai_workos?schema=public
 WORKOS_BOOTSTRAP_ADMIN_PASSWORD=REPLACE_WITH_ADMIN_LOGIN_PASSWORD
@@ -104,6 +106,8 @@ set +a
 npm run db:generate
 npm run db:migrate:deploy
 npm run db:seed
+npm run build
+npm run check:deploy
 ```
 
 Verify database-backed kernel status:
@@ -142,16 +146,14 @@ vim .env
 
 Current mock-backed WorkOS can start with `WORKOS_PERSISTENCE_MODE=mock`. After the WorkOS database is created and migrated, set `WORKOS_PERSISTENCE_MODE=database` and replace the `DATABASE_URL` password placeholder.
 
-Start the mock-backed app:
+Start or reload the app:
 
 ```bash
-unset DATABASE_URL
-unset REDIS_URL
 chmod +x deploy/alicloud-ecs/start-pm2.sh
 ./deploy/alicloud-ecs/start-pm2.sh
 ```
 
-After switching `/opt/qiuai-workos/.env` to `WORKOS_PERSISTENCE_MODE=database`, do not unset `DATABASE_URL`; reload PM2 normally so the server can read the database-backed configuration from `.env`.
+`start-pm2.sh` loads `.env`, installs dependencies with `npm ci`, generates the Prisma client, runs migrations and seed when `WORKOS_PERSISTENCE_MODE=database`, builds the app, runs `npm run check:deploy`, and only then reloads PM2. Do not unset `DATABASE_URL` after switching to database mode.
 
 Install Nginx config:
 
@@ -174,6 +176,10 @@ For HTTPS, request a certificate for `workos.qiuaihub.com` with the same Certbot
 On the server:
 
 ```bash
+set -a
+source .env
+set +a
+npm run check:deploy
 curl http://127.0.0.1:4100/api/v1/health
 curl http://127.0.0.1:3100/api/v1/health
 curl -I http://workos.qiuaihub.com
@@ -211,6 +217,7 @@ https://workos.qiuaihub.com/billing/alipay/return
 Required production environment variables:
 
 ```bash
+WORKOS_DEPLOY_TARGET=alicloud-ecs
 WORKOS_PUBLIC_BASE_URL=https://workos.qiuaihub.com
 WORKOS_ENTERPRISE_MONTHLY_PRICE_CENTS=REPLACE_WITH_MONTHLY_PRICE_IN_CENTS
 WORKOS_ENTERPRISE_ANNUAL_PRICE_CENTS=REPLACE_WITH_ANNUAL_PRICE_IN_CENTS
