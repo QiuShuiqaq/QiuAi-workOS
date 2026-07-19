@@ -70,6 +70,30 @@ enum SubscriptionStatus {
   EXPIRED
 }
 
+enum PaymentProvider {
+  ALIPAY
+}
+
+enum BillingAccountStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum BillingOrderStatus {
+  PENDING
+  PAID
+  CLOSED
+  CANCELLED
+  FAILED
+}
+
+enum PaymentTransactionStatus {
+  INITIATED
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
 model Account {
   id           String        @id @default(uuid()) @db.Uuid
   primaryEmail String        @unique @map("primary_email")
@@ -129,12 +153,14 @@ model Workspace {
   createdAt      DateTime        @default(now()) @map("created_at")
   updatedAt      DateTime        @updatedAt @map("updated_at")
 
-  tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  ownerAccount  Account           @relation("WorkspaceOwner", fields: [ownerAccountId], references: [id], onDelete: Restrict)
-  organization  Organization?
-  memberships   WorkspaceMember[]
-  subscriptions Subscription[]
-  usageMeters   UsageMeter[]
+  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  ownerAccount   Account           @relation("WorkspaceOwner", fields: [ownerAccountId], references: [id], onDelete: Restrict)
+  organization   Organization?
+  memberships    WorkspaceMember[]
+  subscriptions  Subscription[]
+  usageMeters    UsageMeter[]
+  billingAccount BillingAccount?
+  billingOrders  BillingOrder[]
 
   @@index([tenantId])
   @@index([ownerAccountId])
@@ -215,6 +241,7 @@ model Plan {
 
   entitlements  Entitlement[]
   subscriptions Subscription[]
+  billingOrders BillingOrder[]
 
   @@map("plans")
 }
@@ -247,8 +274,9 @@ model Subscription {
   createdAt          DateTime           @default(now()) @map("created_at")
   updatedAt          DateTime           @updatedAt @map("updated_at")
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  plan      Plan      @relation(fields: [planId], references: [id], onDelete: Restrict)
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  plan          Plan           @relation(fields: [planId], references: [id], onDelete: Restrict)
+  billingOrders BillingOrder[]
 
   @@index([workspaceId])
   @@index([planId])
@@ -270,4 +298,85 @@ model UsageMeter {
 
   @@unique([workspaceId, metricKey, period])
   @@map("usage_meters")
+}
+
+model BillingAccount {
+  id              String               @id @default(uuid()) @db.Uuid
+  workspaceId     String               @unique @map("workspace_id") @db.Uuid
+  status          BillingAccountStatus @default(ACTIVE)
+  billingName     String?              @map("billing_name")
+  taxId           String?              @map("tax_id")
+  contactEmail    String?              @map("contact_email")
+  defaultProvider PaymentProvider?     @map("default_provider")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+
+  workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  orders    BillingOrder[]
+
+  @@map("billing_accounts")
+}
+
+model BillingOrder {
+  id               String             @id @default(uuid()) @db.Uuid
+  workspaceId      String             @map("workspace_id") @db.Uuid
+  billingAccountId String?            @map("billing_account_id") @db.Uuid
+  planId           String             @map("plan_id") @db.Uuid
+  subscriptionId   String?            @map("subscription_id") @db.Uuid
+  orderNo          String             @unique @map("order_no")
+  provider         PaymentProvider
+  status           BillingOrderStatus @default(PENDING)
+  subject          String
+  amountCents      Int                @map("amount_cents")
+  currency         String             @default("CNY")
+  billingCycle     BillingCycle       @map("billing_cycle")
+  periodStart      DateTime?          @map("period_start")
+  periodEnd        DateTime?          @map("period_end")
+  paymentUrl       String?            @map("payment_url")
+  providerTradeNo  String?            @map("provider_trade_no")
+  metadata         Json?
+  paidAt           DateTime?          @map("paid_at")
+  expiresAt        DateTime?          @map("expires_at")
+  closedAt         DateTime?          @map("closed_at")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+
+  workspace      Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  billingAccount BillingAccount?      @relation(fields: [billingAccountId], references: [id], onDelete: SetNull)
+  plan           Plan                 @relation(fields: [planId], references: [id], onDelete: Restrict)
+  subscription   Subscription?        @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  transactions   PaymentTransaction[]
+
+  @@index([workspaceId])
+  @@index([billingAccountId])
+  @@index([planId])
+  @@index([subscriptionId])
+  @@index([status])
+  @@index([provider])
+  @@map("billing_orders")
+}
+
+model PaymentTransaction {
+  id              String                   @id @default(uuid()) @db.Uuid
+  orderId         String                   @map("order_id") @db.Uuid
+  provider        PaymentProvider
+  status          PaymentTransactionStatus @default(INITIATED)
+  amountCents     Int                      @map("amount_cents")
+  currency        String                   @default("CNY")
+  providerTradeNo String?                  @map("provider_trade_no")
+  notifyPayload   Json?                    @map("notify_payload")
+  failureCode     String?                  @map("failure_code")
+  failureMessage  String?                  @map("failure_message")
+  notifiedAt      DateTime?                @map("notified_at")
+  completedAt     DateTime?                @map("completed_at")
+  createdAt       DateTime                 @default(now()) @map("created_at")
+  updatedAt       DateTime                 @updatedAt @map("updated_at")
+
+  order BillingOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerTradeNo])
+  @@index([orderId])
+  @@index([status])
+  @@index([provider])
+  @@map("payment_transactions")
 }

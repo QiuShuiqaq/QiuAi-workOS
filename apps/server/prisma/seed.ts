@@ -41,6 +41,10 @@ const ids = {
   subscriptions: {
     personal: '70000000-0000-4000-8000-000000000001',
     enterprise: '70000000-0000-4000-8000-000000000002'
+  },
+  billingAccounts: {
+    personal: '80000000-0000-4000-8000-000000000001',
+    enterprise: '80000000-0000-4000-8000-000000000002'
   }
 };
 
@@ -486,12 +490,52 @@ async function seedSubscriptionsAndUsage() {
   }
 }
 
+async function seedBilling() {
+  await prisma.billingAccount.upsert({
+    where: { workspaceId: ids.workspaces.personal },
+    update: {
+      status: 'ACTIVE',
+      billingName: 'Personal Workspace',
+      taxId: null,
+      contactEmail: 'admin@qiuai.local',
+      defaultProvider: null
+    },
+    create: {
+      id: ids.billingAccounts.personal,
+      workspaceId: ids.workspaces.personal,
+      status: 'ACTIVE',
+      billingName: 'Personal Workspace',
+      contactEmail: 'admin@qiuai.local'
+    }
+  });
+
+  await prisma.billingAccount.upsert({
+    where: { workspaceId: ids.workspaces.enterprise },
+    update: {
+      status: 'ACTIVE',
+      billingName: 'QiuAI Demo Enterprise',
+      taxId: null,
+      contactEmail: 'admin@qiuai.local',
+      defaultProvider: 'ALIPAY'
+    },
+    create: {
+      id: ids.billingAccounts.enterprise,
+      workspaceId: ids.workspaces.enterprise,
+      status: 'ACTIVE',
+      billingName: 'QiuAI Demo Enterprise',
+      contactEmail: 'admin@qiuai.local',
+      defaultProvider: 'ALIPAY'
+    }
+  });
+}
+
 async function main() {
   await seedAccounts();
   await seedTenantsAndWorkspaces();
   await seedPlans();
   await seedOrganization();
   await seedSubscriptionsAndUsage();
+  await seedBilling();
 }
 
 main()
