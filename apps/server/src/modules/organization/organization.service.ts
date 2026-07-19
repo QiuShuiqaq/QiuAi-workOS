@@ -249,19 +249,6 @@ export class OrganizationService {
             createdAt: 'desc'
           },
           take: 1
-        },
-        usageMeters: {
-          orderBy: [
-            {
-              metricKey: 'asc'
-            },
-            {
-              period: 'desc'
-            },
-            {
-              createdAt: 'desc'
-            }
-          ]
         }
       }
     });
@@ -306,13 +293,6 @@ export class OrganizationService {
       }
     });
 
-    const latestUsageByMetric = new Map<string, number>();
-    for (const usageMeter of workspace.usageMeters) {
-      if (!latestUsageByMetric.has(usageMeter.metricKey)) {
-        latestUsageByMetric.set(usageMeter.metricKey, usageMeter.usedValue);
-      }
-    }
-
     const memberCountByDepartment = new Map<string, number>();
     for (const member of workspace.memberships) {
       if (member.departmentId) {
@@ -323,9 +303,39 @@ export class OrganizationService {
       }
     }
 
-    const roleCount = latestUsageByMetric.get('roleInstances.count') ?? 0;
-    const taskCount = latestUsageByMetric.get('tasks.monthlyCount') ?? 0;
     const departments = organization?.departments ?? [];
+    const [roleCount, taskCount, roleCountsByDepartment] = await Promise.all([
+      this.prismaService.roleInstance.count({
+        where: {
+          workspaceId
+        }
+      }),
+      this.prismaService.task.count({
+        where: {
+          workspaceId,
+          createdAt: {
+            gte: this.currentMonthStart()
+          }
+        }
+      }),
+      this.prismaService.roleInstance.groupBy({
+        by: ['departmentId'],
+        where: {
+          workspaceId,
+          departmentId: {
+            not: null
+          }
+        },
+        _count: {
+          _all: true
+        }
+      })
+    ]);
+    const roleCountByDepartment = new Map(
+      roleCountsByDepartment
+        .filter((item) => item.departmentId)
+        .map((item) => [item.departmentId as string, item._count._all])
+    );
 
     return {
       workspace: {
@@ -377,7 +387,7 @@ export class OrganizationService {
         this.toDatabaseDepartmentSummary(
           department,
           memberCountByDepartment.get(department.id) ?? 0,
-          0
+          roleCountByDepartment.get(department.id) ?? 0
         )
       ),
       members: workspace.memberships.map((member) => this.toDatabaseMemberSummary(member)),
@@ -718,6 +728,11 @@ export class OrganizationService {
     return email.split('@')[0] || email;
   }
 
+  private currentMonthStart() {
+    const now = new Date();
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  }
+
   private buildUsageSummary(
     plan: {
       entitlements: Array<{ featureKey: string; enabled: boolean; limitValue?: number; limitUnit?: string }>;
@@ -758,7 +773,7 @@ export class OrganizationService {
       {
         metricKey: 'storage.usedGB',
         title: '存储用量',
-        usedValue: departmentCount * 2 + roleCount + taskCount / 10,
+        usedValue: 0,
         limitUnit: 'GB'
       }
     ];

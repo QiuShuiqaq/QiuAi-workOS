@@ -88,7 +88,7 @@ export function TaskDetailPageClient({
           <Space>
             <Link href={withWorkspaceId('/tasks', workspaceId)}>返回任务中心</Link>
             <Button type="primary" onClick={runTask} loading={isRunning}>
-              Mock 执行
+              请求执行
             </Button>
           </Space>
         }
@@ -160,7 +160,7 @@ export function TaskDetailPageClient({
           <Col xs={24} xl={12}>
             <Card title="执行产物" bordered={false}>
               <List
-                locale={{ emptyText: '暂无产物，点击 Mock 执行后生成。' }}
+                locale={{ emptyText: '暂无产物。执行器接入后会在这里显示交付物。' }}
                 dataSource={task.artifacts}
                 renderItem={(artifact) => (
                   <List.Item>

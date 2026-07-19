@@ -22,7 +22,7 @@ export class WorkspaceController {
 
   @Get(':workspaceId/overview')
   @ApiOkResponse({ type: PlatformOverviewResponseDto })
-  getOverview(@Param('workspaceId') workspaceId: string): PlatformOverviewResponseDto {
+  async getOverview(@Param('workspaceId') workspaceId: string): Promise<PlatformOverviewResponseDto> {
     return this.workspaceService.getOverview(workspaceId);
   }
 }

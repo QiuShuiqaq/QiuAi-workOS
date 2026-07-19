@@ -57,6 +57,10 @@ export function RolesPageClient({
 
   const roleCount = roles.length;
   const runningCount = useMemo(() => roles.filter((role) => role.status === 'running').length, [roles]);
+  const monthlyCost = useMemo(
+    () => roles.reduce((sum, role) => sum + role.kpis.monthlyCost, 0),
+    [roles]
+  );
 
   async function installRole(templateId: string) {
     setInstallingTemplateId(templateId);
@@ -81,7 +85,7 @@ export function RolesPageClient({
             <QiuMetricCard title="可安装模板" value={String(templates.data.length)} trend="行业岗位模板" />
           </Col>
           <Col xs={24} md={8}>
-            <QiuMetricCard title="岗位月成本" value="¥842" trend="mock 统计" />
+            <QiuMetricCard title="岗位月成本" value={`¥${monthlyCost.toFixed(2)}`} trend="来自真实成本记录" />
           </Col>
         </Row>
 

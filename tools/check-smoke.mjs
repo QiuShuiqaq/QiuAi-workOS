@@ -89,6 +89,43 @@ if (
   fail('Billing overview payload is unexpected.', JSON.stringify(billingOverview, null, 2));
 }
 
+const platformOverview = await fetchJson(
+  new URL(`/api/v1/workspaces/${encodeURIComponent(smokeWorkspaceId)}/overview`, apiBaseUrl),
+  'Platform overview'
+);
+if (
+  platformOverview.workspace?.id !== smokeWorkspaceId ||
+  !Array.isArray(platformOverview.metrics) ||
+  !Array.isArray(platformOverview.roles) ||
+  !Array.isArray(platformOverview.tasks)
+) {
+  fail('Platform overview payload is unexpected.', JSON.stringify(platformOverview, null, 2));
+}
+
+const roleTemplates = await fetchJson(
+  new URL(`/api/v1/workspaces/${encodeURIComponent(smokeWorkspaceId)}/roles/templates`, apiBaseUrl),
+  'Role templates'
+);
+if (!Array.isArray(roleTemplates.data) || roleTemplates.data.length === 0) {
+  fail('Role templates payload is unexpected.', JSON.stringify(roleTemplates, null, 2));
+}
+
+const roles = await fetchJson(
+  new URL(`/api/v1/workspaces/${encodeURIComponent(smokeWorkspaceId)}/roles`, apiBaseUrl),
+  'Role instances'
+);
+if (!Array.isArray(roles.data)) {
+  fail('Role instances payload is unexpected.', JSON.stringify(roles, null, 2));
+}
+
+const tasks = await fetchJson(
+  new URL(`/api/v1/workspaces/${encodeURIComponent(smokeWorkspaceId)}/tasks`, apiBaseUrl),
+  'Tasks'
+);
+if (!Array.isArray(tasks.data)) {
+  fail('Tasks payload is unexpected.', JSON.stringify(tasks, null, 2));
+}
+
 const webHealth = await fetchJson(new URL('/api/v1/health', webBaseUrl), 'Web proxy health');
 if (webHealth.status !== apiHealth.status || webHealth.service !== apiHealth.service) {
   fail(
@@ -104,6 +141,10 @@ if (!webRoot.includes('QiuAI WorkOS')) {
 
 console.log(`API health: ${apiHealth.status} (${apiHealth.service})`);
 console.log(`Billing overview: OK (${smokeWorkspaceId})`);
+console.log(`Platform overview: OK (${smokeWorkspaceId})`);
+console.log(`Role templates: OK (${roleTemplates.data.length})`);
+console.log(`Role instances: OK (${roles.data.length})`);
+console.log(`Tasks: OK (${tasks.data.length})`);
 console.log(`Web health proxy: ${webHealth.status} (${webHealth.service})`);
 console.log('Web root HTML: OK');
 console.log('Smoke checks passed.');
