@@ -9,7 +9,19 @@ export function resolveWorkspaceId(
     return currentAccount.activeWorkspaceId;
   }
 
-  return currentAccount.workspaces.some((workspace) => workspace.id === normalizedWorkspaceId)
-    ? normalizedWorkspaceId
-    : currentAccount.activeWorkspaceId;
+  const matchedWorkspace = currentAccount.workspaces.find(
+    (workspace) => workspace.id === normalizedWorkspaceId
+  );
+  if (matchedWorkspace) {
+    return matchedWorkspace.id;
+  }
+
+  const legacyWorkspaceAlias = currentAccount.workspaces.find(
+    (workspace) => workspace.workspaceType === normalizedWorkspaceId
+  );
+  if (legacyWorkspaceAlias) {
+    return legacyWorkspaceAlias.id;
+  }
+
+  return currentAccount.activeWorkspaceId;
 }

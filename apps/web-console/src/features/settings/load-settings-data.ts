@@ -3,6 +3,8 @@ import type {
   GetBillingOverviewResponse,
   ListPlansResponse
 } from '@qiuai/api-contract';
+import { QiuApiError } from '@qiuai/api-client';
+import { redirect } from 'next/navigation';
 
 import { createServerApiClient } from '../../shared/api/server-api';
 import { loadCurrentAccount } from '../common/load-current-account';
@@ -35,7 +37,11 @@ export async function loadSettingsPageData(requestedWorkspaceId?: string): Promi
       billing,
       isApiFallback: false
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof QiuApiError && error.status === 401) {
+      redirect('/login');
+    }
+
     return {
       currentAccount: {
         ...currentAccount,

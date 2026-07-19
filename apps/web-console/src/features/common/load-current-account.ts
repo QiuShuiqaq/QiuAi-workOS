@@ -9,11 +9,7 @@ export async function loadCurrentAccount(): Promise<CurrentAccountResponse> {
   try {
     return await (await createServerApiClient()).getCurrentAccount();
   } catch (error) {
-    if (
-      process.env.WORKOS_PERSISTENCE_MODE === 'database' &&
-      error instanceof QiuApiError &&
-      error.status === 401
-    ) {
+    if (error instanceof QiuApiError && error.status === 401) {
       redirect('/login');
     }
 
