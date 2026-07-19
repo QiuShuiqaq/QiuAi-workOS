@@ -49,6 +49,9 @@ GET /api/v1/workspaces/:workspaceId/organization/overview
 Platform kernel persistence uses Prisma migrations under `prisma/migrations`.
 
 ```bash
+set -a
+source .env
+set +a
 npm run db:generate
 npm run db:migrate:deploy
 npm run db:seed

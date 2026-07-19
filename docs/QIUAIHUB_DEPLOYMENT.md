@@ -98,6 +98,9 @@ Apply schema migrations and seed the platform kernel:
 
 ```bash
 cd /opt/qiuai-workos
+set -a
+source .env
+set +a
 npm run db:generate
 npm run db:migrate:deploy
 npm run db:seed
@@ -139,7 +142,7 @@ vim .env
 
 Current mock-backed WorkOS can start with `WORKOS_PERSISTENCE_MODE=mock`. After the WorkOS database is created and migrated, set `WORKOS_PERSISTENCE_MODE=database` and replace the `DATABASE_URL` password placeholder.
 
-Start the app:
+Start the mock-backed app:
 
 ```bash
 unset DATABASE_URL
@@ -147,6 +150,8 @@ unset REDIS_URL
 chmod +x deploy/alicloud-ecs/start-pm2.sh
 ./deploy/alicloud-ecs/start-pm2.sh
 ```
+
+After switching `/opt/qiuai-workos/.env` to `WORKOS_PERSISTENCE_MODE=database`, do not unset `DATABASE_URL`; reload PM2 normally so the server can read the database-backed configuration from `.env`.
 
 Install Nginx config:
 
