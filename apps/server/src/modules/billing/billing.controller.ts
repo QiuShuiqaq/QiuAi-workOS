@@ -1,11 +1,10 @@
-import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Header, Param, Post, Req, Res } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
-import type { FastifyRequest } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import { BillingService } from './billing.service';
 import { CreateBillingOrderRequestDto } from './dto/create-billing-order-request.dto';
 import {
-  AlipayNotifyResponseDto,
   CreateBillingOrderResponseDto,
   GetBillingOverviewResponseDto
 } from './dto/billing-overview-response.dto';
@@ -44,8 +43,15 @@ export class AlipayBillingController {
   constructor(private readonly billingService: BillingService) {}
 
   @Post('notify')
-  @ApiOkResponse({ type: AlipayNotifyResponseDto })
-  notify(): AlipayNotifyResponseDto {
-    return this.billingService.handleAlipayNotify();
+  @Header('content-type', 'text/plain; charset=utf-8')
+  async notify(@Body() body: unknown, @Res({ passthrough: true }) reply: FastifyReply): Promise<string> {
+    const result = await this.billingService.handleAlipayNotify(body);
+    reply.status(result.httpStatus);
+    return result.success ? 'success' : 'failure';
+  }
+
+  @Post('orders/:orderNo/sync')
+  syncOrder(@Param('orderNo') orderNo: string, @Req() request: FastifyRequest) {
+    return this.billingService.syncAlipayOrder(orderNo, request.headers.cookie);
   }
 }

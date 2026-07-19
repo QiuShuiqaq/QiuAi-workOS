@@ -4,6 +4,20 @@ import { hashPassword } from '../src/shared/auth/password-hash';
 
 const prisma = new PrismaClient();
 
+function readPriceCentsFromEnv(key: string): number | null {
+  const rawValue = process.env[key]?.trim();
+  if (!rawValue) {
+    return null;
+  }
+
+  const value = Number(rawValue);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${key} must be a positive integer amount in cents.`);
+  }
+
+  return value;
+}
+
 const ids = {
   accounts: {
     owner: '00000000-0000-4000-8000-000000000001',
@@ -78,7 +92,7 @@ const plans = [
     name: 'Enterprise Monthly',
     description: 'Monthly enterprise workspace with organization, department, governance, and quota controls.',
     billingCycle: 'MONTHLY',
-    priceCents: null,
+    priceCents: readPriceCentsFromEnv('WORKOS_ENTERPRISE_MONTHLY_PRICE_CENTS'),
     currency: 'CNY',
     entitlements: [
       { featureKey: 'maxRoleInstances', enabled: true, limitValue: 50, limitUnit: 'count' },
@@ -101,7 +115,7 @@ const plans = [
     name: 'Enterprise Annual',
     description: 'Annual enterprise workspace with higher quotas and implementation support.',
     billingCycle: 'ANNUAL',
-    priceCents: null,
+    priceCents: readPriceCentsFromEnv('WORKOS_ENTERPRISE_ANNUAL_PRICE_CENTS'),
     currency: 'CNY',
     entitlements: [
       { featureKey: 'maxRoleInstances', enabled: true, limitValue: 120, limitUnit: 'count' },

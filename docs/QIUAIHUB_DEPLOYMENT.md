@@ -67,7 +67,7 @@ The first persistence slice covers the platform kernel tables:
 - subscriptions
 - usage_meters
 
-Role, task, artifact, execution log, and billing order tables are later slices.
+The current database-backed slices also include billing orders, payment transactions, role templates, role instances, tasks, task runs, artifacts, execution logs, and cost records.
 
 ## Database Bootstrap
 
@@ -201,11 +201,42 @@ https://qiuaihub.com/api/payment/alipay/notify
 https://qiuaihub.com/payment/alipay/return
 ```
 
-When WorkOS billing is implemented, use separate callback paths to avoid routing conflicts:
+WorkOS uses separate callback paths to avoid routing conflicts:
 
 ```text
 https://workos.qiuaihub.com/api/v1/billing/alipay/notify
 https://workos.qiuaihub.com/billing/alipay/return
 ```
 
-The current first-version WorkOS skeleton does not process real payments yet.
+Required production environment variables:
+
+```bash
+WORKOS_PUBLIC_BASE_URL=https://workos.qiuaihub.com
+WORKOS_ENTERPRISE_MONTHLY_PRICE_CENTS=REPLACE_WITH_MONTHLY_PRICE_IN_CENTS
+WORKOS_ENTERPRISE_ANNUAL_PRICE_CENTS=REPLACE_WITH_ANNUAL_PRICE_IN_CENTS
+PAYMENT_ALIPAY_APP_ID=REPLACE_IN_SERVER_ENV_ONLY
+PAYMENT_ALIPAY_PRIVATE_KEY=REPLACE_IN_SERVER_ENV_ONLY
+PAYMENT_ALIPAY_PUBLIC_KEY=REPLACE_IN_SERVER_ENV_ONLY
+PAYMENT_ALIPAY_GATEWAY_URL=https://openapi.alipay.com/gateway.do
+PAYMENT_ALIPAY_NOTIFY_PATH=/api/v1/billing/alipay/notify
+PAYMENT_ALIPAY_RETURN_PATH=/billing/alipay/return
+PAYMENT_ALIPAY_KEY_TYPE=PKCS8
+PAYMENT_ALIPAY_SELLER_ID=OPTIONAL_PID_VALIDATION
+WORKOS_ALLOW_MANUAL_BILLING_AMOUNT=false
+```
+
+Production behavior:
+
+- Enterprise monthly/annual order amounts come from server-side plan prices. If a plan price is not configured, the web UI disables online payment for that plan and the API refuses paid orders unless `WORKOS_ALLOW_MANUAL_BILLING_AMOUNT=true` is explicitly enabled for controlled manual tests.
+- Paid order creation fails with `ALIPAY_NOT_CONFIGURED` if required keys are missing.
+- Paid order creation returns `paymentUrl` when Alipay is configured.
+- Alipay notify returns plain text `success` only after signature, app ID, seller ID, and amount validation.
+- Paid notifications update `billing_orders`, `payment_transactions`, and the workspace subscription.
+
+After configuring Alipay, verify with a small real order:
+
+```bash
+curl https://workos.qiuaihub.com/api/v1/workspaces/20000000-0000-4000-8000-000000000002/billing/overview
+```
+
+Then create a small authenticated test order from the web session or with a cookie-backed `curl`, open `paymentUrl`, complete payment, and confirm the order changes to `PAID`.

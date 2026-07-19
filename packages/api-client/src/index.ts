@@ -5,6 +5,7 @@ import type {
   LoginRequest,
   LoginResponse,
   LogoutResponse,
+  SyncAlipayOrderResponse,
   ApiErrorResponse,
   CreateTaskRequest,
   CreateTaskResponse,
@@ -86,6 +87,10 @@ export class QiuApiClient {
     input: CreateBillingOrderRequest
   ): Promise<CreateBillingOrderResponse> {
     return this.post(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/billing/orders`, input);
+  }
+
+  syncAlipayOrder(orderNo: string): Promise<SyncAlipayOrderResponse> {
+    return this.post(`/api/v1/billing/alipay/orders/${encodeURIComponent(orderNo)}/sync`, {});
   }
 
   checkEntitlement(input: EntitlementCheckRequest): Promise<EntitlementCheckResult> {

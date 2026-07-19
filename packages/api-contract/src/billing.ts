@@ -93,3 +93,12 @@ export interface AlipayNotifyResponse {
   success: boolean;
   message: string;
 }
+
+export interface SyncAlipayOrderResponse {
+  data: {
+    kind: 'not_found' | 'pending' | 'paid' | 'closed';
+    orderNo: string;
+    tradeStatus?: string;
+    order?: BillingOrderSummary;
+  };
+}

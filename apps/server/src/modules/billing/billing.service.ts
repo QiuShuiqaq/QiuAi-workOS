@@ -1,16 +1,38 @@
 import { randomUUID } from 'node:crypto';
 
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import type { BillingCycle, PaymentProvider, PlanCode } from '@prisma/client';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  ServiceUnavailableException
+} from '@nestjs/common';
+import type { BillingCycle, PaymentProvider, PlanCode, Prisma } from '@prisma/client';
 
 import { demoPlans } from '../../shared/mock/platform-seed';
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
+import {
+  buildAlipayCheckoutUrl,
+  formatAmountCny,
+  getAlipayGatewayUrl,
+  getAlipayNotifyPath,
+  getAlipayReturnPath,
+  getMissingAlipayEnvKeys,
+  isAlipayConfigured,
+  isAlipayTradeClosed,
+  isAlipayTradePaid,
+  normalizeAlipayNotifyBody,
+  parseAlipayDecodedBody,
+  parseAlipayRawBody,
+  queryAlipayTradeByOrderNo,
+  validateAlipayAppContext,
+  verifyAlipayNotifySignature
+} from './alipay-gateway';
 import { CreateBillingOrderRequestDto } from './dto/create-billing-order-request.dto';
 import {
-  AlipayNotifyResponseDto,
   BillingAccountSummaryDto,
   BillingOrderSummaryDto,
   BillingOverviewDto,
@@ -28,11 +50,26 @@ const PLAN_CODES = [
   'ENTERPRISE_CUSTOM'
 ] as const;
 
-const ALIPAY_REQUIRED_ENV_KEYS = [
-  'PAYMENT_ALIPAY_APP_ID',
-  'PAYMENT_ALIPAY_PRIVATE_KEY',
-  'PAYMENT_ALIPAY_PUBLIC_KEY'
-] as const;
+export interface AlipayNotifyProcessingResult {
+  success: boolean;
+  message: string;
+  httpStatus: number;
+}
+
+export interface AlipayOrderSyncResult {
+  data: {
+    kind: 'not_found' | 'pending' | 'paid' | 'closed';
+    orderNo: string;
+    tradeStatus?: string;
+    order?: BillingOrderSummaryDto;
+  };
+}
+
+type BillingOrderWithPlan = Prisma.BillingOrderGetPayload<{
+  include: {
+    plan: true;
+  };
+}>;
 
 @Injectable()
 export class BillingService {
@@ -64,10 +101,156 @@ export class BillingService {
     return { data };
   }
 
-  handleAlipayNotify(): AlipayNotifyResponseDto {
+  async handleAlipayNotify(rawBody: unknown): Promise<AlipayNotifyProcessingResult> {
+    if (!isDatabasePersistenceEnabled()) {
+      return {
+        success: false,
+        message: 'Alipay notifications require database persistence mode.',
+        httpStatus: 503
+      };
+    }
+
+    if (!isAlipayConfigured()) {
+      return {
+        success: false,
+        message: 'Alipay is not configured.',
+        httpStatus: 503
+      };
+    }
+
+    try {
+      const body = normalizeAlipayNotifyBody(rawBody);
+      const rawPayload = parseAlipayRawBody(body);
+      const payload = parseAlipayDecodedBody(body);
+      const signatureVerified = verifyAlipayNotifySignature({
+        rawPayload,
+        decodedPayload: payload
+      });
+
+      if (!signatureVerified) {
+        return {
+          success: false,
+          message: 'Alipay notification signature verification failed.',
+          httpStatus: 400
+        };
+      }
+
+      await this.applyAlipayTradeUpdate({
+        orderNo: payload.out_trade_no ?? '',
+        tradeNo: payload.trade_no ?? null,
+        tradeStatus: payload.trade_status ?? null,
+        totalAmount: payload.total_amount ?? null,
+        appId: payload.app_id ?? null,
+        sellerId: payload.seller_id ?? null,
+        rawPayload: payload,
+        source: 'notify'
+      });
+
+      return {
+        success: true,
+        message: 'Alipay notification processed.',
+        httpStatus: 200
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Alipay notification processing failed.',
+        httpStatus: 500
+      };
+    }
+  }
+
+  async syncAlipayOrder(orderNo: string, cookieHeader?: string): Promise<AlipayOrderSyncResult> {
+    if (!isDatabasePersistenceEnabled()) {
+      throw new ServiceUnavailableException({
+        error: {
+          code: 'PERSISTENCE_MODE_REQUIRED',
+          message: 'Alipay order sync requires database persistence mode.'
+        }
+      });
+    }
+
+    if (!isAlipayConfigured()) {
+      throw new ServiceUnavailableException({
+        error: {
+          code: 'ALIPAY_NOT_CONFIGURED',
+          message: 'Alipay is not configured.',
+          details: {
+            missingEnvKeys: getMissingAlipayEnvKeys()
+          }
+        }
+      });
+    }
+
+    const localOrder = await this.prismaService.billingOrder.findUnique({
+      where: {
+        orderNo
+      },
+      select: {
+        workspaceId: true
+      }
+    });
+    if (!localOrder) {
+      return {
+        data: {
+          kind: 'not_found',
+          orderNo
+        }
+      };
+    }
+
+    await this.requireWorkspaceAccess(localOrder.workspaceId, cookieHeader);
+
+    const trade = await queryAlipayTradeByOrderNo(orderNo);
+    if (!trade) {
+      return {
+        data: {
+          kind: 'not_found',
+          orderNo
+        }
+      };
+    }
+
+    const order = await this.applyAlipayTradeUpdate({
+      orderNo: trade.orderNo,
+      tradeNo: trade.tradeNo,
+      tradeStatus: trade.tradeStatus,
+      totalAmount: trade.totalAmount,
+      appId: this.readStringField(trade.raw, 'appId', 'app_id'),
+      sellerId: this.readStringField(trade.raw, 'sellerId', 'seller_id'),
+      rawPayload: trade.raw,
+      source: 'return'
+    });
+
+    if (isAlipayTradePaid(trade.tradeStatus)) {
+      return {
+        data: {
+          kind: 'paid',
+          orderNo: trade.orderNo,
+          tradeStatus: trade.tradeStatus ?? undefined,
+          order: order ? this.toBillingOrderSummary(order) : undefined
+        }
+      };
+    }
+
+    if (isAlipayTradeClosed(trade.tradeStatus)) {
+      return {
+        data: {
+          kind: 'closed',
+          orderNo: trade.orderNo,
+          tradeStatus: trade.tradeStatus ?? undefined,
+          order: order ? this.toBillingOrderSummary(order) : undefined
+        }
+      };
+    }
+
     return {
-      success: false,
-      message: 'Alipay notification verification is reserved and not enabled yet.'
+      data: {
+        kind: 'pending',
+        orderNo: trade.orderNo,
+        tradeStatus: trade.tradeStatus ?? undefined,
+        order: order ? this.toBillingOrderSummary(order) : undefined
+      }
     };
   }
 
@@ -297,17 +480,30 @@ export class BillingService {
       }));
 
     const provider = (input.provider ?? billingAccount.defaultProvider ?? 'ALIPAY') as PaymentProvider;
+    this.requirePaymentProviderConfigured(provider);
+
     const amountCents = this.resolveOrderAmount(
       input.amountCents,
       plan.priceCents ?? undefined,
       plan.billingCycle
     );
     const now = new Date();
+    const orderNo = this.generateOrderNo(now);
+    const subject = this.resolveSubject(input.subject, plan.name);
     const period = this.resolveNextBillingPeriod(
       plan.billingCycle,
       workspace.subscriptions[0]?.currentPeriodEnd ?? now
     );
     const currency = input.currency ?? plan.currency ?? 'CNY';
+    const paymentUrl =
+      provider === 'ALIPAY'
+        ? buildAlipayCheckoutUrl({
+            orderNo,
+            amountCents,
+            subject,
+            body: `${workspace.name} ${plan.name}`
+          })
+        : undefined;
 
     const order = await this.prismaService.billingOrder.create({
       data: {
@@ -315,19 +511,22 @@ export class BillingService {
         billingAccountId: billingAccount.id,
         planId: plan.id,
         subscriptionId: workspace.subscriptions[0]?.id,
-        orderNo: this.generateOrderNo(now),
+        orderNo,
         provider,
         status: 'PENDING',
-        subject: this.resolveSubject(input.subject, plan.name),
+        subject,
         amountCents,
         currency,
         billingCycle: plan.billingCycle,
         periodStart: period?.start,
         periodEnd: period?.end,
+        paymentUrl,
         expiresAt: this.addMinutes(now, 30),
         metadata: {
-          paymentProviderReady: this.getProviderStatus(provider).isConfigured,
-          paymentIntegrationStage: 'CONFIG_RESERVED'
+          paymentProviderReady: true,
+          paymentIntegrationStage: 'ALIPAY_PAGE_PAY_READY',
+          alipayNotifyPath: getAlipayNotifyPath(),
+          alipayReturnPath: getAlipayReturnPath()
         },
         transactions: {
           create: {
@@ -361,16 +560,284 @@ export class BillingService {
       };
     }
 
-    const missingEnvKeys = ALIPAY_REQUIRED_ENV_KEYS.filter((key) => !process.env[key]);
+    const missingEnvKeys = getMissingAlipayEnvKeys();
 
     return {
       provider: 'ALIPAY',
       isConfigured: missingEnvKeys.length === 0,
-      gatewayUrl: process.env.PAYMENT_ALIPAY_GATEWAY_URL ?? 'https://openapi.alipay.com/gateway.do',
-      notifyPath: process.env.PAYMENT_ALIPAY_NOTIFY_PATH ?? '/api/v1/billing/alipay/notify',
-      returnPath: process.env.PAYMENT_ALIPAY_RETURN_PATH ?? '/billing/alipay/return',
+      gatewayUrl: getAlipayGatewayUrl(),
+      notifyPath: getAlipayNotifyPath(),
+      returnPath: getAlipayReturnPath(),
       missingEnvKeys: [...missingEnvKeys]
     };
+  }
+
+  private requirePaymentProviderConfigured(provider: PaymentProvider): void {
+    if (provider !== 'ALIPAY') {
+      throw new BadRequestException({
+        error: {
+          code: 'UNSUPPORTED_PAYMENT_PROVIDER',
+          message: 'Unsupported payment provider.',
+          details: { provider }
+        }
+      });
+    }
+
+    const missingEnvKeys = getMissingAlipayEnvKeys();
+    if (missingEnvKeys.length > 0) {
+      throw new ServiceUnavailableException({
+        error: {
+          code: 'ALIPAY_NOT_CONFIGURED',
+          message: 'Alipay is not configured.',
+          details: {
+            missingEnvKeys
+          }
+        }
+      });
+    }
+  }
+
+  private async applyAlipayTradeUpdate(input: {
+    orderNo: string;
+    tradeNo: string | null;
+    tradeStatus: string | null;
+    totalAmount: string | null;
+    appId?: string | null;
+    sellerId?: string | null;
+    rawPayload: Record<string, unknown>;
+    source: 'notify' | 'return';
+  }): Promise<BillingOrderWithPlan | null> {
+    const orderNo = input.orderNo.trim();
+    if (!orderNo) {
+      throw new Error('ALIPAY_ORDER_NO_REQUIRED');
+    }
+
+    validateAlipayAppContext({
+      appId: input.appId,
+      sellerId: input.sellerId
+    });
+
+    const order = await this.prismaService.billingOrder.findUnique({
+      where: {
+        orderNo
+      },
+      include: {
+        plan: true
+      }
+    });
+    if (!order) {
+      throw new Error('BILLING_ORDER_NOT_FOUND');
+    }
+
+    this.ensureAlipayAmountMatches(order, input.totalAmount);
+
+    if (isAlipayTradeClosed(input.tradeStatus)) {
+      return this.markBillingOrderClosedFromAlipay(order, input);
+    }
+
+    if (!isAlipayTradePaid(input.tradeStatus)) {
+      await this.recordAlipayTransaction(order, {
+        tradeNo: input.tradeNo,
+        status: 'INITIATED',
+        notifyPayload: input.rawPayload
+      });
+
+      return order;
+    }
+
+    return this.markBillingOrderPaidFromAlipay(order, input);
+  }
+
+  private async markBillingOrderPaidFromAlipay(
+    order: BillingOrderWithPlan,
+    input: {
+      tradeNo: string | null;
+      tradeStatus: string | null;
+      rawPayload: Record<string, unknown>;
+      source: 'notify' | 'return';
+    }
+  ): Promise<BillingOrderWithPlan> {
+    const now = new Date();
+
+    return this.prismaService.$transaction(async (tx) => {
+      await this.recordAlipayTransaction(
+        order,
+        {
+          tradeNo: input.tradeNo,
+          status: 'SUCCEEDED',
+          notifyPayload: {
+            ...input.rawPayload,
+            workosSource: input.source
+          },
+          completedAt: now
+        },
+        tx
+      );
+
+      const subscriptionId = await this.activateSubscriptionForPaidOrder(order, tx);
+
+      return tx.billingOrder.update({
+        where: {
+          id: order.id
+        },
+        data: {
+          status: 'PAID',
+          providerTradeNo: input.tradeNo ?? order.providerTradeNo,
+          subscriptionId,
+          paidAt: order.paidAt ?? now,
+          metadata: {
+            ...this.toJsonObject(order.metadata),
+            alipayTradeStatus: input.tradeStatus,
+            paymentSource: input.source
+          }
+        },
+        include: {
+          plan: true
+        }
+      });
+    });
+  }
+
+  private async markBillingOrderClosedFromAlipay(
+    order: BillingOrderWithPlan,
+    input: {
+      tradeNo: string | null;
+      rawPayload: Record<string, unknown>;
+    }
+  ): Promise<BillingOrderWithPlan> {
+    const now = new Date();
+
+    return this.prismaService.$transaction(async (tx) => {
+      await this.recordAlipayTransaction(
+        order,
+        {
+          tradeNo: input.tradeNo,
+          status: 'CANCELLED',
+          notifyPayload: input.rawPayload,
+          completedAt: now
+        },
+        tx
+      );
+
+      return tx.billingOrder.update({
+        where: {
+          id: order.id
+        },
+        data: {
+          status: order.status === 'PAID' ? 'PAID' : 'CLOSED',
+          providerTradeNo: input.tradeNo ?? order.providerTradeNo,
+          closedAt: order.closedAt ?? now
+        },
+        include: {
+          plan: true
+        }
+      });
+    });
+  }
+
+  private async activateSubscriptionForPaidOrder(
+    order: BillingOrderWithPlan,
+    tx: Prisma.TransactionClient
+  ): Promise<string> {
+    const data = {
+      workspaceId: order.workspaceId,
+      planId: order.planId,
+      status: 'ACTIVE' as const,
+      billingCycle: order.billingCycle,
+      currentPeriodStart: order.periodStart,
+      currentPeriodEnd: order.periodEnd,
+      cancelAtPeriodEnd: false
+    };
+
+    if (order.subscriptionId) {
+      const subscription = await tx.subscription.update({
+        where: {
+          id: order.subscriptionId
+        },
+        data
+      });
+
+      return subscription.id;
+    }
+
+    const subscription = await tx.subscription.create({
+      data
+    });
+
+    return subscription.id;
+  }
+
+  private async recordAlipayTransaction(
+    order: BillingOrderWithPlan,
+    input: {
+      tradeNo: string | null;
+      status: 'INITIATED' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+      notifyPayload: Record<string, unknown>;
+      completedAt?: Date;
+    },
+    tx: Prisma.TransactionClient | PrismaService = this.prismaService
+  ): Promise<void> {
+    const data = {
+      orderId: order.id,
+      provider: 'ALIPAY' as const,
+      status: input.status,
+      amountCents: order.amountCents,
+      currency: order.currency,
+      providerTradeNo: input.tradeNo,
+      notifyPayload: input.notifyPayload as Prisma.InputJsonValue,
+      notifiedAt: new Date(),
+      completedAt: input.completedAt
+    };
+
+    if (input.tradeNo) {
+      await tx.paymentTransaction.upsert({
+        where: {
+          provider_providerTradeNo: {
+            provider: 'ALIPAY',
+            providerTradeNo: input.tradeNo
+          }
+        },
+        update: data,
+        create: data
+      });
+      return;
+    }
+
+    await tx.paymentTransaction.create({
+      data
+    });
+  }
+
+  private ensureAlipayAmountMatches(
+    order: {
+      amountCents: number;
+      orderNo: string;
+    },
+    totalAmount: string | null
+  ): void {
+    if (!totalAmount) {
+      return;
+    }
+
+    if (formatAmountCny(order.amountCents) !== formatAmountCny(Math.round(Number(totalAmount) * 100))) {
+      throw new Error('ALIPAY_AMOUNT_MISMATCH');
+    }
+  }
+
+  private readStringField(record: Record<string, unknown>, ...keys: string[]): string | null {
+    for (const key of keys) {
+      if (typeof record[key] === 'string') {
+        return record[key] as string;
+      }
+    }
+
+    return null;
+  }
+
+  private toJsonObject(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
   }
 
   private resolveOrderAmount(
@@ -388,6 +855,28 @@ export class BillingService {
     }
 
     const amountCents = inputAmountCents ?? catalogAmountCents;
+    if (catalogAmountCents && catalogAmountCents > 0) {
+      if (inputAmountCents !== undefined && inputAmountCents !== catalogAmountCents) {
+        throw new BadRequestException({
+          error: {
+            code: 'PAYMENT_AMOUNT_MISMATCH',
+            message: 'The submitted amount does not match the configured plan price.'
+          }
+        });
+      }
+
+      return catalogAmountCents;
+    }
+
+    if (process.env.WORKOS_ALLOW_MANUAL_BILLING_AMOUNT !== 'true') {
+      throw new BadRequestException({
+        error: {
+          code: 'PLAN_PRICE_REQUIRED',
+          message: 'A configured server-side plan price is required before creating paid orders.'
+        }
+      });
+    }
+
     if (!amountCents || amountCents <= 0) {
       throw new BadRequestException({
         error: {
