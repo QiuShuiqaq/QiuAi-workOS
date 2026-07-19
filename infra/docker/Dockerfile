@@ -7,6 +7,7 @@ RUN apk add --no-cache libc6-compat
 COPY . .
 
 RUN npm ci
+RUN npm run prisma:generate -w @qiuai/server
 RUN npm run build
 
 FROM build AS server

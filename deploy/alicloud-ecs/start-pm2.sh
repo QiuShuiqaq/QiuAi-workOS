@@ -12,6 +12,9 @@ unset REDIS_URL
 echo "==> Installing dependencies"
 npm ci
 
+echo "==> Generating Prisma client"
+npm run prisma:generate -w @qiuai/server
+
 echo "==> Building QiuAI WorkOS"
 npm run build
 
