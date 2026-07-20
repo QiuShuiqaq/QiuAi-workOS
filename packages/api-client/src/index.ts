@@ -17,8 +17,15 @@ import type {
   GetTaskResponse,
   GetBillingOverviewResponse,
   GetEnterpriseWorkspaceOverviewResponse,
+  AcceptWorkspaceInvitationRequest,
+  AcceptWorkspaceInvitationResponse,
+  CancelWorkspaceInvitationResponse,
+  CreateWorkspaceInvitationRequest,
+  CreateWorkspaceInvitationResponse,
   CurrentAccountResponse,
+  GetPublicInvitationResponse,
   KernelStatusResponse,
+  ListWorkspaceInvitationsResponse,
   ListRoleInstancesResponse,
   ListRoleTemplatesResponse,
   ListPlansResponse,
@@ -135,6 +142,38 @@ export class QiuApiClient {
       `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/organization/departments`,
       input
     );
+  }
+
+  listWorkspaceInvitations(workspaceId: string): Promise<ListWorkspaceInvitationsResponse> {
+    return this.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/invitations`);
+  }
+
+  createWorkspaceInvitation(
+    workspaceId: string,
+    input: CreateWorkspaceInvitationRequest
+  ): Promise<CreateWorkspaceInvitationResponse> {
+    return this.post(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/invitations`, input);
+  }
+
+  cancelWorkspaceInvitation(
+    workspaceId: string,
+    invitationId: string
+  ): Promise<CancelWorkspaceInvitationResponse> {
+    return this.post(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/invitations/${encodeURIComponent(invitationId)}/cancel`,
+      {}
+    );
+  }
+
+  getPublicInvitation(token: string): Promise<GetPublicInvitationResponse> {
+    return this.get(`/api/v1/invitations/${encodeURIComponent(token)}`);
+  }
+
+  acceptWorkspaceInvitation(
+    token: string,
+    input: AcceptWorkspaceInvitationRequest
+  ): Promise<AcceptWorkspaceInvitationResponse> {
+    return this.post(`/api/v1/invitations/${encodeURIComponent(token)}/accept`, input);
   }
 
   listTasks(workspaceId: string): Promise<ListTasksResponse> {

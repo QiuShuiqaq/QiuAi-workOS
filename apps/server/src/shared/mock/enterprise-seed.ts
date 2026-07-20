@@ -46,6 +46,19 @@ export interface MockSubscriptionSummary {
   cancelAtPeriodEnd: boolean;
 }
 
+export interface MockInvitationSummary {
+  id: string;
+  workspaceId: string;
+  email: string;
+  systemRole: 'admin' | 'member' | 'viewer';
+  departmentId?: string;
+  departmentName?: string;
+  status: 'pending' | 'accepted' | 'cancelled' | 'expired';
+  expiresAt: string;
+  acceptedAt?: string;
+  createdAt: string;
+}
+
 export const demoOrganizations: MockOrganizationSummary[] = [
   {
     id: 'org_enterprise',
@@ -179,6 +192,20 @@ export const demoSubscriptions: MockSubscriptionSummary[] = [
     currentPeriodStart: '2026-07-01T00:00:00.000Z',
     currentPeriodEnd: '2026-08-01T00:00:00.000Z',
     cancelAtPeriodEnd: false
+  }
+];
+
+export const demoInvitations: MockInvitationSummary[] = [
+  {
+    id: 'invite_ops_new',
+    workspaceId: 'enterprise',
+    email: 'new.member@qiuai.local',
+    systemRole: 'member',
+    departmentId: 'dept_operations',
+    departmentName: '杩愯惀閮?',
+    status: 'pending',
+    expiresAt: '2026-08-01T00:00:00.000Z',
+    createdAt: '2026-07-20T00:00:00.000Z'
   }
 ];
 

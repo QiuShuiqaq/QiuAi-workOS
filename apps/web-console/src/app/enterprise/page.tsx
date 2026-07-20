@@ -7,7 +7,7 @@ export default async function EnterprisePage({
   searchParams?: Promise<{ workspaceId?: string }>;
 }) {
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const { currentAccount, overview, isApiFallback } = await loadEnterprisePageData(
+  const { currentAccount, overview, invitations, isApiFallback } = await loadEnterprisePageData(
     resolvedSearchParams?.workspaceId
   );
 
@@ -15,6 +15,7 @@ export default async function EnterprisePage({
     <EnterprisePageClient
       currentAccount={currentAccount}
       overview={overview}
+      invitations={invitations}
       isApiFallback={isApiFallback}
     />
   );

@@ -14,7 +14,7 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "prisma:studio": "prisma studio --schema prisma/schema.prisma",
     "lint": "node -e \"console.log('Server lint placeholder.')\"",
-    "test": "node --import tsx --test src/main.test.ts src/modules/billing/alipay-gateway.test.ts src/modules/desktop-sync/desktop-sync.contract.test.ts"
+    "test": "node --import tsx --test src/main.test.ts src/modules/billing/alipay-gateway.test.ts src/modules/desktop-sync/desktop-sync.contract.test.ts src/modules/invitation/invitation-token.test.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

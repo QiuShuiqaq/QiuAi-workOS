@@ -6,6 +6,7 @@ export * from './enterprise';
 export * from './entitlement';
 export * from './errors';
 export * from './execution';
+export * from './invitation';
 export * from './kernel';
 export * from './pagination';
 export * from './platform-overview';

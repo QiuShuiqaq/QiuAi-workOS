@@ -6,6 +6,7 @@ import { DesktopSyncModule } from './desktop-sync/desktop-sync.module';
 import { BillingModule } from './billing/billing.module';
 import { CommercialModule } from './commercial/commercial.module';
 import { EntitlementModule } from './entitlement/entitlement.module';
+import { InvitationModule } from './invitation/invitation.module';
 import { HealthModule } from './health/health.module';
 import { KernelModule } from './kernel/kernel.module';
 import { OrganizationModule } from './organization/organization.module';
@@ -25,6 +26,7 @@ import { MockPlatformStoreModule } from '../shared/mock/mock-platform-store.modu
     MockPlatformStoreModule,
     CommercialModule,
     EntitlementModule,
+    InvitationModule,
     HealthModule,
     KernelModule,
     OrganizationModule,

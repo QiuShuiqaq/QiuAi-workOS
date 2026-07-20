@@ -12,10 +12,12 @@ import {
 } from './platform-seed';
 import {
   demoDepartments,
+  demoInvitations,
   demoMembers,
   demoOrganizations,
   demoSubscriptions,
   type MockDepartmentSummary,
+  type MockInvitationSummary,
   type MockMemberSummary,
   type MockOrganizationSummary,
   type MockSubscriptionSummary
@@ -47,6 +49,7 @@ export class MockPlatformStore {
   private readonly tasks: MockTaskDetail[] = demoTasks.map((task) => ({ ...task }));
   private readonly organizations: MockOrganizationSummary[] = demoOrganizations.map((item) => ({ ...item }));
   private readonly departments: MockDepartmentSummary[] = demoDepartments.map((item) => ({ ...item }));
+  private readonly invitations: MockInvitationSummary[] = demoInvitations.map((item) => ({ ...item }));
   private readonly members: MockMemberSummary[] = demoMembers.map((item) => ({ ...item }));
   private readonly subscriptions: MockSubscriptionSummary[] = demoSubscriptions.map((item) => ({ ...item }));
   private readonly desktopRuntimeSyncs: MockDesktopRuntimeSyncSummary[] = [];
@@ -99,6 +102,70 @@ export class MockPlatformStore {
     return this.departments.find(
       (department) => department.organizationId === organization.id && department.id === departmentId
     );
+  }
+
+  listInvitations(workspaceId: string) {
+    return this.invitations.filter((invitation) => invitation.workspaceId === workspaceId);
+  }
+
+  getInvitationByToken(invitationId: string) {
+    return this.invitations.find((invitation) => invitation.id === invitationId);
+  }
+
+  createInvitation(
+    workspaceId: string,
+    input: {
+      email: string;
+      systemRole: 'admin' | 'member' | 'viewer';
+      departmentId?: string;
+      expiresInDays: number;
+    }
+  ) {
+    const organization = this.getOrganization(workspaceId);
+    if (!organization) {
+      return undefined;
+    }
+
+    const department = input.departmentId ? this.getDepartment(workspaceId, input.departmentId) : undefined;
+    const now = new Date().toISOString();
+    const invitation = {
+      id: `invite_${Date.now()}`,
+      workspaceId,
+      email: input.email.trim().toLowerCase(),
+      systemRole: input.systemRole,
+      departmentId: department?.id,
+      departmentName: department?.name,
+      status: 'pending' as const,
+      expiresAt: new Date(Date.now() + input.expiresInDays * 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: now
+    };
+
+    this.invitations.unshift(invitation);
+    return invitation;
+  }
+
+  cancelInvitation(workspaceId: string, invitationId: string) {
+    const invitation = this.invitations.find(
+      (item) => item.workspaceId === workspaceId && item.id === invitationId
+    );
+
+    if (!invitation) {
+      return undefined;
+    }
+
+    invitation.status = 'cancelled';
+    return invitation;
+  }
+
+  acceptInvitationByToken(invitationId: string) {
+    const invitation = this.getInvitationByToken(invitationId);
+    if (!invitation) {
+      return undefined;
+    }
+
+    invitation.status = 'accepted';
+    invitation.acceptedAt = new Date().toISOString();
+    return invitation;
   }
 
   createDepartment(
