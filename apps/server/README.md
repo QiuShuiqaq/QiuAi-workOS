@@ -1,6 +1,6 @@
 # Server
 
-Main QiuAI WorkOS API server.
+Main QiuAI WorkOS API control plane.
 
 Architecture direction:
 
@@ -8,6 +8,7 @@ Architecture direction:
 - TypeScript
 - Contract-first API
 - Server-side entitlement enforcement
+- Store only control-plane metadata, summaries, billing, audit, and sync state
 - Future extraction path for execution, model gateway, and workers
 
 Planned module layout lives under `src/modules`.

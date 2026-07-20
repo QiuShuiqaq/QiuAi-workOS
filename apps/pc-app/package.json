@@ -1,13 +1,45 @@
 {
   "name": "@qiuai/pc-app",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
+  "description": "QiuAI WorkOS desktop client",
+  "author": "QiuAI",
+  "main": "dist/main/main.js",
   "scripts": {
-    "dev": "node -e \"console.log('Electron app scaffold ready. Electron dependencies are not installed yet.')\"",
-    "build": "node -e \"console.log('Electron build placeholder.')\"",
-    "typecheck": "node -e \"console.log('Electron typecheck placeholder.')\"",
+    "dev": "npm run build:electron && concurrently -k -n renderer,electron \"vite --host 127.0.0.1 --port 5173 --strictPort\" \"wait-on http://127.0.0.1:5173 && cross-env QIUAI_PC_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "build": "npm run build:electron && npm run build:renderer",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "build:renderer": "npm exec -- vite build",
+    "start": "electron .",
+    "package": "npm run build && node scripts/package.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "lint": "node -e \"console.log('Electron lint placeholder.')\"",
-    "test": "node -e \"console.log('Electron test placeholder.')\""
+    "test": "node --import tsx --test src/shared/desktop-state.test.ts src/main/runtime-store.test.ts src/main/workspace-backup.test.ts"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^5.0.0",
+    "@qiuai/api-contract": "1.0.0",
+    "@qiuai/design-tokens": "1.0.0",
+    "@qiuai/domain": "1.0.0",
+    "@qiuai/ui": "1.0.0",
+    "antd": "^5.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "sql.js": "1.14.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.0",
+    "7zip-bin": "5.2.0",
+    "concurrently": "^9.0.0",
+    "cross-env": "^10.0.0",
+    "electron": "39.8.10",
+    "electron-builder": "24.13.3",
+    "vite": "^7.0.0",
+    "wait-on": "^9.0.0"
+  },
+  "build": {
+    "appId": "com.qiuai.workos.pc",
+    "productName": "QiuAI WorkOS"
   }
 }

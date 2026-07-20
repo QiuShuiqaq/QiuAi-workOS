@@ -1,6 +1,6 @@
 {
   "name": "@qiuai/api-client",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -15,6 +15,6 @@
     "test": "node --import tsx --test src/index.test.ts"
   },
   "dependencies": {
-    "@qiuai/api-contract": "0.0.0"
+    "@qiuai/api-contract": "1.0.0"
   }
 }

@@ -4,6 +4,12 @@ Enterprise Digital Workforce Platform.
 
 This repository is structured as a TypeScript monorepo for the QiuAI WorkOS platform kernel, web console, Electron desktop client, and future mobile client.
 
+## Canonical Architecture
+
+- System boundaries: `docs/SYSTEM_ARCHITECTURE.md`
+- Console split decision: `docs/decisions/ADR-009-console-boundaries.md`
+- Desktop runtime spec: `docs/PC_DESKTOP_RUNTIME_SPEC.md`
+
 ## Local Tooling
 
 Project tooling should stay inside this repository whenever possible.
@@ -29,9 +35,10 @@ Use the wrapper for npm commands on Windows:
 
 ## Workspace Layout
 
-- `apps/server`: main API server
-- `apps/web-console`: Web console
-- `apps/pc-app`: Electron desktop app
+- `apps/server`: API control plane
+- `apps/admin-console`: platform operator console
+- `apps/web-console`: enterprise portal and control console
+- `apps/pc-app`: Electron desktop runtime for digital employees
 - `apps/mobile-app`: React Native / Expo mobile app
 - `packages/domain`: shared domain types
 - `packages/api-contract`: shared API contracts

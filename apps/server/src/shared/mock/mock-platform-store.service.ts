@@ -29,6 +29,17 @@ export interface MockCreateTaskRequest {
   priority?: 'low' | 'normal' | 'high' | 'urgent';
 }
 
+export interface MockDesktopRuntimeSyncSummary {
+  runtimeId: string;
+  workspaceId: string;
+  deviceId: string;
+  deviceName: string;
+  platform: string;
+  appVersion: string;
+  runtimeSnapshot: Record<string, unknown>;
+  syncedAt: string;
+}
+
 @Injectable()
 export class MockPlatformStore {
   private readonly roleTemplates: MockRoleTemplateSummary[] = [...demoRoleTemplates];
@@ -38,6 +49,7 @@ export class MockPlatformStore {
   private readonly departments: MockDepartmentSummary[] = demoDepartments.map((item) => ({ ...item }));
   private readonly members: MockMemberSummary[] = demoMembers.map((item) => ({ ...item }));
   private readonly subscriptions: MockSubscriptionSummary[] = demoSubscriptions.map((item) => ({ ...item }));
+  private readonly desktopRuntimeSyncs: MockDesktopRuntimeSyncSummary[] = [];
 
   listRoleTemplates(): MockRoleTemplateSummary[] {
     return this.roleTemplates;
@@ -255,5 +267,28 @@ export class MockPlatformStore {
 
   workspaceExists(workspaceId: string): boolean {
     return demoWorkspaces.some((workspace) => workspace.id === workspaceId);
+  }
+
+  upsertDesktopRuntimeSync(input: MockDesktopRuntimeSyncSummary) {
+    const existingIndex = this.desktopRuntimeSyncs.findIndex(
+      (sync) => sync.runtimeId === input.runtimeId
+    );
+    const record = { ...input };
+
+    if (existingIndex >= 0) {
+      this.desktopRuntimeSyncs[existingIndex] = record;
+      return record;
+    }
+
+    this.desktopRuntimeSyncs.unshift(record);
+    return record;
+  }
+
+  listDesktopRuntimeSyncs(workspaceId: string) {
+    return this.desktopRuntimeSyncs.filter((sync) => sync.workspaceId === workspaceId);
+  }
+
+  getDesktopRuntimeSync(runtimeId: string) {
+    return this.desktopRuntimeSyncs.find((sync) => sync.runtimeId === runtimeId);
   }
 }

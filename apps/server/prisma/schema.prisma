@@ -215,6 +215,7 @@ model Workspace {
   roleInstances  RoleInstance[]
   tasks          Task[]
   costRecords    CostRecord[]
+  desktopRuntimeSyncs DesktopRuntimeSync[]
 
   @@index([tenantId])
   @@index([ownerAccountId])
@@ -583,4 +584,24 @@ model CostRecord {
   @@index([provider])
   @@index([createdAt])
   @@map("cost_records")
+}
+
+model DesktopRuntimeSync {
+  id             String   @id @default(uuid()) @db.Uuid
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  runtimeId      String   @unique @map("runtime_id")
+  deviceId       String   @map("device_id")
+  deviceName     String   @map("device_name")
+  platform       String
+  appVersion     String   @map("app_version")
+  runtimeSnapshot Json    @map("runtime_snapshot")
+  syncedAt       DateTime @map("synced_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([syncedAt])
+  @@map("desktop_runtime_syncs")
 }

@@ -238,6 +238,51 @@ Production behavior:
 - Alipay notify returns plain text `success` only after signature, app ID, seller ID, and amount validation.
 - Paid notifications update `billing_orders`, `payment_transactions`, and the workspace subscription.
 
+## Alipay Development Settings
+
+支付宝开放平台控制台里，你现在最关键的是这一路径：
+
+```text
+应用详情 -> 开发设置 -> 开发信息 -> 接口加签方式（密钥/证书） -> 设置
+```
+
+当前这套代码走的是**普通公钥 / 密钥模式**，不是证书模式。  
+原因很简单：后端已经按 `appId + 应用私钥 + 支付宝公钥` 这组配置接好了，当前不需要切到证书模式。
+
+建议按下面填：
+
+| 控制台项 | 该填什么 |
+| --- | --- |
+| 接口加签方式 | 普通公钥 / 密钥模式 |
+| 应用公钥 | 用支付宝开放平台密钥工具生成后，填到控制台 |
+| 应用私钥 | 只放在本项目服务器 `.env`，不要放前端 |
+| 支付宝公钥 | 从支付宝控制台复制后，填到本项目服务器 `.env` |
+| 应用 APPID | 填到 `PAYMENT_ALIPAY_APP_ID` |
+| 服务器 IP 白名单 | 选填，先不配也可以；如果控制台强制要求，再加当前 ECS 公网出口 IP |
+
+补充说明：
+
+- 这个项目的支付回调地址不是你手工在控制台里拼的，而是代码通过订单参数注入的。
+- 订单创建时会自动带上：
+  - `https://workos.qiuaihub.com/api/v1/billing/alipay/notify`
+  - `https://workos.qiuaihub.com/billing/alipay/return`
+- `PAYMENT_ALIPAY_KEY_TYPE` 保持 `PKCS8`。
+- `.env` 里的私钥必须是完整 PEM 内容，保留头尾行，换行可写成 `\n`。
+- 如果你把控制台切成证书模式，当前后端就不能直接用现有配置，需要再做一轮代码适配。
+
+### 这一页每一项怎么处理
+
+| 控制台项 | 现在怎么配 | 说明 |
+| --- | --- | --- |
+| 接口加签方式 | 已设置，确认是“密钥”模式 | 当前后端按应用私钥 + 支付宝公钥工作，不走证书模式 |
+| 接口内容加密方式 | 暂不设置 | 当前支付链路不依赖这项 |
+| 服务器 IP 白名单 | 可选，先不配也可以 | 需要更强安全控制时再加 ECS 公网出口 IP |
+| 应用网关 | 先留空 | 这项用于接收支付宝异步消息，不是当前 page pay 主链路必需项 |
+| 支付宝网关地址 | 保持默认 | 当前代码已默认使用 `https://openapi.alipay.com/gateway.do` |
+| 授权回调地址 | 先留空 | 当前支付链路不依赖用户授权回跳 |
+| openid 配置管理 | 已启用即可 | 当前不需要额外改动 |
+| 受限密钥 | 暂不设置 | 当前项目还没用到这类能力 |
+
 After configuring Alipay, verify with a small real order:
 
 ```bash

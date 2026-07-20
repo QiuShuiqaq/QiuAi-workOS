@@ -1,13 +1,27 @@
 {
   "name": "@qiuai/admin-console",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node -e \"console.log('Admin console is a later-stage app placeholder.')\"",
-    "build": "node -e \"console.log('Admin console build placeholder.')\"",
-    "typecheck": "node -e \"console.log('Admin console typecheck placeholder.')\"",
+    "dev": "next dev --hostname 127.0.0.1 --port 3200",
+    "build": "next build",
+    "start": "next start --hostname 127.0.0.1 --port 3200",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "node -e \"console.log('Admin console lint placeholder.')\"",
     "test": "node -e \"console.log('Admin console test placeholder.')\""
+  },
+  "dependencies": {
+    "@ant-design/icons": "^5.0.0",
+    "@ant-design/nextjs-registry": "^1.0.0",
+    "@qiuai/api-client": "1.0.0",
+    "@qiuai/api-contract": "1.0.0",
+    "@qiuai/design-tokens": "1.0.0",
+    "@qiuai/ui": "1.0.0",
+    "antd": "^5.0.0",
+    "next": "^15.0.0",
+    "postcss": "8.5.10",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   }
 }

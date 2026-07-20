@@ -1,4 +1,5 @@
 export * from './auth';
+export * from './desktop-sync';
 export * from './billing';
 export * from './commercial';
 export * from './enterprise';

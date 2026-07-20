@@ -1,0 +1,114 @@
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 1100px;
+  height: 100%;
+  margin: 0;
+  background: #f6f8fa;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.desktop-shell {
+  min-height: 100vh;
+  background: #f6f8fa;
+}
+
+.desktop-sidebar {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #d0d7de;
+  background: #fff;
+}
+
+.brand-block {
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.brand-title,
+.page-title {
+  margin: 0;
+}
+
+.desktop-sidebar .ant-menu {
+  flex: 1;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding: 20px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.desktop-content {
+  min-height: 100vh;
+  padding: 24px;
+  overflow: auto;
+}
+
+.content-stack {
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.main-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.list-icon {
+  color: #1677ff;
+  font-size: 22px;
+}
+
+.task-list-item {
+  padding: 12px 0;
+  cursor: pointer;
+}
+
+.task-list-item:hover {
+  background: #fafafa;
+}
+
+.task-list-item-selected {
+  background: #f0f5ff;
+  border-radius: 6px;
+  padding-inline: 12px;
+}
+
+@media (max-width: 1280px) {
+  .metric-grid,
+  .main-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  html,
+  body,
+  #root {
+    min-width: 0;
+  }
+
+  .desktop-content {
+    padding: 16px;
+  }
+
+  .metric-grid,
+  .main-grid {
+    grid-template-columns: 1fr;
+  }
+}
