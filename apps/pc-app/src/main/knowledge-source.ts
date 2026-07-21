@@ -1,4 +1,4 @@
-import { dialog } from 'electron';
+import * as electron from 'electron';
 import {
   readFileSync,
   readdirSync,
@@ -10,6 +10,9 @@ import type {
   DesktopKnowledgeSourcePathResult
 } from '../shared/desktop-api.js';
 import type { KnowledgeBindingSource } from '../shared/desktop-contract.js';
+
+const electronApi = (electron as typeof electron & { default?: typeof electron }).default ?? electron;
+const { dialog } = electronApi;
 
 const maxFolderEntries = 200;
 const maxFolderDepth = 2;

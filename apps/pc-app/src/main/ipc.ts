@@ -1,4 +1,4 @@
-import { ipcMain, shell } from 'electron';
+import * as electron from 'electron';
 import {
   checkServerConnection,
   getDesktopAppInfo,
@@ -14,6 +14,9 @@ import {
   listWorkspaceBackupBundles,
   restoreWorkspaceBackupBundle
 } from './workspace-backup.js';
+
+const electronApi = (electron as typeof electron & { default?: typeof electron }).default ?? electron;
+const { ipcMain, shell } = electronApi;
 
 const channels = {
   getAppInfo: 'qiuai:desktop:get-app-info',

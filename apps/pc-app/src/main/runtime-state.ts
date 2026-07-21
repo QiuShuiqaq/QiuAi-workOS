@@ -1,4 +1,4 @@
-import { app } from 'electron';
+import * as electron from 'electron';
 import os from 'node:os';
 import path from 'node:path';
 import { createInitialDesktopRuntimeState } from '../shared/desktop-state.js';
@@ -9,6 +9,9 @@ import type {
   DesktopServerConnectionStatus
 } from '../shared/desktop-api.js';
 import { loadDesktopRuntimeState, loadRuntimeIdentity, saveDesktopRuntimeState } from './runtime-store.js';
+
+const electronApi = (electron as typeof electron & { default?: typeof electron }).default ?? electron;
+const { app } = electronApi;
 
 const defaultServerBaseUrl = 'https://workos.qiuaihub.com';
 

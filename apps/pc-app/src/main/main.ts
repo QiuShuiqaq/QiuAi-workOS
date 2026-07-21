@@ -1,8 +1,11 @@
-import { app, BrowserWindow, shell } from 'electron';
+import * as electron from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerDesktopIpc } from './ipc.js';
 import { configureUserDataPath } from './runtime-state.js';
+
+const electronApi = (electron as typeof electron & { default?: typeof electron }).default ?? electron;
+const { app, BrowserWindow, shell } = electronApi;
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const isDev = Boolean(process.env.QIUAI_PC_DEV_SERVER_URL);
