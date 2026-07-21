@@ -9,10 +9,11 @@
   "scripts": {
     "dev": "npm run build:electron && concurrently -k -n renderer,electron \"vite --host 127.0.0.1 --port 5173 --strictPort\" \"wait-on http://127.0.0.1:5173 && cross-env QIUAI_PC_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
     "build": "npm run build:electron && npm run build:renderer",
-    "build:electron": "tsc -p tsconfig.electron.json",
+    "build:electron": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.electron.json",
     "build:renderer": "npm exec -- vite build",
     "start": "electron .",
     "package": "npm run build && node scripts/package.mjs",
+    "package:installer": "npm run build && node scripts/package-installer.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "lint": "node -e \"console.log('Electron lint placeholder.')\"",
     "test": "node --import tsx --test src/shared/desktop-state.test.ts src/shared/desktop-task-runner.test.ts src/main/artifact-store.test.ts src/main/desktop-tool.test.ts src/main/runtime-store.test.ts src/main/workspace-backup.test.ts"
@@ -40,6 +41,34 @@
   },
   "build": {
     "appId": "com.qiuai.workos.pc",
-    "productName": "QiuAI WorkOS"
+    "productName": "QiuAI WorkOS",
+    "directories": {
+      "output": "release/installers"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/sql.js/dist/sql-wasm.wasm"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "QiuAI WorkOS"
+    }
   }
 }

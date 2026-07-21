@@ -80,6 +80,10 @@ interface ModelFormValues {
   fallbackProfileId?: string;
 }
 
+interface OnboardingFormValues {
+  workspaceId: string;
+}
+
 interface RoleConfigFormValues {
   modelProfileIds: string[];
   toolIds: string[];
@@ -151,6 +155,7 @@ const currencyFormatter = new Intl.NumberFormat('zh-CN', {
   currency: 'CNY',
   maximumFractionDigits: 0
 });
+const pendingWorkspaceId = 'workspace_pending_login';
 
 export default function App() {
   const [runtimeState, setRuntimeState] = useState<DesktopRuntimeState>(
@@ -171,7 +176,9 @@ export default function App() {
   const [workspaceBackups, setWorkspaceBackups] = useState<DesktopBackupSummary[]>([]);
   const [taskForm] = Form.useForm<TaskFormValues>();
   const [modelForm] = Form.useForm<ModelFormValues>();
+  const [onboardingForm] = Form.useForm<OnboardingFormValues>();
   const [roleConfigForm] = Form.useForm<RoleConfigFormValues>();
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [roleConfigModalOpen, setRoleConfigModalOpen] = useState(false);
   const [roleConfigMode, setRoleConfigMode] = useState<'install' | 'configure'>('install');
   const [roleConfigRoleCode, setRoleConfigRoleCode] = useState('');
@@ -200,6 +207,17 @@ export default function App() {
 
     return () => window.clearTimeout(handle);
   }, [hasLoadedPersistedState, runtimeState]);
+
+  useEffect(() => {
+    if (!hasLoadedPersistedState) {
+      return;
+    }
+
+    if (runtimeState.localRuntime.workspaceId === pendingWorkspaceId) {
+      onboardingForm.setFieldsValue({ workspaceId: '' });
+      setOnboardingOpen(true);
+    }
+  }, [hasLoadedPersistedState, onboardingForm, runtimeState.localRuntime.workspaceId]);
 
   useEffect(() => {
     const firstModelId = runtimeState.modelProfiles[0]?.id;
@@ -358,6 +376,26 @@ export default function App() {
     }
   }
 
+  function submitOnboarding(values: OnboardingFormValues) {
+    const workspaceId = values.workspaceId.trim();
+    if (!workspaceId) {
+      return;
+    }
+
+    setRuntimeState((current) => ({
+      ...current,
+      localRuntime: {
+        ...current.localRuntime,
+        workspaceId
+      },
+      runtimeSnapshot: {
+        ...current.runtimeSnapshot,
+        workspaceId
+      }
+    }));
+    setOnboardingOpen(false);
+  }
+
   const activeRolePackage = useMemo(() => {
     return (
       runtimeState.rolePackages.find(
@@ -426,6 +464,7 @@ export default function App() {
   const enabledModelCount = runtimeState.localRuntime.enabledModelProfileIds.length;
   const enabledToolCount = runtimeState.localRuntime.enabledToolIds.length;
   const knowledgeBindingCount = runtimeState.localRuntime.knowledgeBindingIds.length;
+  const requiresOnboarding = runtimeState.localRuntime.workspaceId === pendingWorkspaceId;
 
   const connectionTone = useMemo(() => {
     if (runtimeState.serverConnection.state === 'online') return 'success';
@@ -473,6 +512,11 @@ export default function App() {
                 </div>
 
                 <Space wrap>
+                  {requiresOnboarding ? (
+                    <Button type="primary" onClick={() => setOnboardingOpen(true)}>
+                      初始化工作区
+                    </Button>
+                  ) : null}
                   <Tag icon={<SafetyCertificateOutlined />} color={connectionTone}>
                     {connectionLabel(runtimeState.serverConnection.state)}
                   </Tag>
@@ -496,9 +540,45 @@ export default function App() {
             </Space>
           </Layout.Content>
         </Layout>
+        {renderOnboardingModal()}
       </AppProvider>
     </ConfigProvider>
   );
+
+  function renderOnboardingModal() {
+    return (
+      <Modal
+        title="企业工作区初始化"
+        open={onboardingOpen}
+        closable={!requiresOnboarding}
+        maskClosable={false}
+        okText="完成初始化"
+        cancelText="稍后"
+        cancelButtonProps={{
+          style: requiresOnboarding ? { display: 'none' } : undefined
+        }}
+        onCancel={() => setOnboardingOpen(false)}
+        onOk={() => onboardingForm.submit()}
+      >
+        <Form<OnboardingFormValues>
+          form={onboardingForm}
+          layout="vertical"
+          onFinish={submitOnboarding}
+        >
+          <Form.Item
+            name="workspaceId"
+            label="Workspace ID"
+            rules={[{ required: true, message: '请输入企业工作区 ID' }]}
+          >
+            <Input placeholder="例如：从 web-console 企业工作区复制 workspaceId" />
+          </Form.Item>
+          <Typography.Text type="secondary">
+            桌面端会把任务、知识库摘要、模型配置和本地产物绑定到这个工作区；用户电脑上的资产仍保存在本机。
+          </Typography.Text>
+        </Form>
+      </Modal>
+    );
+  }
 
   function renderWorkbench() {
     return (
