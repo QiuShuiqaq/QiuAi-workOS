@@ -16,10 +16,11 @@ function parseBaseUrl(value, fallback, label) {
   }
 }
 
-async function fetchJson(url, label) {
+async function fetchJson(url, label, headers = {}) {
   const response = await fetch(url, {
     headers: {
-      accept: 'application/json'
+      accept: 'application/json',
+      ...headers
     }
   });
 
@@ -33,6 +34,30 @@ async function fetchJson(url, label) {
   }
 
   return response.json();
+}
+
+async function postJson(url, label, payload, headers = {}) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      ...headers
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const contentType = response.headers.get('content-type') ?? '';
+  const body = contentType.includes('application/json') ? await response.json() : await response.text();
+
+  if (!response.ok) {
+    fail(`${label} returned a non-OK response.`, `${url} -> ${response.status} ${response.statusText}`);
+  }
+
+  return {
+    body,
+    setCookie: response.headers.get('set-cookie') ?? undefined
+  };
 }
 
 async function fetchHtml(url, label) {
@@ -78,9 +103,41 @@ const smokeWorkspaceId =
     ? '20000000-0000-4000-8000-000000000002'
     : 'enterprise');
 
+const smokeEmail =
+  process.env.WORKOS_SMOKE_EMAIL ??
+  process.env.WORKOS_BOOTSTRAP_ADMIN_EMAIL ??
+  process.env.WORKOS_MOCK_ADMIN_EMAIL ??
+  'admin@qiuai.local';
+const smokePassword =
+  process.env.WORKOS_SMOKE_PASSWORD ??
+  process.env.WORKOS_BOOTSTRAP_ADMIN_PASSWORD ??
+  process.env.WORKOS_MOCK_ADMIN_PASSWORD ??
+  (process.env.NODE_ENV === 'production' ? undefined : 'qiuai-demo');
+
+if (!smokePassword) {
+  fail(
+    'Smoke checks require a login password for protected workspace APIs.',
+    'Set WORKOS_SMOKE_PASSWORD or WORKOS_BOOTSTRAP_ADMIN_PASSWORD before running `npm run check:smoke`.'
+  );
+}
+
+const login = await postJson(new URL('/api/v1/auth/login', apiBaseUrl), 'Smoke login', {
+  email: smokeEmail,
+  password: smokePassword
+});
+if (!login.body?.authenticated || !login.setCookie) {
+  fail('Smoke login payload is unexpected.', JSON.stringify(login.body, null, 2));
+}
+
+const sessionCookie = login.setCookie.split(';')[0];
+const authHeaders = {
+  cookie: sessionCookie
+};
+
 const billingOverview = await fetchJson(
   new URL(`/api/v1/workspaces/${encodeURIComponent(smokeWorkspaceId)}/billing/overview`, apiBaseUrl),
-  'Billing overview'
+  'Billing overview',
+  authHeaders
 );
 if (
   billingOverview.data?.workspaceId !== smokeWorkspaceId ||
@@ -91,7 +148,8 @@ if (
 
 const platformOverview = await fetchJson(
   new URL(`/api/v1/workspaces/${encodeURIComponent(smokeWorkspaceId)}/overview`, apiBaseUrl),
-  'Platform overview'
+  'Platform overview',
+  authHeaders
 );
 if (
   platformOverview.workspace?.id !== smokeWorkspaceId ||
@@ -104,7 +162,8 @@ if (
 
 const roleTemplates = await fetchJson(
   new URL(`/api/v1/workspaces/${encodeURIComponent(smokeWorkspaceId)}/roles/templates`, apiBaseUrl),
-  'Role templates'
+  'Role templates',
+  authHeaders
 );
 if (!Array.isArray(roleTemplates.data) || roleTemplates.data.length === 0) {
   fail('Role templates payload is unexpected.', JSON.stringify(roleTemplates, null, 2));
@@ -112,7 +171,8 @@ if (!Array.isArray(roleTemplates.data) || roleTemplates.data.length === 0) {
 
 const roles = await fetchJson(
   new URL(`/api/v1/workspaces/${encodeURIComponent(smokeWorkspaceId)}/roles`, apiBaseUrl),
-  'Role instances'
+  'Role instances',
+  authHeaders
 );
 if (!Array.isArray(roles.data)) {
   fail('Role instances payload is unexpected.', JSON.stringify(roles, null, 2));
@@ -120,7 +180,8 @@ if (!Array.isArray(roles.data)) {
 
 const tasks = await fetchJson(
   new URL(`/api/v1/workspaces/${encodeURIComponent(smokeWorkspaceId)}/tasks`, apiBaseUrl),
-  'Tasks'
+  'Tasks',
+  authHeaders
 );
 if (!Array.isArray(tasks.data)) {
   fail('Tasks payload is unexpected.', JSON.stringify(tasks, null, 2));
@@ -140,6 +201,7 @@ if (!webRoot.includes('QiuAI WorkOS')) {
 }
 
 console.log(`API health: ${apiHealth.status} (${apiHealth.service})`);
+console.log(`Smoke login: OK (${smokeEmail})`);
 console.log(`Billing overview: OK (${smokeWorkspaceId})`);
 console.log(`Platform overview: OK (${smokeWorkspaceId})`);
 console.log(`Role templates: OK (${roleTemplates.data.length})`);

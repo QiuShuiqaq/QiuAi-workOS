@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 
 import { MockPlatformStore, type MockCreateTaskRequest } from '../../shared/mock/mock-platform-store.service';
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
@@ -55,8 +55,11 @@ type DatabaseTask = {
 @Injectable()
 export class TaskService {
   constructor(
+    @Inject(MockPlatformStore)
     private readonly store: MockPlatformStore,
+    @Inject(PrismaService)
     private readonly prismaService: PrismaService,
+    @Inject(EntitlementService)
     private readonly entitlementService: EntitlementService
   ) {}
 

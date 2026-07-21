@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, Param, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Header, Inject, Param, Post, Req, Res } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
@@ -15,12 +15,15 @@ import {
   version: '1'
 })
 export class WorkspaceBillingController {
-  constructor(private readonly billingService: BillingService) {}
+  constructor(@Inject(BillingService) private readonly billingService: BillingService) {}
 
   @Get('overview')
   @ApiOkResponse({ type: GetBillingOverviewResponseDto })
-  getOverview(@Param('workspaceId') workspaceId: string): Promise<GetBillingOverviewResponseDto> {
-    return this.billingService.getOverview(workspaceId);
+  getOverview(
+    @Param('workspaceId') workspaceId: string,
+    @Req() request: FastifyRequest
+  ): Promise<GetBillingOverviewResponseDto> {
+    return this.billingService.getOverview(workspaceId, request.headers.cookie);
   }
 
   @Post('orders')
@@ -40,7 +43,7 @@ export class WorkspaceBillingController {
   version: '1'
 })
 export class AlipayBillingController {
-  constructor(private readonly billingService: BillingService) {}
+  constructor(@Inject(BillingService) private readonly billingService: BillingService) {}
 
   @Post('notify')
   @Header('content-type', 'text/plain; charset=utf-8')

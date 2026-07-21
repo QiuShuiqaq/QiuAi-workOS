@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
 
+import { AuthModule } from '../auth/auth.module';
 import { EntitlementModule } from '../entitlement/entitlement.module';
 import { PrismaModule } from '../../shared/prisma/prisma.module';
 import { TaskController } from './task.controller';
 import { TaskService } from './task.service';
 
 @Module({
-  imports: [EntitlementModule, PrismaModule],
+  imports: [AuthModule, EntitlementModule, PrismaModule],
   controllers: [TaskController],
   providers: [TaskService]
 })

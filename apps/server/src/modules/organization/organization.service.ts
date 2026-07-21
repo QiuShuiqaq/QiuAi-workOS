@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException
 } from '@nestjs/common';
@@ -33,8 +34,11 @@ interface CreateDepartmentInput {
 @Injectable()
 export class OrganizationService {
   constructor(
+    @Inject(MockPlatformStore)
     private readonly store: MockPlatformStore,
+    @Inject(PrismaService)
     private readonly prismaService: PrismaService,
+    @Inject(EntitlementService)
     private readonly entitlementService: EntitlementService
   ) {}
 

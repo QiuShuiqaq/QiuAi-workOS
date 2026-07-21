@@ -1,6 +1,7 @@
 import {
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
   UnauthorizedException
@@ -50,9 +51,13 @@ export class InvitationService {
   private readonly mockTokens = new Map<string, string>();
 
   constructor(
+    @Inject(PrismaService)
     private readonly prismaService: PrismaService,
+    @Inject(MockPlatformStore)
     private readonly store: MockPlatformStore,
+    @Inject(EntitlementService)
     private readonly entitlementService: EntitlementService,
+    @Inject(AuthService)
     private readonly authService: AuthService
   ) {}
 

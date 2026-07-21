@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 
 import { demoPlans } from '../../shared/mock/platform-seed';
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
@@ -36,7 +36,9 @@ const PLAN_ORDER: PlanCode[] = [
 @Injectable()
 export class EntitlementService {
   constructor(
+    @Inject(PrismaService)
     private readonly prismaService: PrismaService,
+    @Inject(MockPlatformStore)
     private readonly store: MockPlatformStore
   ) {}
 

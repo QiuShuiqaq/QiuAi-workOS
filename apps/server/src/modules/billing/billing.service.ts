@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import {
   BadRequestException,
-  ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
   ServiceUnavailableException
@@ -76,12 +76,17 @@ type BillingOrderWithPlan = Prisma.BillingOrderGetPayload<{
 @Injectable()
 export class BillingService {
   constructor(
+    @Inject(MockPlatformStore)
     private readonly store: MockPlatformStore,
+    @Inject(PrismaService)
     private readonly prismaService: PrismaService,
+    @Inject(AuthService)
     private readonly authService: AuthService
   ) {}
 
-  async getOverview(workspaceId: string): Promise<GetBillingOverviewResponseDto> {
+  async getOverview(workspaceId: string, cookieHeader?: string): Promise<GetBillingOverviewResponseDto> {
+    await this.requireWorkspaceAccess(workspaceId, cookieHeader);
+
     const data = isDatabasePersistenceEnabled()
       ? await this.buildDatabaseOverview(workspaceId)
       : this.buildMockOverview(workspaceId);
@@ -257,18 +262,7 @@ export class BillingService {
   }
 
   private async requireWorkspaceAccess(workspaceId: string, cookieHeader?: string) {
-    const currentAccount = await this.authService.getCurrentAccount(cookieHeader);
-    const canAccessWorkspace = currentAccount.workspaces.some((workspace) => workspace.id === workspaceId);
-
-    if (!canAccessWorkspace) {
-      throw new ForbiddenException({
-        error: {
-          code: 'FORBIDDEN',
-          message: 'The current account cannot access this workspace.',
-          details: { workspaceId }
-        }
-      });
-    }
+    await this.authService.requireWorkspaceAccess(workspaceId, cookieHeader);
   }
 
   private buildMockOverview(workspaceId: string): BillingOverviewDto {

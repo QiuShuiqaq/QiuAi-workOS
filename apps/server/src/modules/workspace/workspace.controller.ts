@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Req } from '@nestjs/common';
+import { Controller, Get, Inject, Param, Req } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
 
@@ -12,7 +12,7 @@ import { WorkspaceService } from './workspace.service';
   version: '1'
 })
 export class WorkspaceController {
-  constructor(private readonly workspaceService: WorkspaceService) {}
+  constructor(@Inject(WorkspaceService) private readonly workspaceService: WorkspaceService) {}
 
   @Get('current')
   @ApiOkResponse({ type: CurrentAccountResponseDto })
@@ -22,7 +22,10 @@ export class WorkspaceController {
 
   @Get(':workspaceId/overview')
   @ApiOkResponse({ type: PlatformOverviewResponseDto })
-  async getOverview(@Param('workspaceId') workspaceId: string): Promise<PlatformOverviewResponseDto> {
-    return this.workspaceService.getOverview(workspaceId);
+  async getOverview(
+    @Param('workspaceId') workspaceId: string,
+    @Req() request: FastifyRequest
+  ): Promise<PlatformOverviewResponseDto> {
+    return this.workspaceService.getOverview(workspaceId, request.headers.cookie);
   }
 }

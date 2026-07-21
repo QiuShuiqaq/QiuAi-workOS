@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, Req, Res } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
@@ -20,7 +20,7 @@ import { AuthSessionResponseDto } from '../auth/dto/auth-session-response.dto';
   version: '1'
 })
 export class InvitationController {
-  constructor(private readonly invitationService: InvitationService) {}
+  constructor(@Inject(InvitationService) private readonly invitationService: InvitationService) {}
 
   @Get(':token')
   @ApiOkResponse({ type: GetPublicInvitationResponseDto })
@@ -52,7 +52,7 @@ export class InvitationController {
   version: '1'
 })
 export class WorkspaceInvitationController {
-  constructor(private readonly invitationService: InvitationService) {}
+  constructor(@Inject(InvitationService) private readonly invitationService: InvitationService) {}
 
   @Get()
   @ApiOkResponse({ type: ListWorkspaceInvitationsResponseDto })

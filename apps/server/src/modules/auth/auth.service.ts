@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { Prisma, type AccountStatus, type WorkspaceStatus, type WorkspaceType } from '@prisma/client';
 
 import { demoCurrentAccount } from '../../shared/mock/platform-seed';
@@ -46,7 +46,7 @@ type MockSessionRecord = {
 export class AuthService {
   private readonly mockSessions = new Map<string, MockSessionRecord>();
 
-  constructor(private readonly prismaService: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prismaService: PrismaService) {}
 
   async login(input: LoginRequestDto, requestMeta?: { userAgent?: string; ipAddress?: string }) {
     const normalizedEmail = this.normalizeEmail(input.email);
@@ -303,6 +303,26 @@ export class AuthService {
       workspaces: session.workspaces,
       activeWorkspaceId: session.activeWorkspaceId
     };
+  }
+
+  async requireWorkspaceAccess(
+    workspaceId: string,
+    cookieHeader?: string
+  ): Promise<CurrentAccountResponseDto> {
+    const currentAccount = await this.getCurrentAccount(cookieHeader);
+    const canAccessWorkspace = currentAccount.workspaces.some((workspace) => workspace.id === workspaceId);
+
+    if (!canAccessWorkspace) {
+      throw new ForbiddenException({
+        error: {
+          code: 'WORKSPACE_ACCESS_DENIED',
+          message: 'You do not have access to this workspace.',
+          details: { workspaceId }
+        }
+      });
+    }
+
+    return currentAccount;
   }
 
   private buildDatabaseSessionResponse(account: DatabaseAccount, expiresAt: Date): AuthSessionResponseDto {

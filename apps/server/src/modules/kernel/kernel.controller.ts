@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Inject } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 
 import { KernelStatusResponse } from './kernel.dto';
@@ -10,7 +10,7 @@ import { KernelService } from './kernel.service';
   version: '1'
 })
 export class KernelController {
-  constructor(private readonly kernelService: KernelService) {}
+  constructor(@Inject(KernelService) private readonly kernelService: KernelService) {}
 
   @Get('status')
   @ApiOkResponse({ type: KernelStatusResponse })

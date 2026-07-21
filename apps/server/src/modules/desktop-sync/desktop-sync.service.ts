@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
@@ -12,7 +12,9 @@ import {
 @Injectable()
 export class DesktopSyncService {
   constructor(
+    @Inject(MockPlatformStore)
     private readonly store: MockPlatformStore,
+    @Inject(PrismaService)
     private readonly prismaService: PrismaService
   ) {}
 

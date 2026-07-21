@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 
 import { demoPlans } from '../../shared/mock/platform-seed';
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
@@ -7,7 +7,7 @@ import { KernelStatusResponse } from './kernel.dto';
 
 @Injectable()
 export class KernelService {
-  constructor(private readonly prismaService: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prismaService: PrismaService) {}
 
   async getStatus(): Promise<KernelStatusResponse> {
     if (!isDatabasePersistenceEnabled()) {

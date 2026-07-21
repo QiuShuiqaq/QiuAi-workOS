@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 
 import { demoPlans } from '../../shared/mock/platform-seed';
 import { PrismaService } from '../../shared/prisma/prisma.service';
@@ -18,7 +18,7 @@ const PLAN_DISPLAY_ORDER = [
 
 @Injectable()
 export class CommercialService {
-  constructor(private readonly prismaService: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prismaService: PrismaService) {}
 
   async listPlans(): Promise<ListPlansResponseDto> {
     if (!isDatabasePersistenceEnabled()) {

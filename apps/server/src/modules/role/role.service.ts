@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
@@ -57,8 +57,11 @@ type DatabaseRoleInstance = {
 @Injectable()
 export class RoleService {
   constructor(
+    @Inject(MockPlatformStore)
     private readonly store: MockPlatformStore,
+    @Inject(PrismaService)
     private readonly prismaService: PrismaService,
+    @Inject(EntitlementService)
     private readonly entitlementService: EntitlementService
   ) {}
 

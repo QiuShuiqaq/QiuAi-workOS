@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
 import { demoWorkspaces } from '../../shared/mock/platform-seed';
@@ -11,8 +11,11 @@ import { PlatformOverviewResponseDto } from './dto/platform-overview-response.dt
 @Injectable()
 export class WorkspaceService {
   constructor(
+    @Inject(MockPlatformStore)
     private readonly store: MockPlatformStore,
+    @Inject(PrismaService)
     private readonly prismaService: PrismaService,
+    @Inject(AuthService)
     private readonly authService: AuthService
   ) {}
 
@@ -37,7 +40,9 @@ export class WorkspaceService {
     }
   }
 
-  async getOverview(workspaceId: string): Promise<PlatformOverviewResponseDto> {
+  async getOverview(workspaceId: string, cookieHeader?: string): Promise<PlatformOverviewResponseDto> {
+    await this.authService.requireWorkspaceAccess(workspaceId, cookieHeader);
+
     if (isDatabasePersistenceEnabled()) {
       return this.getDatabaseOverview(workspaceId);
     }
