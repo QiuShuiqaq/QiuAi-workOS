@@ -28,6 +28,7 @@ import InputNumber from 'antd/es/input-number';
 import Layout from 'antd/es/layout';
 import List from 'antd/es/list';
 import Menu from 'antd/es/menu';
+import Modal from 'antd/es/modal';
 import Select from 'antd/es/select';
 import Space from 'antd/es/space';
 import Statistic from 'antd/es/statistic';
@@ -43,9 +44,12 @@ import type {
   DesktopTaskState,
   DesktopTaskDetail,
   DesktopTaskSummary,
+  DesktopKnowledgeSourceSummary,
+  KnowledgeBindingSource,
   ModelProfile,
   RolePackageManifest
 } from '../shared/desktop-contract';
+import { defaultRoleTemplateCatalog, type RoleTemplateCatalogEntry } from '@qiuai/domain';
 import { syncDesktopRuntimeSnapshot } from '../shared/desktop-sync-client';
 import { createDesktopRuntimePreviewState } from '../shared/desktop-state';
 import {
@@ -53,13 +57,11 @@ import {
   createTaskDetailFromSummary,
   toDesktopTaskSummary
 } from '../shared/workbench-data';
+import { runDesktopTask } from '../shared/desktop-task-runner';
 
 type SectionKey = 'workbench' | 'roles' | 'models' | 'tools' | 'knowledge' | 'runtime' | 'sync';
 
-interface DesktopRoleTemplate extends RolePackageManifest {
-  industry: string;
-  installNote: string;
-}
+type DesktopRoleTemplate = RoleTemplateCatalogEntry;
 
 interface TaskFormValues {
   roleCode: string;
@@ -70,10 +72,25 @@ interface ModelFormValues {
   providerName: string;
   modelName: string;
   purpose: ModelProfile['purpose'];
+  apiBaseUrl?: string;
+  apiKey?: string;
   temperature?: number;
   maxTokens?: number;
   monthlyBudgetCents?: number;
   fallbackProfileId?: string;
+}
+
+interface RoleConfigFormValues {
+  modelProfileIds: string[];
+  toolIds: string[];
+  knowledgeSources: KnowledgeBindingSource[];
+}
+
+interface KnowledgeBindingCatalogEntry {
+  source: KnowledgeBindingSource;
+  bindingId: string;
+  label: string;
+  description: string;
 }
 
 const sectionItems: Array<{ key: SectionKey; icon: ReactNode; label: string }> = [
@@ -86,47 +103,41 @@ const sectionItems: Array<{ key: SectionKey; icon: ReactNode; label: string }> =
   { key: 'sync', icon: <CloudSyncOutlined />, label: '同步设置' }
 ];
 
-const desktopRoleTemplates: DesktopRoleTemplate[] = [
+const desktopRoleTemplates: DesktopRoleTemplate[] = defaultRoleTemplateCatalog;
+const desktopRoleTemplateByRoleCode = new Map(
+  desktopRoleTemplates.map((template) => [template.roleCode, template] as const)
+);
+
+const knowledgeBindingCatalog: KnowledgeBindingCatalogEntry[] = [
   {
-    roleCode: 'ai-operations-specialist',
-    name: 'AI 运营专员',
-    version: '1.0.0',
-    summary: '案例筛选、标题生成、发布前检查和日报整理。',
-    modelProfileIds: ['qiu-general-default', 'qiu-vision-default'],
-    toolIds: ['web-search', 'office-document', 'local-filesystem'],
-    requiredKnowledgeSources: ['local_folder', 'server_summary'],
-    defaultTaskTypes: ['content_review', 'publish_plan', 'daily_report'],
-    syncPolicy: 'summary_only',
-    industry: '内容运营',
-    installNote: '适合做素材筛选、发布前检查和日报交付。'
+    source: 'local_folder',
+    bindingId: 'kb-local-folder',
+    label: '本地文件夹',
+    description: '同步指定目录下的资料与文档摘要'
   },
   {
-    roleCode: 'ai-customer-specialist',
-    name: 'AI 客服专员',
-    version: '1.0.0',
-    summary: '整理跟进记录、识别客户意图、生成下一步动作建议。',
-    modelProfileIds: ['qiu-general-default', 'qiu-reasoning-default'],
-    toolIds: ['web-search', 'local-filesystem'],
-    requiredKnowledgeSources: ['workspace_library', 'server_summary'],
-    defaultTaskTypes: ['customer_followup', 'case_summary', 'next_action'],
-    syncPolicy: 'summary_plus_metadata',
-    industry: '客户运营',
-    installNote: '适合客服整理和售后辅助。'
+    source: 'local_file',
+    bindingId: 'kb-local-file',
+    label: '本地文件',
+    description: '同步单个文件或附件摘要'
   },
   {
-    roleCode: 'ai-contract-review-specialist',
-    name: 'AI 合同审核专员',
-    version: '1.0.0',
-    summary: '合同条款初筛、风险摘要、审批建议。',
-    modelProfileIds: ['qiu-general-default', 'qiu-reasoning-default'],
-    toolIds: ['web-search', 'office-document'],
-    requiredKnowledgeSources: ['local_file', 'workspace_library'],
-    defaultTaskTypes: ['contract_review', 'risk_summary', 'approval_note'],
-    syncPolicy: 'summary_plus_metadata',
-    industry: '法务服务',
-    installNote: '适合合同初审和风险摘要。'
+    source: 'workspace_library',
+    bindingId: 'kb-workspace-library',
+    label: '工作区知识库',
+    description: '同步当前工作区内的沉淀知识'
+  },
+  {
+    source: 'server_summary',
+    bindingId: 'kb-server-summary',
+    label: '服务端摘要',
+    description: '同步服务端返回的精简摘要'
   }
 ];
+
+const knowledgeBindingCatalogByBindingId = new Map(
+  knowledgeBindingCatalog.map((entry) => [entry.bindingId, entry] as const)
+);
 
 const knowledgeBindingOptions = [
   { id: 'kb-local-folder', label: '本地文件夹' },
@@ -153,10 +164,17 @@ export default function App() {
   const [isBackupBusy, setIsBackupBusy] = useState(false);
   const [syncNotice, setSyncNotice] = useState('');
   const [backupNotice, setBackupNotice] = useState('');
+  const [modelTestNotice, setModelTestNotice] = useState('');
+  const [isTestingModel, setIsTestingModel] = useState(false);
+  const [localActionNotice, setLocalActionNotice] = useState('');
   const [hasLoadedPersistedState, setHasLoadedPersistedState] = useState(false);
   const [workspaceBackups, setWorkspaceBackups] = useState<DesktopBackupSummary[]>([]);
   const [taskForm] = Form.useForm<TaskFormValues>();
   const [modelForm] = Form.useForm<ModelFormValues>();
+  const [roleConfigForm] = Form.useForm<RoleConfigFormValues>();
+  const [roleConfigModalOpen, setRoleConfigModalOpen] = useState(false);
+  const [roleConfigMode, setRoleConfigMode] = useState<'install' | 'configure'>('install');
+  const [roleConfigRoleCode, setRoleConfigRoleCode] = useState('');
 
   useEffect(() => {
     void loadRuntimeState();
@@ -327,6 +345,19 @@ export default function App() {
     }
   }
 
+  async function openLocalPath(targetPath?: string) {
+    if (!targetPath || !window.qiuDesktop) {
+      return;
+    }
+
+    setLocalActionNotice('');
+    try {
+      await window.qiuDesktop.openLocalPath(targetPath);
+    } catch (error) {
+      setLocalActionNotice(`打开本地路径失败：${error instanceof Error ? error.message : 'unknown error'}`);
+    }
+  }
+
   const activeRolePackage = useMemo(() => {
     return (
       runtimeState.rolePackages.find(
@@ -348,11 +379,14 @@ export default function App() {
       providerName: selectedModelProfile.providerName,
       modelName: selectedModelProfile.modelName,
       purpose: selectedModelProfile.purpose,
+      apiBaseUrl: selectedModelProfile.apiBaseUrl,
+      apiKey: selectedModelProfile.apiKey,
       temperature: selectedModelProfile.temperature,
       maxTokens: selectedModelProfile.maxTokens,
       monthlyBudgetCents: selectedModelProfile.monthlyBudgetCents,
       fallbackProfileId: selectedModelProfile.fallbackProfileId
     });
+    setModelTestNotice('');
   }, [modelForm, selectedModelProfile]);
 
   const orderedTasks = useMemo(() => {
@@ -574,9 +608,11 @@ export default function App() {
                           key="run"
                           type="link"
                           icon={<PlayCircleOutlined />}
+                          loading={task.state === 'running'}
+                          disabled={task.state === 'running'}
                           onClick={(event) => {
                             event.stopPropagation();
-                            completeTask(task.taskId);
+                            void completeTask(task.taskId);
                           }}
                         >
                           模拟完成
@@ -637,6 +673,39 @@ export default function App() {
                       : '—'}
                   </Descriptions.Item>
                 </Descriptions>
+                {selectedTask.executionContext ? (
+                  <div>
+                    <Typography.Title level={5}>鎵ц閰嶇疆</Typography.Title>
+                    <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                      <div>
+                        <Typography.Text type="secondary">妯″瀷</Typography.Text>
+                        <Space size={6} wrap>
+                          {selectedTask.executionContext.modelProfileIds.map((profileId) => (
+                            <Tag key={profileId}>
+                              {resolveModelProfileLabel(runtimeState.modelProfiles, profileId)}
+                            </Tag>
+                          ))}
+                        </Space>
+                      </div>
+                      <div>
+                        <Typography.Text type="secondary">宸ュ叿</Typography.Text>
+                        <Space size={6} wrap>
+                          {selectedTask.executionContext.toolIds.map((toolId) => (
+                            <Tag key={toolId}>{resolveToolLabel(runtimeState.tools, toolId)}</Tag>
+                          ))}
+                        </Space>
+                      </div>
+                      <div>
+                        <Typography.Text type="secondary">鐭ヨ瘑</Typography.Text>
+                        <Space size={6} wrap>
+                          {selectedTask.executionContext.knowledgeBindingIds.map((bindingId) => (
+                            <Tag key={bindingId}>{resolveKnowledgeBindingLabel(bindingId)}</Tag>
+                          ))}
+                        </Space>
+                      </div>
+                    </Space>
+                  </div>
+                ) : null}
 
                 <div>
                   <Typography.Title level={5}>执行日志</Typography.Title>
@@ -666,18 +735,39 @@ export default function App() {
                     dataSource={selectedTask.artifacts}
                     locale={{ emptyText: '暂无产物' }}
                     renderItem={(artifact) => (
-                      <List.Item>
+                      <List.Item
+                        actions={
+                          artifact.localPath
+                            ? [
+                                <Button
+                                  key="open"
+                                  type="link"
+                                  icon={<FolderOpenOutlined />}
+                                  onClick={() => void openLocalPath(artifact.localPath)}
+                                >
+                                  打开文件
+                                </Button>
+                              ]
+                            : undefined
+                        }
+                      >
                         <Space direction="vertical" size={2}>
                           <Space size={8} wrap>
                             <Tag>{artifact.type}</Tag>
                             <Typography.Text strong>{artifact.title}</Typography.Text>
                           </Space>
                           <Typography.Text type="secondary">{artifact.content}</Typography.Text>
+                          {artifact.localPath ? (
+                            <Typography.Text type="secondary">{artifact.localPath}</Typography.Text>
+                          ) : null}
                           <Typography.Text type="secondary">{formatDate(artifact.createdAt)}</Typography.Text>
                         </Space>
                       </List.Item>
                     )}
                   />
+                  {localActionNotice ? (
+                    <Typography.Text type="warning">{localActionNotice}</Typography.Text>
+                  ) : null}
                 </div>
 
                 <div>
@@ -713,6 +803,13 @@ export default function App() {
   }
 
   function renderRoles() {
+    const roleConfigTemplate = roleConfigRoleCode
+      ? desktopRoleTemplateByRoleCode.get(roleConfigRoleCode)
+      : undefined;
+    const roleConfigRolePackage = runtimeState.rolePackages.find(
+      (rolePackage) => rolePackage.roleCode === roleConfigRoleCode
+    );
+
     return (
       <>
         <div className="metric-grid">
@@ -737,10 +834,18 @@ export default function App() {
               renderItem={(rolePackage) => {
                 const summary = installedRoleSummaries.find((item) => item.roleCode === rolePackage.roleCode);
                 const isActive = runtimeState.localRuntime.activeRoleCode === rolePackage.roleCode;
+                const template = desktopRoleTemplateByRoleCode.get(rolePackage.roleCode);
 
                 return (
                   <List.Item
                     actions={[
+                      <Button
+                        key="configure"
+                        type="link"
+                        onClick={() => openRoleConfig(rolePackage.roleCode, 'configure')}
+                      >
+                        配置
+                      </Button>,
                       <Button
                         key="activate"
                         type={isActive ? 'default' : 'link'}
@@ -762,12 +867,24 @@ export default function App() {
                         </Space>
                       }
                       description={
-                        <Space size={8} wrap>
+                        <Space direction="vertical" size={4}>
+                          <Space size={8} wrap>
+                            <Typography.Text type="secondary">
+                              {rolePackage.roleCode} 路 {rolePackage.version}
+                            </Typography.Text>
+                            <Typography.Text type="secondary">
+                              浠诲姟 {summary?.taskCount ?? 0}
+                            </Typography.Text>
+                          </Space>
+                          {template ? (
+                            <Space size={6} wrap>
+                              {(summary?.skills ?? template.skills).slice(0, 4).map((skill) => (
+                                <Tag key={skill.code}>{skill.name}</Tag>
+                              ))}
+                            </Space>
+                          ) : null}
                           <Typography.Text type="secondary">
-                            {rolePackage.roleCode} · {rolePackage.version}
-                          </Typography.Text>
-                          <Typography.Text type="secondary">
-                            任务 {summary?.taskCount ?? 0}
+                            模型 {rolePackage.modelProfileIds.length} / 工具 {rolePackage.toolIds.length} / 知识 {rolePackage.requiredKnowledgeSources.length}
                           </Typography.Text>
                         </Space>
                       }
@@ -804,7 +921,7 @@ export default function App() {
                           key="install"
                           type="link"
                           icon={<RobotOutlined />}
-                          onClick={() => installRole(template)}
+                          onClick={() => openRoleConfig(template.roleCode, 'install')}
                         >
                           安装
                         </Button>
@@ -822,11 +939,20 @@ export default function App() {
                         <Space direction="vertical" size={4}>
                           <Typography.Text type="secondary">{template.summary}</Typography.Text>
                           <Typography.Text type="secondary">{template.installNote}</Typography.Text>
+                          <Typography.Text type="secondary">{template.businessGoal}</Typography.Text>
+                          <Space size={6} wrap>
+                            {template.skills.map((skill) => (
+                              <Tag key={skill.code}>{skill.name}</Tag>
+                            ))}
+                          </Space>
                           <Space size={6} wrap>
                             {template.defaultTaskTypes.map((type) => (
                               <Tag key={type}>{type}</Tag>
                             ))}
                           </Space>
+                          <Typography.Text type="secondary">
+                            模型 {template.modelProfileIds.length} / 工具 {template.toolIds.length} / 知识 {template.requiredKnowledgeSources.length}
+                          </Typography.Text>
                         </Space>
                       }
                     />
@@ -836,6 +962,99 @@ export default function App() {
             />
           </Card>
         </div>
+
+        <Modal
+          open={roleConfigModalOpen}
+          title={
+            roleConfigTemplate
+              ? `${roleConfigMode === 'install' ? '配置并安装' : '配置'} - ${roleConfigTemplate.name}`
+              : roleConfigMode === 'install'
+                ? '配置并安装角色'
+                : '配置角色'
+          }
+          okText={roleConfigMode === 'install' ? '安装角色' : '保存配置'}
+          onCancel={closeRoleConfig}
+          onOk={() => roleConfigForm.submit()}
+          width={820}
+          destroyOnHidden
+        >
+          {roleConfigTemplate ? (
+            <Space direction="vertical" size={16} style={{ width: '100%' }}>
+              <Descriptions column={1} size="small" bordered>
+                <Descriptions.Item label="模板版本">{roleConfigTemplate.version}</Descriptions.Item>
+                <Descriptions.Item label="行业">{roleConfigTemplate.industry}</Descriptions.Item>
+                <Descriptions.Item label="场景">{roleConfigTemplate.scenario}</Descriptions.Item>
+                <Descriptions.Item label="安装说明">{roleConfigTemplate.installNote}</Descriptions.Item>
+                <Descriptions.Item label="业务目标">{roleConfigTemplate.businessGoal}</Descriptions.Item>
+              </Descriptions>
+
+              <Space size={6} wrap>
+                {roleConfigTemplate.skills.map((skill) => (
+                  <Tag key={skill.code}>{skill.name}</Tag>
+                ))}
+              </Space>
+
+              <Form<RoleConfigFormValues>
+                form={roleConfigForm}
+                layout="vertical"
+                id="role-config-form"
+                initialValues={{
+                  modelProfileIds: roleConfigRolePackage?.modelProfileIds ?? roleConfigTemplate.modelProfileIds,
+                  toolIds: roleConfigRolePackage?.toolIds ?? roleConfigTemplate.toolIds,
+                  knowledgeSources:
+                    roleConfigRolePackage?.requiredKnowledgeSources ??
+                    roleConfigTemplate.requiredKnowledgeSources
+                }}
+                onFinish={submitRoleConfig}
+              >
+                <Form.Item
+                  name="modelProfileIds"
+                  label="模型绑定"
+                  rules={[{ required: true, message: '至少选择一个模型绑定' }]}
+                >
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    optionLabelProp="label"
+                    placeholder="选择角色可使用的模型"
+                    options={runtimeState.modelProfiles.map((profile) => ({
+                      label: `${profile.providerName} / ${profile.modelName}`,
+                      value: profile.id
+                    }))}
+                  />
+                </Form.Item>
+
+                <Form.Item name="toolIds" label="工具绑定">
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    optionLabelProp="label"
+                    placeholder="选择角色可调用的工具"
+                    options={runtimeState.tools.map((tool) => ({
+                      label: tool.name,
+                      value: tool.id
+                    }))}
+                  />
+                </Form.Item>
+
+                <Form.Item name="knowledgeSources" label="知识绑定">
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    optionLabelProp="label"
+                    placeholder="选择角色依赖的知识来源"
+                    options={knowledgeBindingCatalog.map((entry) => ({
+                      label: entry.label,
+                      value: entry.source
+                    }))}
+                  />
+                </Form.Item>
+              </Form>
+            </Space>
+          ) : (
+            <Empty description="未找到可配置的角色模板" />
+          )}
+        </Modal>
       </>
     );
   }
@@ -928,6 +1147,12 @@ export default function App() {
                     ]}
                   />
                 </Form.Item>
+                <Form.Item name="apiBaseUrl" label="API Base URL">
+                  <Input placeholder="https://api.openai.com/v1" />
+                </Form.Item>
+                <Form.Item name="apiKey" label="API Key">
+                  <Input.Password placeholder="Stored locally" />
+                </Form.Item>
                 <Form.Item name="temperature" label="温度">
                   <InputNumber min={0} max={2} step={0.1} style={{ width: '100%' }} />
                 </Form.Item>
@@ -948,9 +1173,27 @@ export default function App() {
                       }))}
                   />
                 </Form.Item>
-                <Button type="primary" htmlType="submit" icon={<SettingOutlined />} block>
-                  保存配置
-                </Button>
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Space wrap>
+                    <Button type="primary" htmlType="submit" icon={<SettingOutlined />}>
+                      保存配置
+                    </Button>
+                    <Button
+                      icon={<ReloadOutlined />}
+                      loading={isTestingModel}
+                      onClick={() => void testSelectedModelConnection()}
+                    >
+                      测试连接
+                    </Button>
+                  </Space>
+                  {modelTestNotice ? (
+                    <Typography.Text
+                      type={modelTestNotice.startsWith('模型连接正常') ? 'success' : 'danger'}
+                    >
+                      {modelTestNotice}
+                    </Typography.Text>
+                  ) : null}
+                </Space>
               </Form>
             ) : null}
           </Card>
@@ -1036,7 +1279,7 @@ export default function App() {
           <Card bordered={false}>
             <Statistic
               title="可用来源"
-              value={knowledgeBindingOptions.length}
+              value={knowledgeBindingCatalog.length}
             />
           </Card>
           <Card bordered={false}>
@@ -1050,13 +1293,18 @@ export default function App() {
         <div className="main-grid">
           <Card title="当前绑定" bordered={false}>
             <List
-              dataSource={runtimeState.localRuntime.knowledgeBindingIds}
+              dataSource={runtimeState.knowledgeSources.length > 0
+                ? runtimeState.knowledgeSources
+                : runtimeState.localRuntime.knowledgeBindingIds.map((bindingId) =>
+                    createKnowledgeSourceFromBindingId(bindingId)
+                  )}
               locale={{ emptyText: '尚未绑定本地知识' }}
-              renderItem={(bindingId) => (
+              renderItem={(source) => (
                 <List.Item>
                   <List.Item.Meta
                     avatar={<FolderOpenOutlined className="list-icon" />}
-                    title={bindingId}
+                    title={source.label}
+                    description={source.localPath ?? source.summary ?? source.id}
                   />
                 </List.Item>
               )}
@@ -1065,16 +1313,16 @@ export default function App() {
 
           <Card title="添加来源" bordered={false}>
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              {knowledgeBindingOptions.map((option) => {
-                const isBound = runtimeState.localRuntime.knowledgeBindingIds.includes(option.id);
+              {knowledgeBindingCatalog.map((option) => {
+                const isBound = runtimeState.localRuntime.knowledgeBindingIds.includes(option.bindingId);
 
                 return (
-                  <Flex key={option.id} align="center" justify="space-between" gap={12}>
+                  <Flex key={option.bindingId} align="center" justify="space-between" gap={12}>
                     <Typography.Text>{option.label}</Typography.Text>
                     <Button
                       type="link"
                       disabled={isBound}
-                      onClick={() => addKnowledgeBinding(option.id)}
+                      onClick={() => void addKnowledgeBinding(option)}
                     >
                       {isBound ? '已绑定' : '绑定'}
                     </Button>
@@ -1217,20 +1465,35 @@ export default function App() {
     );
   }
 
-  function installRole(template: DesktopRoleTemplate) {
+  function installRole(template: DesktopRoleTemplate, values?: RoleConfigFormValues) {
     setRuntimeState((current) => {
       const existingRole = current.rolePackages.find(
         (rolePackage) => rolePackage.roleCode === template.roleCode
       );
       const now = new Date().toISOString();
+      const installedRolePackage = {
+        ...(existingRole ?? toInstalledRolePackage(template)),
+        modelProfileIds: values?.modelProfileIds ?? template.modelProfileIds,
+        toolIds: values?.toolIds ?? template.toolIds,
+        requiredKnowledgeSources: values?.knowledgeSources ?? template.requiredKnowledgeSources
+      };
       const rolePackages = existingRole
-        ? current.rolePackages
-        : [stripTemplate(template), ...current.rolePackages];
+        ? current.rolePackages.map((rolePackage) =>
+            rolePackage.roleCode === template.roleCode ? installedRolePackage : rolePackage
+          )
+        : [installedRolePackage, ...current.rolePackages];
+      const enabledKnowledgeBindingIds = mergeUniqueStrings(
+        current.localRuntime.knowledgeBindingIds,
+        installedRolePackage.requiredKnowledgeSources.map((source) => getKnowledgeBindingId(source))
+      );
       const enabledModelProfileIds = mergeUniqueStrings(
         current.localRuntime.enabledModelProfileIds,
-        template.modelProfileIds
+        installedRolePackage.modelProfileIds
       );
-      const enabledToolIds = mergeUniqueStrings(current.localRuntime.enabledToolIds, template.toolIds);
+      const enabledToolIds = mergeUniqueStrings(
+        current.localRuntime.enabledToolIds,
+        installedRolePackage.toolIds
+      );
       const activeRoleCode =
         current.localRuntime.activeRoleCode && rolePackages.some((rolePackage) => rolePackage.roleCode === current.localRuntime.activeRoleCode)
           ? current.localRuntime.activeRoleCode
@@ -1244,6 +1507,7 @@ export default function App() {
           ...current.localRuntime,
           installedRoleCodes: rolePackages.map((rolePackage) => rolePackage.roleCode),
           activeRoleCode,
+          knowledgeBindingIds: enabledKnowledgeBindingIds,
           enabledModelProfileIds,
           enabledToolIds
         },
@@ -1319,6 +1583,8 @@ export default function App() {
               providerName: values.providerName.trim(),
               modelName: values.modelName.trim(),
               purpose: values.purpose,
+              apiBaseUrl: values.apiBaseUrl?.trim() || undefined,
+              apiKey: values.apiKey?.trim() || undefined,
               temperature: values.temperature,
               maxTokens: values.maxTokens,
               monthlyBudgetCents: values.monthlyBudgetCents,
@@ -1327,6 +1593,60 @@ export default function App() {
           : profile
       )
     }));
+  }
+
+  async function testSelectedModelConnection() {
+    if (!selectedModelProfile || !window.qiuDesktop) {
+      return;
+    }
+
+    setIsTestingModel(true);
+    setModelTestNotice('');
+
+    try {
+      const values = await modelForm.validateFields();
+      const apiBaseUrl = values.apiBaseUrl?.trim();
+      const apiKey = values.apiKey?.trim();
+
+      if (!apiBaseUrl || !apiKey) {
+        setModelTestNotice('请先填写 API Base URL 和 API Key。');
+        return;
+      }
+
+      const profile: ModelProfile = {
+        ...selectedModelProfile,
+        providerName: values.providerName.trim(),
+        modelName: values.modelName.trim(),
+        purpose: values.purpose,
+        apiBaseUrl,
+        apiKey,
+        temperature: values.temperature,
+        maxTokens: Math.min(values.maxTokens ?? 256, 512),
+        monthlyBudgetCents: values.monthlyBudgetCents,
+        fallbackProfileId: values.fallbackProfileId || undefined
+      };
+
+      const response = await window.qiuDesktop.invokeModelChat({
+        profile,
+        timeoutMs: 20_000,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a connection test assistant. Reply briefly in Chinese.'
+          },
+          {
+            role: 'user',
+            content: '请回复“连接正常”，并说明当前模型可用于 QiuAI WorkOS 桌面端。'
+          }
+        ]
+      });
+
+      setModelTestNotice(`模型连接正常：${response.provider}/${response.modelName}`);
+    } catch (error) {
+      setModelTestNotice(`模型连接失败：${error instanceof Error ? error.message : 'unknown error'}`);
+    } finally {
+      setIsTestingModel(false);
+    }
   }
 
   function toggleTool(toolId: string, enabled: boolean) {
@@ -1349,20 +1669,147 @@ export default function App() {
     });
   }
 
-  function addKnowledgeBinding(bindingId: string) {
+  async function addKnowledgeBinding(option: KnowledgeBindingCatalogEntry) {
+    const now = new Date().toISOString();
+    const pathResult =
+      option.source === 'local_folder' || option.source === 'local_file'
+        ? await window.qiuDesktop?.selectKnowledgeSourcePath(option.source)
+        : undefined;
+
+    if (pathResult?.canceled) {
+      return;
+    }
+
+    const knowledgeSource: DesktopKnowledgeSourceSummary = {
+      id: option.bindingId,
+      source: option.source,
+      label: pathResult?.label ?? option.label,
+      enabled: true,
+      createdAt: now,
+      localPath: pathResult?.path,
+      lastIndexedAt: pathResult?.lastIndexedAt,
+      summary:
+        pathResult?.summary
+          ? pathResult.summary
+          : option.description
+    };
+
     setRuntimeState((current) => {
-      if (current.localRuntime.knowledgeBindingIds.includes(bindingId)) {
+      if (current.localRuntime.knowledgeBindingIds.includes(option.bindingId)) {
         return current;
       }
 
       return {
         ...current,
+        knowledgeSources: [
+          ...current.knowledgeSources.filter((source) => source.id !== knowledgeSource.id),
+          knowledgeSource
+        ],
         localRuntime: {
           ...current.localRuntime,
-          knowledgeBindingIds: [...current.localRuntime.knowledgeBindingIds, bindingId]
+          knowledgeBindingIds: [...current.localRuntime.knowledgeBindingIds, option.bindingId]
         }
       };
     });
+  }
+
+  async function persistTaskArtifacts(
+    task: DesktopTaskDetail,
+    workspaceId: string,
+    createdAt: string
+  ): Promise<DesktopTaskDetail> {
+    const bridge = window.qiuDesktop;
+    if (!bridge || task.artifacts.length === 0) {
+      return task;
+    }
+
+    const artifacts: DesktopTaskDetail['artifacts'] = [];
+    const artifactLogs: DesktopTaskDetail['executionLogs'] = [];
+
+    for (const artifact of task.artifacts) {
+      if (artifact.localPath) {
+        artifacts.push(artifact);
+        continue;
+      }
+
+      try {
+        const result = await bridge.writeTaskArtifact({
+          workspaceId,
+          taskId: task.taskId,
+          artifact
+        });
+
+        artifacts.push({
+          ...artifact,
+          localPath: result.localPath
+        });
+        artifactLogs.push({
+          id: `${task.taskId}-log-local-filesystem-invoked-${artifact.id}-${Date.parse(createdAt) || Date.now()}`,
+          level: 'info',
+          eventType: 'TOOL_INVOKED',
+          message: `local-filesystem wrote artifact file: ${result.localPath}`,
+          createdAt
+        });
+        artifactLogs.push({
+          id: `${task.taskId}-log-artifact-file-written-${artifact.id}-${Date.parse(createdAt) || Date.now()}`,
+          level: 'info',
+          eventType: 'ARTIFACT_FILE_WRITTEN',
+          message: `Artifact written to local file: ${result.localPath}`,
+          createdAt
+        });
+      } catch (error) {
+        artifacts.push(artifact);
+        artifactLogs.push({
+          id: `${task.taskId}-log-artifact-file-write-failed-${artifact.id}-${Date.parse(createdAt) || Date.now()}`,
+          level: 'warning',
+          eventType: 'ARTIFACT_FILE_WRITE_FAILED',
+          message: error instanceof Error ? error.message : 'Artifact file write failed.',
+          createdAt
+        });
+      }
+    }
+
+    return {
+      ...task,
+      artifacts,
+      executionLogs: [...task.executionLogs, ...artifactLogs]
+    };
+  }
+
+  function openRoleConfig(roleCode: string, mode: 'install' | 'configure') {
+    const template = desktopRoleTemplateByRoleCode.get(roleCode);
+    if (!template) {
+      return;
+    }
+
+    const currentRolePackage =
+      runtimeState.rolePackages.find((rolePackage) => rolePackage.roleCode === roleCode) ??
+      toInstalledRolePackage(template);
+
+    setRoleConfigRoleCode(roleCode);
+    setRoleConfigMode(mode);
+    setRoleConfigModalOpen(true);
+    roleConfigForm.setFieldsValue({
+      modelProfileIds: currentRolePackage.modelProfileIds,
+      toolIds: currentRolePackage.toolIds,
+      knowledgeSources: currentRolePackage.requiredKnowledgeSources
+    });
+  }
+
+  function closeRoleConfig() {
+    setRoleConfigModalOpen(false);
+    setRoleConfigRoleCode('');
+    roleConfigForm.resetFields();
+  }
+
+  function submitRoleConfig(values: RoleConfigFormValues) {
+    const template = desktopRoleTemplateByRoleCode.get(roleConfigRoleCode);
+    if (!template) {
+      return;
+    }
+
+    installRole(template, values);
+    closeRoleConfig();
   }
 
   function createTask(values: TaskFormValues) {
@@ -1373,13 +1820,15 @@ export default function App() {
 
     const roleCode = values.roleCode;
     const roleName = resolveRoleName(runtimeState.rolePackages, roleCode);
+    const executionContext = buildExecutionContextForRole(runtimeState.rolePackages, roleCode);
     const taskDetail = createMockTaskDetail({
       roleCode,
       roleName,
       title,
       state: 'queued',
       artifactCount: 0,
-      costCents: 0
+      costCents: 0,
+      executionContext
     });
     const task = toDesktopTaskSummary(taskDetail);
 
@@ -1407,13 +1856,27 @@ export default function App() {
     taskForm.resetFields(['title']);
   }
 
-  function completeTask(taskId: string) {
+  async function completeTask(taskId: string) {
+    const sourceState = runtimeState;
+    const startedAt = new Date().toISOString();
+
     setRuntimeState((current) => {
-      const completedAt = new Date().toISOString();
       const taskDetails = (current.taskDetails ?? current.runtimeSnapshot.tasks.map((task) =>
         createTaskDetailFromSummary(task, resolveRoleName(current.rolePackages, task.roleCode))
       )).map((detail) =>
-        detail.taskId === taskId ? completeTaskDetail(detail, completedAt) : detail
+        detail.taskId === taskId
+          ? {
+              ...detail,
+              state: 'running' as const,
+              updatedAt: startedAt,
+              currentRun: {
+                id: detail.currentRun?.id ?? `${detail.taskId}-run-1`,
+                taskId: detail.taskId,
+                status: 'running' as const,
+                startedAt
+              }
+            }
+          : detail
       );
       const tasks = taskDetails.map(toDesktopTaskSummary);
 
@@ -1428,6 +1891,76 @@ export default function App() {
             tasks,
             current.runtimeSnapshot.rolePackages,
             current.localRuntime.activeRoleCode
+          )
+        }
+      };
+    });
+
+    const completedAt = new Date().toISOString();
+    const sourceTaskDetails = sourceState.taskDetails ?? sourceState.runtimeSnapshot.tasks.map((task) =>
+      createTaskDetailFromSummary(task, resolveRoleName(sourceState.rolePackages, task.roleCode))
+    );
+    const targetTask = sourceTaskDetails.find((detail) => detail.taskId === taskId);
+
+    if (!targetTask) {
+      return;
+    }
+
+    const result = await runDesktopTask({
+      task: {
+        ...targetTask,
+        state: 'running',
+        updatedAt: startedAt,
+        currentRun: {
+          id: targetTask.currentRun?.id ?? `${targetTask.taskId}-run-1`,
+          taskId: targetTask.taskId,
+          status: 'running',
+          startedAt
+        }
+      },
+      workspaceId: sourceState.localRuntime.workspaceId,
+      rolePackage: sourceState.rolePackages.find((rolePackage) => rolePackage.roleCode === targetTask.roleCode),
+      modelProfiles: sourceState.modelProfiles,
+      tools: sourceState.tools,
+      knowledgeSources: sourceState.knowledgeSources,
+      enabledModelProfileIds: sourceState.localRuntime.enabledModelProfileIds,
+      enabledToolIds: sourceState.localRuntime.enabledToolIds,
+      enabledKnowledgeBindingIds: sourceState.localRuntime.knowledgeBindingIds,
+      modelInvoker: window.qiuDesktop?.invokeModelChat,
+      desktopToolInvoker: window.qiuDesktop?.invokeDesktopTool,
+      completedAt
+    });
+    const persistedTask = await persistTaskArtifacts(
+      result.task,
+      sourceState.localRuntime.workspaceId,
+      completedAt
+    );
+
+    setRuntimeState((current) => {
+      const taskDetails = (current.taskDetails ?? current.runtimeSnapshot.tasks.map((task) =>
+        createTaskDetailFromSummary(task, resolveRoleName(current.rolePackages, task.roleCode))
+      )).map((detail) => (detail.taskId === taskId ? persistedTask : detail));
+      const tasks = taskDetails.map(toDesktopTaskSummary);
+      const usedToolIdSet = new Set(result.usedToolIds);
+
+      return {
+        ...current,
+        taskDetails,
+        runtimeSnapshot: {
+          ...current.runtimeSnapshot,
+          tasks,
+          rolePackages: rebuildRoleSummaries(
+            current.rolePackages,
+            tasks,
+            current.runtimeSnapshot.rolePackages,
+            current.localRuntime.activeRoleCode
+          ),
+          tools: rebuildToolSummaries(
+            current.tools,
+            current.localRuntime.enabledToolIds,
+            current.runtimeSnapshot.tools
+          ).map((tool) =>
+            usedToolIdSet.has(tool.toolId) ? { ...tool, lastUsedAt: completedAt } : tool
           )
         }
       };
@@ -1493,12 +2026,15 @@ function formatCents(value?: number) {
   return currencyFormatter.format(value / 100);
 }
 
-function stripTemplate(template: DesktopRoleTemplate): RolePackageManifest {
+function toInstalledRolePackage(template: DesktopRoleTemplate): RolePackageManifest {
   return {
     roleCode: template.roleCode,
     name: template.name,
     version: template.version,
     summary: template.summary,
+    templateId: template.templateId,
+    templateVersion: template.version,
+    skills: template.skills.map((skill) => ({ ...skill })),
     modelProfileIds: [...template.modelProfileIds],
     toolIds: [...template.toolIds],
     requiredKnowledgeSources: [...template.requiredKnowledgeSources],
@@ -1509,6 +2045,23 @@ function stripTemplate(template: DesktopRoleTemplate): RolePackageManifest {
 
 function mergeUniqueStrings(left: string[], right: string[]) {
   return [...new Set([...left, ...right])];
+}
+
+function getKnowledgeBindingId(source: KnowledgeBindingSource) {
+  return knowledgeBindingCatalog.find((entry) => entry.source === source)?.bindingId ?? source;
+}
+
+function createKnowledgeSourceFromBindingId(bindingId: string): DesktopKnowledgeSourceSummary {
+  const catalogEntry = knowledgeBindingCatalogByBindingId.get(bindingId);
+
+  return {
+    id: bindingId,
+    source: catalogEntry?.source ?? 'server_summary',
+    label: catalogEntry?.label ?? bindingId,
+    enabled: true,
+    createdAt: new Date(0).toISOString(),
+    summary: catalogEntry?.description
+  };
 }
 
 function rebuildRoleSummaries(
@@ -1543,7 +2096,13 @@ function rebuildRoleSummaries(
       state: rolePackage.roleCode === activeRoleCode ? 'running' : preservedState,
       installedAt: previous?.installedAt ?? installedAt,
       lastRunAt: lastRuns.get(rolePackage.roleCode) ?? previous?.lastRunAt,
-      taskCount: taskCounts.get(rolePackage.roleCode) ?? previous?.taskCount ?? 0
+      taskCount: taskCounts.get(rolePackage.roleCode) ?? previous?.taskCount ?? 0,
+      templateId: rolePackage.templateId ?? previous?.templateId,
+      templateVersion: rolePackage.templateVersion ?? previous?.templateVersion,
+      skills:
+        rolePackage.skills?.length
+          ? rolePackage.skills.map((skill) => ({ ...skill }))
+          : previous?.skills?.map((skill) => ({ ...skill }))
     };
   });
 }
@@ -1568,6 +2127,36 @@ function estimateTaskCost(title: string) {
 
 function resolveRoleName(rolePackages: RolePackageManifest[], roleCode: string): string {
   return rolePackages.find((rolePackage) => rolePackage.roleCode === roleCode)?.name ?? roleCode;
+}
+
+function buildExecutionContextForRole(
+  rolePackages: RolePackageManifest[],
+  roleCode: string
+): NonNullable<DesktopTaskDetail['executionContext']> | undefined {
+  const rolePackage = rolePackages.find((item) => item.roleCode === roleCode);
+  if (!rolePackage) {
+    return undefined;
+  }
+
+  return {
+    modelProfileIds: [...rolePackage.modelProfileIds],
+    toolIds: [...rolePackage.toolIds],
+    knowledgeBindingIds: rolePackage.requiredKnowledgeSources.map((source) => getKnowledgeBindingId(source))
+  };
+}
+
+function resolveModelProfileLabel(modelProfiles: ModelProfile[], profileId: string): string {
+  const profile = modelProfiles.find((item) => item.id === profileId);
+  return profile ? `${profile.providerName} / ${profile.modelName}` : profileId;
+}
+
+function resolveToolLabel(tools: DesktopRuntimeState['tools'], toolId: string): string {
+  const tool = tools.find((item) => item.id === toolId);
+  return tool ? tool.name : toolId;
+}
+
+function resolveKnowledgeBindingLabel(bindingId: string): string {
+  return knowledgeBindingCatalogByBindingId.get(bindingId)?.label ?? bindingId;
 }
 
 function logLevelColor(level: DesktopTaskDetail['executionLogs'][number]['level']) {

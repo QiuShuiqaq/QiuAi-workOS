@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import type { CurrentAccountResponse, RoleInstanceDetail } from '@qiuai/api-contract';
 import { QiuMetricCard, QiuPage, QiuStatusTag } from '@qiuai/ui';
@@ -9,6 +9,7 @@ import Descriptions from 'antd/es/descriptions';
 import List from 'antd/es/list';
 import Row from 'antd/es/row';
 import Space from 'antd/es/space';
+import Tag from 'antd/es/tag';
 import Link from 'next/link';
 
 import { ConsoleShell } from '../../shared/console/ConsoleShell';
@@ -38,7 +39,17 @@ export function RoleDetailPageClient({
           <Col xs={24} md={6}><QiuMetricCard title="月成本" value={`¥${role.kpis.monthlyCost}`} /></Col>
         </Row>
         <Card bordered={false}>
-          <Descriptions column={2} title={<Space>岗位信息<QiuStatusTag tone="processing">{role.status}</QiuStatusTag></Space>}>
+          <Descriptions
+            column={2}
+            title={
+              <Space>
+                岗位信息
+                <QiuStatusTag tone="processing">{role.status}</QiuStatusTag>
+              </Space>
+            }
+          >
+            <Descriptions.Item label="模板 ID">{role.templateId}</Descriptions.Item>
+            <Descriptions.Item label="模板版本">{role.templateVersion}</Descriptions.Item>
             <Descriptions.Item label="部门">{role.departmentName || '未分配'}</Descriptions.Item>
             <Descriptions.Item label="负责人">{role.ownerName}</Descriptions.Item>
             <Descriptions.Item label="审批规则">{role.approvalPolicy}</Descriptions.Item>
@@ -46,12 +57,21 @@ export function RoleDetailPageClient({
           </Descriptions>
         </Card>
         <Row gutter={[16, 16]}>
-          <Col xs={24} md={12}>
+          <Col xs={24} md={8}>
+            <Card title="技能包" bordered={false}>
+              <Space size={6} wrap>
+                {role.skills.map((skill) => (
+                  <Tag key={skill.code}>{skill.name}</Tag>
+                ))}
+              </Space>
+            </Card>
+          </Col>
+          <Col xs={24} md={8}>
             <Card title="知识来源" bordered={false}>
               <List dataSource={role.knowledgeSources} renderItem={(item) => <List.Item>{item}</List.Item>} />
             </Card>
           </Col>
-          <Col xs={24} md={12}>
+          <Col xs={24} md={8}>
             <Card title="工具能力" bordered={false}>
               <List dataSource={role.tools} renderItem={(item) => <List.Item>{item}</List.Item>} />
             </Card>

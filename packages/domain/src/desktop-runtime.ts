@@ -28,6 +28,8 @@ export interface ModelProfile {
   providerName: string;
   modelName: string;
   purpose: ModelPurpose;
+  apiBaseUrl?: string;
+  apiKey?: string;
   temperature?: number;
   maxTokens?: number;
   fallbackProfileId?: string;
@@ -85,6 +87,8 @@ export function validateModelProfile(input: unknown): ModelProfile {
       'embeddings',
       'document'
     ]),
+    apiBaseUrl: optionalString(record.apiBaseUrl, 'modelProfile.apiBaseUrl'),
+    apiKey: optionalString(record.apiKey, 'modelProfile.apiKey'),
     temperature: optionalNumber(record.temperature, 'modelProfile.temperature'),
     maxTokens: optionalPositiveInteger(record.maxTokens, 'modelProfile.maxTokens'),
     fallbackProfileId: optionalString(record.fallbackProfileId, 'modelProfile.fallbackProfileId'),

@@ -13,6 +13,7 @@ interface InstallRoleInput {
 
 type DatabaseRoleTemplate = {
   id: string;
+  version: string;
   name: string;
   industry: string;
   scenario: string;
@@ -21,18 +22,21 @@ type DatabaseRoleTemplate = {
   businessGoal: string;
   knowledgeSources: unknown;
   tools: unknown;
+  skills: unknown;
   approvalPolicy: string;
 };
 
 type DatabaseRoleInstance = {
   id: string;
   templateId: string;
+  templateVersion: string;
   workspaceId: string;
   name: string;
   status: string;
   businessGoal: string;
   knowledgeSources: unknown;
   tools: unknown;
+  skills: unknown;
   approvalPolicy: string;
   installedAt: Date;
   department?: { name: string } | null;
@@ -161,6 +165,7 @@ export class RoleService {
     const role = await this.prismaService.roleInstance.create({
       data: {
         templateId: template.id,
+        templateVersion: template.version,
         workspaceId,
         departmentId: department?.id ?? null,
         ownerMemberId: ownerMember?.id ?? null,
@@ -169,6 +174,7 @@ export class RoleService {
         businessGoal: template.businessGoal,
         knowledgeSources: this.toStringArray(template.knowledgeSources),
         tools: this.toStringArray(template.tools),
+        skills: this.toSkillSummaries(template.skills),
         approvalPolicy: template.approvalPolicy
       },
       include: this.roleInclude()
@@ -303,11 +309,13 @@ export class RoleService {
   private toTemplateSummary(template: DatabaseRoleTemplate) {
     return {
       id: template.id,
+      version: template.version,
       name: template.name,
       industry: template.industry,
       scenario: template.scenario,
       description: template.description,
-      recommendedPlanCode: template.recommendedPlanCode
+      recommendedPlanCode: template.recommendedPlanCode,
+      skills: this.toSkillSummaries(template.skills)
     };
   }
 
@@ -315,12 +323,14 @@ export class RoleService {
     return {
       id: role.id,
       templateId: role.templateId,
+      templateVersion: role.templateVersion,
       workspaceId: role.workspaceId,
       name: role.name,
       departmentName: role.department?.name,
       ownerName: this.ownerName(role),
       status: this.toRoleStatus(role.status),
       installedAt: role.installedAt.toISOString(),
+      skills: this.toSkillSummaries(role.skills),
       kpis: this.calculateKpis(role)
     };
   }
@@ -331,6 +341,7 @@ export class RoleService {
       businessGoal: role.businessGoal,
       knowledgeSources: this.toStringArray(role.knowledgeSources),
       tools: this.toStringArray(role.tools),
+      skills: this.toSkillSummaries(role.skills),
       approvalPolicy: role.approvalPolicy,
       recentTaskIds: role.tasks.slice(0, 10).map((task) => task.id)
     };
@@ -378,6 +389,29 @@ export class RoleService {
     }
 
     return value.filter((item): item is string => typeof item === 'string');
+  }
+
+  private toSkillSummaries(value: unknown) {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    return value.flatMap((item) => {
+      if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+        return [];
+      }
+
+      const record = item as Record<string, unknown>;
+      const code = typeof record.code === 'string' ? record.code.trim() : '';
+      const name = typeof record.name === 'string' ? record.name.trim() : '';
+      const summary = typeof record.summary === 'string' ? record.summary.trim() : '';
+
+      if (!code || !name || !summary) {
+        return [];
+      }
+
+      return [{ code, name, summary }];
+    });
   }
 
   private toRoleStatus(value: string): 'running' | 'trial' | 'configuration_required' | 'paused' {

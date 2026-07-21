@@ -481,6 +481,7 @@ model PaymentTransaction {
 
 model RoleTemplate {
   id                  String   @id
+  version             String
   name                String
   industry            String
   scenario            String
@@ -489,6 +490,7 @@ model RoleTemplate {
   businessGoal        String   @map("business_goal")
   knowledgeSources    Json     @map("knowledge_sources")
   tools               Json
+  skills              Json
   approvalPolicy      String   @map("approval_policy")
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
@@ -496,12 +498,14 @@ model RoleTemplate {
   roleInstances RoleInstance[]
 
   @@index([recommendedPlanCode])
+  @@index([version])
   @@map("role_templates")
 }
 
 model RoleInstance {
   id               String             @id @default(uuid()) @db.Uuid
   templateId       String             @map("template_id")
+  templateVersion  String             @map("template_version")
   workspaceId      String             @map("workspace_id") @db.Uuid
   departmentId     String?            @map("department_id") @db.Uuid
   ownerMemberId    String?            @map("owner_member_id") @db.Uuid
@@ -510,6 +514,7 @@ model RoleInstance {
   businessGoal     String             @map("business_goal")
   knowledgeSources Json               @map("knowledge_sources")
   tools            Json
+  skills           Json
   approvalPolicy   String             @map("approval_policy")
   installedAt      DateTime           @default(now()) @map("installed_at")
   createdAt        DateTime           @default(now()) @map("created_at")

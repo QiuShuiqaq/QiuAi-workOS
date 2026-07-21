@@ -4,6 +4,7 @@ import type {
   DesktopExecutionLogEntry,
   DesktopExecutionRunSummary,
   DesktopTaskDetail,
+  DesktopTaskExecutionContext,
   DesktopTaskPriority,
   DesktopTaskState,
   DesktopTaskSummary
@@ -22,6 +23,7 @@ export interface MockTaskSeed {
   createdAt?: string;
   artifactCount?: number;
   costCents?: number;
+  executionContext?: DesktopTaskExecutionContext;
 }
 
 export function createMockTaskSummary(seed: MockTaskSeed): DesktopTaskSummary {
@@ -55,7 +57,8 @@ export function createMockTaskDetail(seed: MockTaskDetailSeed): DesktopTaskDetai
     createdAt,
     updatedAt,
     artifactCount,
-    costCents
+    costCents,
+    executionContext: seed.executionContext
   });
 
   return {
@@ -91,7 +94,14 @@ export function createMockTaskDetail(seed: MockTaskDetailSeed): DesktopTaskDetai
       state,
       createdAt,
       updatedAt
-    })
+    }),
+    executionContext: seed.executionContext
+      ? {
+          modelProfileIds: [...seed.executionContext.modelProfileIds],
+          toolIds: [...seed.executionContext.toolIds],
+          knowledgeBindingIds: [...seed.executionContext.knowledgeBindingIds]
+        }
+      : undefined
   };
 }
 
@@ -112,7 +122,12 @@ export function createDesktopPreviewTaskDetails(): DesktopTaskDetail[] {
       state: 'completed',
       updatedAt: baseTime.toISOString(),
       artifactCount: 1,
-      costCents: 320
+      costCents: 320,
+      executionContext: {
+        modelProfileIds: ['qiu-general-default', 'qiu-vision-default'],
+        toolIds: ['web-search', 'office-document', 'local-filesystem'],
+        knowledgeBindingIds: ['kb-local-folder', 'kb-server-summary']
+      }
     }),
     createMockTaskDetail({
       taskId: 'task-preview-publish-check',
@@ -123,7 +138,12 @@ export function createDesktopPreviewTaskDetails(): DesktopTaskDetail[] {
       state: 'waiting_approval',
       updatedAt: new Date(baseTime.getTime() + 18 * 60 * 1000).toISOString(),
       artifactCount: 0,
-      costCents: 120
+      costCents: 120,
+      executionContext: {
+        modelProfileIds: ['qiu-general-default'],
+        toolIds: ['web-search'],
+        knowledgeBindingIds: ['kb-local-folder']
+      }
     })
   ];
 }
@@ -143,7 +163,14 @@ export function createTaskDetailFromSummary(
     createdAt: summary.updatedAt,
     updatedAt: summary.updatedAt,
     artifactCount: summary.artifactCount ?? 0,
-    costCents: summary.costCents ?? 0
+    costCents: summary.costCents ?? 0,
+    executionContext: summary.executionContext
+      ? {
+          modelProfileIds: [...summary.executionContext.modelProfileIds],
+          toolIds: [...summary.executionContext.toolIds],
+          knowledgeBindingIds: [...summary.executionContext.knowledgeBindingIds]
+        }
+      : undefined
   });
 }
 
@@ -155,7 +182,14 @@ export function toDesktopTaskSummary(detail: DesktopTaskDetail): DesktopTaskSumm
     state: detail.state,
     updatedAt: detail.updatedAt,
     artifactCount: detail.artifactCount ?? detail.artifacts.length,
-    costCents: detail.costCents ?? aggregateCostCents(detail.costRecords)
+    costCents: detail.costCents ?? aggregateCostCents(detail.costRecords),
+    executionContext: detail.executionContext
+      ? {
+          modelProfileIds: [...detail.executionContext.modelProfileIds],
+          toolIds: [...detail.executionContext.toolIds],
+          knowledgeBindingIds: [...detail.executionContext.knowledgeBindingIds]
+        }
+      : undefined
   };
 }
 
@@ -180,6 +214,7 @@ function buildExecutionLogs(input: {
   updatedAt: string;
   artifactCount: number;
   costCents: number;
+  executionContext?: DesktopTaskExecutionContext;
 }): DesktopExecutionLogEntry[] {
   const startedAt = input.createdAt;
   const finishedAt = input.updatedAt;

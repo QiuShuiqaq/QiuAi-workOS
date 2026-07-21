@@ -4,6 +4,18 @@ export type DesktopRolePackageState = 'installed' | 'running' | 'paused' | 'erro
 
 export type DesktopTaskState = 'queued' | 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled';
 
+export interface DesktopRoleSkillSummary {
+  code: string;
+  name: string;
+  summary: string;
+}
+
+export interface DesktopTaskExecutionContext {
+  modelProfileIds: string[];
+  toolIds: string[];
+  knowledgeBindingIds: string[];
+}
+
 export interface DesktopRolePackageSummary {
   roleCode: string;
   version: string;
@@ -11,6 +23,9 @@ export interface DesktopRolePackageSummary {
   installedAt: string;
   lastRunAt?: string;
   taskCount?: number;
+  templateId?: string;
+  templateVersion?: string;
+  skills?: DesktopRoleSkillSummary[];
 }
 
 export interface DesktopToolSummary {
@@ -27,6 +42,7 @@ export interface DesktopTaskSummary {
   updatedAt: string;
   artifactCount?: number;
   costCents?: number;
+  executionContext?: DesktopTaskExecutionContext;
 }
 
 export interface DesktopRuntimeSnapshot {

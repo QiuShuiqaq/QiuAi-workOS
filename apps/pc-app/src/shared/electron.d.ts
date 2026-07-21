@@ -46,6 +46,17 @@ declare module 'electron' {
 
   export const shell: {
     openExternal(url: string): Promise<void>;
+    openPath(path: string): Promise<string>;
+  };
+
+  export const dialog: {
+    showOpenDialog(options: {
+      title?: string;
+      properties?: Array<'openFile' | 'openDirectory' | 'multiSelections'>;
+    }): Promise<{
+      canceled: boolean;
+      filePaths: string[];
+    }>;
   };
 
   export const ipcMain: {

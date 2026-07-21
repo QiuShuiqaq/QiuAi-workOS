@@ -161,6 +161,7 @@ export function createInitialDesktopRuntimeState(
     rolePackages: initialRolePackages,
     modelProfiles: initialModelProfiles,
     tools: initialTools,
+    knowledgeSources: [],
     taskDetails,
     serverConnection:
       input.serverConnection ??

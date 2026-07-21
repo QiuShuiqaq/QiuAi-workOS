@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import type {
   CurrentAccountResponse,
@@ -13,6 +13,7 @@ import Col from 'antd/es/col';
 import List from 'antd/es/list';
 import Row from 'antd/es/row';
 import Space from 'antd/es/space';
+import Tag from 'antd/es/tag';
 import Typography from 'antd/es/typography';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
@@ -57,10 +58,7 @@ export function RolesPageClient({
 
   const roleCount = roles.length;
   const runningCount = useMemo(() => roles.filter((role) => role.status === 'running').length, [roles]);
-  const monthlyCost = useMemo(
-    () => roles.reduce((sum, role) => sum + role.kpis.monthlyCost, 0),
-    [roles]
-  );
+  const monthlyCost = useMemo(() => roles.reduce((sum, role) => sum + role.kpis.monthlyCost, 0), [roles]);
 
   async function installRole(templateId: string) {
     setInstallingTemplateId(templateId);
@@ -82,7 +80,7 @@ export function RolesPageClient({
             <QiuMetricCard title="已安装岗位" value={String(roleCount)} trend={`${runningCount} 个运行中`} />
           </Col>
           <Col xs={24} md={8}>
-            <QiuMetricCard title="可安装模板" value={String(templates.data.length)} trend="行业岗位模板" />
+            <QiuMetricCard title="可安装模板" value={String(templates.data.length)} trend="岗位模板目录" />
           </Col>
           <Col xs={24} md={8}>
             <QiuMetricCard title="岗位月成本" value={`¥${monthlyCost.toFixed(2)}`} trend="来自真实成本记录" />
@@ -103,8 +101,25 @@ export function RolesPageClient({
                     ]}
                   >
                     <List.Item.Meta
-                      title={<Space><Typography.Text strong>{role.name}</Typography.Text><QiuStatusTag tone={roleTone(role.status)}>{roleLabel(role.status)}</QiuStatusTag></Space>}
-                      description={`${role.departmentName || '未分配部门'} · ${role.ownerName} · 完成 ${role.kpis.taskCompleted} 个任务`}
+                      title={
+                        <Space size={8} wrap>
+                          <Typography.Text strong>{role.name}</Typography.Text>
+                          <QiuStatusTag tone={roleTone(role.status)}>{roleLabel(role.status)}</QiuStatusTag>
+                          <Tag color="blue">v{role.templateVersion}</Tag>
+                        </Space>
+                      }
+                      description={
+                        <Space direction="vertical" size={4}>
+                          <Typography.Text type="secondary">
+                            {role.departmentName || '未分配部门'} · {role.ownerName} · 完成 {role.kpis.taskCompleted} 个任务
+                          </Typography.Text>
+                          <Space size={6} wrap>
+                            {role.skills.slice(0, 4).map((skill) => (
+                              <Tag key={`${role.id}-${skill.code}`}>{skill.name}</Tag>
+                            ))}
+                          </Space>
+                        </Space>
+                      }
                     />
                   </List.Item>
                 )}
@@ -129,8 +144,26 @@ export function RolesPageClient({
                     ]}
                   >
                     <List.Item.Meta
-                      title={template.name}
-                      description={`${template.industry} · ${template.scenario}`}
+                      title={
+                        <Space size={8} wrap>
+                          <Typography.Text strong>{template.name}</Typography.Text>
+                          <Tag color="blue">v{template.version}</Tag>
+                          <Tag color="geekblue">{template.recommendedPlanCode}</Tag>
+                        </Space>
+                      }
+                      description={
+                        <Space direction="vertical" size={4}>
+                          <Typography.Text type="secondary">
+                            {template.industry} · {template.scenario}
+                          </Typography.Text>
+                          <Typography.Text type="secondary">{template.description}</Typography.Text>
+                          <Space size={6} wrap>
+                            {template.skills.slice(0, 4).map((skill) => (
+                              <Tag key={`${template.id}-${skill.code}`}>{skill.name}</Tag>
+                            ))}
+                          </Space>
+                        </Space>
+                      }
                     />
                   </List.Item>
                 )}

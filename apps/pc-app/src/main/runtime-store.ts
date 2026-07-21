@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import type { DesktopRuntimeState } from '../shared/desktop-api.js';
 import type {
+  DesktopKnowledgeSourceSummary,
   DesktopRuntimeSnapshot,
   ModelProfile,
   RolePackageManifest,
@@ -53,6 +54,7 @@ interface StoredDesktopWorkspaceRuntime {
   schemaVersion: 1;
   savedAt: string;
   runtimeSnapshot: DesktopRuntimeSnapshot;
+  knowledgeSources: DesktopKnowledgeSourceSummary[];
   taskDetails?: DesktopRuntimeState['taskDetails'];
 }
 
@@ -110,8 +112,13 @@ export async function loadDesktopRuntimeState(
     return undefined;
   }
 
-  await saveDesktopRuntimeState(userDataPath, legacyState);
-  return legacyState;
+  const normalizedLegacyState = {
+    ...legacyState,
+    knowledgeSources: legacyState.knowledgeSources ?? []
+  };
+
+  await saveDesktopRuntimeState(userDataPath, normalizedLegacyState);
+  return normalizedLegacyState;
 }
 
 export async function saveDesktopRuntimeState(
@@ -195,6 +202,7 @@ function readSplitDesktopRuntimeState(
     rolePackages: catalog.rolePackages,
     modelProfiles: catalog.modelProfiles,
     tools: catalog.tools,
+    knowledgeSources: runtime.knowledgeSources,
     taskDetails: runtime.taskDetails,
     serverConnection: profile.serverConnection
   };
@@ -220,6 +228,7 @@ function readPersistedDesktopRuntimeState(snapshot: {
     rolePackages: catalog.rolePackages,
     modelProfiles: catalog.modelProfiles,
     tools: catalog.tools,
+    knowledgeSources: runtime.knowledgeSources,
     taskDetails: runtime.taskDetails,
     serverConnection: profile.serverConnection
   };
@@ -326,6 +335,7 @@ function readWorkspaceRuntimeRecord(
     schemaVersion: 1,
     savedAt: record.savedAt,
     runtimeSnapshot: record.runtimeSnapshot,
+    knowledgeSources: readKnowledgeSourcesRecord(record.knowledgeSources),
     taskDetails: readTaskDetailsRecord(record.taskDetails)
   };
 }
@@ -456,6 +466,8 @@ function isModelProfile(value: unknown): value is ModelProfile {
       record.purpose === 'vision' ||
       record.purpose === 'embeddings' ||
       record.purpose === 'document') &&
+    (record.apiBaseUrl === undefined || typeof record.apiBaseUrl === 'string') &&
+    (record.apiKey === undefined || typeof record.apiKey === 'string') &&
     (record.temperature === undefined || typeof record.temperature === 'number') &&
     (record.maxTokens === undefined || typeof record.maxTokens === 'number') &&
     (record.fallbackProfileId === undefined || typeof record.fallbackProfileId === 'string') &&
@@ -520,9 +532,39 @@ function isDesktopRuntimeState(value: unknown): value is DesktopRuntimeState {
     Array.isArray(record.rolePackages) &&
     Array.isArray(record.modelProfiles) &&
     Array.isArray(record.tools) &&
+    (record.knowledgeSources === undefined || Array.isArray(record.knowledgeSources)) &&
     (record.taskDetails === undefined || Array.isArray(record.taskDetails)) &&
     typeof record.serverConnection === 'object' &&
     record.serverConnection !== null
+  );
+}
+
+function readKnowledgeSourcesRecord(value: unknown): DesktopKnowledgeSourceSummary[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isDesktopKnowledgeSourceSummary);
+}
+
+function isDesktopKnowledgeSourceSummary(value: unknown): value is DesktopKnowledgeSourceSummary {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === 'string' &&
+    (record.source === 'local_folder' ||
+      record.source === 'local_file' ||
+      record.source === 'workspace_library' ||
+      record.source === 'server_summary') &&
+    typeof record.label === 'string' &&
+    typeof record.enabled === 'boolean' &&
+    typeof record.createdAt === 'string' &&
+    (record.localPath === undefined || typeof record.localPath === 'string') &&
+    (record.lastIndexedAt === undefined || typeof record.lastIndexedAt === 'string') &&
+    (record.summary === undefined || typeof record.summary === 'string')
   );
 }
 

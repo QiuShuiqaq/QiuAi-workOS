@@ -1,4 +1,8 @@
-import type { PlanCode } from '../types/plan-code';
+﻿import type { PlanCode } from '../types/plan-code';
+import {
+  serverRoleTemplateCatalog,
+  type ServerRoleSkill
+} from '../role-template-catalog';
 
 export interface MockWorkspaceSummary {
   id: string;
@@ -27,22 +31,26 @@ export interface MockPlanDetail {
 
 export interface MockRoleTemplateSummary {
   id: string;
+  version: string;
   name: string;
   industry: string;
   scenario: string;
   description: string;
   recommendedPlanCode: string;
+  skills: ServerRoleSkill[];
 }
 
 export interface MockRoleInstanceDetail {
   id: string;
   templateId: string;
+  templateVersion: string;
   workspaceId: string;
   name: string;
   departmentName?: string;
   ownerName: string;
   status: 'running' | 'trial' | 'configuration_required' | 'paused';
   installedAt: string;
+  skills: ServerRoleSkill[];
   kpis: {
     taskCompleted: number;
     automationRate: number;
@@ -106,6 +114,14 @@ export interface MockPlatformMetricSummary {
   title: string;
   value: string;
   trend?: string;
+}
+
+const roleTemplateById = new Map(
+  serverRoleTemplateCatalog.map((template) => [template.templateId, template] as const)
+);
+
+function cloneSkills(skills: ServerRoleSkill[]) {
+  return skills.map((skill) => ({ ...skill }));
 }
 
 const personalFreeEntitlements = [
@@ -284,43 +300,31 @@ export const demoPlans: MockPlanDetail[] = [
   }
 ];
 
-export const demoRoleTemplates: MockRoleTemplateSummary[] = [
-  {
-    id: 'template_case_ops',
-    name: 'AI Case Operations Specialist',
-    industry: 'Health products and private domain operations',
-    scenario: 'Case material screening, editing, and publishing',
-    description: 'Processes customer case materials and creates reviewable operations output.',
-    recommendedPlanCode: 'PERSONAL_FREE'
-  },
-  {
-    id: 'template_customer_followup',
-    name: 'AI Customer Follow-up Specialist',
-    industry: 'Customer operations',
-    scenario: 'Follow-up record cleanup, intent detection, and action suggestions',
-    description: 'Structures customer follow-up records and proposes next actions.',
-    recommendedPlanCode: 'ENTERPRISE_BASIC_MONTHLY'
-  },
-  {
-    id: 'template_contract_review',
-    name: 'AI Contract Review Specialist',
-    industry: 'Legal services',
-    scenario: 'Contract clause review and risk summary',
-    description: 'Performs first-pass contract risk detection with review notes.',
-    recommendedPlanCode: 'ENTERPRISE_STANDARD_MONTHLY'
-  }
-];
+export const demoRoleTemplates: MockRoleTemplateSummary[] = serverRoleTemplateCatalog.map(
+  (template) => ({
+    id: template.templateId,
+    version: template.version,
+    name: template.name,
+    industry: template.industry,
+    scenario: template.scenario,
+    description: template.description,
+    recommendedPlanCode: template.recommendedPlanCode,
+    skills: cloneSkills(template.skills)
+  })
+);
 
 export const demoRoles: MockRoleInstanceDetail[] = [
   {
     id: 'role_case_ops',
     templateId: 'template_case_ops',
+    templateVersion: roleTemplateById.get('template_case_ops')?.version ?? '1.0.0',
     workspaceId: 'enterprise',
     name: 'AI Case Operations Specialist',
     departmentName: 'Operations',
     ownerName: 'Workspace Admin',
     status: 'running',
     installedAt: '2026-07-18T00:00:00.000Z',
+    skills: cloneSkills(roleTemplateById.get('template_case_ops')?.skills ?? []),
     businessGoal: 'Improve case material handling efficiency and produce repeatable operations output.',
     knowledgeSources: ['Case standard', 'Publishing guideline', 'Historical case library'],
     tools: ['Asset library', 'Publishing system', 'Data dashboard'],
@@ -336,12 +340,14 @@ export const demoRoles: MockRoleInstanceDetail[] = [
   {
     id: 'role_customer_followup',
     templateId: 'template_customer_followup',
+    templateVersion: roleTemplateById.get('template_customer_followup')?.version ?? '1.0.0',
     workspaceId: 'enterprise',
     name: 'AI Customer Follow-up Specialist',
     departmentName: 'Customer Success',
     ownerName: 'Customer Lead',
     status: 'configuration_required',
     installedAt: '2026-07-18T00:00:00.000Z',
+    skills: cloneSkills(roleTemplateById.get('template_customer_followup')?.skills ?? []),
     businessGoal: 'Turn customer follow-up notes into structured intent and next actions.',
     knowledgeSources: ['Customer segments', 'Follow-up scripts', 'After-sales policy'],
     tools: ['CRM', 'Follow-up records'],
@@ -357,12 +363,14 @@ export const demoRoles: MockRoleInstanceDetail[] = [
   {
     id: 'role_contract_review',
     templateId: 'template_contract_review',
+    templateVersion: roleTemplateById.get('template_contract_review')?.version ?? '1.0.0',
     workspaceId: 'enterprise',
     name: 'AI Contract Review Specialist',
     departmentName: 'Legal',
     ownerName: 'Legal Lead',
     status: 'trial',
     installedAt: '2026-07-18T00:00:00.000Z',
+    skills: cloneSkills(roleTemplateById.get('template_contract_review')?.skills ?? []),
     businessGoal: 'Reduce repeated legal review time by producing a first-pass risk summary.',
     knowledgeSources: ['Contract templates', 'Risk clause checklist'],
     tools: ['Document library'],

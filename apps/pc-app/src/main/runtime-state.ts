@@ -132,16 +132,21 @@ export async function checkServerConnection(): Promise<DesktopServerConnectionSt
 }
 
 function hydratePersistedRuntimeState(state: DesktopRuntimeState): DesktopRuntimeState {
-  if (state.taskDetails && state.taskDetails.length > 0) {
-    return state;
+  const normalizedState = {
+    ...state,
+    knowledgeSources: state.knowledgeSources ?? []
+  };
+
+  if (normalizedState.taskDetails && normalizedState.taskDetails.length > 0) {
+    return normalizedState;
   }
 
-  const taskDetails = state.runtimeSnapshot.tasks.map((task) =>
-    createTaskDetailFromSummary(task, resolveRoleName(state.rolePackages, task.roleCode))
+  const taskDetails = normalizedState.runtimeSnapshot.tasks.map((task) =>
+    createTaskDetailFromSummary(task, resolveRoleName(normalizedState.rolePackages, task.roleCode))
   );
 
   return {
-    ...state,
+    ...normalizedState,
     taskDetails
   };
 }

@@ -178,6 +178,7 @@ export async function writeWorkspaceSnapshotBundle(
       schemaVersion: 1,
       savedAt,
       runtimeSnapshot: state.runtimeSnapshot,
+      knowledgeSources: state.knowledgeSources,
       taskDetails: state.taskDetails ?? []
     };
 

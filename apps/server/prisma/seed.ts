@@ -1,6 +1,7 @@
-import { PrismaClient } from '@prisma/client';
+﻿import { PrismaClient } from '@prisma/client';
 
 import { hashPassword } from '../src/shared/auth/password-hash';
+import { serverRoleTemplateCatalog } from '../src/shared/role-template-catalog';
 
 const prisma = new PrismaClient();
 
@@ -242,44 +243,7 @@ const plans = [
   }
 ] as const;
 
-const roleTemplates = [
-  {
-    id: 'template_case_ops',
-    name: 'AI案例运营专员',
-    industry: '保健品与私域运营',
-    scenario: '案例素材识别、筛选、剪辑建议和发布准备',
-    description: '自动处理客户案例素材，生成筛选结果、内容建议和运营交付物。',
-    recommendedPlanCode: 'PERSONAL_FREE',
-    businessGoal: '提升案例素材处理效率，稳定完成案例筛选、内容生成和运营复盘。',
-    knowledgeSources: ['企业案例标准', '内容发布规范', '历史案例库'],
-    tools: ['素材库', '内容发布系统', '数据看板'],
-    approvalPolicy: '发布前需要运营负责人审批。'
-  },
-  {
-    id: 'template_customer_followup',
-    name: 'AI客户回访专员',
-    industry: '客户运营',
-    scenario: '回访记录整理、意向识别和后续动作建议',
-    description: '整理客户回访内容，识别客户意向和风险，并生成跟进建议。',
-    recommendedPlanCode: 'ENTERPRISE_BASIC_MONTHLY',
-    businessGoal: '沉淀客户回访记录，识别客户意向并推动后续跟进。',
-    knowledgeSources: ['客户分层规则', '回访话术', '售后政策'],
-    tools: ['CRM', '回访记录表'],
-    approvalPolicy: '高风险客户建议需要人工确认。'
-  },
-  {
-    id: 'template_contract_review',
-    name: 'AI合同审核专员',
-    industry: '法律服务',
-    scenario: '合同条款审查和风险摘要',
-    description: '对合同进行初步风险识别，输出审查摘要和风险提示。',
-    recommendedPlanCode: 'ENTERPRISE_STANDARD_MONTHLY',
-    businessGoal: '对合同进行初审，减少法务重复审查时间。',
-    knowledgeSources: ['合同模板库', '风险条款清单'],
-    tools: ['文档库'],
-    approvalPolicy: '所有合同结论必须经法务确认。'
-  }
-] as const;
+const roleTemplates = serverRoleTemplateCatalog;
 
 async function seedAccounts() {
   const accounts = [
@@ -671,9 +635,10 @@ async function seedRoleTemplates() {
   for (const template of roleTemplates) {
     await prisma.roleTemplate.upsert({
       where: {
-        id: template.id
+        id: template.templateId
       },
       update: {
+        version: template.version,
         name: template.name,
         industry: template.industry,
         scenario: template.scenario,
@@ -682,10 +647,12 @@ async function seedRoleTemplates() {
         businessGoal: template.businessGoal,
         knowledgeSources: [...template.knowledgeSources],
         tools: [...template.tools],
+        skills: template.skills.map((skill) => ({ ...skill })),
         approvalPolicy: template.approvalPolicy
       },
       create: {
-        id: template.id,
+        id: template.templateId,
+        version: template.version,
         name: template.name,
         industry: template.industry,
         scenario: template.scenario,
@@ -694,6 +661,7 @@ async function seedRoleTemplates() {
         businessGoal: template.businessGoal,
         knowledgeSources: [...template.knowledgeSources],
         tools: [...template.tools],
+        skills: template.skills.map((skill) => ({ ...skill })),
         approvalPolicy: template.approvalPolicy
       }
     });

@@ -30,6 +30,7 @@ export interface DesktopArtifactSummary {
   title: string;
   content: string;
   createdAt: string;
+  localPath?: string;
 }
 
 export interface DesktopExecutionLogEntry {
@@ -59,12 +60,20 @@ export interface DesktopExecutionRunSummary {
   finishedAt?: string;
 }
 
+export interface DesktopTaskExecutionContext {
+  modelProfileIds: string[];
+  toolIds: string[];
+  knowledgeBindingIds: string[];
+}
+
 export interface ModelProfile {
   id: string;
   providerId: string;
   providerName: string;
   modelName: string;
   purpose: ModelPurpose;
+  apiBaseUrl?: string;
+  apiKey?: string;
   temperature?: number;
   maxTokens?: number;
   fallbackProfileId?: string;
@@ -81,11 +90,20 @@ export interface ToolManifest {
   requiresApproval: boolean;
 }
 
+export interface DesktopRoleSkillSummary {
+  code: string;
+  name: string;
+  summary: string;
+}
+
 export interface RolePackageManifest {
   roleCode: string;
   name: string;
   version: string;
   summary?: string;
+  templateId?: string;
+  templateVersion?: string;
+  skills?: DesktopRoleSkillSummary[];
   modelProfileIds: string[];
   toolIds: string[];
   requiredKnowledgeSources: KnowledgeBindingSource[];
@@ -126,12 +144,26 @@ export interface DesktopRolePackageSummary {
   installedAt: string;
   lastRunAt?: string;
   taskCount?: number;
+  templateId?: string;
+  templateVersion?: string;
+  skills?: DesktopRoleSkillSummary[];
 }
 
 export interface DesktopToolSummary {
   toolId: string;
   enabled: boolean;
   lastUsedAt?: string;
+}
+
+export interface DesktopKnowledgeSourceSummary {
+  id: string;
+  source: KnowledgeBindingSource;
+  label: string;
+  enabled: boolean;
+  createdAt: string;
+  localPath?: string;
+  lastIndexedAt?: string;
+  summary?: string;
 }
 
 export interface DesktopTaskSummary {
@@ -142,6 +174,7 @@ export interface DesktopTaskSummary {
   updatedAt: string;
   artifactCount?: number;
   costCents?: number;
+  executionContext?: DesktopTaskExecutionContext;
 }
 
 export interface DesktopTaskDetail {
@@ -161,6 +194,7 @@ export interface DesktopTaskDetail {
   executionLogs: DesktopExecutionLogEntry[];
   costRecords: DesktopCostRecordSummary[];
   currentRun?: DesktopExecutionRunSummary;
+  executionContext?: DesktopTaskExecutionContext;
 }
 
 export interface DesktopRuntimeSnapshot {

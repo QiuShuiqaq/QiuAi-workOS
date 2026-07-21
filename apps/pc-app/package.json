@@ -15,7 +15,7 @@
     "package": "npm run build && node scripts/package.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "lint": "node -e \"console.log('Electron lint placeholder.')\"",
-    "test": "node --import tsx --test src/shared/desktop-state.test.ts src/main/runtime-store.test.ts src/main/workspace-backup.test.ts"
+    "test": "node --import tsx --test src/shared/desktop-state.test.ts src/shared/desktop-task-runner.test.ts src/main/artifact-store.test.ts src/main/desktop-tool.test.ts src/main/runtime-store.test.ts src/main/workspace-backup.test.ts"
   },
   "dependencies": {
     "@ant-design/icons": "^5.0.0",

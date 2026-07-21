@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -15,6 +16,7 @@ import {
 } from '../shared/desktop-api.js';
 import type {
   DesktopPlatform,
+  DesktopKnowledgeSourceSummary,
   DesktopRolePackageState,
   DesktopRuntimeSnapshot,
   DesktopTaskState,
@@ -22,6 +24,7 @@ import type {
   DesktopToolSummary,
   LocalRuntimeContract,
   ModelProfile,
+  DesktopRoleSkillSummary,
   RolePackageManifest,
   ToolManifest
 } from '../shared/desktop-contract.js';
@@ -38,6 +41,7 @@ const backupSchemaVersion = 1;
 const backupBundleType = 'desktop-runtime-state-backup';
 const backupManifestFileName = 'manifest.json';
 const backupStateFileName = 'desktop-runtime-state.json';
+const backupAssetsFolderName = 'assets';
 
 export interface WorkspaceBackupManifest {
   schemaVersion: 1;
@@ -86,6 +90,7 @@ export async function createWorkspaceBackupBundle(
   };
 
   try {
+    copyReferencedArtifactFiles(validatedState, layout, tempBundlePath);
     writeJsonFile(path.join(tempBundlePath, backupManifestFileName), manifest);
     writeJsonFile(path.join(tempBundlePath, backupStateFileName), validatedState);
     renameSync(tempBundlePath, finalBundlePath);
@@ -165,7 +170,12 @@ export async function restoreWorkspaceBackupBundle(
     );
   }
 
-  await saveDesktopRuntimeState(userDataPath, state);
+  const restoredLayout = getDesktopStorageLayout(userDataPath, manifest.workspaceId);
+  ensureDesktopStorageLayout(restoredLayout);
+  copyBackupAssets(normalizedBundlePath, restoredLayout.assetsPath);
+
+  const restoredState = remapRestoredArtifactPaths(state, userDataPath, manifest.workspaceId);
+  await saveDesktopRuntimeState(userDataPath, restoredState);
 
   return {
     bundleId: manifest.bundleId,
@@ -174,6 +184,99 @@ export async function restoreWorkspaceBackupBundle(
     createdAt: manifest.createdAt,
     appVersion: manifest.appVersion
   };
+}
+
+function copyReferencedArtifactFiles(
+  state: DesktopRuntimeState,
+  layout: DesktopStorageLayout,
+  bundlePath: string
+): void {
+  for (const artifact of listArtifacts(state)) {
+    if (!artifact.localPath || !existsSync(artifact.localPath)) {
+      continue;
+    }
+
+    const relativePath = getSafeRelativePath(layout.assetsPath, artifact.localPath);
+    if (!relativePath) {
+      continue;
+    }
+
+    const destinationPath = path.join(bundlePath, backupAssetsFolderName, relativePath);
+    mkdirSync(path.dirname(destinationPath), { recursive: true });
+    copyFileSync(artifact.localPath, destinationPath);
+  }
+}
+
+function copyBackupAssets(bundlePath: string, assetsPath: string): void {
+  const backupAssetsPath = path.join(bundlePath, backupAssetsFolderName);
+  if (!existsSync(backupAssetsPath)) {
+    return;
+  }
+
+  copyDirectoryContents(backupAssetsPath, assetsPath);
+}
+
+function copyDirectoryContents(sourcePath: string, destinationPath: string): void {
+  mkdirSync(destinationPath, { recursive: true });
+
+  for (const entry of readdirSync(sourcePath, { withFileTypes: true })) {
+    const sourceEntryPath = path.join(sourcePath, entry.name);
+    const destinationEntryPath = path.join(destinationPath, entry.name);
+
+    if (entry.isDirectory()) {
+      copyDirectoryContents(sourceEntryPath, destinationEntryPath);
+      continue;
+    }
+
+    if (entry.isFile()) {
+      mkdirSync(path.dirname(destinationEntryPath), { recursive: true });
+      copyFileSync(sourceEntryPath, destinationEntryPath);
+    }
+  }
+}
+
+function remapRestoredArtifactPaths(
+  state: DesktopRuntimeState,
+  userDataPath: string,
+  workspaceId: string
+): DesktopRuntimeState {
+  const originalLayout = getDesktopStorageLayout(state.app.userDataPath, workspaceId);
+  const restoredLayout = getDesktopStorageLayout(userDataPath, workspaceId);
+  const taskDetails = state.taskDetails?.map((task) => ({
+    ...task,
+    artifacts: task.artifacts.map((artifact) => {
+      if (!artifact.localPath) {
+        return artifact;
+      }
+
+      const relativePath = getSafeRelativePath(originalLayout.assetsPath, artifact.localPath);
+      return relativePath
+        ? { ...artifact, localPath: path.join(restoredLayout.assetsPath, relativePath) }
+        : artifact;
+    })
+  }));
+
+  return {
+    ...state,
+    app: {
+      ...state.app,
+      userDataPath
+    },
+    taskDetails
+  };
+}
+
+function getSafeRelativePath(rootPath: string, targetPath: string): string | undefined {
+  const relativePath = path.relative(path.resolve(rootPath), path.resolve(targetPath));
+  if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    return undefined;
+  }
+
+  return relativePath;
+}
+
+function listArtifacts(state: DesktopRuntimeState) {
+  return (state.taskDetails ?? []).flatMap((task) => task.artifacts);
 }
 
 function buildBackupBundleId(workspaceId: string, createdAt: string): string {
@@ -227,6 +330,9 @@ function validateDesktopRuntimeState(input: unknown): DesktopRuntimeState {
     app: validateDesktopAppInfo(record.app),
     localRuntime: validateLocalRuntimeContract(record.localRuntime),
     runtimeSnapshot: validateDesktopRuntimeSnapshot(record.runtimeSnapshot),
+    knowledgeSources: Array.isArray(record.knowledgeSources)
+      ? record.knowledgeSources.map(validateDesktopKnowledgeSourceSummary)
+      : [],
     taskDetails: Array.isArray(record.taskDetails)
       ? record.taskDetails.map(validateDesktopTaskDetail)
       : undefined,
@@ -238,6 +344,26 @@ function validateDesktopRuntimeState(input: unknown): DesktopRuntimeState {
     ),
     tools: requireArray(record.tools, 'desktopRuntimeState.tools').map(validateToolManifest),
     serverConnection: validateDesktopServerConnectionStatus(record.serverConnection)
+  };
+}
+
+function validateDesktopKnowledgeSourceSummary(value: unknown): DesktopKnowledgeSourceSummary {
+  const record = requireRecord(value, 'desktop knowledge source summary');
+
+  return {
+    id: requireString(record.id, 'knowledgeSource.id'),
+    source: requireEnum(record.source, 'knowledgeSource.source', [
+      'local_folder',
+      'local_file',
+      'workspace_library',
+      'server_summary'
+    ]),
+    label: requireString(record.label, 'knowledgeSource.label'),
+    enabled: optionalBoolean(record.enabled, 'knowledgeSource.enabled'),
+    createdAt: requireString(record.createdAt, 'knowledgeSource.createdAt'),
+    localPath: optionalString(record.localPath, 'knowledgeSource.localPath'),
+    lastIndexedAt: optionalString(record.lastIndexedAt, 'knowledgeSource.lastIndexedAt'),
+    summary: optionalString(record.summary, 'knowledgeSource.summary')
   };
 }
 
@@ -318,7 +444,21 @@ function validateDesktopRolePackageSummary(value: unknown): DesktopRuntimeState[
     ]) as DesktopRolePackageState,
     installedAt: requireString(record.installedAt, 'rolePackageSummary.installedAt'),
     lastRunAt: optionalString(record.lastRunAt, 'rolePackageSummary.lastRunAt'),
-    taskCount: optionalInteger(record.taskCount, 'rolePackageSummary.taskCount')
+    taskCount: optionalInteger(record.taskCount, 'rolePackageSummary.taskCount'),
+    templateId: optionalString(record.templateId, 'rolePackageSummary.templateId'),
+    templateVersion: optionalString(record.templateVersion, 'rolePackageSummary.templateVersion'),
+    skills: Array.isArray(record.skills)
+      ? record.skills.map(validateDesktopRoleSkillSummary)
+      : undefined
+  };
+}
+
+function validateDesktopRoleSkillSummary(value: unknown): DesktopRoleSkillSummary {
+  const record = requireRecord(value, 'desktop role skill summary');
+  return {
+    code: requireString(record.code, 'roleSkill.code'),
+    name: requireString(record.name, 'roleSkill.name'),
+    summary: requireString(record.summary, 'roleSkill.summary')
   };
 }
 
@@ -347,7 +487,10 @@ function validateDesktopTaskSummary(value: unknown): DesktopTaskSummary {
     ]) as DesktopTaskState,
     updatedAt: requireString(record.updatedAt, 'taskSummary.updatedAt'),
     artifactCount: optionalInteger(record.artifactCount, 'taskSummary.artifactCount'),
-    costCents: optionalInteger(record.costCents, 'taskSummary.costCents')
+    costCents: optionalInteger(record.costCents, 'taskSummary.costCents'),
+    executionContext: record.executionContext
+      ? validateDesktopTaskExecutionContext(record.executionContext)
+      : undefined
   };
 }
 
@@ -382,7 +525,10 @@ function validateDesktopTaskDetail(
     costRecords: requireArray(record.costRecords, 'taskDetail.costRecords').map(
       validateDesktopCostRecordSummary
     ),
-    currentRun: record.currentRun ? validateDesktopExecutionRunSummary(record.currentRun) : undefined
+    currentRun: record.currentRun ? validateDesktopExecutionRunSummary(record.currentRun) : undefined,
+    executionContext: record.executionContext
+      ? validateDesktopTaskExecutionContext(record.executionContext)
+      : undefined
   };
 }
 
@@ -395,7 +541,8 @@ function validateDesktopArtifactSummary(
     type: requireEnum(record.type, 'artifact.type', ['text', 'report', 'video', 'image', 'file']),
     title: requireString(record.title, 'artifact.title'),
     content: requireString(record.content, 'artifact.content'),
-    createdAt: requireString(record.createdAt, 'artifact.createdAt')
+    createdAt: requireString(record.createdAt, 'artifact.createdAt'),
+    localPath: optionalString(record.localPath, 'artifact.localPath')
   };
 }
 
@@ -447,6 +594,20 @@ function validateDesktopExecutionRunSummary(
   };
 }
 
+function validateDesktopTaskExecutionContext(
+  value: unknown
+): NonNullable<DesktopRuntimeState['taskDetails']>[number]['executionContext'] {
+  const record = requireRecord(value, 'desktop task execution context');
+  return {
+    modelProfileIds: requireStringArray(record.modelProfileIds, 'taskExecutionContext.modelProfileIds'),
+    toolIds: requireStringArray(record.toolIds, 'taskExecutionContext.toolIds'),
+    knowledgeBindingIds: requireStringArray(
+      record.knowledgeBindingIds,
+      'taskExecutionContext.knowledgeBindingIds'
+    )
+  };
+}
+
 function validateLocalRuntimeContract(value: unknown): LocalRuntimeContract {
   const record = requireRecord(value, 'local runtime contract');
   return {
@@ -487,6 +648,8 @@ function validateModelProfile(value: unknown): ModelProfile {
       'embeddings',
       'document'
     ]),
+    apiBaseUrl: optionalString(record.apiBaseUrl, 'modelProfile.apiBaseUrl'),
+    apiKey: optionalString(record.apiKey, 'modelProfile.apiKey'),
     temperature: optionalNumber(record.temperature, 'modelProfile.temperature'),
     maxTokens: optionalInteger(record.maxTokens, 'modelProfile.maxTokens'),
     fallbackProfileId: optionalString(record.fallbackProfileId, 'modelProfile.fallbackProfileId'),

@@ -30,6 +30,15 @@ export interface DesktopRolePackageSummary {
   installedAt: string;
   lastRunAt?: string;
   taskCount?: number;
+  templateId?: string;
+  templateVersion?: string;
+  skills?: DesktopRoleSkillSummary[];
+}
+
+export interface DesktopRoleSkillSummary {
+  code: string;
+  name: string;
+  summary: string;
 }
 
 export interface DesktopToolSummary {
@@ -46,6 +55,13 @@ export interface DesktopTaskSummary {
   updatedAt: string;
   artifactCount?: number;
   costCents?: number;
+  executionContext?: DesktopTaskExecutionContext;
+}
+
+export interface DesktopTaskExecutionContext {
+  modelProfileIds: string[];
+  toolIds: string[];
+  knowledgeBindingIds: string[];
 }
 
 export function parseDesktopRuntimeSyncRequest(input: unknown): DesktopRuntimeSyncRequest {
@@ -94,9 +110,37 @@ function parseRolePackageSummaries(input: unknown): DesktopRuntimeSnapshot['role
       taskCount: optionalNonNegativeInteger(
         record.taskCount,
         `desktopRuntimeSnapshot.rolePackages[${index}].taskCount`
-      )
+      ),
+      templateId: optionalString(
+        record.templateId,
+        `desktopRuntimeSnapshot.rolePackages[${index}].templateId`
+      ),
+      templateVersion: optionalString(
+        record.templateVersion,
+        `desktopRuntimeSnapshot.rolePackages[${index}].templateVersion`
+      ),
+      skills: Array.isArray(record.skills)
+        ? record.skills.map((item, skillIndex) =>
+            parseDesktopRoleSkillSummary(
+              item,
+              `desktopRuntimeSnapshot.rolePackages[${index}].skills[${skillIndex}]`
+            )
+          )
+        : undefined
     };
   });
+}
+
+function parseDesktopRoleSkillSummary(
+  input: unknown,
+  labelPrefix: string
+): DesktopRoleSkillSummary {
+  const record = requireRecord(input, labelPrefix);
+  return {
+    code: requireString(record.code, `${labelPrefix}.code`),
+    name: requireString(record.name, `${labelPrefix}.name`),
+    summary: requireString(record.summary, `${labelPrefix}.summary`)
+  };
 }
 
 function parseToolSummaries(input: unknown): DesktopRuntimeSnapshot['tools'] {
@@ -135,9 +179,36 @@ function parseTaskSummaries(input: unknown): DesktopRuntimeSnapshot['tasks'] {
         record.artifactCount,
         `desktopRuntimeSnapshot.tasks[${index}].artifactCount`
       ),
-      costCents: optionalNonNegativeInteger(record.costCents, `desktopRuntimeSnapshot.tasks[${index}].costCents`)
+      costCents: optionalNonNegativeInteger(
+        record.costCents,
+        `desktopRuntimeSnapshot.tasks[${index}].costCents`
+      ),
+      executionContext: record.executionContext
+        ? parseDesktopTaskExecutionContext(
+            record.executionContext,
+            `desktopRuntimeSnapshot.tasks[${index}].executionContext`
+          )
+        : undefined
     };
   });
+}
+
+function parseDesktopTaskExecutionContext(
+  input: unknown,
+  labelPrefix: string
+): DesktopTaskExecutionContext {
+  const record = requireRecord(input, labelPrefix);
+  return {
+    modelProfileIds: requireStringArray(
+      record.modelProfileIds,
+      `${labelPrefix}.modelProfileIds`
+    ),
+    toolIds: requireStringArray(record.toolIds, `${labelPrefix}.toolIds`),
+    knowledgeBindingIds: requireStringArray(
+      record.knowledgeBindingIds,
+      `${labelPrefix}.knowledgeBindingIds`
+    )
+  };
 }
 
 function requireRecord(input: unknown, label: string): Record<string, unknown> {
@@ -176,6 +247,14 @@ function requireBoolean(value: unknown, fieldName: string): boolean {
   }
 
   return value;
+}
+
+function requireStringArray(value: unknown, fieldName: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${fieldName} must be an array of strings.`);
+  }
+
+  return value.map((item, index) => requireString(item, `${fieldName}[${index}]`));
 }
 
 function optionalNonNegativeInteger(value: unknown, fieldName: string): number | undefined {

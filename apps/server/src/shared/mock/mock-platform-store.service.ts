@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+﻿import { Injectable } from '@nestjs/common';
 
 import {
   demoRoleTemplates,
@@ -214,12 +214,14 @@ export class MockPlatformStore {
     const role = {
       id: `role_${Date.now()}`,
       templateId: template.id,
+      templateVersion: template.version,
       workspaceId,
       name: input.name || template.name,
       departmentName: input.departmentName || '未分配部门',
-      ownerName: '企业管理员',
+      ownerName: '企业管理者',
       status: 'configuration_required' as const,
       installedAt: now,
+      skills: template.skills.map((skill) => ({ ...skill })),
       businessGoal: template.description,
       knowledgeSources: ['待配置企业知识'],
       tools: ['待配置工具'],
