@@ -7,7 +7,7 @@
   "author": "QiuAI",
   "main": "dist/main/main.js",
   "scripts": {
-    "dev": "npm run build:electron && concurrently -k -n renderer,electron \"vite --host 127.0.0.1 --port 5173 --strictPort\" \"wait-on http://127.0.0.1:5173 && cross-env QIUAI_PC_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "dev": "node scripts/dev.mjs",
     "build": "npm run build:electron && npm run build:renderer",
     "build:electron": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.electron.json",
     "build:renderer": "npm exec -- vite build",
