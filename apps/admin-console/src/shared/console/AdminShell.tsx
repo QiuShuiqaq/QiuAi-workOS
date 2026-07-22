@@ -1,6 +1,8 @@
 'use client';
 
 import {
+  ApartmentOutlined,
+  AuditOutlined,
   DashboardOutlined,
   DollarOutlined,
   LogoutOutlined,
@@ -8,7 +10,6 @@ import {
   UserOutlined
 } from '@ant-design/icons';
 import type { CurrentAccountResponse } from '@qiuai/api-contract';
-import { createBrowserApiClient } from '../api/browser-api';
 import { QiuStatusTag } from '@qiuai/ui';
 import Button from 'antd/es/button';
 import Flex from 'antd/es/flex';
@@ -20,6 +21,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
+import { createBrowserApiClient } from '../api/browser-api';
+
 export interface AdminShellProps {
   currentAccount: CurrentAccountResponse;
   children: ReactNode;
@@ -27,6 +30,8 @@ export interface AdminShellProps {
 
 function selectedKey(pathname: string) {
   if (pathname.startsWith('/plans')) return 'plans';
+  if (pathname.startsWith('/workspaces')) return 'workspaces';
+  if (pathname.startsWith('/audit')) return 'audit';
   return 'dashboard';
 }
 
@@ -93,6 +98,16 @@ export function AdminShell({ currentAccount, children }: AdminShellProps) {
               key: 'plans',
               icon: <DollarOutlined />,
               label: <Link href="/plans">套餐目录</Link>
+            },
+            {
+              key: 'workspaces',
+              icon: <ApartmentOutlined />,
+              label: <Link href="/workspaces">企业管理</Link>
+            },
+            {
+              key: 'audit',
+              icon: <AuditOutlined />,
+              label: <Link href="/audit">审计日志</Link>
             }
           ]}
         />

@@ -2,6 +2,57 @@ export interface DesktopRuntimeSyncRequest {
   data: DesktopRuntimeSnapshot;
 }
 
+export interface CreateDesktopBindingCodeRequest {
+  expiresInMinutes?: number;
+}
+
+export interface RedeemDesktopBindingCodeRequest {
+  bindingCode: string;
+  runtimeId: string;
+  deviceId: string;
+  deviceName: string;
+  platform: DesktopRuntimeSnapshot['platform'];
+  appVersion: string;
+}
+
+export interface DesktopDeviceSummary {
+  id: string;
+  workspaceId: string;
+  runtimeId: string;
+  deviceId: string;
+  deviceName: string;
+  platform: DesktopRuntimeSnapshot['platform'];
+  appVersion: string;
+  status: 'ACTIVE' | 'REVOKED';
+  boundAt: string;
+  lastSeenAt?: string;
+  lastSyncedAt?: string;
+}
+
+export interface CreateDesktopBindingCodeResponse {
+  data: {
+    id: string;
+    workspaceId: string;
+    status: 'PENDING' | 'REDEEMED' | 'EXPIRED' | 'CANCELLED';
+    expiresAt: string;
+    createdAt: string;
+    redeemedAt?: string;
+    bindingCode: string;
+  };
+}
+
+export interface ListDesktopDevicesResponse {
+  data: DesktopDeviceSummary[];
+}
+
+export interface RedeemDesktopBindingCodeResponse {
+  data: {
+    workspaceId: string;
+    deviceToken: string;
+    device: DesktopDeviceSummary;
+  };
+}
+
 export interface DesktopRuntimeSyncResponse {
   data: {
     accepted: true;
@@ -68,6 +119,36 @@ export function parseDesktopRuntimeSyncRequest(input: unknown): DesktopRuntimeSy
   const record = requireRecord(input, 'desktop runtime sync request');
   return {
     data: parseDesktopRuntimeSnapshot(record.data)
+  };
+}
+
+export function parseCreateDesktopBindingCodeRequest(input: unknown): CreateDesktopBindingCodeRequest {
+  if (input === undefined || input === null) {
+    return {};
+  }
+
+  const record = requireRecord(input, 'desktop binding code request');
+  const expiresInMinutes = optionalBoundedInteger(
+    record.expiresInMinutes,
+    'desktopBindingCode.expiresInMinutes',
+    1,
+    60
+  );
+
+  return {
+    ...(expiresInMinutes === undefined ? {} : { expiresInMinutes })
+  };
+}
+
+export function parseRedeemDesktopBindingCodeRequest(input: unknown): RedeemDesktopBindingCodeRequest {
+  const record = requireRecord(input, 'desktop binding redeem request');
+  return {
+    bindingCode: requireString(record.bindingCode, 'desktopBindingRedeem.bindingCode'),
+    runtimeId: requireString(record.runtimeId, 'desktopBindingRedeem.runtimeId'),
+    deviceId: requireString(record.deviceId, 'desktopBindingRedeem.deviceId'),
+    deviceName: requireString(record.deviceName, 'desktopBindingRedeem.deviceName'),
+    platform: requireEnum(record.platform, 'desktopBindingRedeem.platform', ['windows', 'macos', 'linux']),
+    appVersion: requireString(record.appVersion, 'desktopBindingRedeem.appVersion')
   };
 }
 
@@ -264,6 +345,23 @@ function optionalNonNegativeInteger(value: unknown, fieldName: string): number |
 
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
     throw new Error(`${fieldName} must be a non-negative integer.`);
+  }
+
+  return value;
+}
+
+function optionalBoundedInteger(
+  value: unknown,
+  fieldName: string,
+  min: number,
+  max: number
+): number | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
+    throw new Error(`${fieldName} must be an integer between ${min} and ${max}.`);
   }
 
   return value;

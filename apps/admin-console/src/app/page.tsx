@@ -1,19 +1,14 @@
-import { redirect } from 'next/navigation';
-
+import { AdminAccessDenied } from '../features/auth/AdminAccessDenied';
 import { AdminDashboard } from '../features/dashboard/AdminDashboard';
 import { loadAdminDashboardData } from '../features/dashboard/load-admin-data';
-import { createServerApiClient } from '../shared/api/server-api';
+import { loadAdminSession } from '../shared/auth/load-admin-session';
 
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  try {
-    const session = await (await createServerApiClient()).getAuthSession();
-    if (!session.authenticated) {
-      redirect('/login?next=/');
-    }
-  } catch {
-    // Fall through to fallback data when the backend is unavailable.
+  const { currentAccount, isAdminOperator } = await loadAdminSession('/');
+  if (!isAdminOperator) {
+    return <AdminAccessDenied currentAccount={currentAccount} />;
   }
 
   const data = await loadAdminDashboardData();

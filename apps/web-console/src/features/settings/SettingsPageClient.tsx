@@ -1,10 +1,12 @@
 'use client';
 
-import { CreditCardOutlined } from '@ant-design/icons';
+import { CreditCardOutlined, DesktopOutlined, ReloadOutlined } from '@ant-design/icons';
 import type {
   BillingOrderSummary,
   BillingOverview,
   CurrentAccountResponse,
+  CreateDesktopBindingCodeResponse,
+  DesktopDeviceSummary,
   EntitlementSummary,
   PaymentProviderConfigStatus,
   PlanDetail
@@ -16,6 +18,7 @@ import Card from 'antd/es/card';
 import Col from 'antd/es/col';
 import Descriptions from 'antd/es/descriptions';
 import message from 'antd/es/message';
+import Modal from 'antd/es/modal';
 import Row from 'antd/es/row';
 import Space from 'antd/es/space';
 import Table from 'antd/es/table';
@@ -31,6 +34,7 @@ export interface SettingsPageClientProps {
   currentAccount: CurrentAccountResponse;
   plans: PlanDetail[];
   billing: BillingOverview;
+  desktopDevices: DesktopDeviceSummary[];
   isApiFallback: boolean;
 }
 
@@ -123,10 +127,14 @@ export function SettingsPageClient({
   currentAccount,
   plans,
   billing,
+  desktopDevices,
   isApiFallback
 }: SettingsPageClientProps) {
   const router = useRouter();
   const [payingPlanCode, setPayingPlanCode] = useState<string | null>(null);
+  const [isCreatingBindingCode, setIsCreatingBindingCode] = useState(false);
+  const [latestBindingCode, setLatestBindingCode] =
+    useState<CreateDesktopBindingCodeResponse['data'] | null>(null);
   const activeWorkspace = currentAccount.workspaces.find(
     (workspace) => workspace.id === currentAccount.activeWorkspaceId
   ) ?? currentAccount.workspaces[0];
@@ -160,6 +168,27 @@ export function SettingsPageClient({
       message.error(error instanceof Error ? error.message : '创建支付订单失败');
     } finally {
       setPayingPlanCode(null);
+    }
+  }
+
+  async function createDesktopBindingCode() {
+    if (isApiFallback) {
+      message.warning('后端 API 未连接，无法生成绑定码');
+      return;
+    }
+
+    setIsCreatingBindingCode(true);
+    try {
+      const response = await createBrowserApiClient().createDesktopBindingCode(activeWorkspace.id, {
+        expiresInMinutes: 10
+      });
+      setLatestBindingCode(response.data);
+      message.success('绑定码已生成');
+      router.refresh();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '生成绑定码失败');
+    } finally {
+      setIsCreatingBindingCode(false);
     }
   }
 
@@ -283,6 +312,40 @@ export function SettingsPageClient({
     }
   ];
 
+  const desktopDeviceColumns: ColumnsType<DesktopDeviceSummary> = [
+    {
+      title: '设备',
+      key: 'device',
+      render: (_value, device) => (
+        <Space direction="vertical" size={2}>
+          <Typography.Text strong>{device.deviceName}</Typography.Text>
+          <Typography.Text type="secondary">{device.deviceId}</Typography.Text>
+        </Space>
+      )
+    },
+    {
+      title: '运行标识',
+      dataIndex: 'runtimeId',
+      responsive: ['md'],
+      render: (value: string) => <Typography.Text copyable>{value}</Typography.Text>
+    },
+    {
+      title: '平台',
+      dataIndex: 'platform'
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      render: (status: string) => <QiuStatusTag tone={status === 'ACTIVE' ? 'success' : 'danger'}>{status}</QiuStatusTag>
+    },
+    {
+      title: '最近同步',
+      dataIndex: 'lastSyncedAt',
+      responsive: ['lg'],
+      render: (value: string | undefined) => formatDateTime(value)
+    }
+  ];
+
   return (
     <ConsoleShell currentAccount={currentAccount}>
       <QiuPage title="企业设置" description="管理工作空间、账户和商业版本边界。">
@@ -386,6 +449,65 @@ export function SettingsPageClient({
         <Card title="商业版本" bordered={false}>
           <Table rowKey="code" columns={planColumns} dataSource={plans} pagination={false} />
         </Card>
+        <Card
+          title="桌面端绑定"
+          bordered={false}
+          extra={
+            <Space>
+              <Button icon={<ReloadOutlined />} onClick={() => void router.refresh()}>
+                刷新
+              </Button>
+              <Button
+                type="primary"
+                icon={<DesktopOutlined />}
+                loading={isCreatingBindingCode}
+                onClick={() => void createDesktopBindingCode()}
+              >
+                生成绑定码
+              </Button>
+            </Space>
+          }
+        >
+          <Alert
+            showIcon
+            type="info"
+            message="桌面端首次启动后，请在这里生成一次性绑定码，让企业 PC 自动接入当前工作区。"
+          />
+          <Table
+            rowKey="id"
+            columns={desktopDeviceColumns}
+            dataSource={desktopDevices}
+            pagination={false}
+            locale={{ emptyText: '当前还没有绑定的桌面设备' }}
+          />
+        </Card>
+
+        <Modal
+          title="桌面端绑定码"
+          open={Boolean(latestBindingCode)}
+          onCancel={() => setLatestBindingCode(null)}
+          onOk={() => setLatestBindingCode(null)}
+          okText="关闭"
+          cancelButtonProps={{ style: { display: 'none' } }}
+        >
+          {latestBindingCode ? (
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Typography.Paragraph>
+                将下面的绑定码输入到桌面端完成一次性绑定，10 分钟后自动失效。
+              </Typography.Paragraph>
+              <Typography.Title level={3} style={{ margin: 0 }} copyable>
+                {latestBindingCode.bindingCode}
+              </Typography.Title>
+              <Descriptions size="small" column={1}>
+                <Descriptions.Item label="工作区">{latestBindingCode.workspaceId}</Descriptions.Item>
+                <Descriptions.Item label="过期时间">
+                  {formatDateTime(latestBindingCode.expiresAt)}
+                </Descriptions.Item>
+                <Descriptions.Item label="状态">{latestBindingCode.status}</Descriptions.Item>
+              </Descriptions>
+            </Space>
+          ) : null}
+        </Modal>
       </QiuPage>
     </ConsoleShell>
   );

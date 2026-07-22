@@ -50,7 +50,6 @@ import type {
   RolePackageManifest
 } from '../shared/desktop-contract';
 import { defaultRoleTemplateCatalog, type RoleTemplateCatalogEntry } from '@qiuai/domain';
-import { syncDesktopRuntimeSnapshot } from '../shared/desktop-sync-client';
 import { createDesktopRuntimePreviewState } from '../shared/desktop-state';
 import {
   createMockTaskDetail,
@@ -81,7 +80,7 @@ interface ModelFormValues {
 }
 
 interface OnboardingFormValues {
-  workspaceId: string;
+  bindingCode: string;
 }
 
 interface RoleConfigFormValues {
@@ -166,8 +165,10 @@ export default function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string>('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isBindingDevice, setIsBindingDevice] = useState(false);
   const [isBackupBusy, setIsBackupBusy] = useState(false);
   const [syncNotice, setSyncNotice] = useState('');
+  const [onboardingNotice, setOnboardingNotice] = useState('');
   const [backupNotice, setBackupNotice] = useState('');
   const [modelTestNotice, setModelTestNotice] = useState('');
   const [isTestingModel, setIsTestingModel] = useState(false);
@@ -214,7 +215,8 @@ export default function App() {
     }
 
     if (runtimeState.localRuntime.workspaceId === pendingWorkspaceId) {
-      onboardingForm.setFieldsValue({ workspaceId: '' });
+      onboardingForm.setFieldsValue({ bindingCode: '' });
+      setOnboardingNotice('');
       setOnboardingOpen(true);
     }
   }, [hasLoadedPersistedState, onboardingForm, runtimeState.localRuntime.workspaceId]);
@@ -301,11 +303,7 @@ export default function App() {
     setIsSyncing(true);
     setSyncNotice('');
     try {
-      const result = await syncDesktopRuntimeSnapshot(
-        runtimeState.app.serverBaseUrl,
-        runtimeState.localRuntime.workspaceId,
-        runtimeState.runtimeSnapshot
-      );
+      const result = await window.qiuDesktop.syncRuntimeState(runtimeState);
       const syncedAt = result.data.syncedAt;
       setRuntimeState((current) => ({
         ...current,
@@ -376,24 +374,24 @@ export default function App() {
     }
   }
 
-  function submitOnboarding(values: OnboardingFormValues) {
-    const workspaceId = values.workspaceId.trim();
-    if (!workspaceId) {
+  async function submitOnboarding(values: OnboardingFormValues) {
+    const bindingCode = values.bindingCode.trim();
+    if (!bindingCode || !window.qiuDesktop) {
       return;
     }
 
-    setRuntimeState((current) => ({
-      ...current,
-      localRuntime: {
-        ...current.localRuntime,
-        workspaceId
-      },
-      runtimeSnapshot: {
-        ...current.runtimeSnapshot,
-        workspaceId
-      }
-    }));
-    setOnboardingOpen(false);
+    setIsBindingDevice(true);
+    setOnboardingNotice('');
+    try {
+      const boundState = await window.qiuDesktop.bindDesktopDevice(bindingCode);
+      setRuntimeState(boundState);
+      onboardingForm.resetFields();
+      setOnboardingOpen(false);
+    } catch (error) {
+      setOnboardingNotice(`绑定失败：${error instanceof Error ? error.message : 'unknown error'}`);
+    } finally {
+      setIsBindingDevice(false);
+    }
   }
 
   const activeRolePackage = useMemo(() => {
@@ -546,6 +544,36 @@ export default function App() {
   );
 
   function renderOnboardingModal() {
+    return (
+      <Modal
+        title="桌面端绑定"
+        open={onboardingOpen}
+        closable={!requiresOnboarding}
+        maskClosable={false}
+        okText="绑定"
+        cancelText="稍后"
+        confirmLoading={isBindingDevice}
+        cancelButtonProps={{
+          style: requiresOnboarding ? { display: 'none' } : undefined
+        }}
+        onCancel={() => setOnboardingOpen(false)}
+        onOk={() => onboardingForm.submit()}
+      >
+        <Form<OnboardingFormValues> form={onboardingForm} layout="vertical" onFinish={submitOnboarding}>
+          <Form.Item
+            name="bindingCode"
+            label="绑定码"
+            rules={[{ required: true, message: '请输入桌面端绑定码' }]}
+          >
+            <Input placeholder="例如：QIU-ABCD-EFGH" />
+          </Form.Item>
+          <Typography.Text type="secondary">
+            绑定后，桌面端会自动接入当前工作区；本机数据仍保存在本地。
+          </Typography.Text>
+          {onboardingNotice ? <Typography.Text type="danger">{onboardingNotice}</Typography.Text> : null}
+        </Form>
+      </Modal>
+    );
     return (
       <Modal
         title="企业工作区初始化"

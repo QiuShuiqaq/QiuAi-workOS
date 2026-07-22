@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 
+import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
 import { DesktopSyncModule } from './desktop-sync/desktop-sync.module';
 import { BillingModule } from './billing/billing.module';
@@ -20,6 +21,7 @@ import { MockPlatformStoreModule } from '../shared/mock/mock-platform-store.modu
     ConfigModule.forRoot({
       isGlobal: true
     }),
+    AdminModule,
     AuthModule,
     DesktopSyncModule,
     BillingModule,

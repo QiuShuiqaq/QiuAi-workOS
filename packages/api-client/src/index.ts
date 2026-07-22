@@ -11,6 +11,9 @@ import type {
   CreateTaskResponse,
   CreateDepartmentRequest,
   CreateDepartmentResponse,
+  CancelAdminWorkspaceInvitationResponse,
+  CreateAdminDesktopBindingCodeRequest,
+  CreateAdminDesktopBindingCodeResponse,
   EntitlementCheckRequest,
   EntitlementCheckResult,
   GetRoleInstanceResponse,
@@ -19,10 +22,23 @@ import type {
   GetEnterpriseWorkspaceOverviewResponse,
   AcceptWorkspaceInvitationRequest,
   AcceptWorkspaceInvitationResponse,
+  CreateAdminWorkspaceRequest,
+  CreateAdminWorkspaceResponse,
+  CreateAdminWorkspaceInvitationRequest,
+  CreateAdminWorkspaceInvitationResponse,
+  GrantAdminWorkspaceAuthorizationRequest,
+  GrantAdminWorkspaceAuthorizationResponse,
+  ListAdminActionLogsResponse,
   CancelWorkspaceInvitationResponse,
+  CreateDesktopBindingCodeRequest,
+  CreateDesktopBindingCodeResponse,
   CreateWorkspaceInvitationRequest,
   CreateWorkspaceInvitationResponse,
   CurrentAccountResponse,
+  GetAdminWorkspaceResponse,
+  ListDesktopDevicesResponse,
+  ListAdminPlansResponse,
+  ListAdminWorkspacesResponse,
   GetPublicInvitationResponse,
   KernelStatusResponse,
   ListWorkspaceInvitationsResponse,
@@ -32,7 +48,14 @@ import type {
   ListTasksResponse,
   InstallRoleRequest,
   InstallRoleResponse,
-  PlatformOverviewResponse
+  RedeemDesktopBindingCodeRequest,
+  RedeemDesktopBindingCodeResponse,
+  PlatformOverviewResponse,
+  RevokeAdminDesktopDeviceResponse,
+  UpdateAdminWorkspaceStatusRequest,
+  UpdateAdminWorkspaceStatusResponse,
+  UpdateAdminPlanRequest,
+  UpdateAdminPlanResponse
 } from '@qiuai/api-contract';
 
 export interface QiuApiClientOptions {
@@ -87,6 +110,121 @@ export class QiuApiClient {
 
   listPlans(): Promise<ListPlansResponse> {
     return this.get('/api/v1/commercial/plans');
+  }
+
+  listAdminPlans(): Promise<ListAdminPlansResponse> {
+    return this.get('/api/v1/admin/plans');
+  }
+
+  createAdminWorkspace(input: CreateAdminWorkspaceRequest): Promise<CreateAdminWorkspaceResponse> {
+    return this.post('/api/v1/admin/workspaces', input);
+  }
+
+  createAdminWorkspaceInvitation(
+    workspaceId: string,
+    input: CreateAdminWorkspaceInvitationRequest
+  ): Promise<CreateAdminWorkspaceInvitationResponse> {
+    return this.post(`/api/v1/admin/workspaces/${encodeURIComponent(workspaceId)}/invitations`, input);
+  }
+
+  cancelAdminWorkspaceInvitation(
+    workspaceId: string,
+    invitationId: string
+  ): Promise<CancelAdminWorkspaceInvitationResponse> {
+    return this.post(
+      `/api/v1/admin/workspaces/${encodeURIComponent(workspaceId)}/invitations/${encodeURIComponent(invitationId)}/cancel`,
+      {}
+    );
+  }
+
+  createAdminDesktopBindingCode(
+    workspaceId: string,
+    input: CreateAdminDesktopBindingCodeRequest
+  ): Promise<CreateAdminDesktopBindingCodeResponse> {
+    return this.post(`/api/v1/admin/workspaces/${encodeURIComponent(workspaceId)}/desktop-binding-codes`, input);
+  }
+
+  revokeAdminDesktopDevice(
+    workspaceId: string,
+    deviceId: string
+  ): Promise<RevokeAdminDesktopDeviceResponse> {
+    return this.post(
+      `/api/v1/admin/workspaces/${encodeURIComponent(workspaceId)}/desktop-devices/${encodeURIComponent(deviceId)}/revoke`,
+      {}
+    );
+  }
+
+  updateAdminPlan(planCode: string, input: UpdateAdminPlanRequest): Promise<UpdateAdminPlanResponse> {
+    return this.patch(`/api/v1/admin/plans/${encodeURIComponent(planCode)}`, input);
+  }
+
+  listAdminWorkspaces(params?: {
+    page?: number;
+    pageSize?: number;
+    query?: string;
+  }): Promise<ListAdminWorkspacesResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.page !== undefined) {
+      searchParams.set('page', String(params.page));
+    }
+    if (params?.pageSize !== undefined) {
+      searchParams.set('pageSize', String(params.pageSize));
+    }
+    if (params?.query) {
+      searchParams.set('query', params.query);
+    }
+
+    const queryString = searchParams.toString();
+    return this.get(`/api/v1/admin/workspaces${queryString ? `?${queryString}` : ''}`);
+  }
+
+  getAdminWorkspace(workspaceId: string): Promise<GetAdminWorkspaceResponse> {
+    return this.get(`/api/v1/admin/workspaces/${encodeURIComponent(workspaceId)}`);
+  }
+
+  grantAdminWorkspaceAuthorization(
+    workspaceId: string,
+    input: GrantAdminWorkspaceAuthorizationRequest
+  ): Promise<GrantAdminWorkspaceAuthorizationResponse> {
+    return this.post(
+      `/api/v1/admin/workspaces/${encodeURIComponent(workspaceId)}/manual-authorizations`,
+      input
+    );
+  }
+
+  updateAdminWorkspaceStatus(
+    workspaceId: string,
+    input: UpdateAdminWorkspaceStatusRequest
+  ): Promise<UpdateAdminWorkspaceStatusResponse> {
+    return this.patch(`/api/v1/admin/workspaces/${encodeURIComponent(workspaceId)}/status`, input);
+  }
+
+  listAdminActionLogs(params?: {
+    page?: number;
+    pageSize?: number;
+    query?: string;
+    action?: string;
+    targetType?: string;
+  }): Promise<ListAdminActionLogsResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.page !== undefined) {
+      searchParams.set('page', String(params.page));
+    }
+    if (params?.pageSize !== undefined) {
+      searchParams.set('pageSize', String(params.pageSize));
+    }
+    if (params?.query) {
+      searchParams.set('query', params.query);
+    }
+    if (params?.action) {
+      searchParams.set('action', params.action);
+    }
+    if (params?.targetType) {
+      searchParams.set('targetType', params.targetType);
+    }
+
+    const queryString = searchParams.toString();
+    return this.get(`/api/v1/admin/action-logs${queryString ? `?${queryString}` : ''}`);
   }
 
   getBillingOverview(workspaceId: string): Promise<GetBillingOverviewResponse> {
@@ -197,6 +335,21 @@ export class QiuApiClient {
     );
   }
 
+  listDesktopDevices(workspaceId: string): Promise<ListDesktopDevicesResponse> {
+    return this.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/desktop/devices`);
+  }
+
+  createDesktopBindingCode(
+    workspaceId: string,
+    input: CreateDesktopBindingCodeRequest
+  ): Promise<CreateDesktopBindingCodeResponse> {
+    return this.post(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/desktop/binding-codes`, input);
+  }
+
+  redeemDesktopBindingCode(input: RedeemDesktopBindingCodeRequest): Promise<RedeemDesktopBindingCodeResponse> {
+    return this.post('/api/v1/desktop/bindings/redeem', input);
+  }
+
   private async get<TResponse>(path: string): Promise<TResponse> {
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method: 'GET',
@@ -219,6 +372,27 @@ export class QiuApiClient {
   private async post<TResponse>(path: string, payload: unknown): Promise<TResponse> {
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method: 'POST',
+      headers: this.mergeHeaders({
+        accept: 'application/json',
+        'content-type': 'application/json'
+      }),
+      body: JSON.stringify(payload),
+      credentials: this.credentials,
+      cache: 'no-store'
+    });
+
+    const body = (await response.json()) as TResponse | ApiErrorResponse;
+
+    if (!response.ok) {
+      throw new QiuApiError(response.status, body as ApiErrorResponse);
+    }
+
+    return body as TResponse;
+  }
+
+  private async patch<TResponse>(path: string, payload: unknown): Promise<TResponse> {
+    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      method: 'PATCH',
       headers: this.mergeHeaders({
         accept: 'application/json',
         'content-type': 'application/json'

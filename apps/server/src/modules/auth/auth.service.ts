@@ -310,14 +310,72 @@ export class AuthService {
     cookieHeader?: string
   ): Promise<CurrentAccountResponseDto> {
     const currentAccount = await this.getCurrentAccount(cookieHeader);
-    const canAccessWorkspace = currentAccount.workspaces.some((workspace) => workspace.id === workspaceId);
+    const workspaceSummary = currentAccount.workspaces.find((workspace) => workspace.id === workspaceId);
 
-    if (!canAccessWorkspace) {
+    if (!workspaceSummary) {
       throw new ForbiddenException({
         error: {
           code: 'WORKSPACE_ACCESS_DENIED',
           message: 'You do not have access to this workspace.',
           details: { workspaceId }
+        }
+      });
+    }
+
+    if (!isDatabasePersistenceEnabled()) {
+      if (workspaceSummary.status !== 'active') {
+        throw new ForbiddenException({
+          error: {
+            code: 'WORKSPACE_NOT_ACTIVE',
+            message: 'Workspace is not active.',
+            details: {
+              workspaceId,
+              status: workspaceSummary.status
+            }
+          }
+        });
+      }
+
+      return currentAccount;
+    }
+
+    const workspace = await this.prismaService.workspace.findUnique({
+      where: {
+        id: workspaceId
+      },
+      select: {
+        id: true,
+        status: true,
+        memberships: {
+          where: {
+            accountId: currentAccount.account.id
+          },
+          select: {
+            id: true
+          }
+        }
+      }
+    });
+
+    if (!workspace || workspace.memberships.length === 0) {
+      throw new ForbiddenException({
+        error: {
+          code: 'WORKSPACE_ACCESS_DENIED',
+          message: 'You do not have access to this workspace.',
+          details: { workspaceId }
+        }
+      });
+    }
+
+    if (workspace.status !== 'ACTIVE') {
+      throw new ForbiddenException({
+        error: {
+          code: 'WORKSPACE_NOT_ACTIVE',
+          message: 'Workspace is not active.',
+          details: {
+            workspaceId,
+            status: this.toWorkspaceStatus(workspace.status)
+          }
         }
       });
     }

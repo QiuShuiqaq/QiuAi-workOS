@@ -4,6 +4,10 @@ export type DesktopRolePackageState = 'installed' | 'running' | 'paused' | 'erro
 
 export type DesktopTaskState = 'queued' | 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled';
 
+export type DesktopDeviceStatus = 'ACTIVE' | 'REVOKED';
+
+export type DesktopBindingCodeStatus = 'PENDING' | 'REDEEMED' | 'EXPIRED' | 'CANCELLED';
+
 export interface DesktopRoleSkillSummary {
   code: string;
   name: string;
@@ -67,5 +71,59 @@ export interface SyncDesktopRuntimeResponse {
     accepted: true;
     syncedAt: string;
     nextSyncAt?: string;
+  };
+}
+
+export interface DesktopDeviceSummary {
+  id: string;
+  workspaceId: string;
+  runtimeId: string;
+  deviceId: string;
+  deviceName: string;
+  platform: DesktopPlatform;
+  appVersion: string;
+  status: DesktopDeviceStatus;
+  boundAt: string;
+  lastSeenAt?: string;
+  lastSyncedAt?: string;
+}
+
+export interface DesktopBindingCodeSummary {
+  id: string;
+  workspaceId: string;
+  status: DesktopBindingCodeStatus;
+  expiresAt: string;
+  createdAt: string;
+  redeemedAt?: string;
+}
+
+export interface CreateDesktopBindingCodeRequest {
+  expiresInMinutes?: number;
+}
+
+export interface CreateDesktopBindingCodeResponse {
+  data: DesktopBindingCodeSummary & {
+    bindingCode: string;
+  };
+}
+
+export interface ListDesktopDevicesResponse {
+  data: DesktopDeviceSummary[];
+}
+
+export interface RedeemDesktopBindingCodeRequest {
+  bindingCode: string;
+  runtimeId: string;
+  deviceId: string;
+  deviceName: string;
+  platform: DesktopPlatform;
+  appVersion: string;
+}
+
+export interface RedeemDesktopBindingCodeResponse {
+  data: {
+    workspaceId: string;
+    deviceToken: string;
+    device: DesktopDeviceSummary;
   };
 }

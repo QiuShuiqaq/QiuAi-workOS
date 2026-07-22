@@ -1,8 +1,10 @@
 import * as electron from 'electron';
 import {
+  bindDesktopDevice,
   checkServerConnection,
   getDesktopAppInfo,
-  getDesktopRuntimeState
+  getDesktopRuntimeState,
+  syncDesktopRuntimeState
 } from './runtime-state.js';
 import { saveDesktopRuntimeState } from './runtime-store.js';
 import { invokeOpenAiCompatibleModelChat } from './model-chat.js';
@@ -21,7 +23,9 @@ const { ipcMain, shell } = electronApi;
 const channels = {
   getAppInfo: 'qiuai:desktop:get-app-info',
   getRuntimeState: 'qiuai:desktop:get-runtime-state',
+  bindDesktopDevice: 'qiuai:desktop:bind-desktop-device',
   checkServerConnection: 'qiuai:desktop:check-server-connection',
+  syncRuntimeState: 'qiuai:desktop:sync-runtime-state',
   saveRuntimeState: 'qiuai:desktop:save-runtime-state',
   listWorkspaceBackups: 'qiuai:desktop:list-workspace-backups',
   createWorkspaceBackup: 'qiuai:desktop:create-workspace-backup',
@@ -36,7 +40,13 @@ const channels = {
 export function registerDesktopIpc() {
   ipcMain.handle(channels.getAppInfo, () => getDesktopAppInfo());
   ipcMain.handle(channels.getRuntimeState, () => getDesktopRuntimeState());
+  ipcMain.handle(channels.bindDesktopDevice, async (_, bindingCode: string) => {
+    return bindDesktopDevice(bindingCode);
+  });
   ipcMain.handle(channels.checkServerConnection, () => checkServerConnection());
+  ipcMain.handle(channels.syncRuntimeState, async (_, state) => {
+    return syncDesktopRuntimeState(state);
+  });
   ipcMain.handle(channels.saveRuntimeState, async (_, state) => {
     await saveDesktopRuntimeState(getDesktopAppInfo().userDataPath, state);
     return true;

@@ -1,28 +1,46 @@
 'use client';
 
-import type { CurrentAccountResponse, PlanDetail } from '@qiuai/api-contract';
+import type {
+  AdminPlanDetail,
+  CurrentAccountResponse,
+  UpdateAdminPlanRequest
+} from '@qiuai/api-contract';
 import { QiuPage, QiuStatusTag } from '@qiuai/ui';
+import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import Alert from 'antd/es/alert';
-import Card from 'antd/es/card';
-import Col from 'antd/es/col';
 import Button from 'antd/es/button';
-import Descriptions from 'antd/es/descriptions';
-import Row from 'antd/es/row';
+import Card from 'antd/es/card';
+import Divider from 'antd/es/divider';
+import Form from 'antd/es/form';
+import Input from 'antd/es/input';
+import InputNumber from 'antd/es/input-number';
+import Modal from 'antd/es/modal';
+import Select from 'antd/es/select';
 import Space from 'antd/es/space';
+import Switch from 'antd/es/switch';
 import Table from 'antd/es/table';
 import type { ColumnsType } from 'antd/es/table';
+import Tag from 'antd/es/tag';
 import Typography from 'antd/es/typography';
+import message from 'antd/es/message';
+import { useEffect, useMemo, useState } from 'react';
 
+import { createBrowserApiClient } from '../../shared/api/browser-api';
 import { AdminShell } from '../../shared/console/AdminShell';
 
 export interface AdminPlansPageClientProps {
   currentAccount: CurrentAccountResponse;
-  plans: PlanDetail[];
-  isApiFallback: boolean;
+  plans: AdminPlanDetail[];
 }
 
+type EditablePlanForm = UpdateAdminPlanRequest;
+
 function formatCurrency(amountCents?: number, currency = 'CNY') {
-  if (!amountCents) {
+  if (amountCents === undefined || amountCents === null) {
+    return '-';
+  }
+
+  if (amountCents === 0) {
     return '免费';
   }
 
@@ -41,21 +59,72 @@ function billingCycleLabel(value: string) {
   }[value] ?? value;
 }
 
-function planTone(plan: PlanDetail): 'default' | 'processing' | 'warning' {
+function planTone(plan: AdminPlanDetail): 'default' | 'processing' | 'warning' {
+  if (plan.status === 'ARCHIVED') return 'warning';
   if (plan.billingCycle === 'FREE') return 'default';
   if (plan.billingCycle === 'CUSTOM') return 'warning';
   return 'processing';
 }
 
-export function AdminPlansPageClient({
-  currentAccount,
-  plans,
-  isApiFallback
-}: AdminPlansPageClientProps) {
-  const paidPlans = plans.filter((plan) => plan.billingCycle === 'MONTHLY' || plan.billingCycle === 'ANNUAL');
-  const customPlans = plans.filter((plan) => plan.billingCycle === 'CUSTOM');
+export function AdminPlansPageClient({ currentAccount, plans }: AdminPlansPageClientProps) {
+  const [rows, setRows] = useState(plans);
+  const [editingPlan, setEditingPlan] = useState<AdminPlanDetail | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [form] = Form.useForm<EditablePlanForm>();
 
-  const columns: ColumnsType<PlanDetail> = [
+  useEffect(() => {
+    setRows(plans);
+  }, [plans]);
+
+  useEffect(() => {
+    if (!editingPlan) {
+      form.resetFields();
+      return;
+    }
+
+    form.setFieldsValue({
+      name: editingPlan.name,
+      description: editingPlan.description,
+      priceCents: editingPlan.priceCents,
+      currency: editingPlan.currency ?? 'CNY',
+      status: editingPlan.status,
+      entitlements: editingPlan.entitlements.map((item) => ({
+        featureKey: item.featureKey,
+        enabled: item.enabled,
+        limitValue: item.limitValue,
+        limitUnit: item.limitUnit
+      }))
+    });
+  }, [editingPlan, form]);
+
+  async function handleSave(values: EditablePlanForm) {
+    if (!editingPlan) {
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const apiClient = createBrowserApiClient();
+      const response = await apiClient.updateAdminPlan(editingPlan.code, values);
+      setRows((current) =>
+        current.map((plan) => (plan.code === editingPlan.code ? response.data : plan))
+      );
+      message.success('套餐已更新');
+      setEditingPlan(null);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '更新失败';
+      message.error(errorMessage);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const paidPlans = useMemo(
+    () => rows.filter((plan) => plan.billingCycle === 'MONTHLY' || plan.billingCycle === 'ANNUAL'),
+    [rows]
+  );
+
+  const columns: ColumnsType<AdminPlanDetail> = [
     {
       title: '套餐',
       dataIndex: 'name',
@@ -77,14 +146,23 @@ export function AdminPlansPageClient({
       render: (_value, plan) => formatCurrency(plan.priceCents, plan.currency ?? 'CNY')
     },
     {
+      title: '状态',
+      key: 'status',
+      render: (_value, plan) => <QiuStatusTag tone={planTone(plan)}>{plan.status}</QiuStatusTag>
+    },
+    {
       title: '权益数',
       key: 'entitlements',
       render: (_value, plan) => plan.entitlements.length
     },
     {
-      title: '状态',
-      key: 'tone',
-      render: (_value, plan) => <QiuStatusTag tone={planTone(plan)}>{billingCycleLabel(plan.billingCycle)}</QiuStatusTag>
+      title: '操作',
+      key: 'actions',
+      render: (_value, plan) => (
+        <Button icon={<EditOutlined />} onClick={() => setEditingPlan(plan)}>
+          编辑
+        </Button>
+      )
     }
   ];
 
@@ -92,64 +170,151 @@ export function AdminPlansPageClient({
     <AdminShell currentAccount={currentAccount}>
       <QiuPage
         title="套餐目录"
-        description="套餐、权益和价格直接由服务端目录驱动。"
-        actions={
-          <Button href="/">返回总览</Button>
-        }
+        description="这里直接维护平台套餐的名称、价格、状态和权益。"
+        actions={<Button href="/">返回总览</Button>}
       >
-        {isApiFallback ? <Alert showIcon type="warning" message="后端 API 未连接，当前显示 fallback 数据。" /> : null}
-
-        <Row gutter={[16, 16]}>
-          <Col xs={24} md={8}>
-            <Card bordered={false}>
-              <Descriptions column={1}>
-                <Descriptions.Item label="套餐总数">{plans.length}</Descriptions.Item>
-                <Descriptions.Item label="付费套餐">{paidPlans.length}</Descriptions.Item>
-                <Descriptions.Item label="定制套餐">{customPlans.length}</Descriptions.Item>
-              </Descriptions>
-            </Card>
-          </Col>
-          <Col xs={24} md={16}>
-            <Card bordered={false}>
-              <Typography.Text type="secondary">
-                这是平台的商业目录视图，后续会继续承接模板、权限和套餐运营动作。
-              </Typography.Text>
-            </Card>
-          </Col>
-        </Row>
-
-        <Card title="完整套餐目录" bordered={false}>
-          <Table
-            rowKey="code"
-            columns={columns}
-            dataSource={plans}
-            pagination={false}
-            expandable={{
-              expandedRowRender: (plan) => (
-                <Card bordered={false} size="small" style={{ background: '#f6f8fa' }}>
-                  <Descriptions column={2} size="small">
-                    <Descriptions.Item label="说明" span={2}>
-                      {plan.description ?? '-'}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="适用版本">
-                      {billingCycleLabel(plan.billingCycle)}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="权益明细">
-                      {plan.entitlements
-                        .map((item) =>
-                          `${item.featureKey}:${item.enabled ? 'on' : 'off'}${
-                            item.limitValue !== undefined ? `(${item.limitValue}${item.limitUnit ?? ''})` : ''
-                          }`
-                        )
-                        .join('，')}
-                    </Descriptions.Item>
-                  </Descriptions>
-                </Card>
-              )
-            }}
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Alert
+            showIcon
+            type="info"
+            message="套餐代码是固定的"
+            description="当前版本支持编辑已存在套餐的内容和价格；如果要新增一个全新的套餐代码，需要后续再补 schema 和枚举。"
           />
-        </Card>
+
+          <Card bordered={false}>
+            <Space size={24} wrap>
+              <Typography.Text>总套餐数：{rows.length}</Typography.Text>
+              <Typography.Text>付费套餐：{paidPlans.length}</Typography.Text>
+              <Typography.Text>已归档：{rows.filter((plan) => plan.status === 'ARCHIVED').length}</Typography.Text>
+            </Space>
+          </Card>
+
+          <Card title="完整套餐目录" bordered={false}>
+            <Table
+              rowKey="code"
+              columns={columns}
+              dataSource={rows}
+              pagination={false}
+              expandable={{
+                expandedRowRender: (plan) => (
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    <Typography.Text type="secondary">{plan.description ?? '-'}</Typography.Text>
+                    <Space wrap>
+                      {plan.entitlements.map((item) => (
+                        <Tag key={`${plan.code}-${item.featureKey}`}>
+                          {item.featureKey}
+                          {item.enabled ? ':on' : ':off'}
+                          {item.limitValue !== undefined ? `(${item.limitValue}${item.limitUnit ?? ''})` : ''}
+                        </Tag>
+                      ))}
+                    </Space>
+                  </Space>
+                )
+              }}
+            />
+          </Card>
+        </Space>
       </QiuPage>
+
+      <Modal
+        title={`编辑套餐：${editingPlan?.name ?? ''}`}
+        open={Boolean(editingPlan)}
+        onCancel={() => setEditingPlan(null)}
+        onOk={() => form.submit()}
+        confirmLoading={saving}
+        width={760}
+        okText="保存"
+      >
+        <Form layout="vertical" form={form} onFinish={handleSave}>
+          <Form.Item name="name" label="套餐名称" rules={[{ required: true, message: '请输入套餐名称' }]}>
+            <Input />
+          </Form.Item>
+
+          <Form.Item name="description" label="套餐说明">
+            <Input.TextArea rows={3} />
+          </Form.Item>
+
+          <Space style={{ width: '100%' }} size={16} align="start">
+            <Form.Item name="priceCents" label="价格(分)" style={{ flex: 1 }}>
+              <InputNumber min={0} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="currency" label="币种" style={{ width: 160 }}>
+              <Select
+                options={[
+                  { value: 'CNY', label: 'CNY' },
+                  { value: 'USD', label: 'USD' }
+                ]}
+              />
+            </Form.Item>
+            <Form.Item name="status" label="状态" style={{ width: 160 }}>
+              <Select
+                options={[
+                  { value: 'ACTIVE', label: 'ACTIVE' },
+                  { value: 'ARCHIVED', label: 'ARCHIVED' }
+                ]}
+              />
+            </Form.Item>
+          </Space>
+
+          <Divider style={{ margin: '16px 0' }}>权益</Divider>
+
+          <Form.List name="entitlements">
+            {(fields, { add, remove }) => (
+              <Space direction="vertical" style={{ width: '100%' }} size={12}>
+                {fields.map((field) => (
+                  <Card key={field.key} size="small" bordered>
+                    <Space direction="vertical" style={{ width: '100%' }} size={12}>
+                      <Space align="start" style={{ width: '100%' }} size={12}>
+                        <Form.Item
+                          {...field}
+                          name={[field.name, 'featureKey']}
+                          label="featureKey"
+                          rules={[{ required: true, message: '请输入 featureKey' }]}
+                          style={{ flex: 2 }}
+                        >
+                          <Input placeholder="maxRoleInstances" />
+                        </Form.Item>
+                        <Form.Item
+                          {...field}
+                          name={[field.name, 'enabled']}
+                          label="启用"
+                          valuePropName="checked"
+                          initialValue
+                          style={{ width: 110 }}
+                        >
+                          <Switch />
+                        </Form.Item>
+                        <Form.Item {...field} name={[field.name, 'limitValue']} label="limitValue" style={{ flex: 1 }}>
+                          <InputNumber min={0} style={{ width: '100%' }} />
+                        </Form.Item>
+                        <Form.Item {...field} name={[field.name, 'limitUnit']} label="limitUnit" style={{ width: 120 }}>
+                          <Input placeholder="count" />
+                        </Form.Item>
+                        <Button
+                          danger
+                          icon={<DeleteOutlined />}
+                          style={{ marginTop: 30 }}
+                          onClick={() => remove(field.name)}
+                        >
+                          删除
+                        </Button>
+                      </Space>
+                    </Space>
+                  </Card>
+                ))}
+                <Button
+                  type="dashed"
+                  icon={<PlusOutlined />}
+                  onClick={() => add({ enabled: true })}
+                  block
+                >
+                  添加权益
+                </Button>
+              </Space>
+            )}
+          </Form.List>
+        </Form>
+      </Modal>
     </AdminShell>
   );
 }

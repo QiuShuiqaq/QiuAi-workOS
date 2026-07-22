@@ -1,21 +1,16 @@
-import { redirect } from 'next/navigation';
-
+import { AdminAccessDenied } from '../../features/auth/AdminAccessDenied';
 import { AdminPlansPageClient } from '../../features/plans/AdminPlansPageClient';
-import { loadAdminDashboardData } from '../../features/dashboard/load-admin-data';
-import { createServerApiClient } from '../../shared/api/server-api';
+import { loadAdminPlansPageData } from '../../features/plans/load-admin-plans-data';
+import { loadAdminSession } from '../../shared/auth/load-admin-session';
 
 export const dynamic = 'force-dynamic';
 
 export default async function PlansPage() {
-  try {
-    const session = await (await createServerApiClient()).getAuthSession();
-    if (!session.authenticated) {
-      redirect('/login?next=/plans');
-    }
-  } catch {
-    // Fall through to fallback data when the backend is unavailable.
+  const { currentAccount, isAdminOperator } = await loadAdminSession('/plans');
+  if (!isAdminOperator) {
+    return <AdminAccessDenied currentAccount={currentAccount} />;
   }
 
-  const data = await loadAdminDashboardData();
+  const data = await loadAdminPlansPageData();
   return <AdminPlansPageClient {...data} />;
 }

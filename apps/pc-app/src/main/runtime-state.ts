@@ -2,13 +2,19 @@ import * as electron from 'electron';
 import os from 'node:os';
 import path from 'node:path';
 import { createInitialDesktopRuntimeState } from '../shared/desktop-state.js';
+import { redeemDesktopBindingCode, syncDesktopRuntimeSnapshot } from '../shared/desktop-sync-client.js';
 import { createTaskDetailFromSummary } from '../shared/workbench-data.js';
 import type {
   DesktopAppInfo,
   DesktopRuntimeState,
   DesktopServerConnectionStatus
 } from '../shared/desktop-api.js';
-import { loadDesktopRuntimeState, loadRuntimeIdentity, saveDesktopRuntimeState } from './runtime-store.js';
+import {
+  loadDesktopRuntimeState,
+  loadRuntimeIdentity,
+  saveDesktopRuntimeState,
+  updateRuntimeIdentity
+} from './runtime-store.js';
 
 const electronApi = (electron as typeof electron & { default?: typeof electron }).default ?? electron;
 const { app } = electronApi;
@@ -47,14 +53,15 @@ export function getDesktopAppInfo(): DesktopAppInfo {
 export async function getDesktopRuntimeState(): Promise<DesktopRuntimeState> {
   const appInfo = getDesktopAppInfo();
   const identity = loadRuntimeIdentity(appInfo.userDataPath);
-  const persistedState = await loadDesktopRuntimeState(appInfo.userDataPath, identity.workspaceId);
+  const workspaceId = identity.deviceToken ? identity.workspaceId : 'workspace_pending_login';
+  const persistedState = await loadDesktopRuntimeState(appInfo.userDataPath, workspaceId);
   const serverConnection = await checkServerConnection();
 
   const initialState = createInitialDesktopRuntimeState({
     app: appInfo,
     runtimeId: identity.runtimeId,
     deviceId: identity.deviceId,
-    workspaceId: identity.workspaceId,
+    workspaceId,
     lastSyncedAt: persistedState?.localRuntime.lastSyncedAt ?? identity.lastSyncedAt,
     serverConnection
   });
@@ -77,14 +84,14 @@ export async function getDesktopRuntimeState(): Promise<DesktopRuntimeState> {
       ...hydratedPersistedState.localRuntime,
       runtimeId: identity.runtimeId,
       deviceId: identity.deviceId,
-      workspaceId: identity.workspaceId,
+      workspaceId,
       lastSyncedAt: hydratedPersistedState.localRuntime.lastSyncedAt ?? identity.lastSyncedAt
     },
     runtimeSnapshot: {
       ...hydratedPersistedState.runtimeSnapshot,
       runtimeId: identity.runtimeId,
       deviceId: identity.deviceId,
-      workspaceId: identity.workspaceId,
+      workspaceId,
       appVersion: appInfo.appVersion,
       lastSyncedAt:
         hydratedPersistedState.runtimeSnapshot.lastSyncedAt ??
@@ -93,6 +100,72 @@ export async function getDesktopRuntimeState(): Promise<DesktopRuntimeState> {
     },
     serverConnection
   };
+}
+
+export async function bindDesktopDevice(bindingCode: string): Promise<DesktopRuntimeState> {
+  const appInfo = getDesktopAppInfo();
+  const identity = loadRuntimeIdentity(appInfo.userDataPath);
+  const response = await redeemDesktopBindingCode(appInfo.serverBaseUrl, {
+    bindingCode,
+    runtimeId: identity.runtimeId,
+    deviceId: identity.deviceId,
+    deviceName: appInfo.deviceName,
+    platform: mapPlatform(appInfo.platform),
+    appVersion: appInfo.appVersion
+  });
+
+  const currentState = await getDesktopRuntimeState();
+  const boundState: DesktopRuntimeState = {
+    ...currentState,
+    app: appInfo,
+    localRuntime: {
+      ...currentState.localRuntime,
+      runtimeId: identity.runtimeId,
+      deviceId: identity.deviceId,
+      workspaceId: response.data.workspaceId,
+      appVersion: appInfo.appVersion
+    },
+    runtimeSnapshot: {
+      ...currentState.runtimeSnapshot,
+      runtimeId: identity.runtimeId,
+      deviceId: identity.deviceId,
+      workspaceId: response.data.workspaceId,
+      deviceName: appInfo.deviceName,
+      platform: mapPlatform(appInfo.platform),
+      appVersion: appInfo.appVersion
+    }
+  };
+
+  await saveDesktopRuntimeState(appInfo.userDataPath, boundState);
+  updateRuntimeIdentity(appInfo.userDataPath, {
+    workspaceId: response.data.workspaceId,
+    deviceToken: response.data.deviceToken
+  });
+
+  return boundState;
+}
+
+export async function syncDesktopRuntimeState(state: DesktopRuntimeState) {
+  const appInfo = getDesktopAppInfo();
+  const identity = loadRuntimeIdentity(appInfo.userDataPath);
+
+  if (!identity.deviceToken) {
+    throw new Error('Desktop device token is missing. Bind the device first.');
+  }
+
+  const result = await syncDesktopRuntimeSnapshot(
+    appInfo.serverBaseUrl,
+    state.localRuntime.workspaceId,
+    state.runtimeSnapshot,
+    identity.deviceToken
+  );
+
+  updateRuntimeIdentity(appInfo.userDataPath, {
+    workspaceId: state.localRuntime.workspaceId,
+    lastSyncedAt: result.data.syncedAt
+  });
+
+  return result;
 }
 
 export async function checkServerConnection(): Promise<DesktopServerConnectionStatus> {
@@ -156,4 +229,10 @@ function hydratePersistedRuntimeState(state: DesktopRuntimeState): DesktopRuntim
 
 function resolveRoleName(rolePackages: DesktopRuntimeState['rolePackages'], roleCode: string): string {
   return rolePackages.find((rolePackage) => rolePackage.roleCode === roleCode)?.name ?? roleCode;
+}
+
+function mapPlatform(platform: NodeJS.Platform): DesktopRuntimeState['runtimeSnapshot']['platform'] {
+  if (platform === 'darwin') return 'macos';
+  if (platform === 'win32') return 'windows';
+  return 'linux';
 }

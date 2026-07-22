@@ -32,6 +32,14 @@ export interface DesktopServerConnectionStatus {
   message?: string;
 }
 
+export interface DesktopRuntimeSyncResponse {
+  data: {
+    accepted: true;
+    syncedAt: string;
+    nextSyncAt?: string;
+  };
+}
+
 export interface DesktopRuntimeState {
   app: DesktopAppInfo;
   localRuntime: LocalRuntimeContract;
@@ -115,7 +123,9 @@ export interface DesktopToolInvocationResult {
 export interface QiuDesktopBridge {
   getAppInfo(): Promise<DesktopAppInfo>;
   getRuntimeState(): Promise<DesktopRuntimeState>;
+  bindDesktopDevice(bindingCode: string): Promise<DesktopRuntimeState>;
   checkServerConnection(): Promise<DesktopServerConnectionStatus>;
+  syncRuntimeState(state: DesktopRuntimeState): Promise<DesktopRuntimeSyncResponse>;
   saveRuntimeState(state: DesktopRuntimeState): Promise<void>;
   listWorkspaceBackups(): Promise<DesktopBackupSummary[]>;
   createWorkspaceBackup(state: DesktopRuntimeState): Promise<DesktopBackupSummary>;

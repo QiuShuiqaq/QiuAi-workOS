@@ -152,6 +152,18 @@ enum ExecutionLogLevel {
   ERROR
 }
 
+enum DesktopBindingCodeStatus {
+  PENDING
+  REDEEMED
+  EXPIRED
+  CANCELLED
+}
+
+enum DesktopDeviceStatus {
+  ACTIVE
+  REVOKED
+}
+
 model Account {
   id           String        @id @default(uuid()) @db.Uuid
   primaryEmail String        @unique @map("primary_email")
@@ -166,6 +178,8 @@ model Account {
   authSessions    AuthSession[]
   createdInvitations Invitation[]   @relation("InvitationCreatedBy")
   acceptedInvitations Invitation[]  @relation("InvitationAcceptedBy")
+  desktopBindingCodes DesktopBindingCode[]
+  adminActionLogs AdminActionLog[] @relation("AdminActionOperator")
 
   @@map("accounts")
 }
@@ -225,6 +239,8 @@ model Workspace {
   tasks          Task[]
   costRecords    CostRecord[]
   desktopRuntimeSyncs DesktopRuntimeSync[]
+  desktopBindingCodes DesktopBindingCode[]
+  desktopDevices DesktopDevice[]
   invitations    Invitation[]
 
   @@index([tenantId])
@@ -323,6 +339,57 @@ model Invitation {
   @@index([createdByAccountId])
   @@index([acceptedByAccountId])
   @@map("invitations")
+}
+
+model DesktopBindingCode {
+  id                  String                   @id @default(uuid()) @db.Uuid
+  workspaceId         String                   @map("workspace_id") @db.Uuid
+  codeHash            String                   @unique @map("code_hash")
+  status              DesktopBindingCodeStatus @default(PENDING)
+  expiresAt           DateTime                 @map("expires_at")
+  redeemedAt          DateTime?                @map("redeemed_at")
+  redeemedDeviceId    String?                  @map("redeemed_device_id") @db.Uuid
+  createdByAccountId  String?                  @map("created_by_account_id") @db.Uuid
+  createdAt           DateTime                 @default(now()) @map("created_at")
+  updatedAt           DateTime                 @updatedAt @map("updated_at")
+
+  workspace      Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  redeemedDevice DesktopDevice? @relation(fields: [redeemedDeviceId], references: [id], onDelete: SetNull)
+  createdBy      Account?       @relation(fields: [createdByAccountId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([status])
+  @@index([expiresAt])
+  @@index([createdByAccountId])
+  @@index([redeemedDeviceId])
+  @@map("desktop_binding_codes")
+}
+
+model DesktopDevice {
+  id             String              @id @default(uuid()) @db.Uuid
+  workspaceId    String              @map("workspace_id") @db.Uuid
+  runtimeId      String              @map("runtime_id")
+  deviceId       String              @map("device_id")
+  deviceName     String              @map("device_name")
+  platform       String
+  appVersion     String              @map("app_version")
+  tokenHash      String              @unique @map("token_hash")
+  status         DesktopDeviceStatus @default(ACTIVE)
+  boundAt        DateTime            @default(now()) @map("bound_at")
+  lastSeenAt     DateTime?           @map("last_seen_at")
+  lastSyncedAt   DateTime?           @map("last_synced_at")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  bindingCodes DesktopBindingCode[]
+
+  @@unique([workspaceId, runtimeId])
+  @@unique([workspaceId, deviceId])
+  @@index([workspaceId])
+  @@index([status])
+  @@index([lastSeenAt])
+  @@map("desktop_devices")
 }
 
 model Plan {
@@ -650,4 +717,23 @@ model DesktopRuntimeSync {
   @@index([workspaceId])
   @@index([syncedAt])
   @@map("desktop_runtime_syncs")
+}
+
+model AdminActionLog {
+  id                String   @id @default(uuid()) @db.Uuid
+  operatorAccountId String?  @map("operator_account_id") @db.Uuid
+  action            String
+  targetType        String   @map("target_type")
+  targetId          String   @map("target_id")
+  summary           String
+  metadata          Json?
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  operator Account? @relation("AdminActionOperator", fields: [operatorAccountId], references: [id], onDelete: SetNull)
+
+  @@index([operatorAccountId])
+  @@index([action])
+  @@index([targetType, targetId])
+  @@index([createdAt])
+  @@map("admin_action_logs")
 }

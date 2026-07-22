@@ -25,6 +25,7 @@ export interface StoredRuntimeIdentity {
   deviceId: string;
   workspaceId: string;
   createdAt: string;
+  deviceToken?: string;
   lastSyncedAt?: string;
 }
 
@@ -78,6 +79,24 @@ export function loadRuntimeIdentity(userDataPath: string): StoredRuntimeIdentity
 
   writeFileSync(filePath, `${JSON.stringify(identity, null, 2)}\n`, { encoding: 'utf8' });
   return identity;
+}
+
+export function updateRuntimeIdentity(
+  userDataPath: string,
+  patch: Partial<StoredRuntimeIdentity>
+): StoredRuntimeIdentity {
+  const current = loadRuntimeIdentity(userDataPath);
+  const updated: StoredRuntimeIdentity = {
+    ...current,
+    ...patch,
+    runtimeId: patch.runtimeId ?? current.runtimeId,
+    deviceId: patch.deviceId ?? current.deviceId,
+    workspaceId: patch.workspaceId ?? current.workspaceId,
+    createdAt: current.createdAt
+  };
+
+  writeRuntimeIdentity(path.join(userDataPath, identityFileName), updated);
+  return updated;
 }
 
 export async function loadDesktopRuntimeState(
@@ -138,6 +157,7 @@ export async function saveDesktopRuntimeState(
     runtimeId: state.localRuntime.runtimeId,
     deviceId: state.localRuntime.deviceId,
     workspaceId,
+    deviceToken: identity.deviceToken,
     lastSyncedAt:
       state.localRuntime.lastSyncedAt ??
       state.runtimeSnapshot.lastSyncedAt ??
@@ -165,6 +185,8 @@ function readRuntimeIdentity(filePath: string): StoredRuntimeIdentity | undefine
         deviceId: parsed.deviceId,
         workspaceId: parsed.workspaceId,
         createdAt: parsed.createdAt,
+        deviceToken:
+          typeof parsed.deviceToken === 'string' ? parsed.deviceToken : undefined,
         lastSyncedAt:
           typeof parsed.lastSyncedAt === 'string' ? parsed.lastSyncedAt : undefined
       };

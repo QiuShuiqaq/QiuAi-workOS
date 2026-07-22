@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { parseDesktopRuntimeSyncRequest } from './desktop-sync.contract';
+import {
+  parseCreateDesktopBindingCodeRequest,
+  parseDesktopRuntimeSyncRequest,
+  parseRedeemDesktopBindingCodeRequest
+} from './desktop-sync.contract';
 
 describe('desktop runtime sync contract', () => {
   test('parses a valid runtime snapshot payload', () => {
@@ -74,5 +78,26 @@ describe('desktop runtime sync contract', () => {
         }),
       /desktopRuntimeSnapshot\.deviceId/
     );
+  });
+
+  test('parses desktop binding code requests', () => {
+    assert.deepEqual(parseCreateDesktopBindingCodeRequest({}), {});
+    assert.deepEqual(parseCreateDesktopBindingCodeRequest({ expiresInMinutes: 10 }), {
+      expiresInMinutes: 10
+    });
+  });
+
+  test('parses desktop binding redeem requests', () => {
+    const request = parseRedeemDesktopBindingCodeRequest({
+      bindingCode: 'QIU-ABCD-EFGH',
+      runtimeId: 'runtime-001',
+      deviceId: 'device-001',
+      deviceName: 'desktop-001',
+      platform: 'windows',
+      appVersion: '1.0.0'
+    });
+
+    assert.equal(request.bindingCode, 'QIU-ABCD-EFGH');
+    assert.equal(request.platform, 'windows');
   });
 });
