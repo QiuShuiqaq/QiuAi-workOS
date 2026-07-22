@@ -309,7 +309,18 @@ logsUrl.searchParams.set('query', workspaceId);
 const logsResponse = await requestJson(logsUrl, 'List admin action logs', {
   headers: authHeaders
 });
-const actions = new Set((logsResponse.body.data ?? []).map((item) => item.action));
+const deviceLogsUrl = new URL('/api/v1/admin/action-logs', apiBaseUrl);
+deviceLogsUrl.searchParams.set('page', '1');
+deviceLogsUrl.searchParams.set('pageSize', '20');
+deviceLogsUrl.searchParams.set('query', activeDevice.id);
+deviceLogsUrl.searchParams.set('targetType', 'desktop_device');
+const deviceLogsResponse = await requestJson(deviceLogsUrl, 'List admin desktop device action logs', {
+  headers: authHeaders
+});
+const actions = new Set([
+  ...(logsResponse.body.data ?? []).map((item) => item.action),
+  ...(deviceLogsResponse.body.data ?? []).map((item) => item.action)
+]);
 for (const expectedAction of [
   'CREATE_WORKSPACE',
   'CREATE_WORKSPACE_INVITATION',
