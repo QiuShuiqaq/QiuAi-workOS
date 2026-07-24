@@ -22,6 +22,16 @@ export type ToolCapability =
 
 export type SyncPolicy = 'summary_only' | 'summary_plus_metadata';
 
+export interface DesktopWebSearchToolSettings {
+  endpoint?: string;
+  apiKey?: string;
+  allowPrivateNetwork?: boolean;
+}
+
+export interface DesktopToolSettings {
+  webSearch?: DesktopWebSearchToolSettings;
+}
+
 export interface ModelProfile {
   id: string;
   providerId: string;
@@ -69,6 +79,7 @@ export interface LocalRuntimeContract {
   enabledModelProfileIds: string[];
   knowledgeBindingIds: string[];
   syncPolicy: SyncPolicy;
+  toolSettings?: DesktopToolSettings;
   lastSyncedAt?: string;
 }
 
@@ -180,6 +191,7 @@ export function validateLocalRuntimeContract(input: unknown): LocalRuntimeContra
       'summary_only',
       'summary_plus_metadata'
     ]),
+    toolSettings: optionalToolSettings(record.toolSettings, 'localRuntime.toolSettings'),
     lastSyncedAt: optionalString(record.lastSyncedAt, 'localRuntime.lastSyncedAt')
   };
 }
@@ -252,6 +264,43 @@ function optionalPositiveInteger(value: unknown, fieldName: string): number | un
   }
 
   return value;
+}
+
+function optionalToolSettings(
+  value: unknown,
+  fieldName: string
+): DesktopToolSettings | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`${fieldName} must be an object.`);
+  }
+
+  const record = value as Record<string, unknown>;
+  const webSearch = record.webSearch;
+
+  if (webSearch === undefined || webSearch === null) {
+    return {};
+  }
+
+  if (typeof webSearch !== 'object' || webSearch === null || Array.isArray(webSearch)) {
+    throw new Error(`${fieldName}.webSearch must be an object.`);
+  }
+
+  const webSearchRecord = webSearch as Record<string, unknown>;
+
+  return {
+    webSearch: {
+      endpoint: optionalString(webSearchRecord.endpoint, `${fieldName}.webSearch.endpoint`),
+      apiKey: optionalString(webSearchRecord.apiKey, `${fieldName}.webSearch.apiKey`),
+      allowPrivateNetwork: optionalBoolean(
+        webSearchRecord.allowPrivateNetwork,
+        `${fieldName}.webSearch.allowPrivateNetwork`
+      )
+    }
+  };
 }
 
 function requireStringArray(value: unknown, fieldName: string): string[] {

@@ -174,6 +174,64 @@ assert.ok(toolCallingTask.task.executionLogs.some((log) => log.eventType === 'TO
 assert.ok(toolCallingTask.task.executionLogs.some((log) => log.eventType === 'TOOL_INVOKED'));
 assert.ok(toolCallingTask.task.executionLogs.some((log) => log.eventType === 'TOOL_RESULT_RETURNED_TO_MODEL'));
 
+let officeToolModelInvocationCount = 0;
+const officeToolCallingTask = await runDesktopTask({
+  task: {
+    ...task,
+    taskId: 'task-runner-office-tool-call-001',
+    executionContext: {
+      modelProfileIds: ['qiu-general-default'],
+      toolIds: ['office-document'],
+      knowledgeBindingIds: []
+    }
+  },
+  workspaceId: 'workspace-office-tool-call',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['office-document'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    officeToolModelInvocationCount += 1;
+    if (officeToolModelInvocationCount === 1) {
+      return {
+        provider: request.profile.providerName,
+        modelName: request.profile.modelName,
+        content:
+          'QIUAI_DESKTOP_TOOL_CALL: {"toolId":"office-document","action":"office.write_markdown_document","input":{"title":"Follow-up Plan","folder":"documents","fileName":"follow-up-plan","content":"## Next actions\\n\\n- Call customer owner"}}'
+      };
+    }
+
+    assert.match(request.messages.at(-1)?.content ?? '', /Desktop tool result/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: 'Final result generated after office document tool execution.'
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    assert.equal(request.workspaceId, 'workspace-office-tool-call');
+    assert.equal(request.toolId, 'office-document');
+    assert.equal(request.action, 'office.write_markdown_document');
+    assert.equal(request.input.fileName, 'follow-up-plan');
+
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\documents\\follow-up-plan.md'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:12.000Z'
+});
+
+assert.equal(officeToolModelInvocationCount, 2);
+assert.equal(officeToolCallingTask.task.state, 'completed');
+assert.deepEqual(officeToolCallingTask.usedToolIds, ['office-document']);
+assert.match(officeToolCallingTask.task.artifacts[0]?.content ?? '', /office document tool execution/);
+
 const unconfiguredKnowledge = await runDesktopTask({
   task,
   modelProfiles,

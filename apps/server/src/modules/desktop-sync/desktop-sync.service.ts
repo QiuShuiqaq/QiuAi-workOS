@@ -13,6 +13,7 @@ import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
+import { RoleService } from '../role/role.service';
 import {
   createDesktopBindingCode,
   createDesktopDeviceToken,
@@ -56,8 +57,31 @@ export class DesktopSyncService {
     @Inject(PrismaService)
     private readonly prismaService: PrismaService,
     @Inject(AuthService)
-    private readonly authService: AuthService
+    private readonly authService: AuthService,
+    @Inject(RoleService)
+    private readonly roleService: RoleService
   ) {}
+
+  async listAuthorizedRoleTemplates(workspaceId: string, deviceToken?: string) {
+    if (isDatabasePersistenceEnabled()) {
+      await this.requireDatabaseDeviceTokenForWorkspace(workspaceId, deviceToken);
+      return this.roleService.listTemplates(workspaceId);
+    }
+
+    if (!this.store.workspaceExists(workspaceId)) {
+      throw new NotFoundException({
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Workspace was not found.',
+          details: {
+            workspaceId
+          }
+        }
+      });
+    }
+    this.requireMockDeviceTokenForWorkspace(workspaceId, deviceToken, new Date());
+    return this.roleService.listTemplates(workspaceId);
+  }
 
   async listDevices(workspaceId: string, cookieHeader?: string): Promise<ListDesktopDevicesResponse> {
     if (!isDatabasePersistenceEnabled()) {
@@ -547,6 +571,55 @@ export class DesktopSyncService {
     return device;
   }
 
+  private async requireDatabaseDeviceTokenForWorkspace(workspaceId: string, deviceToken?: string) {
+    if (!deviceToken) {
+      throw new UnauthorizedException({
+        error: {
+          code: 'AUTHENTICATION_REQUIRED',
+          message: 'Desktop device token is required.'
+        }
+      });
+    }
+
+    const device = await this.prismaService.desktopDevice.findUnique({
+      where: {
+        tokenHash: hashDesktopToken(deviceToken)
+      }
+    });
+
+    if (!device || device.status !== 'ACTIVE') {
+      throw new UnauthorizedException({
+        error: {
+          code: 'AUTHENTICATION_REQUIRED',
+          message: 'Desktop device token is invalid.'
+        }
+      });
+    }
+
+    if (device.workspaceId !== workspaceId) {
+      throw new ForbiddenException({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Desktop device is not bound to this workspace.',
+          details: {
+            workspaceId
+          }
+        }
+      });
+    }
+
+    await this.prismaService.desktopDevice.update({
+      where: {
+        id: device.id
+      },
+      data: {
+        lastSeenAt: new Date()
+      }
+    });
+
+    return device;
+  }
+
   private requireMockDeviceToken(
     workspaceId: string,
     runtimeId: string,
@@ -584,6 +657,42 @@ export class DesktopSyncService {
 
     device.lastSeenAt = syncedAt.toISOString();
     device.lastSyncedAt = syncedAt.toISOString();
+  }
+
+  private requireMockDeviceTokenForWorkspace(
+    workspaceId: string,
+    deviceToken: string | undefined,
+    seenAt: Date
+  ) {
+    if (!deviceToken) {
+      throw new UnauthorizedException({
+        error: {
+          code: 'AUTHENTICATION_REQUIRED',
+          message: 'Desktop device token is required.'
+        }
+      });
+    }
+
+    const device = this.mockDevices.find((item) => item.tokenHash === hashDesktopToken(deviceToken));
+    if (!device || device.status !== 'ACTIVE') {
+      throw new UnauthorizedException({
+        error: {
+          code: 'AUTHENTICATION_REQUIRED',
+          message: 'Desktop device token is invalid.'
+        }
+      });
+    }
+
+    if (device.workspaceId !== workspaceId) {
+      throw new ForbiddenException({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Desktop device token does not match this workspace.'
+        }
+      });
+    }
+
+    device.lastSeenAt = seenAt.toISOString();
   }
 
   private async expireDatabaseBindingCodes() {

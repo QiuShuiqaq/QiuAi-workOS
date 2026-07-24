@@ -17,6 +17,9 @@ declare module 'electron' {
       minWidth?: number;
       minHeight?: number;
       title?: string;
+      frame?: boolean;
+      titleBarStyle?: 'default' | 'hidden' | 'hiddenInset' | 'customButtonsOnHover';
+      autoHideMenuBar?: boolean;
       backgroundColor?: string;
       webPreferences?: {
         preload?: string;
@@ -30,6 +33,12 @@ declare module 'electron' {
 
     loadURL(url: string): Promise<void>;
     loadFile(path: string): Promise<void>;
+    setMenu(menu: unknown): void;
+    minimize(): void;
+    maximize(): void;
+    unmaximize(): void;
+    isMaximized(): boolean;
+    close(): void;
     webContents: {
       setWindowOpenHandler(
         handler: (details: { url: string }) => { action: 'deny' | 'allow' }
@@ -42,7 +51,12 @@ declare module 'electron' {
     };
 
     static getAllWindows(): BrowserWindow[];
+    static fromWebContents(webContents: unknown): BrowserWindow | null;
   }
+
+  export const Menu: {
+    setApplicationMenu(menu: unknown): void;
+  };
 
   export const shell: {
     openExternal(url: string): Promise<void>;

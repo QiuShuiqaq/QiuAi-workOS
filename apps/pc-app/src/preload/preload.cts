@@ -1,6 +1,7 @@
 import type {
   DesktopAppInfo,
   DesktopBackupSummary,
+  DesktopAuthorizedRoleTemplateCatalog,
   DesktopKnowledgeSourcePathResult,
   DesktopModelChatRequest,
   DesktopModelChatResponse,
@@ -11,6 +12,7 @@ import type {
   DesktopTaskArtifactWriteResult,
   DesktopToolInvocationRequest,
   DesktopToolInvocationResult,
+  DesktopWindowControlAction,
   QiuDesktopBridge
 } from '../shared/desktop-api.js';
 import type { KnowledgeBindingSource } from '../shared/desktop-contract.js';
@@ -22,6 +24,7 @@ const channels = {
   getRuntimeState: 'qiuai:desktop:get-runtime-state',
   bindDesktopDevice: 'qiuai:desktop:bind-desktop-device',
   checkServerConnection: 'qiuai:desktop:check-server-connection',
+  listAuthorizedRoleTemplates: 'qiuai:desktop:list-authorized-role-templates',
   syncRuntimeState: 'qiuai:desktop:sync-runtime-state',
   saveRuntimeState: 'qiuai:desktop:save-runtime-state',
   listWorkspaceBackups: 'qiuai:desktop:list-workspace-backups',
@@ -31,7 +34,8 @@ const channels = {
   selectKnowledgeSourcePath: 'qiuai:desktop:select-knowledge-source-path',
   writeTaskArtifact: 'qiuai:desktop:write-task-artifact',
   invokeDesktopTool: 'qiuai:desktop:invoke-desktop-tool',
-  openLocalPath: 'qiuai:desktop:open-local-path'
+  openLocalPath: 'qiuai:desktop:open-local-path',
+  controlWindow: 'qiuai:desktop:control-window'
 } as const;
 
 const bridge: QiuDesktopBridge = {
@@ -41,6 +45,8 @@ const bridge: QiuDesktopBridge = {
     ipcRenderer.invoke(channels.bindDesktopDevice, bindingCode) as Promise<DesktopRuntimeState>,
   checkServerConnection: () =>
     ipcRenderer.invoke(channels.checkServerConnection) as Promise<DesktopServerConnectionStatus>,
+  listAuthorizedRoleTemplates: () =>
+    ipcRenderer.invoke(channels.listAuthorizedRoleTemplates) as Promise<DesktopAuthorizedRoleTemplateCatalog>,
   syncRuntimeState: (state: DesktopRuntimeState) =>
     ipcRenderer.invoke(channels.syncRuntimeState, state) as Promise<DesktopRuntimeSyncResponse>,
   saveRuntimeState: (state: DesktopRuntimeState) =>
@@ -60,7 +66,9 @@ const bridge: QiuDesktopBridge = {
   invokeDesktopTool: (request: DesktopToolInvocationRequest) =>
     ipcRenderer.invoke(channels.invokeDesktopTool, request) as Promise<DesktopToolInvocationResult>,
   openLocalPath: (path: string) =>
-    ipcRenderer.invoke(channels.openLocalPath, path) as Promise<void>
+    ipcRenderer.invoke(channels.openLocalPath, path) as Promise<void>,
+  controlWindow: (action: DesktopWindowControlAction) =>
+    ipcRenderer.invoke(channels.controlWindow, action) as Promise<boolean>
 };
 
 contextBridge.exposeInMainWorld('qiuDesktop', bridge);

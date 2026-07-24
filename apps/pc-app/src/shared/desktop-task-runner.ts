@@ -78,7 +78,12 @@ const toolCallMarker = 'QIUAI_DESKTOP_TOOL_CALL:';
 const supportedToolActions: DesktopToolInvocationAction[] = [
   'filesystem.write_text_file',
   'filesystem.read_text_file',
-  'filesystem.list_directory'
+  'filesystem.list_directory',
+  'web.fetch_url',
+  'web.search',
+  'office.write_markdown_document',
+  'spreadsheet.write_csv',
+  'presentation.write_outline_markdown'
 ];
 
 export async function runDesktopTask(input: RunDesktopTaskInput): Promise<RunDesktopTaskResult> {
@@ -666,6 +671,11 @@ function buildModelMessages(
   binding: ResolvedRuntimeBinding
 ): DesktopModelChatMessage[] {
   const tools = binding.availableTools.map((tool) => `${tool.name} (${tool.capabilities.join(', ')})`);
+  const toolInstructions = buildToolInstructions(binding.availableTools);
+  const verificationToolInstruction =
+    task.taskType === 'desktop_runtime_verification'
+      ? 'This is a desktop runtime verification task. If office-document or local-filesystem is available, request exactly one write tool before the final answer to prove local artifact generation.'
+      : '';
   const knowledgeContext = binding.availableKnowledgeSources
     .map((source) => formatKnowledgeSourceForPrompt(source))
     .join('\n---\n');
@@ -680,6 +690,8 @@ function buildModelMessages(
         'Use the provided task input and local runtime context.',
         'Do not claim that files or external tools were changed unless a tool result is provided.',
         `When a local desktop tool is needed, output exactly one line starting with ${toolCallMarker} followed by compact JSON: {"toolId":"local-filesystem","action":"filesystem.write_text_file","input":{"folder":"reports","fileName":"result","content":"..."}}.`,
+        `Allowed desktop tool actions:\n${toolInstructions || 'none'}`,
+        verificationToolInstruction,
         'Only request a desktop tool when it is necessary; otherwise produce the final answer directly.',
         'Return a practical Chinese work result with next actions when appropriate.'
       ].join('\n')
@@ -695,6 +707,37 @@ function buildModelMessages(
       ].join('\n')
     }
   ];
+}
+
+function buildToolInstructions(tools: ToolManifest[]): string {
+  return tools
+    .flatMap((tool) => {
+      if (tool.id === 'local-filesystem') {
+        return [
+          '- local-filesystem/filesystem.write_text_file input: {"folder":"reports","fileName":"result","content":"markdown text"}',
+          '- local-filesystem/filesystem.read_text_file input: {"path":"absolute allowed local file path"}',
+          '- local-filesystem/filesystem.list_directory input: {"path":"absolute allowed local folder path"}'
+        ];
+      }
+
+      if (tool.id === 'web-search') {
+        return [
+          '- web-search/web.fetch_url input: {"url":"https://example.com","maxChars":12000}',
+          '- web-search/web.search input: {"query":"search terms","maxResults":5}'
+        ];
+      }
+
+      if (tool.id === 'office-document') {
+        return [
+          '- office-document/office.write_markdown_document input: {"title":"title","folder":"documents","fileName":"file-name","content":"markdown text"}',
+          '- office-document/spreadsheet.write_csv input: {"folder":"spreadsheets","fileName":"file-name","rows":[["name","value"],["A","1"]]}',
+          '- office-document/presentation.write_outline_markdown input: {"title":"title","folder":"presentations","fileName":"file-name","slides":[{"title":"slide","bullets":["point"]}]}'
+        ];
+      }
+
+      return [];
+    })
+    .join('\n');
 }
 
 function parseDesktopToolCall(content: string): DesktopToolCallInstruction | undefined {

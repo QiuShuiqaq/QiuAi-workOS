@@ -2,6 +2,21 @@ import type { BillingAccountSummary, BillingOrderSummary, BillingSubscriptionSum
 import type { EntitlementSummary, PlanDetail } from './commercial';
 import type { CreateDesktopBindingCodeRequest, DesktopBindingCodeSummary } from './desktop-sync';
 import type {
+  AdminRoleTemplateDetail,
+  ArchiveAdminRoleTemplateResponse,
+  CreateAdminRoleTemplateRequest,
+  CreateAdminRoleTemplateResponse,
+  GetAdminRoleTemplateResponse,
+  ListAdminRoleTemplatesPagedResponse,
+  ListAdminRoleTemplatesQuery,
+  ListAdminRoleTemplatesResponse,
+  PublishAdminRoleTemplateResponse,
+  TestAdminRoleTemplateRequest,
+  TestAdminRoleTemplateResponse,
+  UpdateAdminRoleTemplateRequest,
+  UpdateAdminRoleTemplateResponse
+} from './role-template';
+import type {
   CancelWorkspaceInvitationResponse,
   CreateWorkspaceInvitationRequest,
   CreateWorkspaceInvitationResponse,
@@ -181,3 +196,19 @@ export interface CreateAdminDesktopBindingCodeResponse {
 export interface RevokeAdminDesktopDeviceResponse {
   data: AdminDesktopDeviceSummary;
 }
+
+export type {
+  AdminRoleTemplateDetail,
+  ArchiveAdminRoleTemplateResponse,
+  CreateAdminRoleTemplateRequest,
+  CreateAdminRoleTemplateResponse,
+  GetAdminRoleTemplateResponse,
+  ListAdminRoleTemplatesPagedResponse,
+  ListAdminRoleTemplatesQuery,
+  ListAdminRoleTemplatesResponse,
+  PublishAdminRoleTemplateResponse,
+  TestAdminRoleTemplateRequest,
+  TestAdminRoleTemplateResponse,
+  UpdateAdminRoleTemplateRequest,
+  UpdateAdminRoleTemplateResponse
+};

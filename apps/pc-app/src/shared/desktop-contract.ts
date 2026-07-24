@@ -22,6 +22,16 @@ export type ToolCapability =
 
 export type SyncPolicy = 'summary_only' | 'summary_plus_metadata';
 
+export interface DesktopWebSearchToolSettings {
+  endpoint?: string;
+  apiKey?: string;
+  allowPrivateNetwork?: boolean;
+}
+
+export interface DesktopToolSettings {
+  webSearch?: DesktopWebSearchToolSettings;
+}
+
 export type DesktopTaskPriority = 'low' | 'normal' | 'high' | 'urgent';
 
 export interface DesktopArtifactSummary {
@@ -122,6 +132,7 @@ export interface LocalRuntimeContract {
   enabledModelProfileIds: string[];
   knowledgeBindingIds: string[];
   syncPolicy: SyncPolicy;
+  toolSettings?: DesktopToolSettings;
   lastSyncedAt?: string;
 }
 

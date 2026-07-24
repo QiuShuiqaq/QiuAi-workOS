@@ -1,3 +1,4 @@
+import type { DesktopAuthorizedRoleTemplateSummary } from './desktop-api.js';
 import type { DesktopRuntimeSnapshot } from './desktop-contract.js';
 
 interface RedeemDesktopBindingCodeRequest {
@@ -39,6 +40,10 @@ interface SyncDesktopRuntimeResponse {
     syncedAt: string;
     nextSyncAt?: string;
   };
+}
+
+interface ListAuthorizedRoleTemplatesResponse {
+  data: DesktopAuthorizedRoleTemplateSummary[];
 }
 
 export async function syncDesktopRuntimeSnapshot(
@@ -93,6 +98,31 @@ export async function redeemDesktopBindingCode(
   }
 
   return body as RedeemDesktopBindingCodeResponse;
+}
+
+export async function listAuthorizedRoleTemplates(
+  baseUrl: string,
+  workspaceId: string,
+  deviceToken: string
+): Promise<ListAuthorizedRoleTemplatesResponse> {
+  const response = await fetch(
+    `${normalizeBaseUrl(baseUrl)}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/desktop/role-templates`,
+    {
+      headers: {
+        accept: 'application/json',
+        'x-qiuai-device-token': deviceToken
+      }
+    }
+  );
+
+  const body = (await response.json()) as ListAuthorizedRoleTemplatesResponse | { error?: { message?: string } };
+  if (!response.ok) {
+    const errorBody = body as { error?: { message?: string } };
+    const message = errorBody.error?.message ?? `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return body as ListAuthorizedRoleTemplatesResponse;
 }
 
 function normalizeBaseUrl(baseUrl: string): string {

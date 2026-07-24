@@ -114,6 +114,12 @@ enum RoleInstanceStatus {
   PAUSED
 }
 
+enum RoleTemplateStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
 enum TaskStatus {
   QUEUED
   RUNNING
@@ -559,12 +565,18 @@ model RoleTemplate {
   tools               Json
   skills              Json
   approvalPolicy      String   @map("approval_policy")
+  status              RoleTemplateStatus @default(PUBLISHED)
+  allowedPlanCodes    Json               @default("[]") @map("allowed_plan_codes")
+  visibleWorkspaceIds Json               @default("[]") @map("visible_workspace_ids")
+  publishedAt         DateTime?          @map("published_at")
+  lastTestedAt        DateTime?          @map("last_tested_at")
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
   roleInstances RoleInstance[]
 
   @@index([recommendedPlanCode])
+  @@index([status])
   @@index([version])
   @@map("role_templates")
 }

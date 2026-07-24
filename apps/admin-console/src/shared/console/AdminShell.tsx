@@ -3,6 +3,7 @@
 import {
   ApartmentOutlined,
   AuditOutlined,
+  AppstoreAddOutlined,
   DashboardOutlined,
   DollarOutlined,
   LogoutOutlined,
@@ -32,6 +33,7 @@ function selectedKey(pathname: string) {
   if (pathname.startsWith('/plans')) return 'plans';
   if (pathname.startsWith('/workspaces')) return 'workspaces';
   if (pathname.startsWith('/audit')) return 'audit';
+  if (pathname.startsWith('/templates')) return 'templates';
   return 'dashboard';
 }
 
@@ -103,6 +105,11 @@ export function AdminShell({ currentAccount, children }: AdminShellProps) {
               key: 'workspaces',
               icon: <ApartmentOutlined />,
               label: <Link href="/workspaces">企业管理</Link>
+            },
+            {
+              key: 'templates',
+              icon: <AppstoreAddOutlined />,
+              label: <Link href="/templates">妯℃澘宸ュ巶</Link>
             },
             {
               key: 'audit',

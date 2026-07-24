@@ -24,6 +24,9 @@ type DatabaseRoleTemplate = {
   tools: unknown;
   skills: unknown;
   approvalPolicy: string;
+  status: string;
+  allowedPlanCodes: unknown;
+  visibleWorkspaceIds: unknown;
 };
 
 type DatabaseRoleInstance = {
@@ -65,10 +68,20 @@ export class RoleService {
     private readonly entitlementService: EntitlementService
   ) {}
 
-  async listTemplates() {
+  async listTemplates(workspaceId: string) {
+    const planCode = await this.resolveWorkspacePlanCode(workspaceId);
+    if (!planCode) {
+      return {
+        data: []
+      };
+    }
+
     if (!isDatabasePersistenceEnabled()) {
       return {
-        data: this.store.listRoleTemplates()
+        data: this.store
+          .listRoleTemplates()
+          .filter((template) => this.canWorkspaceUseTemplate(template, workspaceId, planCode))
+          .map((template) => this.toTemplateSummary(template))
       };
     }
 
@@ -79,7 +92,9 @@ export class RoleService {
     });
 
     return {
-      data: templates.map((template) => this.toTemplateSummary(template))
+      data: templates
+        .filter((template) => this.canWorkspaceUseTemplate(template, workspaceId, planCode))
+        .map((template) => this.toTemplateSummary(template))
     };
   }
 
@@ -123,7 +138,17 @@ export class RoleService {
   }
 
   async installRole(workspaceId: string, input: InstallRoleInput) {
+    const planCode = await this.resolveWorkspacePlanCode(workspaceId);
+    if (!planCode) {
+      return undefined;
+    }
+
     if (!isDatabasePersistenceEnabled()) {
+      const template = this.store.getRoleTemplate(input.templateId);
+      if (!template || !this.canWorkspaceUseTemplate(template, workspaceId, planCode)) {
+        return undefined;
+      }
+
       const role = this.store.installRole(workspaceId, input);
       return role ? { data: role } : undefined;
     }
@@ -134,6 +159,10 @@ export class RoleService {
       }
     });
     if (!template) {
+      return undefined;
+    }
+
+    if (!this.canWorkspaceUseTemplate(template, workspaceId, planCode)) {
       return undefined;
     }
 
@@ -318,8 +347,63 @@ export class RoleService {
       scenario: template.scenario,
       description: template.description,
       recommendedPlanCode: template.recommendedPlanCode,
-      skills: this.toSkillSummaries(template.skills)
+      businessGoal: template.businessGoal,
+      knowledgeSources: this.toStringArray(template.knowledgeSources),
+      tools: this.toStringArray(template.tools),
+      skills: this.toSkillSummaries(template.skills),
+      approvalPolicy: template.approvalPolicy
     };
+  }
+
+  private async resolveWorkspacePlanCode(workspaceId: string): Promise<string | null> {
+    if (!isDatabasePersistenceEnabled()) {
+      const subscription = this.store.getSubscription(workspaceId);
+      return subscription?.planCode ?? this.store.getWorkspace(workspaceId)?.planCode ?? null;
+    }
+
+    const workspace = await this.prismaService.workspace.findUnique({
+      where: {
+        id: workspaceId
+      },
+      select: {
+        subscriptions: {
+          select: {
+            plan: {
+              select: {
+                code: true
+              }
+            }
+          },
+          orderBy: {
+            createdAt: 'desc'
+          },
+          take: 1
+        }
+      }
+    });
+
+    return workspace?.subscriptions[0]?.plan.code ?? null;
+  }
+
+  private canWorkspaceUseTemplate(
+    template: {
+      status: string;
+      allowedPlanCodes: unknown;
+      visibleWorkspaceIds: unknown;
+    },
+    workspaceId: string,
+    planCode: string
+  ): boolean {
+    if (template.status !== 'PUBLISHED') {
+      return false;
+    }
+
+    const visibleWorkspaceIds = this.toStringArray(template.visibleWorkspaceIds);
+    if (visibleWorkspaceIds.includes(workspaceId)) {
+      return true;
+    }
+
+    return this.toStringArray(template.allowedPlanCodes).includes(planCode);
   }
 
   private toRoleSummary(role: DatabaseRoleInstance) {

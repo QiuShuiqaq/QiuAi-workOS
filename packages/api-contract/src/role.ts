@@ -12,7 +12,11 @@ export interface RoleTemplateSummary {
   scenario: string;
   description: string;
   recommendedPlanCode: string;
+  businessGoal: string;
+  knowledgeSources: string[];
+  tools: string[];
   skills: RoleSkillSummary[];
+  approvalPolicy: string;
 }
 
 export interface RoleInstanceSummary {

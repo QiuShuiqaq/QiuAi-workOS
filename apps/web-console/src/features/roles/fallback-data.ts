@@ -19,7 +19,11 @@ export const fallbackRoleTemplates: ListRoleTemplatesResponse = {
     scenario: template.scenario,
     description: template.description,
     recommendedPlanCode: template.recommendedPlanCode,
-    skills: template.skills
+    businessGoal: template.businessGoal,
+    knowledgeSources: template.knowledgeSources,
+    tools: template.tools,
+    skills: template.skills,
+    approvalPolicy: template.approvalPolicy
   }))
 };
 

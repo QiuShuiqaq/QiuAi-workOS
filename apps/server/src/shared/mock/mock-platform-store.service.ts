@@ -58,6 +58,45 @@ export class MockPlatformStore {
     return this.roleTemplates;
   }
 
+  getRoleTemplate(templateId: string) {
+    return this.roleTemplates.find((template) => template.id === templateId);
+  }
+
+  createRoleTemplate(
+    input: Omit<MockRoleTemplateSummary, 'createdAt' | 'updatedAt'> & {
+      createdAt?: string;
+      updatedAt?: string;
+    }
+  ) {
+    if (this.getRoleTemplate(input.id)) {
+      return undefined;
+    }
+
+    const now = new Date().toISOString();
+    const template: MockRoleTemplateSummary = {
+      ...input,
+      createdAt: input.createdAt ?? now,
+      updatedAt: input.updatedAt ?? now
+    };
+    this.roleTemplates.unshift(template);
+    return template;
+  }
+
+  updateRoleTemplate(
+    templateId: string,
+    input: Partial<MockRoleTemplateSummary>
+  ) {
+    const template = this.getRoleTemplate(templateId);
+    if (!template) {
+      return undefined;
+    }
+
+    Object.assign(template, input, {
+      updatedAt: new Date().toISOString()
+    });
+    return template;
+  }
+
   getWorkspace(workspaceId: string) {
     return demoWorkspaces.find((workspace) => workspace.id === workspaceId);
   }

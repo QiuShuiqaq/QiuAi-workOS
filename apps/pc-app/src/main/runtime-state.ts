@@ -2,10 +2,15 @@ import * as electron from 'electron';
 import os from 'node:os';
 import path from 'node:path';
 import { createInitialDesktopRuntimeState } from '../shared/desktop-state.js';
-import { redeemDesktopBindingCode, syncDesktopRuntimeSnapshot } from '../shared/desktop-sync-client.js';
+import {
+  listAuthorizedRoleTemplates as fetchAuthorizedRoleTemplates,
+  redeemDesktopBindingCode,
+  syncDesktopRuntimeSnapshot
+} from '../shared/desktop-sync-client.js';
 import { createTaskDetailFromSummary } from '../shared/workbench-data.js';
 import type {
   DesktopAppInfo,
+  DesktopAuthorizedRoleTemplateCatalog,
   DesktopRuntimeState,
   DesktopServerConnectionStatus
 } from '../shared/desktop-api.js';
@@ -168,6 +173,45 @@ export async function syncDesktopRuntimeState(state: DesktopRuntimeState) {
   return result;
 }
 
+export async function listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRoleTemplateCatalog> {
+  const appInfo = getDesktopAppInfo();
+  const identity = loadRuntimeIdentity(appInfo.userDataPath);
+  const workspaceId = identity.deviceToken ? identity.workspaceId : 'workspace_pending_login';
+
+  if (!identity.deviceToken) {
+    return {
+      source: 'local_fallback',
+      workspaceId,
+      loadedAt: new Date().toISOString(),
+      templates: toFallbackRoleTemplates(),
+      message: '桌面端尚未绑定企业工作区。'
+    };
+  }
+
+  try {
+    const response = await fetchAuthorizedRoleTemplates(
+      appInfo.serverBaseUrl,
+      workspaceId,
+      identity.deviceToken
+    );
+
+    return {
+      source: 'server',
+      workspaceId,
+      loadedAt: new Date().toISOString(),
+      templates: response.data
+    };
+  } catch (error) {
+    return {
+      source: 'local_fallback',
+      workspaceId,
+      loadedAt: new Date().toISOString(),
+      templates: toFallbackRoleTemplates(),
+      message: error instanceof Error ? error.message : '授权模板目录加载失败。'
+    };
+  }
+}
+
 export async function checkServerConnection(): Promise<DesktopServerConnectionStatus> {
   const serverBaseUrl = getServerBaseUrl();
   const checkedAt = new Date().toISOString();
@@ -235,4 +279,8 @@ function mapPlatform(platform: NodeJS.Platform): DesktopRuntimeState['runtimeSna
   if (platform === 'darwin') return 'macos';
   if (platform === 'win32') return 'windows';
   return 'linux';
+}
+
+function toFallbackRoleTemplates(): DesktopAuthorizedRoleTemplateCatalog['templates'] {
+  return [];
 }

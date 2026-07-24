@@ -12,6 +12,7 @@ import { HealthModule } from './health/health.module';
 import { KernelModule } from './kernel/kernel.module';
 import { OrganizationModule } from './organization/organization.module';
 import { RoleModule } from './role/role.module';
+import { RoleTemplateFactoryModule } from './role-template-factory/role-template-factory.module';
 import { TaskModule } from './task/task.module';
 import { WorkspaceModule } from './workspace/workspace.module';
 import { MockPlatformStoreModule } from '../shared/mock/mock-platform-store.module';
@@ -33,6 +34,7 @@ import { MockPlatformStoreModule } from '../shared/mock/mock-platform-store.modu
     KernelModule,
     OrganizationModule,
     RoleModule,
+    RoleTemplateFactoryModule,
     TaskModule,
     WorkspaceModule
   ]

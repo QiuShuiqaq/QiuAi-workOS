@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { AuthModule } from '../auth/auth.module';
+import { RoleModule } from '../role/role.module';
 import {
   DesktopBindingController,
   DesktopSyncController,
@@ -9,7 +10,7 @@ import {
 import { DesktopSyncService } from './desktop-sync.service';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, RoleModule],
   controllers: [DesktopBindingController, DesktopSyncController, WorkspaceDesktopController],
   providers: [DesktopSyncService]
 })

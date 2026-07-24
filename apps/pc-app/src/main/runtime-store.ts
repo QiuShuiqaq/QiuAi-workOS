@@ -445,7 +445,38 @@ function isLocalRuntimeContract(value: unknown): value is DesktopRuntimeState['l
     Array.isArray(record.knowledgeBindingIds) &&
     (record.activeRoleCode === undefined || typeof record.activeRoleCode === 'string') &&
     (record.lastSyncedAt === undefined || typeof record.lastSyncedAt === 'string') &&
+    isDesktopToolSettings(record.toolSettings) &&
     (record.syncPolicy === 'summary_only' || record.syncPolicy === 'summary_plus_metadata')
+  );
+}
+
+function isDesktopToolSettings(value: unknown): boolean {
+  if (value === undefined) {
+    return true;
+  }
+
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (record.webSearch === undefined) {
+    return true;
+  }
+
+  if (
+    typeof record.webSearch !== 'object' ||
+    record.webSearch === null ||
+    Array.isArray(record.webSearch)
+  ) {
+    return false;
+  }
+
+  const webSearch = record.webSearch as Record<string, unknown>;
+  return (
+    (webSearch.endpoint === undefined || typeof webSearch.endpoint === 'string') &&
+    (webSearch.apiKey === undefined || typeof webSearch.apiKey === 'string') &&
+    (webSearch.allowPrivateNetwork === undefined || typeof webSearch.allowPrivateNetwork === 'boolean')
   );
 }
 

@@ -4,6 +4,7 @@ import {
   checkServerConnection,
   getDesktopAppInfo,
   getDesktopRuntimeState,
+  listAuthorizedRoleTemplates,
   syncDesktopRuntimeState
 } from './runtime-state.js';
 import { saveDesktopRuntimeState } from './runtime-store.js';
@@ -18,13 +19,14 @@ import {
 } from './workspace-backup.js';
 
 const electronApi = (electron as typeof electron & { default?: typeof electron }).default ?? electron;
-const { ipcMain, shell } = electronApi;
+const { BrowserWindow, ipcMain, shell } = electronApi;
 
 const channels = {
   getAppInfo: 'qiuai:desktop:get-app-info',
   getRuntimeState: 'qiuai:desktop:get-runtime-state',
   bindDesktopDevice: 'qiuai:desktop:bind-desktop-device',
   checkServerConnection: 'qiuai:desktop:check-server-connection',
+  listAuthorizedRoleTemplates: 'qiuai:desktop:list-authorized-role-templates',
   syncRuntimeState: 'qiuai:desktop:sync-runtime-state',
   saveRuntimeState: 'qiuai:desktop:save-runtime-state',
   listWorkspaceBackups: 'qiuai:desktop:list-workspace-backups',
@@ -34,7 +36,8 @@ const channels = {
   selectKnowledgeSourcePath: 'qiuai:desktop:select-knowledge-source-path',
   writeTaskArtifact: 'qiuai:desktop:write-task-artifact',
   invokeDesktopTool: 'qiuai:desktop:invoke-desktop-tool',
-  openLocalPath: 'qiuai:desktop:open-local-path'
+  openLocalPath: 'qiuai:desktop:open-local-path',
+  controlWindow: 'qiuai:desktop:control-window'
 } as const;
 
 export function registerDesktopIpc() {
@@ -44,6 +47,7 @@ export function registerDesktopIpc() {
     return bindDesktopDevice(bindingCode);
   });
   ipcMain.handle(channels.checkServerConnection, () => checkServerConnection());
+  ipcMain.handle(channels.listAuthorizedRoleTemplates, () => listAuthorizedRoleTemplates());
   ipcMain.handle(channels.syncRuntimeState, async (_, state) => {
     return syncDesktopRuntimeState(state);
   });
@@ -86,5 +90,32 @@ export function registerDesktopIpc() {
     if (errorMessage) {
       throw new Error(errorMessage);
     }
+  });
+  ipcMain.handle(channels.controlWindow, (event, action: string) => {
+    const currentWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!currentWindow) {
+      return false;
+    }
+
+    if (action === 'minimize') {
+      currentWindow.minimize();
+      return true;
+    }
+
+    if (action === 'toggle-maximize') {
+      if (currentWindow.isMaximized()) {
+        currentWindow.unmaximize();
+      } else {
+        currentWindow.maximize();
+      }
+      return true;
+    }
+
+    if (action === 'close') {
+      currentWindow.close();
+      return true;
+    }
+
+    throw new Error(`Unsupported window action: ${action}`);
   });
 }

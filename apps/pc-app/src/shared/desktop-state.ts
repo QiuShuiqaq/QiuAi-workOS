@@ -128,6 +128,7 @@ export function createInitialDesktopRuntimeState(
     enabledModelProfileIds,
     knowledgeBindingIds: [],
     syncPolicy: 'summary_only',
+    toolSettings: buildInitialToolSettings(),
     lastSyncedAt: input.lastSyncedAt
   };
 
@@ -218,4 +219,29 @@ function lastTaskAtMap(tasks: DesktopTaskSummary[]) {
   }
 
   return timestamps;
+}
+
+function buildInitialToolSettings(): LocalRuntimeContract['toolSettings'] {
+  const env = readProcessEnv();
+
+  return {
+    webSearch: {
+      endpoint: normalizeEnvValue(env.QIUAI_WEB_SEARCH_ENDPOINT),
+      apiKey: normalizeEnvValue(env.QIUAI_WEB_SEARCH_API_KEY),
+      allowPrivateNetwork: env.QIUAI_DESKTOP_ALLOW_PRIVATE_WEB_TOOL === 'true'
+    }
+  };
+}
+
+function readProcessEnv(): Record<string, string | undefined> {
+  const processLike = (globalThis as typeof globalThis & {
+    process?: { env?: Record<string, string | undefined> };
+  }).process;
+
+  return processLike?.env ?? {};
+}
+
+function normalizeEnvValue(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
 }

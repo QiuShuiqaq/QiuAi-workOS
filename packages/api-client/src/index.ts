@@ -28,7 +28,12 @@ import type {
   CreateAdminWorkspaceInvitationResponse,
   GrantAdminWorkspaceAuthorizationRequest,
   GrantAdminWorkspaceAuthorizationResponse,
+  ArchiveAdminRoleTemplateResponse,
+  CreateAdminRoleTemplateRequest,
+  CreateAdminRoleTemplateResponse,
+  GetAdminRoleTemplateResponse,
   ListAdminActionLogsResponse,
+  ListAdminRoleTemplatesResponse,
   CancelWorkspaceInvitationResponse,
   CreateDesktopBindingCodeRequest,
   CreateDesktopBindingCodeResponse,
@@ -51,9 +56,14 @@ import type {
   RedeemDesktopBindingCodeRequest,
   RedeemDesktopBindingCodeResponse,
   PlatformOverviewResponse,
+  PublishAdminRoleTemplateResponse,
   RevokeAdminDesktopDeviceResponse,
+  TestAdminRoleTemplateRequest,
+  TestAdminRoleTemplateResponse,
   UpdateAdminWorkspaceStatusRequest,
   UpdateAdminWorkspaceStatusResponse,
+  UpdateAdminRoleTemplateRequest,
+  UpdateAdminRoleTemplateResponse,
   UpdateAdminPlanRequest,
   UpdateAdminPlanResponse
 } from '@qiuai/api-contract';
@@ -156,6 +166,42 @@ export class QiuApiClient {
 
   updateAdminPlan(planCode: string, input: UpdateAdminPlanRequest): Promise<UpdateAdminPlanResponse> {
     return this.patch(`/api/v1/admin/plans/${encodeURIComponent(planCode)}`, input);
+  }
+
+  listAdminRoleTemplates(): Promise<ListAdminRoleTemplatesResponse> {
+    return this.get('/api/v1/admin/role-templates');
+  }
+
+  getAdminRoleTemplate(templateId: string): Promise<GetAdminRoleTemplateResponse> {
+    return this.get(`/api/v1/admin/role-templates/${encodeURIComponent(templateId)}`);
+  }
+
+  createAdminRoleTemplate(
+    input: CreateAdminRoleTemplateRequest
+  ): Promise<CreateAdminRoleTemplateResponse> {
+    return this.post('/api/v1/admin/role-templates', input);
+  }
+
+  updateAdminRoleTemplate(
+    templateId: string,
+    input: UpdateAdminRoleTemplateRequest
+  ): Promise<UpdateAdminRoleTemplateResponse> {
+    return this.patch(`/api/v1/admin/role-templates/${encodeURIComponent(templateId)}`, input);
+  }
+
+  testAdminRoleTemplate(
+    templateId: string,
+    input: TestAdminRoleTemplateRequest
+  ): Promise<TestAdminRoleTemplateResponse> {
+    return this.post(`/api/v1/admin/role-templates/${encodeURIComponent(templateId)}/test`, input);
+  }
+
+  publishAdminRoleTemplate(templateId: string): Promise<PublishAdminRoleTemplateResponse> {
+    return this.post(`/api/v1/admin/role-templates/${encodeURIComponent(templateId)}/publish`, {});
+  }
+
+  archiveAdminRoleTemplate(templateId: string): Promise<ArchiveAdminRoleTemplateResponse> {
+    return this.post(`/api/v1/admin/role-templates/${encodeURIComponent(templateId)}/archive`, {});
   }
 
   listAdminWorkspaces(params?: {

@@ -5,7 +5,7 @@ import { registerDesktopIpc } from './ipc.js';
 import { configureUserDataPath } from './runtime-state.js';
 
 const electronApi = (electron as typeof electron & { default?: typeof electron }).default ?? electron;
-const { app, BrowserWindow, shell } = electronApi;
+const { app, BrowserWindow, Menu, shell } = electronApi;
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const isDev = Boolean(process.env.QIUAI_PC_DEV_SERVER_URL);
@@ -19,6 +19,9 @@ async function createMainWindow() {
     minWidth: 1100,
     minHeight: 720,
     title: 'QiuAI WorkOS',
+    frame: false,
+    titleBarStyle: 'hidden',
+    autoHideMenuBar: true,
     backgroundColor: '#f6f8fa',
     webPreferences: {
       preload: path.join(currentDir, '../preload/preload.cjs'),
@@ -29,6 +32,7 @@ async function createMainWindow() {
       allowRunningInsecureContent: false
     }
   });
+  mainWindow.setMenu(null);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) {
@@ -61,6 +65,7 @@ async function createMainWindow() {
 }
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null);
   registerDesktopIpc();
   void createMainWindow();
 

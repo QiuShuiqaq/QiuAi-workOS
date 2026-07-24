@@ -52,6 +52,35 @@ export interface DesktopRuntimeState {
   serverConnection: DesktopServerConnectionStatus;
 }
 
+export interface DesktopAuthorizedRoleSkillSummary {
+  code: string;
+  name: string;
+  summary: string;
+}
+
+export interface DesktopAuthorizedRoleTemplateSummary {
+  id: string;
+  version: string;
+  name: string;
+  industry: string;
+  scenario: string;
+  description: string;
+  recommendedPlanCode: string;
+  businessGoal: string;
+  knowledgeSources: string[];
+  tools: string[];
+  skills: DesktopAuthorizedRoleSkillSummary[];
+  approvalPolicy: string;
+}
+
+export interface DesktopAuthorizedRoleTemplateCatalog {
+  source: 'server' | 'local_fallback';
+  workspaceId: string;
+  loadedAt: string;
+  templates: DesktopAuthorizedRoleTemplateSummary[];
+  message?: string;
+}
+
 export interface DesktopBackupSummary {
   bundleId: string;
   workspaceId: string;
@@ -102,7 +131,12 @@ export interface DesktopTaskArtifactWriteResult {
 export type DesktopToolInvocationAction =
   | 'filesystem.write_text_file'
   | 'filesystem.read_text_file'
-  | 'filesystem.list_directory';
+  | 'filesystem.list_directory'
+  | 'web.fetch_url'
+  | 'web.search'
+  | 'office.write_markdown_document'
+  | 'spreadsheet.write_csv'
+  | 'presentation.write_outline_markdown';
 
 export interface DesktopToolInvocationRequest {
   workspaceId: string;
@@ -120,11 +154,14 @@ export interface DesktopToolInvocationResult {
   message?: string;
 }
 
+export type DesktopWindowControlAction = 'minimize' | 'toggle-maximize' | 'close';
+
 export interface QiuDesktopBridge {
   getAppInfo(): Promise<DesktopAppInfo>;
   getRuntimeState(): Promise<DesktopRuntimeState>;
   bindDesktopDevice(bindingCode: string): Promise<DesktopRuntimeState>;
   checkServerConnection(): Promise<DesktopServerConnectionStatus>;
+  listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRoleTemplateCatalog>;
   syncRuntimeState(state: DesktopRuntimeState): Promise<DesktopRuntimeSyncResponse>;
   saveRuntimeState(state: DesktopRuntimeState): Promise<void>;
   listWorkspaceBackups(): Promise<DesktopBackupSummary[]>;
@@ -135,6 +172,7 @@ export interface QiuDesktopBridge {
   writeTaskArtifact(request: DesktopTaskArtifactWriteRequest): Promise<DesktopTaskArtifactWriteResult>;
   invokeDesktopTool(request: DesktopToolInvocationRequest): Promise<DesktopToolInvocationResult>;
   openLocalPath(path: string): Promise<void>;
+  controlWindow(action: DesktopWindowControlAction): Promise<boolean>;
 }
 
 declare global {

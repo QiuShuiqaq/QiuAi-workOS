@@ -37,7 +37,18 @@ export interface MockRoleTemplateSummary {
   scenario: string;
   description: string;
   recommendedPlanCode: string;
+  businessGoal: string;
+  knowledgeSources: string[];
+  tools: string[];
   skills: ServerRoleSkill[];
+  approvalPolicy: string;
+  status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+  allowedPlanCodes: string[];
+  visibleWorkspaceIds: string[];
+  publishedAt?: string;
+  lastTestedAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface MockRoleInstanceDetail {
@@ -122,6 +133,25 @@ const roleTemplateById = new Map(
 
 function cloneSkills(skills: ServerRoleSkill[]) {
   return skills.map((skill) => ({ ...skill }));
+}
+
+function defaultAllowedPlanCodes(planCode: string): string[] {
+  switch (planCode) {
+    case 'ENTERPRISE_BASIC_MONTHLY':
+    case 'ENTERPRISE_BASIC_ANNUAL':
+      return ['ENTERPRISE_BASIC_MONTHLY', 'ENTERPRISE_BASIC_ANNUAL'];
+    case 'ENTERPRISE_STANDARD_MONTHLY':
+    case 'ENTERPRISE_STANDARD_ANNUAL':
+      return ['ENTERPRISE_STANDARD_MONTHLY', 'ENTERPRISE_STANDARD_ANNUAL'];
+    case 'ENTERPRISE_PRO_MONTHLY':
+    case 'ENTERPRISE_PRO_ANNUAL':
+      return ['ENTERPRISE_PRO_MONTHLY', 'ENTERPRISE_PRO_ANNUAL'];
+    case 'ENTERPRISE_MONTHLY':
+    case 'ENTERPRISE_ANNUAL':
+      return ['ENTERPRISE_MONTHLY', 'ENTERPRISE_ANNUAL'];
+    default:
+      return [planCode];
+  }
 }
 
 const personalFreeEntitlements = [
@@ -309,7 +339,17 @@ export const demoRoleTemplates: MockRoleTemplateSummary[] = serverRoleTemplateCa
     scenario: template.scenario,
     description: template.description,
     recommendedPlanCode: template.recommendedPlanCode,
-    skills: cloneSkills(template.skills)
+    businessGoal: template.businessGoal,
+    knowledgeSources: [...template.knowledgeSources],
+    tools: [...template.tools],
+    skills: cloneSkills(template.skills),
+    approvalPolicy: template.approvalPolicy,
+    status: 'PUBLISHED',
+    allowedPlanCodes: defaultAllowedPlanCodes(template.recommendedPlanCode),
+    visibleWorkspaceIds: [],
+    publishedAt: '2026-07-24T00:00:00.000Z',
+    createdAt: '2026-07-24T00:00:00.000Z',
+    updatedAt: '2026-07-24T00:00:00.000Z'
   })
 );
 

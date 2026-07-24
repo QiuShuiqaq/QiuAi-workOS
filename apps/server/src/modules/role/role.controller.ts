@@ -25,7 +25,7 @@ export class RoleController {
     @Req() request: FastifyRequest
   ) {
     await this.authService.requireWorkspaceAccess(workspaceId, request.headers.cookie);
-    return this.roleService.listTemplates();
+    return this.roleService.listTemplates(workspaceId);
   }
 
   @Get()

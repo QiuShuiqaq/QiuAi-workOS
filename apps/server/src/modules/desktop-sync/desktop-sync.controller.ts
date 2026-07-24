@@ -40,6 +40,14 @@ export class DesktopSyncController {
 export class WorkspaceDesktopController {
   constructor(@Inject(DesktopSyncService) private readonly desktopSyncService: DesktopSyncService) {}
 
+  @Get('role-templates')
+  listRoleTemplates(@Param('workspaceId') workspaceId: string, @Req() request: FastifyRequest) {
+    return this.desktopSyncService.listAuthorizedRoleTemplates(
+      workspaceId,
+      readDesktopDeviceToken(request)
+    );
+  }
+
   @Get('devices')
   listDevices(@Param('workspaceId') workspaceId: string, @Req() request: FastifyRequest) {
     return this.desktopSyncService.listDevices(workspaceId, request.headers.cookie);

@@ -630,6 +630,7 @@ function validateLocalRuntimeContract(value: unknown): LocalRuntimeContract {
       'summary_only',
       'summary_plus_metadata'
     ]),
+    toolSettings: optionalToolSettings(record.toolSettings, 'localRuntime.toolSettings'),
     lastSyncedAt: optionalString(record.lastSyncedAt, 'localRuntime.lastSyncedAt')
   };
 }
@@ -830,6 +831,34 @@ function optionalBoolean(value: unknown, fieldName: string): boolean {
   }
 
   return value;
+}
+
+function optionalToolSettings(
+  value: unknown,
+  fieldName: string
+): LocalRuntimeContract['toolSettings'] {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const record = requireRecord(value, fieldName);
+  const webSearch = record.webSearch;
+
+  if (webSearch === undefined || webSearch === null) {
+    return {};
+  }
+
+  const webSearchRecord = requireRecord(webSearch, `${fieldName}.webSearch`);
+  return {
+    webSearch: {
+      endpoint: optionalString(webSearchRecord.endpoint, `${fieldName}.webSearch.endpoint`),
+      apiKey: optionalString(webSearchRecord.apiKey, `${fieldName}.webSearch.apiKey`),
+      allowPrivateNetwork: optionalBoolean(
+        webSearchRecord.allowPrivateNetwork,
+        `${fieldName}.webSearch.allowPrivateNetwork`
+      )
+    }
+  };
 }
 
 function optionalInteger(value: unknown, fieldName: string): number | undefined {

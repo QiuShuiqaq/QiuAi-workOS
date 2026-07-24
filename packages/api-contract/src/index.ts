@@ -15,3 +15,4 @@ export * from './role';
 export * from './task';
 export * from './workspace';
 export * from './plan-catalog';
+export * from './role-template';
