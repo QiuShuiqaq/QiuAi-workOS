@@ -25,6 +25,7 @@ import type {
   LocalRuntimeContract,
   ModelProfile,
   DesktopRoleSkillSummary,
+  DesktopRoleWorkflowStep,
   RolePackageManifest,
   ToolManifest
 } from '../shared/desktop-contract.js';
@@ -462,6 +463,26 @@ function validateDesktopRoleSkillSummary(value: unknown): DesktopRoleSkillSummar
   };
 }
 
+function validateDesktopRoleWorkflowStep(value: unknown): DesktopRoleWorkflowStep {
+  const record = requireRecord(value, 'desktop role workflow step');
+  return {
+    id: requireString(record.id, 'roleWorkflowStep.id'),
+    order: requireInteger(record.order, 'roleWorkflowStep.order'),
+    type: requireEnum(record.type, 'roleWorkflowStep.type', [
+      'input',
+      'reasoning',
+      'knowledge',
+      'tool',
+      'approval',
+      'output'
+    ]),
+    name: requireString(record.name, 'roleWorkflowStep.name'),
+    instruction: requireString(record.instruction, 'roleWorkflowStep.instruction'),
+    toolIds: requireStringArray(record.toolIds, 'roleWorkflowStep.toolIds'),
+    requiresApproval: optionalBoolean(record.requiresApproval, 'roleWorkflowStep.requiresApproval')
+  };
+}
+
 function validateDesktopToolSummary(value: unknown): DesktopToolSummary {
   const record = requireRecord(value, 'desktop tool summary');
   return {
@@ -716,6 +737,16 @@ function validateRolePackageManifest(value: unknown): RolePackageManifest {
     name: requireString(record.name, 'rolePackage.name'),
     version: requireString(record.version, 'rolePackage.version'),
     summary: optionalString(record.summary, 'rolePackage.summary'),
+    templateId: optionalString(record.templateId, 'rolePackage.templateId'),
+    templateVersion: optionalString(record.templateVersion, 'rolePackage.templateVersion'),
+    skills: Array.isArray(record.skills)
+      ? record.skills.map(validateDesktopRoleSkillSummary)
+      : undefined,
+    workflowSteps: Array.isArray(record.workflowSteps)
+      ? record.workflowSteps.map(validateDesktopRoleWorkflowStep)
+      : undefined,
+    sampleInputs: requireStringArray(record.sampleInputs, 'rolePackage.sampleInputs'),
+    outputFormat: optionalString(record.outputFormat, 'rolePackage.outputFormat'),
     modelProfileIds,
     toolIds,
     requiredKnowledgeSources,

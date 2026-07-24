@@ -13,6 +13,7 @@ import type {
   AdminWorkspaceSummary,
   CreateAdminRoleTemplateRequest,
   CurrentAccountResponse,
+  RoleTemplateStepType,
   UpdateAdminRoleTemplateRequest
 } from '@qiuai/api-contract';
 import { QiuPage, QiuStatusTag } from '@qiuai/ui';
@@ -23,9 +24,11 @@ import Divider from 'antd/es/divider';
 import Drawer from 'antd/es/drawer';
 import Form from 'antd/es/form';
 import Input from 'antd/es/input';
+import InputNumber from 'antd/es/input-number';
 import Popconfirm from 'antd/es/popconfirm';
 import Select from 'antd/es/select';
 import Space from 'antd/es/space';
+import Switch from 'antd/es/switch';
 import Table from 'antd/es/table';
 import type { ColumnsType } from 'antd/es/table';
 import Tag from 'antd/es/tag';
@@ -49,6 +52,16 @@ type RoleTemplateSkillForm = {
   summary?: string;
 };
 
+type RoleTemplateWorkflowStepForm = {
+  id?: string;
+  order?: number;
+  type?: RoleTemplateStepType;
+  name?: string;
+  instruction?: string;
+  toolIds?: string[];
+  requiresApproval?: boolean;
+};
+
 type RoleTemplateFormValues = {
   id: string;
   version: string;
@@ -61,6 +74,9 @@ type RoleTemplateFormValues = {
   knowledgeSources?: string[];
   tools?: string[];
   skills?: RoleTemplateSkillForm[];
+  workflowSteps?: RoleTemplateWorkflowStepForm[];
+  sampleInputs?: string[];
+  outputFormat?: string;
   approvalPolicy: string;
   allowedPlanCodes?: string[];
   visibleWorkspaceIds?: string[];
@@ -90,6 +106,15 @@ const toolOptions = [
   'mcp'
 ].map((value) => ({ value, label: value }));
 
+const workflowStepTypeOptions: Array<{ value: RoleTemplateStepType; label: string }> = [
+  { value: 'input', label: '输入' },
+  { value: 'knowledge', label: '知识' },
+  { value: 'reasoning', label: '分析' },
+  { value: 'tool', label: '工具' },
+  { value: 'approval', label: '审批' },
+  { value: 'output', label: '输出' }
+];
+
 function normalizeTags(values?: string[]) {
   return [...new Set((values ?? []).map((value) => value.trim()).filter(Boolean))];
 }
@@ -102,6 +127,62 @@ function normalizeSkills(values?: RoleTemplateSkillForm[]) {
       summary: skill.summary?.trim() ?? ''
     }))
     .filter((skill) => skill.code && skill.name && skill.summary);
+}
+
+function normalizeWorkflowSteps(values?: RoleTemplateWorkflowStepForm[]) {
+  return (values ?? [])
+    .map((step, index) => ({
+      id: step.id?.trim() ?? '',
+      order: Number.isInteger(step.order) && Number(step.order) > 0 ? Number(step.order) : index + 1,
+      type: step.type ?? 'reasoning',
+      name: step.name?.trim() ?? '',
+      instruction: step.instruction?.trim() ?? '',
+      toolIds: normalizeTags(step.toolIds),
+      requiresApproval: Boolean(step.requiresApproval)
+    }))
+    .filter((step) => step.id && step.name && step.instruction)
+    .sort((left, right) => left.order - right.order);
+}
+
+function createDefaultWorkflowSteps(): RoleTemplateWorkflowStepForm[] {
+  return [
+    {
+      id: 'receive_input',
+      order: 1,
+      type: 'input',
+      name: '接收任务',
+      instruction: '确认用户输入、目标、边界和交付物要求。'
+    },
+    {
+      id: 'gather_context',
+      order: 2,
+      type: 'knowledge',
+      name: '读取知识',
+      instruction: '读取企业授权知识和本地资料，记录缺失信息。'
+    },
+    {
+      id: 'analyze_plan',
+      order: 3,
+      type: 'reasoning',
+      name: '分析计划',
+      instruction: '拆解任务，确定处理路径、风险和需要调用的工具。'
+    },
+    {
+      id: 'use_tools',
+      order: 4,
+      type: 'tool',
+      name: '调用工具',
+      instruction: '在必要时调用已授权工具，并把工具结果写入最终产物。',
+      toolIds: ['office-document']
+    },
+    {
+      id: 'deliver_output',
+      order: 5,
+      type: 'output',
+      name: '输出结果',
+      instruction: '输出结构化结果、依据、风险提示、下一步动作和本地文件路径。'
+    }
+  ];
 }
 
 function formatDateTime(value?: string) {
@@ -141,6 +222,9 @@ function buildCreatePayload(values: RoleTemplateFormValues): CreateAdminRoleTemp
     knowledgeSources: normalizeTags(values.knowledgeSources),
     tools: normalizeTags(values.tools),
     skills: normalizeSkills(values.skills),
+    workflowSteps: normalizeWorkflowSteps(values.workflowSteps),
+    sampleInputs: normalizeTags(values.sampleInputs),
+    outputFormat: values.outputFormat?.trim() || undefined,
     approvalPolicy: values.approvalPolicy.trim(),
     allowedPlanCodes: allowedPlanCodes.length ? allowedPlanCodes : undefined,
     visibleWorkspaceIds: visibleWorkspaceIds.length ? visibleWorkspaceIds : undefined
@@ -159,6 +243,9 @@ function buildUpdatePayload(values: RoleTemplateFormValues): UpdateAdminRoleTemp
     knowledgeSources: normalizeTags(values.knowledgeSources),
     tools: normalizeTags(values.tools),
     skills: normalizeSkills(values.skills),
+    workflowSteps: normalizeWorkflowSteps(values.workflowSteps),
+    sampleInputs: normalizeTags(values.sampleInputs),
+    outputFormat: values.outputFormat?.trim(),
     approvalPolicy: values.approvalPolicy.trim(),
     allowedPlanCodes: normalizeTags(values.allowedPlanCodes),
     visibleWorkspaceIds: normalizeTags(values.visibleWorkspaceIds)
@@ -244,6 +331,9 @@ export function AdminRoleTemplatesPageClient({
         knowledgeSources: template.knowledgeSources,
         tools: template.tools,
         skills: template.skills,
+        workflowSteps: template.workflowSteps,
+        sampleInputs: template.sampleInputs,
+        outputFormat: template.outputFormat,
         approvalPolicy: template.approvalPolicy,
         allowedPlanCodes: template.allowedPlanCodes,
         visibleWorkspaceIds: template.visibleWorkspaceIds
@@ -263,6 +353,9 @@ export function AdminRoleTemplatesPageClient({
       knowledgeSources: [],
       tools: [],
       skills: [{ code: '', name: '', summary: '' }],
+      workflowSteps: createDefaultWorkflowSteps(),
+      sampleInputs: [],
+      outputFormat: 'Markdown report with summary, findings, risks, next actions, and local artifact links.',
       approvalPolicy: '',
       allowedPlanCodes: activePaidPlanCode ? [activePaidPlanCode] : [],
       visibleWorkspaceIds: []
@@ -321,7 +414,7 @@ export function AdminRoleTemplatesPageClient({
     setTestingTemplateId(template.id);
     try {
       const response = await createBrowserApiClient().testAdminRoleTemplate(template.id, {
-        sampleInput: template.businessGoal
+        sampleInput: template.sampleInputs[0] ?? template.businessGoal
       });
       setTestNotice({
         templateName: template.name,
@@ -549,6 +642,14 @@ export function AdminRoleTemplatesPageClient({
                         <Tag key={skill.code}>{skill.name}</Tag>
                       ))}
                     </Space>
+                    <Space wrap>
+                      {template.workflowSteps.map((step) => (
+                        <Tag key={step.id}>
+                          {step.order}. {step.name}
+                        </Tag>
+                      ))}
+                    </Space>
+                    <Typography.Text type="secondary">输出格式：{template.outputFormat || '-'}</Typography.Text>
                   </Space>
                 )
               }}
@@ -666,6 +767,108 @@ export function AdminRoleTemplatesPageClient({
               </Space>
             )}
           </Form.List>
+
+          <Divider orientation="left">步骤编排</Divider>
+
+          <Form.List name="workflowSteps">
+            {(fields, { add, remove }) => (
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                {fields.map((field) => (
+                  <Card
+                    key={field.key}
+                    size="small"
+                    title={`步骤 ${field.name + 1}`}
+                    extra={
+                      <Button type="link" danger onClick={() => remove(field.name)}>
+                        删除
+                      </Button>
+                    }
+                  >
+                    <div style={{ display: 'grid', gridTemplateColumns: '96px 150px 1fr', gap: 12 }}>
+                      <Form.Item
+                        {...field}
+                        name={[field.name, 'order']}
+                        label="顺序"
+                        rules={[{ required: true, message: '请输入顺序' }]}
+                      >
+                        <InputNumber min={1} style={{ width: '100%' }} />
+                      </Form.Item>
+                      <Form.Item
+                        {...field}
+                        name={[field.name, 'type']}
+                        label="类型"
+                        rules={[{ required: true, message: '请选择类型' }]}
+                      >
+                        <Select options={workflowStepTypeOptions} />
+                      </Form.Item>
+                      <Form.Item
+                        {...field}
+                        name={[field.name, 'name']}
+                        label="名称"
+                        rules={[{ required: true, message: '请输入名称' }]}
+                      >
+                        <Input placeholder="读取知识" />
+                      </Form.Item>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr 140px', gap: 12 }}>
+                      <Form.Item
+                        {...field}
+                        name={[field.name, 'id']}
+                        label="步骤 ID"
+                        rules={[{ required: true, message: '请输入步骤 ID' }]}
+                      >
+                        <Input placeholder="gather_context" />
+                      </Form.Item>
+                      <Form.Item {...field} name={[field.name, 'toolIds']} label="工具 ID">
+                        <Select mode="tags" tokenSeparators={[',']} options={toolOptions} />
+                      </Form.Item>
+                      <Form.Item
+                        {...field}
+                        name={[field.name, 'requiresApproval']}
+                        label="需要审批"
+                        valuePropName="checked"
+                      >
+                        <Switch checkedChildren="是" unCheckedChildren="否" />
+                      </Form.Item>
+                    </div>
+                    <Form.Item
+                      {...field}
+                      name={[field.name, 'instruction']}
+                      label="执行说明"
+                      rules={[{ required: true, message: '请输入执行说明' }]}
+                    >
+                      <Input.TextArea rows={2} />
+                    </Form.Item>
+                  </Card>
+                ))}
+                <Button
+                  type="dashed"
+                  onClick={() =>
+                    add({
+                      id: `step_${fields.length + 1}`,
+                      order: fields.length + 1,
+                      type: 'reasoning',
+                      name: '',
+                      instruction: '',
+                      requiresApproval: false
+                    })
+                  }
+                  block
+                >
+                  添加步骤
+                </Button>
+              </Space>
+            )}
+          </Form.List>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
+            <Form.Item name="sampleInputs" label="测试样例">
+              <Select mode="tags" tokenSeparators={[',']} placeholder="输入一个样例任务后回车" />
+            </Form.Item>
+            <Form.Item name="outputFormat" label="输出格式">
+              <Input placeholder="Markdown report with summary, risks, next actions..." />
+            </Form.Item>
+          </div>
 
           <Divider orientation="left">发布范围</Divider>
 

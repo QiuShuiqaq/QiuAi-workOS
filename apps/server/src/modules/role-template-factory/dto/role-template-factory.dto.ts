@@ -1,9 +1,12 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsIn,
+  IsInt,
   IsOptional,
   IsString,
+  Min,
   MinLength,
   ValidateNested
 } from 'class-validator';
@@ -18,6 +21,29 @@ export class AdminRoleTemplateSkillDto {
 
   @ApiProperty({ example: '搜索并整理潜在线索背景。' })
   summary!: string;
+}
+
+export class AdminRoleTemplateWorkflowStepDto {
+  @ApiProperty({ example: 'receive_input' })
+  id!: string;
+
+  @ApiProperty({ example: 1 })
+  order!: number;
+
+  @ApiProperty({ enum: ['input', 'reasoning', 'knowledge', 'tool', 'approval', 'output'] })
+  type!: 'input' | 'reasoning' | 'knowledge' | 'tool' | 'approval' | 'output';
+
+  @ApiProperty({ example: '接收任务' })
+  name!: string;
+
+  @ApiProperty({ example: '确认用户输入、目标、边界和交付物要求。' })
+  instruction!: string;
+
+  @ApiPropertyOptional({ type: [String], example: ['web-search'] })
+  toolIds?: string[];
+
+  @ApiPropertyOptional({ example: true })
+  requiresApproval?: boolean;
 }
 
 export class AdminRoleTemplateDetailDto {
@@ -53,6 +79,15 @@ export class AdminRoleTemplateDetailDto {
 
   @ApiProperty({ type: [AdminRoleTemplateSkillDto] })
   skills!: AdminRoleTemplateSkillDto[];
+
+  @ApiProperty({ type: [AdminRoleTemplateWorkflowStepDto] })
+  workflowSteps!: AdminRoleTemplateWorkflowStepDto[];
+
+  @ApiProperty({ type: [String] })
+  sampleInputs!: string[];
+
+  @ApiProperty({ example: 'Markdown report with summary, findings, risks, next actions, and local artifact links.' })
+  outputFormat!: string;
 
   @ApiProperty({ example: '正式对外发送前需要销售负责人确认。' })
   approvalPolicy!: string;
@@ -104,6 +139,43 @@ export class AdminRoleTemplateSkillInputDto {
   @IsString()
   @MinLength(1)
   summary!: string;
+}
+
+export class AdminRoleTemplateWorkflowStepInputDto {
+  @ApiProperty({ example: 'receive_input' })
+  @IsString()
+  @MinLength(1)
+  id!: string;
+
+  @ApiProperty({ example: 1 })
+  @IsInt()
+  @Min(1)
+  order!: number;
+
+  @ApiProperty({ enum: ['input', 'reasoning', 'knowledge', 'tool', 'approval', 'output'] })
+  @IsIn(['input', 'reasoning', 'knowledge', 'tool', 'approval', 'output'])
+  type!: 'input' | 'reasoning' | 'knowledge' | 'tool' | 'approval' | 'output';
+
+  @ApiProperty({ example: '接收任务' })
+  @IsString()
+  @MinLength(1)
+  name!: string;
+
+  @ApiProperty({ example: '确认用户输入、目标、边界和交付物要求。' })
+  @IsString()
+  @MinLength(1)
+  instruction!: string;
+
+  @ApiPropertyOptional({ type: [String], example: ['web-search'] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  toolIds?: string[];
+
+  @ApiPropertyOptional({ example: true })
+  @IsOptional()
+  @IsBoolean()
+  requiresApproval?: boolean;
 }
 
 export class CreateAdminRoleTemplateRequestDto {
@@ -162,6 +234,24 @@ export class CreateAdminRoleTemplateRequestDto {
   @ValidateNested({ each: true })
   @Type(() => AdminRoleTemplateSkillInputDto)
   skills!: AdminRoleTemplateSkillInputDto[];
+
+  @ApiPropertyOptional({ type: [AdminRoleTemplateWorkflowStepInputDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AdminRoleTemplateWorkflowStepInputDto)
+  workflowSteps?: AdminRoleTemplateWorkflowStepInputDto[];
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  sampleInputs?: string[];
+
+  @ApiPropertyOptional({ example: 'Markdown report with summary, findings, risks, next actions, and local artifact links.' })
+  @IsOptional()
+  @IsString()
+  outputFormat?: string;
 
   @ApiProperty({ example: '正式对外发送前需要销售负责人确认。' })
   @IsString()
@@ -247,6 +337,24 @@ export class UpdateAdminRoleTemplateRequestDto {
   @ValidateNested({ each: true })
   @Type(() => AdminRoleTemplateSkillInputDto)
   skills?: AdminRoleTemplateSkillInputDto[];
+
+  @ApiPropertyOptional({ type: [AdminRoleTemplateWorkflowStepInputDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AdminRoleTemplateWorkflowStepInputDto)
+  workflowSteps?: AdminRoleTemplateWorkflowStepInputDto[];
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  sampleInputs?: string[];
+
+  @ApiPropertyOptional({ example: 'Markdown report with summary, findings, risks, next actions, and local artifact links.' })
+  @IsOptional()
+  @IsString()
+  outputFormat?: string;
 
   @ApiPropertyOptional({ example: '正式对外发送前需要销售负责人确认。' })
   @IsOptional()

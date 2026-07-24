@@ -40,8 +40,21 @@ const planCodes = [
 ] as const;
 
 const planCodeSet = new Set<string>(planCodes);
+const workflowStepTypes = ['input', 'reasoning', 'knowledge', 'tool', 'approval', 'output'] as const;
+const workflowStepTypeSet = new Set<string>(workflowStepTypes);
 
 type RoleTemplateDate = Date | string;
+type RoleTemplateStepType = (typeof workflowStepTypes)[number];
+
+type RoleTemplateWorkflowStep = {
+  id: string;
+  order: number;
+  type: RoleTemplateStepType;
+  name: string;
+  instruction: string;
+  toolIds?: string[];
+  requiresApproval?: boolean;
+};
 
 type RoleTemplateRecord = {
   id: string;
@@ -55,6 +68,9 @@ type RoleTemplateRecord = {
   knowledgeSources: unknown;
   tools: unknown;
   skills: unknown;
+  workflowSteps: unknown;
+  sampleInputs: unknown;
+  outputFormat?: string | null;
   approvalPolicy: string;
   status: string;
   allowedPlanCodes: unknown;
@@ -80,6 +96,9 @@ interface NormalizedRoleTemplateInput {
     name: string;
     summary: string;
   }>;
+  workflowSteps: RoleTemplateWorkflowStep[];
+  sampleInputs: string[];
+  outputFormat: string;
   approvalPolicy: string;
   status: RoleTemplateStatus;
   allowedPlanCodes: string[];
@@ -527,6 +546,12 @@ export class RoleTemplateFactoryService {
       knowledgeSources: this.normalizeStringArray(input.knowledgeSources),
       tools: this.normalizeStringArray(input.tools),
       skills: this.normalizeSkills(input.skills),
+      workflowSteps: this.normalizeWorkflowSteps(input.workflowSteps ?? []),
+      sampleInputs: this.normalizeStringArray(input.sampleInputs ?? []),
+      outputFormat: this.normalizeOptionalText(
+        input.outputFormat,
+        'Markdown report with summary, findings, risks, next actions, and local artifact links.'
+      ),
       approvalPolicy: this.requireText(input.approvalPolicy, 'Approval policy cannot be empty.'),
       status,
       allowedPlanCodes,
@@ -557,6 +582,14 @@ export class RoleTemplateFactoryService {
     if (input.knowledgeSources !== undefined) normalized.knowledgeSources = this.normalizeStringArray(input.knowledgeSources);
     if (input.tools !== undefined) normalized.tools = this.normalizeStringArray(input.tools);
     if (input.skills !== undefined) normalized.skills = this.normalizeSkills(input.skills);
+    if (input.workflowSteps !== undefined) normalized.workflowSteps = this.normalizeWorkflowSteps(input.workflowSteps);
+    if (input.sampleInputs !== undefined) normalized.sampleInputs = this.normalizeStringArray(input.sampleInputs);
+    if (input.outputFormat !== undefined) {
+      normalized.outputFormat = this.normalizeOptionalText(
+        input.outputFormat,
+        'Markdown report with summary, findings, risks, next actions, and local artifact links.'
+      );
+    }
     if (input.approvalPolicy !== undefined) {
       normalized.approvalPolicy = this.requireText(input.approvalPolicy, 'Approval policy cannot be empty.');
     }
@@ -582,6 +615,9 @@ export class RoleTemplateFactoryService {
       knowledgeSources: input.knowledgeSources,
       tools: input.tools,
       skills: input.skills,
+      workflowSteps: input.workflowSteps,
+      sampleInputs: input.sampleInputs,
+      outputFormat: input.outputFormat,
       approvalPolicy: input.approvalPolicy,
       status: input.status,
       allowedPlanCodes: input.allowedPlanCodes,
@@ -605,6 +641,9 @@ export class RoleTemplateFactoryService {
     if (input.knowledgeSources !== undefined) data.knowledgeSources = input.knowledgeSources;
     if (input.tools !== undefined) data.tools = input.tools;
     if (input.skills !== undefined) data.skills = input.skills;
+    if (input.workflowSteps !== undefined) data.workflowSteps = input.workflowSteps;
+    if (input.sampleInputs !== undefined) data.sampleInputs = input.sampleInputs;
+    if (input.outputFormat !== undefined) data.outputFormat = input.outputFormat;
     if (input.approvalPolicy !== undefined) data.approvalPolicy = input.approvalPolicy;
     if (input.status !== undefined) {
       data.status = input.status;
@@ -631,6 +670,9 @@ export class RoleTemplateFactoryService {
       knowledgeSources: this.toStringArray(template.knowledgeSources),
       tools: this.toStringArray(template.tools),
       skills: this.toSkillSummaries(template.skills),
+      workflowSteps: this.toWorkflowSteps(template.workflowSteps),
+      sampleInputs: this.toStringArray(template.sampleInputs),
+      outputFormat: template.outputFormat?.trim() || '',
       approvalPolicy: template.approvalPolicy,
       status: this.toRoleTemplateStatus(template.status),
       allowedPlanCodes: this.toStringArray(template.allowedPlanCodes),
@@ -654,6 +696,12 @@ export class RoleTemplateFactoryService {
     }
     if (this.toStringArray(template.tools).length === 0) {
       warnings.push('Template has no tool requirement.');
+    }
+    if (this.toStringArray(template.sampleInputs).length === 0) {
+      warnings.push('Template has no sample input.');
+    }
+    if (!template.outputFormat?.trim()) {
+      warnings.push('Template has no output format.');
     }
     if (!input.sampleInput?.trim()) {
       warnings.push('No sample input was provided; only structural validation was performed.');
@@ -680,6 +728,9 @@ export class RoleTemplateFactoryService {
 
     if (this.toSkillSummaries(template.skills).length === 0) {
       issues.push('Template must define at least one skill.');
+    }
+    if (this.toWorkflowSteps(template.workflowSteps).length === 0) {
+      issues.push('Template must define at least one workflow step.');
     }
     if (
       this.toStringArray(template.allowedPlanCodes).length === 0 &&
@@ -735,13 +786,27 @@ export class RoleTemplateFactoryService {
     switch (planCode) {
       case 'ENTERPRISE_BASIC_MONTHLY':
       case 'ENTERPRISE_BASIC_ANNUAL':
-        return ['ENTERPRISE_BASIC_MONTHLY', 'ENTERPRISE_BASIC_ANNUAL'];
+        return [
+          'ENTERPRISE_BASIC_MONTHLY',
+          'ENTERPRISE_BASIC_ANNUAL',
+          'ENTERPRISE_STANDARD_MONTHLY',
+          'ENTERPRISE_STANDARD_ANNUAL',
+          'ENTERPRISE_PRO_MONTHLY',
+          'ENTERPRISE_PRO_ANNUAL',
+          'ENTERPRISE_CUSTOM'
+        ];
       case 'ENTERPRISE_STANDARD_MONTHLY':
       case 'ENTERPRISE_STANDARD_ANNUAL':
-        return ['ENTERPRISE_STANDARD_MONTHLY', 'ENTERPRISE_STANDARD_ANNUAL'];
+        return [
+          'ENTERPRISE_STANDARD_MONTHLY',
+          'ENTERPRISE_STANDARD_ANNUAL',
+          'ENTERPRISE_PRO_MONTHLY',
+          'ENTERPRISE_PRO_ANNUAL',
+          'ENTERPRISE_CUSTOM'
+        ];
       case 'ENTERPRISE_PRO_MONTHLY':
       case 'ENTERPRISE_PRO_ANNUAL':
-        return ['ENTERPRISE_PRO_MONTHLY', 'ENTERPRISE_PRO_ANNUAL'];
+        return ['ENTERPRISE_PRO_MONTHLY', 'ENTERPRISE_PRO_ANNUAL', 'ENTERPRISE_CUSTOM'];
       case 'ENTERPRISE_MONTHLY':
       case 'ENTERPRISE_ANNUAL':
         return ['ENTERPRISE_MONTHLY', 'ENTERPRISE_ANNUAL'];
@@ -760,6 +825,66 @@ export class RoleTemplateFactoryService {
       name: this.requireText(skill.name, 'Skill name cannot be empty.'),
       summary: this.requireText(skill.summary, 'Skill summary cannot be empty.')
     }));
+  }
+
+  private normalizeWorkflowSteps(
+    values: Array<{
+      id: string;
+      order: number;
+      type: string;
+      name: string;
+      instruction: string;
+      toolIds?: string[];
+      requiresApproval?: boolean;
+    }>
+  ): RoleTemplateWorkflowStep[] {
+    const stepIds = new Set<string>();
+    const normalized = values.map((step, index) => {
+      const id = this.requireText(step.id, 'Workflow step id cannot be empty.');
+      if (stepIds.has(id)) {
+        throw new BadRequestException({
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Workflow step id must be unique.',
+            details: {
+              stepId: id
+            }
+          }
+        });
+      }
+      stepIds.add(id);
+
+      if (!workflowStepTypeSet.has(step.type)) {
+        throw new BadRequestException({
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Workflow step type is invalid.',
+            details: {
+              stepId: id,
+              type: step.type
+            }
+          }
+        });
+      }
+
+      const order = Number.isInteger(step.order) && step.order > 0 ? step.order : index + 1;
+      return {
+        id,
+        order,
+        type: step.type as RoleTemplateStepType,
+        name: this.requireText(step.name, 'Workflow step name cannot be empty.'),
+        instruction: this.requireText(step.instruction, 'Workflow step instruction cannot be empty.'),
+        toolIds: this.normalizeStringArray(step.toolIds ?? []),
+        requiresApproval: step.requiresApproval ?? step.type === 'approval'
+      };
+    });
+
+    return normalized.sort((left, right) => left.order - right.order);
+  }
+
+  private normalizeOptionalText(value: string | undefined, fallback: string): string {
+    const normalized = value?.trim();
+    return normalized || fallback;
   }
 
   private requireText(value: string, message: string): string {
@@ -805,6 +930,47 @@ export class RoleTemplateFactoryService {
 
       return [{ code, name, summary }];
     });
+  }
+
+  private toWorkflowSteps(value: unknown): RoleTemplateWorkflowStep[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    return value
+      .flatMap((item) => {
+        if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+          return [];
+        }
+
+        const record = item as Record<string, unknown>;
+        const id = typeof record.id === 'string' ? record.id.trim() : '';
+        const type = typeof record.type === 'string' ? record.type.trim() : '';
+        const name = typeof record.name === 'string' ? record.name.trim() : '';
+        const instruction =
+          typeof record.instruction === 'string' ? record.instruction.trim() : '';
+        const order = typeof record.order === 'number' && Number.isInteger(record.order) ? record.order : 0;
+
+        if (!id || !workflowStepTypeSet.has(type) || !name || !instruction || order <= 0) {
+          return [];
+        }
+
+        return [
+          {
+            id,
+            order,
+            type: type as RoleTemplateStepType,
+            name,
+            instruction,
+            toolIds: this.toStringArray(record.toolIds),
+            requiresApproval:
+              typeof record.requiresApproval === 'boolean'
+                ? record.requiresApproval
+                : type === 'approval'
+          }
+        ];
+      })
+      .sort((left, right) => left.order - right.order);
   }
 
   private toRoleTemplateStatus(value: string): 'DRAFT' | 'PUBLISHED' | 'ARCHIVED' {

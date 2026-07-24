@@ -564,6 +564,9 @@ model RoleTemplate {
   knowledgeSources    Json     @map("knowledge_sources")
   tools               Json
   skills              Json
+  workflowSteps       Json     @default("[]") @map("workflow_steps")
+  sampleInputs        Json     @default("[]") @map("sample_inputs")
+  outputFormat        String?  @map("output_format")
   approvalPolicy      String   @map("approval_policy")
   status              RoleTemplateStatus @default(PUBLISHED)
   allowedPlanCodes    Json               @default("[]") @map("allowed_plan_codes")

@@ -491,6 +491,15 @@ function isRolePackageManifest(value: unknown): value is RolePackageManifest {
     typeof record.name === 'string' &&
     typeof record.version === 'string' &&
     (record.summary === undefined || typeof record.summary === 'string') &&
+    (record.templateId === undefined || typeof record.templateId === 'string') &&
+    (record.templateVersion === undefined || typeof record.templateVersion === 'string') &&
+    (record.skills === undefined ||
+      (Array.isArray(record.skills) && record.skills.every(isRoleSkillSummary))) &&
+    (record.workflowSteps === undefined ||
+      (Array.isArray(record.workflowSteps) && record.workflowSteps.every(isRoleWorkflowStep))) &&
+    (record.sampleInputs === undefined ||
+      (Array.isArray(record.sampleInputs) && record.sampleInputs.every((item) => typeof item === 'string'))) &&
+    (record.outputFormat === undefined || typeof record.outputFormat === 'string') &&
     Array.isArray(record.modelProfileIds) &&
     record.modelProfileIds.every((item) => typeof item === 'string') &&
     Array.isArray(record.toolIds) &&
@@ -500,6 +509,44 @@ function isRolePackageManifest(value: unknown): value is RolePackageManifest {
     Array.isArray(record.defaultTaskTypes) &&
     record.defaultTaskTypes.every((item) => typeof item === 'string') &&
     (record.syncPolicy === 'summary_only' || record.syncPolicy === 'summary_plus_metadata')
+  );
+}
+
+function isRoleSkillSummary(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.code === 'string' &&
+    typeof record.name === 'string' &&
+    typeof record.summary === 'string'
+  );
+}
+
+function isRoleWorkflowStep(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === 'string' &&
+    typeof record.order === 'number' &&
+    Number.isInteger(record.order) &&
+    record.order > 0 &&
+    (record.type === 'input' ||
+      record.type === 'reasoning' ||
+      record.type === 'knowledge' ||
+      record.type === 'tool' ||
+      record.type === 'approval' ||
+      record.type === 'output') &&
+    typeof record.name === 'string' &&
+    typeof record.instruction === 'string' &&
+    (record.toolIds === undefined ||
+      (Array.isArray(record.toolIds) && record.toolIds.every((item) => typeof item === 'string'))) &&
+    (record.requiresApproval === undefined || typeof record.requiresApproval === 'boolean')
   );
 }
 

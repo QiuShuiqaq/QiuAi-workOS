@@ -632,6 +632,8 @@ async function seedBilling() {
 }
 
 async function seedRoleTemplates() {
+  const publishedAt = new Date('2026-07-24T00:00:00.000Z');
+
   for (const template of roleTemplates) {
     await prisma.roleTemplate.upsert({
       where: {
@@ -648,7 +650,14 @@ async function seedRoleTemplates() {
         knowledgeSources: [...template.knowledgeSources],
         tools: [...template.tools],
         skills: template.skills.map((skill) => ({ ...skill })),
-        approvalPolicy: template.approvalPolicy
+        workflowSteps: template.workflowSteps.map((step) => ({ ...step })),
+        sampleInputs: [...template.sampleInputs],
+        outputFormat: template.outputFormat,
+        approvalPolicy: template.approvalPolicy,
+        status: 'PUBLISHED',
+        allowedPlanCodes: [...template.allowedPlanCodes],
+        visibleWorkspaceIds: [],
+        publishedAt
       },
       create: {
         id: template.templateId,
@@ -662,7 +671,14 @@ async function seedRoleTemplates() {
         knowledgeSources: [...template.knowledgeSources],
         tools: [...template.tools],
         skills: template.skills.map((skill) => ({ ...skill })),
-        approvalPolicy: template.approvalPolicy
+        workflowSteps: template.workflowSteps.map((step) => ({ ...step })),
+        sampleInputs: [...template.sampleInputs],
+        outputFormat: template.outputFormat,
+        approvalPolicy: template.approvalPolicy,
+        status: 'PUBLISHED',
+        allowedPlanCodes: [...template.allowedPlanCodes],
+        visibleWorkspaceIds: [],
+        publishedAt
       }
     });
   }

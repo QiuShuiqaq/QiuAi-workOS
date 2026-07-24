@@ -23,6 +23,9 @@ type DatabaseRoleTemplate = {
   knowledgeSources: unknown;
   tools: unknown;
   skills: unknown;
+  workflowSteps: unknown;
+  sampleInputs: unknown;
+  outputFormat?: string | null;
   approvalPolicy: string;
   status: string;
   allowedPlanCodes: unknown;
@@ -351,6 +354,9 @@ export class RoleService {
       knowledgeSources: this.toStringArray(template.knowledgeSources),
       tools: this.toStringArray(template.tools),
       skills: this.toSkillSummaries(template.skills),
+      workflowSteps: this.toWorkflowSteps(template.workflowSteps),
+      sampleInputs: this.toStringArray(template.sampleInputs),
+      outputFormat: template.outputFormat?.trim() || '',
       approvalPolicy: template.approvalPolicy
     };
   }
@@ -498,6 +504,44 @@ export class RoleService {
       }
 
       return [{ code, name, summary }];
+    });
+  }
+
+  private toWorkflowSteps(value: unknown) {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    return value.flatMap((item) => {
+      if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+        return [];
+      }
+
+      const record = item as Record<string, unknown>;
+      const id = typeof record.id === 'string' ? record.id.trim() : '';
+      const type = typeof record.type === 'string' ? record.type.trim() : '';
+      const name = typeof record.name === 'string' ? record.name.trim() : '';
+      const instruction = typeof record.instruction === 'string' ? record.instruction.trim() : '';
+      const order = typeof record.order === 'number' && Number.isInteger(record.order) ? record.order : 0;
+
+      if (!id || !type || !name || !instruction || order <= 0) {
+        return [];
+      }
+
+      return [
+        {
+          id,
+          order,
+          type,
+          name,
+          instruction,
+          toolIds: this.toStringArray(record.toolIds),
+          requiresApproval:
+            typeof record.requiresApproval === 'boolean'
+              ? record.requiresApproval
+              : type === 'approval'
+        }
+      ];
     });
   }
 

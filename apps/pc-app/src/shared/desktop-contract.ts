@@ -106,6 +106,24 @@ export interface DesktopRoleSkillSummary {
   summary: string;
 }
 
+export type DesktopRoleWorkflowStepType =
+  | 'input'
+  | 'reasoning'
+  | 'knowledge'
+  | 'tool'
+  | 'approval'
+  | 'output';
+
+export interface DesktopRoleWorkflowStep {
+  id: string;
+  order: number;
+  type: DesktopRoleWorkflowStepType;
+  name: string;
+  instruction: string;
+  toolIds?: string[];
+  requiresApproval?: boolean;
+}
+
 export interface RolePackageManifest {
   roleCode: string;
   name: string;
@@ -114,6 +132,9 @@ export interface RolePackageManifest {
   templateId?: string;
   templateVersion?: string;
   skills?: DesktopRoleSkillSummary[];
+  workflowSteps?: DesktopRoleWorkflowStep[];
+  sampleInputs?: string[];
+  outputFormat?: string;
   modelProfileIds: string[];
   toolIds: string[];
   requiredKnowledgeSources: KnowledgeBindingSource[];

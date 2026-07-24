@@ -358,6 +358,12 @@ function toRoleTemplateSummary(template: DesktopRoleTemplate): DesktopAuthorized
     knowledgeSources: [...template.knowledgeSources],
     tools: [...template.tools],
     skills: template.skills.map((skill) => ({ ...skill })),
+    workflowSteps: (template.workflowSteps ?? []).map((step) => ({
+      ...step,
+      toolIds: step.toolIds ? [...step.toolIds] : undefined
+    })),
+    sampleInputs: [...(template.sampleInputs ?? [])],
+    outputFormat: template.outputFormat ?? '',
     approvalPolicy: template.approvalPolicy
   };
 }
@@ -381,6 +387,12 @@ function toDesktopRoleTemplate(summary: DesktopAuthorizedRoleTemplateSummary): D
     tools: [...summary.tools],
     approvalPolicy: summary.approvalPolicy,
     skills: summary.skills.map((skill) => ({ ...skill })),
+    workflowSteps: (summary.workflowSteps ?? []).map((step) => ({
+      ...step,
+      toolIds: step.toolIds ? [...step.toolIds] : undefined
+    })),
+    sampleInputs: [...(summary.sampleInputs ?? [])],
+    outputFormat: summary.outputFormat ?? '',
     modelProfileIds: fallback?.modelProfileIds ?? ['qiu-general-default'],
     toolIds: fallback?.toolIds ?? inferDesktopToolIds(summary),
     requiredKnowledgeSources:
@@ -3935,6 +3947,12 @@ function toInstalledRolePackage(template: DesktopRoleTemplate): RolePackageManif
     templateId: template.templateId,
     templateVersion: template.version,
     skills: template.skills.map((skill) => ({ ...skill })),
+    workflowSteps: (template.workflowSteps ?? []).map((step) => ({
+      ...step,
+      toolIds: step.toolIds ? [...step.toolIds] : undefined
+    })),
+    sampleInputs: [...(template.sampleInputs ?? [])],
+    outputFormat: template.outputFormat,
     modelProfileIds: [...template.modelProfileIds],
     toolIds: [...template.toolIds],
     requiredKnowledgeSources: [...template.requiredKnowledgeSources],

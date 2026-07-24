@@ -1,5 +1,5 @@
 import type { PaginationMeta } from './pagination';
-import type { RoleSkillSummary } from './role';
+import type { RoleSkillSummary, RoleTemplateWorkflowStep } from './role';
 
 export type AdminRoleTemplateStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
 
@@ -15,6 +15,9 @@ export interface AdminRoleTemplateDetail {
   knowledgeSources: string[];
   tools: string[];
   skills: RoleSkillSummary[];
+  workflowSteps: RoleTemplateWorkflowStep[];
+  sampleInputs: string[];
+  outputFormat: string;
   approvalPolicy: string;
   status: AdminRoleTemplateStatus;
   allowedPlanCodes: string[];
@@ -47,6 +50,9 @@ export interface CreateAdminRoleTemplateRequest {
   knowledgeSources: string[];
   tools: string[];
   skills: AdminRoleTemplateSkillInput[];
+  workflowSteps?: RoleTemplateWorkflowStep[];
+  sampleInputs?: string[];
+  outputFormat?: string;
   approvalPolicy: string;
   status?: AdminRoleTemplateStatus;
   allowedPlanCodes?: string[];
@@ -64,6 +70,9 @@ export interface UpdateAdminRoleTemplateRequest {
   knowledgeSources?: string[];
   tools?: string[];
   skills?: AdminRoleTemplateSkillInput[];
+  workflowSteps?: RoleTemplateWorkflowStep[];
+  sampleInputs?: string[];
+  outputFormat?: string;
   approvalPolicy?: string;
   status?: AdminRoleTemplateStatus;
   allowedPlanCodes?: string[];

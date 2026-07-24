@@ -167,13 +167,33 @@ test('admin role template factory governs publication and workspace visibility',
             summary: 'Checks template factory publication and visibility behavior.'
           }
         ],
+        workflowSteps: [
+          {
+            id: 'receive_input',
+            order: 1,
+            type: 'input',
+            name: 'Receive Input',
+            instruction: 'Confirm the requested template factory smoke test scope.'
+          },
+          {
+            id: 'deliver_output',
+            order: 2,
+            type: 'output',
+            name: 'Deliver Output',
+            instruction: 'Return a concise validation result for the operator.'
+          }
+        ],
+        sampleInputs: ['Please verify the template factory flow.'],
+        outputFormat: 'Markdown checklist with validation result and risks.',
         approvalPolicy: 'Manual review is required before customer-facing output.',
         allowedPlanCodes: ['ENTERPRISE_PRO_MONTHLY'],
         visibleWorkspaceIds: []
       }
     });
     assert.equal(createResponse.statusCode, 201);
-    assert.equal(JSON.parse(createResponse.body).data.status, 'DRAFT');
+    const createdTemplate = JSON.parse(createResponse.body).data;
+    assert.equal(createdTemplate.status, 'DRAFT');
+    assert.equal(createdTemplate.workflowSteps.length, 2);
 
     const testResponse = await app.inject({
       method: 'POST',
@@ -230,10 +250,10 @@ test('admin role template factory governs publication and workspace visibility',
     });
     assert.equal(visibleTemplatesResponse.statusCode, 200);
     assert.equal(
-      JSON.parse(visibleTemplatesResponse.body).data.some(
+      JSON.parse(visibleTemplatesResponse.body).data.find(
         (template: { id: string }) => template.id === templateId
-      ),
-      true
+      )?.workflowSteps.length,
+      2
     );
 
     const desktopTemplatesWithoutTokenResponse = await app.inject({
@@ -280,10 +300,10 @@ test('admin role template factory governs publication and workspace visibility',
     });
     assert.equal(desktopTemplatesResponse.statusCode, 200);
     assert.equal(
-      JSON.parse(desktopTemplatesResponse.body).data.some(
+      JSON.parse(desktopTemplatesResponse.body).data.find(
         (template: { id: string }) => template.id === templateId
-      ),
-      true
+      )?.workflowSteps.length,
+      2
     );
 
     const installResponse = await app.inject({

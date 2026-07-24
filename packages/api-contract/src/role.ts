@@ -4,6 +4,24 @@ export interface RoleSkillSummary {
   summary: string;
 }
 
+export type RoleTemplateStepType =
+  | 'input'
+  | 'reasoning'
+  | 'knowledge'
+  | 'tool'
+  | 'approval'
+  | 'output';
+
+export interface RoleTemplateWorkflowStep {
+  id: string;
+  order: number;
+  type: RoleTemplateStepType;
+  name: string;
+  instruction: string;
+  toolIds?: string[];
+  requiresApproval?: boolean;
+}
+
 export interface RoleTemplateSummary {
   id: string;
   version: string;
@@ -16,6 +34,9 @@ export interface RoleTemplateSummary {
   knowledgeSources: string[];
   tools: string[];
   skills: RoleSkillSummary[];
+  workflowSteps: RoleTemplateWorkflowStep[];
+  sampleInputs: string[];
+  outputFormat: string;
   approvalPolicy: string;
 }
 

@@ -58,6 +58,24 @@ export interface DesktopAuthorizedRoleSkillSummary {
   summary: string;
 }
 
+export type DesktopAuthorizedRoleTemplateStepType =
+  | 'input'
+  | 'reasoning'
+  | 'knowledge'
+  | 'tool'
+  | 'approval'
+  | 'output';
+
+export interface DesktopAuthorizedRoleTemplateWorkflowStep {
+  id: string;
+  order: number;
+  type: DesktopAuthorizedRoleTemplateStepType;
+  name: string;
+  instruction: string;
+  toolIds?: string[];
+  requiresApproval?: boolean;
+}
+
 export interface DesktopAuthorizedRoleTemplateSummary {
   id: string;
   version: string;
@@ -70,6 +88,9 @@ export interface DesktopAuthorizedRoleTemplateSummary {
   knowledgeSources: string[];
   tools: string[];
   skills: DesktopAuthorizedRoleSkillSummary[];
+  workflowSteps: DesktopAuthorizedRoleTemplateWorkflowStep[];
+  sampleInputs: string[];
+  outputFormat: string;
   approvalPolicy: string;
 }
 

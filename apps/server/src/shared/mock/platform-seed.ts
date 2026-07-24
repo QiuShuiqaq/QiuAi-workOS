@@ -1,7 +1,8 @@
 ﻿import type { PlanCode } from '../types/plan-code';
 import {
   serverRoleTemplateCatalog,
-  type ServerRoleSkill
+  type ServerRoleSkill,
+  type ServerRoleTemplateWorkflowStep
 } from '../role-template-catalog';
 
 export interface MockWorkspaceSummary {
@@ -41,6 +42,9 @@ export interface MockRoleTemplateSummary {
   knowledgeSources: string[];
   tools: string[];
   skills: ServerRoleSkill[];
+  workflowSteps: ServerRoleTemplateWorkflowStep[];
+  sampleInputs: string[];
+  outputFormat: string;
   approvalPolicy: string;
   status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
   allowedPlanCodes: string[];
@@ -133,25 +137,6 @@ const roleTemplateById = new Map(
 
 function cloneSkills(skills: ServerRoleSkill[]) {
   return skills.map((skill) => ({ ...skill }));
-}
-
-function defaultAllowedPlanCodes(planCode: string): string[] {
-  switch (planCode) {
-    case 'ENTERPRISE_BASIC_MONTHLY':
-    case 'ENTERPRISE_BASIC_ANNUAL':
-      return ['ENTERPRISE_BASIC_MONTHLY', 'ENTERPRISE_BASIC_ANNUAL'];
-    case 'ENTERPRISE_STANDARD_MONTHLY':
-    case 'ENTERPRISE_STANDARD_ANNUAL':
-      return ['ENTERPRISE_STANDARD_MONTHLY', 'ENTERPRISE_STANDARD_ANNUAL'];
-    case 'ENTERPRISE_PRO_MONTHLY':
-    case 'ENTERPRISE_PRO_ANNUAL':
-      return ['ENTERPRISE_PRO_MONTHLY', 'ENTERPRISE_PRO_ANNUAL'];
-    case 'ENTERPRISE_MONTHLY':
-    case 'ENTERPRISE_ANNUAL':
-      return ['ENTERPRISE_MONTHLY', 'ENTERPRISE_ANNUAL'];
-    default:
-      return [planCode];
-  }
 }
 
 const personalFreeEntitlements = [
@@ -343,9 +328,15 @@ export const demoRoleTemplates: MockRoleTemplateSummary[] = serverRoleTemplateCa
     knowledgeSources: [...template.knowledgeSources],
     tools: [...template.tools],
     skills: cloneSkills(template.skills),
+    workflowSteps: template.workflowSteps.map((step) => ({
+      ...step,
+      toolIds: step.toolIds ? [...step.toolIds] : undefined
+    })),
+    sampleInputs: [...template.sampleInputs],
+    outputFormat: template.outputFormat,
     approvalPolicy: template.approvalPolicy,
     status: 'PUBLISHED',
-    allowedPlanCodes: defaultAllowedPlanCodes(template.recommendedPlanCode),
+    allowedPlanCodes: [...template.allowedPlanCodes],
     visibleWorkspaceIds: [],
     publishedAt: '2026-07-24T00:00:00.000Z',
     createdAt: '2026-07-24T00:00:00.000Z',

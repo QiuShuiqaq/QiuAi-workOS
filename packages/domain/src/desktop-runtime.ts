@@ -56,11 +56,39 @@ export interface ToolManifest {
   requiresApproval: boolean;
 }
 
+export type RoleWorkflowStepType =
+  | 'input'
+  | 'reasoning'
+  | 'knowledge'
+  | 'tool'
+  | 'approval'
+  | 'output';
+
+export interface RoleWorkflowStep {
+  id: string;
+  order: number;
+  type: RoleWorkflowStepType;
+  name: string;
+  instruction: string;
+  toolIds?: string[];
+  requiresApproval?: boolean;
+}
+
 export interface RolePackageManifest {
   roleCode: string;
   name: string;
   version: string;
   summary?: string;
+  templateId?: string;
+  templateVersion?: string;
+  skills?: Array<{
+    code: string;
+    name: string;
+    summary: string;
+  }>;
+  workflowSteps?: RoleWorkflowStep[];
+  sampleInputs?: string[];
+  outputFormat?: string;
   modelProfileIds: string[];
   toolIds: string[];
   requiredKnowledgeSources: KnowledgeBindingSource[];
@@ -157,6 +185,16 @@ export function validateRolePackageManifest(input: unknown): RolePackageManifest
     name: requireString(record.name, 'rolePackage.name'),
     version: requireString(record.version, 'rolePackage.version'),
     summary: optionalString(record.summary, 'rolePackage.summary'),
+    templateId: optionalString(record.templateId, 'rolePackage.templateId'),
+    templateVersion: optionalString(record.templateVersion, 'rolePackage.templateVersion'),
+    skills: Array.isArray(record.skills)
+      ? record.skills.map(validateRoleSkill)
+      : undefined,
+    workflowSteps: Array.isArray(record.workflowSteps)
+      ? record.workflowSteps.map(validateRoleWorkflowStep)
+      : undefined,
+    sampleInputs: requireStringArray(record.sampleInputs, 'rolePackage.sampleInputs'),
+    outputFormat: optionalString(record.outputFormat, 'rolePackage.outputFormat'),
     modelProfileIds,
     toolIds,
     requiredKnowledgeSources,
@@ -165,6 +203,37 @@ export function validateRolePackageManifest(input: unknown): RolePackageManifest
       'summary_only',
       'summary_plus_metadata'
     ])
+  };
+}
+
+function validateRoleSkill(input: unknown): NonNullable<RolePackageManifest['skills']>[number] {
+  const record = requireRecord(input, 'role skill');
+
+  return {
+    code: requireString(record.code, 'roleSkill.code'),
+    name: requireString(record.name, 'roleSkill.name'),
+    summary: requireString(record.summary, 'roleSkill.summary')
+  };
+}
+
+function validateRoleWorkflowStep(input: unknown): RoleWorkflowStep {
+  const record = requireRecord(input, 'role workflow step');
+
+  return {
+    id: requireString(record.id, 'roleWorkflowStep.id'),
+    order: requirePositiveInteger(record.order, 'roleWorkflowStep.order'),
+    type: requireEnum(record.type, 'roleWorkflowStep.type', [
+      'input',
+      'reasoning',
+      'knowledge',
+      'tool',
+      'approval',
+      'output'
+    ]),
+    name: requireString(record.name, 'roleWorkflowStep.name'),
+    instruction: requireString(record.instruction, 'roleWorkflowStep.instruction'),
+    toolIds: requireStringArray(record.toolIds, 'roleWorkflowStep.toolIds'),
+    requiresApproval: optionalBoolean(record.requiresApproval, 'roleWorkflowStep.requiresApproval')
   };
 }
 
@@ -261,6 +330,18 @@ function optionalPositiveInteger(value: unknown, fieldName: string): number | un
     value < 0
   ) {
     throw new Error(`${fieldName} must be a non-negative integer.`);
+  }
+
+  return value;
+}
+
+function requirePositiveInteger(value: unknown, fieldName: string): number {
+  if (
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value <= 0
+  ) {
+    throw new Error(`${fieldName} must be a positive integer.`);
   }
 
   return value;

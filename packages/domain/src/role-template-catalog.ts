@@ -12,6 +12,24 @@ export interface RoleSkill {
   summary: string;
 }
 
+export type RoleTemplateWorkflowStepType =
+  | 'input'
+  | 'reasoning'
+  | 'knowledge'
+  | 'tool'
+  | 'approval'
+  | 'output';
+
+export interface RoleTemplateWorkflowStep {
+  id: string;
+  order: number;
+  type: RoleTemplateWorkflowStepType;
+  name: string;
+  instruction: string;
+  toolIds?: string[];
+  requiresApproval?: boolean;
+}
+
 export interface RoleTemplateCatalogEntry {
   templateId: string;
   roleCode: string;
@@ -27,6 +45,9 @@ export interface RoleTemplateCatalogEntry {
   tools: string[];
   approvalPolicy: string;
   skills: RoleSkill[];
+  workflowSteps?: RoleTemplateWorkflowStep[];
+  sampleInputs?: string[];
+  outputFormat?: string;
   modelProfileIds: string[];
   toolIds: string[];
   requiredKnowledgeSources: RoleKnowledgeSource[];

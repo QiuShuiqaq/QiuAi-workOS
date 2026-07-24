@@ -23,6 +23,9 @@ export const fallbackRoleTemplates: ListRoleTemplatesResponse = {
     knowledgeSources: template.knowledgeSources,
     tools: template.tools,
     skills: template.skills,
+    workflowSteps: template.workflowSteps ?? [],
+    sampleInputs: template.sampleInputs ?? [],
+    outputFormat: template.outputFormat ?? '',
     approvalPolicy: template.approvalPolicy
   }))
 };
