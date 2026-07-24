@@ -323,16 +323,20 @@ body,
   grid-area: surface;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .product-surface-flush {
   display: grid;
+  min-height: 0;
+  overflow: hidden;
   background: #fff;
 }
 
 .product-surface-padded {
+  min-height: 0;
   padding: 16px;
+  overflow: auto;
   background: #f6f8fa;
 }
 
@@ -340,7 +344,7 @@ body,
   display: grid;
   grid-template-columns: 276px minmax(0, 1fr);
   height: 100%;
-  min-height: 100%;
+  min-height: 0;
   overflow: hidden;
   background: #fff;
 }
@@ -349,6 +353,8 @@ body,
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   border-right: 1px solid #eef2f7;
   background: #f7f8fa;
 }
@@ -366,7 +372,10 @@ body,
   gap: 6px;
   min-height: 0;
   padding: 12px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .agent-session-item {
@@ -446,6 +455,9 @@ body,
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
   background: #fff;
 }
 
@@ -472,8 +484,41 @@ body,
   gap: 16px;
   min-height: 0;
   padding: 24px clamp(24px, 6vw, 76px);
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   background: linear-gradient(180deg, #fff 0%, #fafbfc 100%);
+}
+
+.chat-message-list,
+.agent-session-list {
+  scrollbar-color: #c7d0dd transparent;
+  scrollbar-width: thin;
+}
+
+.chat-message-list::-webkit-scrollbar,
+.agent-session-list::-webkit-scrollbar {
+  width: 10px;
+}
+
+.chat-message-list::-webkit-scrollbar-track,
+.agent-session-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-message-list::-webkit-scrollbar-thumb,
+.agent-session-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #c7d0dd;
+  background-clip: content-box;
+}
+
+.chat-message-list::-webkit-scrollbar-thumb:hover,
+.agent-session-list::-webkit-scrollbar-thumb:hover {
+  background: #9aa8b8;
+  background-clip: content-box;
 }
 
 .chat-message-row {
@@ -595,6 +640,15 @@ body,
   border-radius: 8px;
   background: #fff;
   box-shadow: 0 10px 28px rgba(16, 24, 40, 0.08);
+}
+
+.chat-composer-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  min-width: 0;
 }
 
 .chat-composer .ant-form-item {
@@ -1042,5 +1096,10 @@ body,
 
   .chat-composer {
     margin: 0 14px 14px;
+  }
+
+  .chat-composer-status {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

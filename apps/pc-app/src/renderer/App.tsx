@@ -40,7 +40,7 @@ import Switch from 'antd/es/switch';
 import Tag from 'antd/es/tag';
 import Typography from 'antd/es/typography';
 import zhCN from 'antd/es/locale/zh_CN';
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 
 import type {
   DesktopAuthorizedRoleTemplateCatalog,
@@ -536,6 +536,7 @@ export default function App() {
     useState<DesktopAuthorizedRoleTemplateCatalog>(initialAuthorizedRoleTemplateCatalog);
   const [hasLoadedPersistedState, setHasLoadedPersistedState] = useState(false);
   const [workspaceBackups, setWorkspaceBackups] = useState<DesktopBackupSummary[]>([]);
+  const chatMessageListRef = useRef<HTMLDivElement | null>(null);
   const [taskForm] = Form.useForm<TaskFormValues>();
   const [modelForm] = Form.useForm<ModelFormValues>();
   const [toolSettingsForm] = Form.useForm<ToolSettingsFormValues>();
@@ -890,6 +891,33 @@ export default function App() {
 
     return taskDetails.find((task) => task.taskId === selectedTaskId) ?? taskDetails[0];
   }, [selectedTaskId, taskDetails]);
+
+  useEffect(() => {
+    if (selectedSection !== 'workbench') {
+      return;
+    }
+
+    const messageList = chatMessageListRef.current;
+    if (!messageList) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      messageList.scrollTo({
+        top: messageList.scrollHeight,
+        behavior: 'smooth'
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    selectedSection,
+    selectedTask?.taskId,
+    selectedTask?.updatedAt,
+    selectedTask?.executionLogs.length,
+    selectedTask?.artifacts.length,
+    selectedTask?.costRecords.length
+  ]);
 
   const installedRoleSummaries = useMemo(() => {
     return runtimeState.runtimeSnapshot.rolePackages;
@@ -1291,7 +1319,13 @@ export default function App() {
             </Space>
           </header>
 
-          <div className="chat-message-list">
+          <div
+            ref={chatMessageListRef}
+            className="chat-message-list"
+            role="log"
+            aria-label="数字员工对话记录"
+            aria-live="polite"
+          >
             {conversationTask ? (
               <>
                 <div className="chat-message-row user">
@@ -1464,12 +1498,42 @@ export default function App() {
               });
             }}
           >
+            <div className="chat-composer-status">
+              <Space size={8} wrap>
+                <Tag color={activeRoleCode ? 'blue' : 'orange'}>
+                  {conversationRole?.name ?? '未选择数字员工'}
+                </Tag>
+                <Tag color={configuredModelCount > 0 ? 'green' : 'orange'}>
+                  模型 {configuredModelCount}/{enabledModelCount}
+                </Tag>
+                <Tag color={enabledToolCount > 0 ? 'green' : 'orange'}>
+                  工具 {enabledToolCount}/{runtimeState.tools.length}
+                </Tag>
+                <Tag color={knowledgeBindingCount > 0 ? 'green' : 'default'}>
+                  知识 {knowledgeBindingCount}
+                </Tag>
+              </Space>
+              {!activeRoleCode ? (
+                <Typography.Text type="warning">请先在左侧选择或安装一个数字员工。</Typography.Text>
+              ) : configuredModelCount === 0 ? (
+                <Typography.Text type="warning">模型还未配置，任务可能无法真实执行。</Typography.Text>
+              ) : null}
+            </div>
             <Form.Item
               name="input"
               rules={[{ required: true, message: '请输入要交给数字员工处理的任务' }]}
             >
               <Input.TextArea
                 autoSize={{ minRows: 3, maxRows: 7 }}
+                disabled={!activeRoleCode}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  taskForm.submit();
+                }}
                 placeholder="输入任务，可以描述目标、文件位置、输出格式，也可以 @ 数字员工或引用本地文件"
               />
             </Form.Item>
