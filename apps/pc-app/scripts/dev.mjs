@@ -112,6 +112,8 @@ const viteProcess = start(process.execPath, [
   '--strictPort'
 ]);
 
+console.log(`Renderer dev server: ${devServerUrl}`);
+
 let shuttingDown = false;
 
 function stopChildren() {
@@ -145,6 +147,8 @@ const electronEnv = {
 };
 delete electronEnv.ELECTRON_RUN_AS_NODE;
 
+console.log(`Starting Electron with renderer: ${devServerUrl}`);
+
 const electronProcess = start(require('electron'), ['.'], {
   env: electronEnv
 });
@@ -156,6 +160,16 @@ electronProcess.once('error', (error) => {
 });
 
 electronProcess.once('exit', (code, signal) => {
+  if (code === 3221225477) {
+    console.error(
+      'Electron exited with Windows access violation 3221225477. ' +
+        'This is usually a native/GPU process crash; QiuAI PC disables GPU by default on Windows. ' +
+        'If it still happens, clear .local/user-data and reinstall dependencies.'
+    );
+  } else if (code !== 0 || signal) {
+    console.error(`Electron exited with ${signal || code}.`);
+  }
+
   stopChildren();
   process.exit(code ?? (signal ? 1 : 0));
 });

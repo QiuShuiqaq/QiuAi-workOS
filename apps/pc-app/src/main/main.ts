@@ -7,6 +7,14 @@ import { configureUserDataPath } from './runtime-state.js';
 const electronApi = (electron as typeof electron & { default?: typeof electron }).default ?? electron;
 const { app, BrowserWindow, Menu, shell } = electronApi;
 
+const shouldDisableHardwareAcceleration =
+  process.platform === 'win32' && process.env.QIUAI_PC_ENABLE_GPU !== '1';
+
+if (shouldDisableHardwareAcceleration) {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch('disable-gpu');
+}
+
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const isDev = Boolean(process.env.QIUAI_PC_DEV_SERVER_URL);
 
