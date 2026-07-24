@@ -69,7 +69,15 @@ import {
 import { runDesktopTask } from '../shared/desktop-task-runner';
 
 type SectionKey = 'workbench' | 'roles' | 'files' | 'settings';
-type SettingsSectionKey = 'models' | 'tools' | 'knowledge' | 'sync';
+type SettingsSectionKey = 'general' | 'models' | 'tools' | 'knowledge' | 'sync';
+type DesktopThemePreference = 'light' | 'system';
+type DesktopDensityPreference = 'comfortable' | 'compact';
+
+interface DesktopClientPreferences {
+  theme: DesktopThemePreference;
+  density: DesktopDensityPreference;
+  startupSection: SectionKey;
+}
 
 type DesktopRoleTemplate = RoleTemplateCatalogEntry;
 
@@ -141,10 +149,28 @@ const settingsSectionItems: Array<{
   label: string;
   description: string;
 }> = [
+  { key: 'general', icon: <SettingOutlined />, label: '通用', description: '主题、启动、数据位置' },
   { key: 'models', icon: <ApiOutlined />, label: '模型', description: '配置 API Key' },
   { key: 'tools', icon: <ToolOutlined />, label: '工具', description: '文件、文档、网页搜索' },
-  { key: 'knowledge', icon: <FolderOpenOutlined />, label: '知识', description: '选择本地资料' },
+  { key: 'knowledge', icon: <DatabaseOutlined />, label: '知识', description: '选择本地资料' },
   { key: 'sync', icon: <CloudSyncOutlined />, label: '连接', description: '绑定、同步、备份' }
+];
+
+const desktopClientPreferenceStorageKey = 'qiuai.pc.client.preferences.v1';
+const defaultDesktopClientPreferences: DesktopClientPreferences = {
+  theme: 'light',
+  density: 'comfortable',
+  startupSection: 'workbench'
+};
+
+const desktopThemeOptions: Array<{ value: DesktopThemePreference; label: string }> = [
+  { value: 'light', label: '浅色' },
+  { value: 'system', label: '跟随系统' }
+];
+
+const desktopDensityOptions: Array<{ value: DesktopDensityPreference; label: string }> = [
+  { value: 'comfortable', label: '标准' },
+  { value: 'compact', label: '紧凑' }
 ];
 
 const fallbackDesktopRoleTemplates: DesktopRoleTemplate[] = defaultRoleTemplateCatalog;
@@ -490,24 +516,67 @@ function includesAny(text: string, tokens: string[]): boolean {
   return tokens.some((token) => normalizedText.includes(token.toLowerCase()));
 }
 
+function isSectionKey(value: string): value is SectionKey {
+  return sectionItems.some((item) => item.key === value);
+}
+
+function isSettingsSectionKey(value: string): value is SettingsSectionKey {
+  return settingsSectionItems.some((item) => item.key === value);
+}
+
+function readDesktopClientPreferences(): DesktopClientPreferences {
+  if (typeof window === 'undefined') {
+    return defaultDesktopClientPreferences;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(desktopClientPreferenceStorageKey);
+    if (!rawValue) {
+      return defaultDesktopClientPreferences;
+    }
+
+    const parsed = JSON.parse(rawValue) as Partial<DesktopClientPreferences>;
+    return {
+      theme: parsed.theme === 'system' ? 'system' : 'light',
+      density: parsed.density === 'compact' ? 'compact' : 'comfortable',
+      startupSection:
+        parsed.startupSection && isSectionKey(parsed.startupSection)
+          ? parsed.startupSection
+          : defaultDesktopClientPreferences.startupSection
+    };
+  } catch {
+    return defaultDesktopClientPreferences;
+  }
+}
+
+function writeDesktopClientPreferences(preferences: DesktopClientPreferences) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(desktopClientPreferenceStorageKey, JSON.stringify(preferences));
+  } catch {
+    // User preferences are non-critical; keep the app usable if storage is unavailable.
+  }
+}
+
 function readInitialSectionKey(): SectionKey {
   const hashValue = window.location.hash.replace(/^#/, '');
   if (hashValue === 'runtime') {
     return 'files';
   }
 
-  if (settingsSectionItems.some((item) => item.key === hashValue)) {
+  if (isSettingsSectionKey(hashValue)) {
     return 'settings';
   }
 
-  return sectionItems.some((item) => item.key === hashValue) ? (hashValue as SectionKey) : 'workbench';
+  return isSectionKey(hashValue) ? hashValue : readDesktopClientPreferences().startupSection;
 }
 
 function readInitialSettingsSectionKey(): SettingsSectionKey {
   const hashValue = window.location.hash.replace(/^#/, '');
-  return settingsSectionItems.some((item) => item.key === hashValue)
-    ? (hashValue as SettingsSectionKey)
-    : 'models';
+  return isSettingsSectionKey(hashValue) ? hashValue : 'general';
 }
 
 export default function App() {
@@ -517,6 +586,9 @@ export default function App() {
   const [selectedSection, setSelectedSection] = useState<SectionKey>(() => readInitialSectionKey());
   const [selectedSettingsSection, setSelectedSettingsSection] = useState<SettingsSectionKey>(
     () => readInitialSettingsSectionKey()
+  );
+  const [clientPreferences, setClientPreferences] = useState<DesktopClientPreferences>(
+    () => readDesktopClientPreferences()
   );
   const [selectedModelId, setSelectedModelId] = useState<string>('');
   const [selectedTaskId, setSelectedTaskId] = useState<string>('');
@@ -802,6 +874,14 @@ export default function App() {
     void window.qiuDesktop?.controlWindow(action);
   }
 
+  function updateClientPreferences(patch: Partial<DesktopClientPreferences>) {
+    setClientPreferences((current) => {
+      const next = { ...current, ...patch };
+      writeDesktopClientPreferences(next);
+      return next;
+    });
+  }
+
   async function submitOnboarding(values: OnboardingFormValues) {
     const bindingCode = values.bindingCode.trim();
     if (!bindingCode || !window.qiuDesktop) {
@@ -947,6 +1027,11 @@ export default function App() {
   const knowledgeBindingCount = runtimeState.localRuntime.knowledgeBindingIds.length;
   const requiresOnboarding = runtimeState.localRuntime.workspaceId === pendingWorkspaceId;
   const currentSectionMeta = sectionMeta(selectedSection);
+  const desktopShellClassName = [
+    'desktop-shell',
+    `desktop-density-${clientPreferences.density}`,
+    `desktop-theme-${clientPreferences.theme}`
+  ].join(' ');
 
   const connectionTone = useMemo(() => {
     if (runtimeState.serverConnection.state === 'online') return 'success';
@@ -957,7 +1042,7 @@ export default function App() {
   return (
     <ConfigProvider locale={zhCN} theme={qiuAntTheme}>
       <AppProvider>
-        <Layout className="desktop-shell">
+        <Layout className={desktopShellClassName}>
           <Layout.Content className="desktop-content">
             <Space direction="vertical" size={18} className="content-stack">
               <Flex
@@ -2511,7 +2596,7 @@ export default function App() {
       (source) => source.source === 'local_file' || source.source === 'local_folder'
     ).length;
     const knowledgeNavItems = [
-      { key: 'sources', icon: <FolderOpenOutlined />, label: '当前来源' },
+      { key: 'sources', icon: <DatabaseOutlined />, label: '当前来源' },
       { key: 'catalog', icon: <PlusOutlined />, label: '添加来源' },
       { key: 'policy', icon: <SafetyCertificateOutlined />, label: '同步策略' }
     ];
@@ -2602,7 +2687,7 @@ export default function App() {
                   renderItem={(source) => (
                     <List.Item>
                       <List.Item.Meta
-                        avatar={<FolderOpenOutlined className="list-icon" />}
+                        avatar={<DatabaseOutlined className="list-icon" />}
                         title={
                           <Space size={8} wrap>
                             <Typography.Text strong>{source.label}</Typography.Text>
@@ -2628,7 +2713,7 @@ export default function App() {
                       <Card key={option.bindingId} size="small" bordered className="knowledge-source-card">
                         <Space direction="vertical" size={10} style={{ width: '100%' }}>
                           <Space size={8} wrap>
-                            <FolderOpenOutlined className="list-icon" />
+                            <DatabaseOutlined className="list-icon" />
                             <Typography.Text strong>{option.label}</Typography.Text>
                             <Tag color={isBound ? 'green' : 'default'}>
                               {isBound ? '已绑定' : '可绑定'}
@@ -2710,86 +2795,170 @@ export default function App() {
     );
   }
 
+  function renderGeneralSettings() {
+    const configuredModelCount = runtimeState.modelProfiles.filter(hasConfiguredModelApi).length;
+    const webSearchConfigured = Boolean(runtimeState.localRuntime.toolSettings?.webSearch?.endpoint);
+    const startupOptions = sectionItems.map((item) => ({
+      value: item.key,
+      label: item.label
+    }));
+
+    return (
+      <div className="client-settings-grid">
+        <section className="client-settings-panel">
+          <div className="client-settings-panel-header">
+            <Typography.Title level={5}>外观</Typography.Title>
+            <Typography.Text type="secondary">客户端界面偏好</Typography.Text>
+          </div>
+
+          <div className="client-setting-row">
+            <div className="client-setting-copy">
+              <Typography.Text strong>主题</Typography.Text>
+              <Typography.Text type="secondary">控制桌面端整体外观</Typography.Text>
+            </div>
+            <Select<DesktopThemePreference>
+              value={clientPreferences.theme}
+              options={desktopThemeOptions}
+              style={{ width: 160 }}
+              onChange={(theme) => updateClientPreferences({ theme })}
+            />
+          </div>
+
+          <div className="client-setting-row">
+            <div className="client-setting-copy">
+              <Typography.Text strong>界面密度</Typography.Text>
+              <Typography.Text type="secondary">调整列表和面板间距</Typography.Text>
+            </div>
+            <Select<DesktopDensityPreference>
+              value={clientPreferences.density}
+              options={desktopDensityOptions}
+              style={{ width: 160 }}
+              onChange={(density) => updateClientPreferences({ density })}
+            />
+          </div>
+        </section>
+
+        <section className="client-settings-panel">
+          <div className="client-settings-panel-header">
+            <Typography.Title level={5}>启动</Typography.Title>
+            <Typography.Text type="secondary">打开客户端后的默认页面</Typography.Text>
+          </div>
+
+          <div className="client-setting-row">
+            <div className="client-setting-copy">
+              <Typography.Text strong>启动页</Typography.Text>
+              <Typography.Text type="secondary">默认进入最常用的工作位置</Typography.Text>
+            </div>
+            <Select<SectionKey>
+              value={clientPreferences.startupSection}
+              options={startupOptions}
+              style={{ width: 160 }}
+              onChange={(startupSection) => updateClientPreferences({ startupSection })}
+            />
+          </div>
+        </section>
+
+        <section className="client-settings-panel client-settings-panel-wide">
+          <div className="client-settings-panel-header">
+            <Typography.Title level={5}>本地数据</Typography.Title>
+            <Typography.Text type="secondary">运行数据、产物和备份位置</Typography.Text>
+          </div>
+
+          <div className="client-setting-path">
+            <Typography.Text copyable>{runtimeState.app.userDataPath}</Typography.Text>
+          </div>
+
+          <Space wrap>
+            <Button
+              icon={<FolderOpenOutlined />}
+              onClick={() => void openLocalPath(runtimeState.app.userDataPath)}
+            >
+              打开目录
+            </Button>
+            <Button
+              icon={<DownloadOutlined />}
+              loading={isBackupBusy}
+              onClick={() => void createWorkspaceBackup()}
+            >
+              创建备份
+            </Button>
+          </Space>
+
+          {backupNotice ? (
+            <Typography.Text type={backupNotice.startsWith('已创建备份') ? 'success' : 'danger'}>
+              {backupNotice}
+            </Typography.Text>
+          ) : null}
+        </section>
+
+        <section className="client-settings-panel client-settings-panel-wide">
+          <div className="client-settings-panel-header">
+            <Typography.Title level={5}>运行状态</Typography.Title>
+            <Typography.Text type="secondary">当前客户端能力概览</Typography.Text>
+          </div>
+
+          <div className="client-status-grid">
+            <div className="client-status-item">
+              <Typography.Text type="secondary">模型</Typography.Text>
+              <Tag color={configuredModelCount > 0 ? 'green' : 'orange'}>
+                {configuredModelCount}/{runtimeState.modelProfiles.length}
+              </Tag>
+            </div>
+            <div className="client-status-item">
+              <Typography.Text type="secondary">工具</Typography.Text>
+              <Tag color={enabledToolCount > 0 ? 'green' : 'orange'}>
+                {enabledToolCount}/{runtimeState.tools.length}
+              </Tag>
+            </div>
+            <div className="client-status-item">
+              <Typography.Text type="secondary">知识</Typography.Text>
+              <Tag color={knowledgeBindingCount > 0 ? 'green' : 'default'}>
+                {knowledgeBindingCount}/{knowledgeBindingCatalog.length}
+              </Tag>
+            </div>
+            <div className="client-status-item">
+              <Typography.Text type="secondary">连接</Typography.Text>
+              <Tag color={connectionTone}>{connectionLabel(runtimeState.serverConnection.state)}</Tag>
+            </div>
+            <div className="client-status-item">
+              <Typography.Text type="secondary">网页搜索</Typography.Text>
+              <Tag color={webSearchConfigured ? 'green' : 'default'}>
+                {webSearchConfigured ? '已配置' : '未配置'}
+              </Tag>
+            </div>
+            <div className="client-status-item">
+              <Typography.Text type="secondary">同步策略</Typography.Text>
+              <Tag>{syncPolicyLabel(runtimeState.localRuntime.syncPolicy)}</Tag>
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   function renderSettings() {
     const configuredModelCount = runtimeState.modelProfiles.filter(hasConfiguredModelApi).length;
     const webSearchConfigured = Boolean(runtimeState.localRuntime.toolSettings?.webSearch?.endpoint);
     const selectedSettingsContent =
-      selectedSettingsSection === 'models'
-        ? renderModels()
-        : selectedSettingsSection === 'tools'
-          ? renderTools()
-          : selectedSettingsSection === 'knowledge'
-            ? renderKnowledge()
-            : renderSync();
+      selectedSettingsSection === 'general'
+        ? renderGeneralSettings()
+        : selectedSettingsSection === 'models'
+          ? renderModels()
+          : selectedSettingsSection === 'tools'
+            ? renderTools()
+            : selectedSettingsSection === 'knowledge'
+              ? renderKnowledge()
+              : renderSync();
     const selectedSettingsItem =
       settingsSectionItems.find((item) => item.key === selectedSettingsSection) ?? settingsSectionItems[0];
 
     return (
       <div className="settings-page">
-        <Card bordered={false} className="settings-overview">
-          <Flex align="center" justify="space-between" gap={16} wrap="wrap">
-            <div>
-              <Typography.Title level={3} style={{ marginBottom: 4 }}>
-                设置
-              </Typography.Title>
-              <Typography.Text type="secondary">
-                日常使用在对话页完成；这里只放配置。
-              </Typography.Text>
-            </div>
-
-            <Space wrap>
-              <Tag color={configuredModelCount > 0 ? 'green' : 'orange'}>
-                模型 {configuredModelCount}/{runtimeState.modelProfiles.length}
-              </Tag>
-              <Tag color={enabledToolCount > 0 ? 'green' : 'orange'}>
-                工具 {enabledToolCount}/{runtimeState.tools.length}
-              </Tag>
-              <Tag color={webSearchConfigured ? 'green' : 'default'}>
-                网页搜索 {webSearchConfigured ? '已配置' : '未配置'}
-              </Tag>
-            </Space>
-          </Flex>
-
-          <div className="settings-quick-grid">
-            <Button
-              onClick={() => {
-                navigateToSettingsSection('models');
-                setSelectedModelNav('advanced');
-              }}
-            >
-              配置模型 API
-            </Button>
-            <Button
-              onClick={() => {
-                navigateToSettingsSection('tools');
-                setSelectedToolNav('web-search');
-              }}
-            >
-              配置网页搜索
-            </Button>
-            <Button
-              onClick={() => {
-                navigateToSettingsSection('knowledge');
-                setSelectedKnowledgeNav('catalog');
-              }}
-            >
-              添加知识来源
-            </Button>
-            <Button
-              onClick={() => {
-                navigateToSettingsSection('sync');
-              }}
-            >
-              检查同步状态
-            </Button>
-          </div>
-        </Card>
-
         <div className="settings-layout">
           <aside className="settings-sidebar">
             <Space direction="vertical" size={4}>
-              <Typography.Text strong>设置中心</Typography.Text>
-              <Typography.Text type="secondary">模型、工具、知识、连接。</Typography.Text>
+              <Typography.Text strong>设置</Typography.Text>
+              <Typography.Text type="secondary">PC 客户端</Typography.Text>
             </Space>
 
             <nav className="settings-sidebar-nav">
