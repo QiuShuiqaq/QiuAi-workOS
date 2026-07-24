@@ -121,7 +121,7 @@ export function TaskDetailPageClient({
               </Space>
             }
           >
-            <Descriptions.Item label="执行岗位">{task.roleName}</Descriptions.Item>
+            <Descriptions.Item label="数字员工">{task.roleName}</Descriptions.Item>
             <Descriptions.Item label="优先级">{taskPriorityLabel(task.priority)}</Descriptions.Item>
             <Descriptions.Item label="创建时间">{new Date(task.createdAt).toLocaleString('zh-CN')}</Descriptions.Item>
             <Descriptions.Item label="更新时间">{new Date(task.updatedAt).toLocaleString('zh-CN')}</Descriptions.Item>

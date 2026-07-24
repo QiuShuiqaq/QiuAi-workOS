@@ -109,7 +109,7 @@ export function AdminShell({ currentAccount, children }: AdminShellProps) {
             {
               key: 'templates',
               icon: <AppstoreAddOutlined />,
-              label: <Link href="/templates">妯℃澘宸ュ巶</Link>
+              label: <Link href="/templates">数字员工</Link>
             },
             {
               key: 'audit',

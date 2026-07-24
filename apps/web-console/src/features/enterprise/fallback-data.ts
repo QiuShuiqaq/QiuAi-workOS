@@ -131,7 +131,7 @@ function buildEnterpriseOverview(workspace: WorkspaceSummary): EnterpriseWorkspa
       }
     ],
     usage: [
-      { metricKey: 'roleInstances.count', title: 'AI 岗位数量', usedValue: 3, limitValue: 50, limitUnit: 'count' },
+      { metricKey: 'roleInstances.count', title: '数字员工数量', usedValue: 3, limitValue: 50, limitUnit: 'count' },
       { metricKey: 'tasks.monthlyCount', title: '月任务数', usedValue: 3, limitValue: 10000, limitUnit: 'count' },
       { metricKey: 'departments.count', title: '部门数量', usedValue: 3 },
       { metricKey: 'members.count', title: '成员数量', usedValue: 5 },
@@ -168,7 +168,7 @@ function buildPersonalOverview(workspace: WorkspaceSummary): EnterpriseWorkspace
       }
     ],
     usage: [
-      { metricKey: 'roleInstances.count', title: 'AI 岗位数量', usedValue: 1, limitValue: 3, limitUnit: 'count' },
+      { metricKey: 'roleInstances.count', title: '数字员工数量', usedValue: 1, limitValue: 3, limitUnit: 'count' },
       { metricKey: 'tasks.monthlyCount', title: '月任务数', usedValue: 0, limitValue: 100, limitUnit: 'count' },
       { metricKey: 'departments.count', title: '部门数量', usedValue: 0 },
       { metricKey: 'members.count', title: '成员数量', usedValue: 1 },

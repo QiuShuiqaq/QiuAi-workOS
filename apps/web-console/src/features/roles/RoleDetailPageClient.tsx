@@ -43,13 +43,13 @@ export function RoleDetailPageClient({
             column={2}
             title={
               <Space>
-                岗位信息
+                基本信息
                 <QiuStatusTag tone="processing">{role.status}</QiuStatusTag>
               </Space>
             }
           >
-            <Descriptions.Item label="模板 ID">{role.templateId}</Descriptions.Item>
-            <Descriptions.Item label="模板版本">{role.templateVersion}</Descriptions.Item>
+            <Descriptions.Item label="员工 ID">{role.templateId}</Descriptions.Item>
+            <Descriptions.Item label="版本">{role.templateVersion}</Descriptions.Item>
             <Descriptions.Item label="部门">{role.departmentName || '未分配'}</Descriptions.Item>
             <Descriptions.Item label="负责人">{role.ownerName}</Descriptions.Item>
             <Descriptions.Item label="审批规则">{role.approvalPolicy}</Descriptions.Item>

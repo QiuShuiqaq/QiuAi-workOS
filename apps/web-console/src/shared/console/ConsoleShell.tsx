@@ -72,7 +72,7 @@ export function ConsoleShell({ currentAccount, children }: ConsoleShellProps) {
           <Typography.Title level={4} style={{ margin: 0 }}>
             QiuAI WorkOS
           </Typography.Title>
-          <Typography.Text type="secondary">企业数字劳动力平台</Typography.Text>
+          <Typography.Text type="secondary">企业管理端</Typography.Text>
         </div>
         <div style={{ padding: '0 16px 16px' }}>
           <QiuWorkspaceSwitcher
@@ -119,7 +119,7 @@ export function ConsoleShell({ currentAccount, children }: ConsoleShellProps) {
             {
               key: 'roles',
               icon: <RobotOutlined />,
-              label: <Link href={withWorkspaceId('/roles')}>AI 岗位</Link>
+              label: <Link href={withWorkspaceId('/roles')}>数字员工</Link>
             },
             {
               key: 'tasks',
@@ -139,7 +139,7 @@ export function ConsoleShell({ currentAccount, children }: ConsoleShellProps) {
             {
               key: 'enterprise',
               icon: <TeamOutlined />,
-              label: <Link href={withWorkspaceId('/enterprise')}>企业控制面</Link>
+              label: <Link href={withWorkspaceId('/enterprise')}>企业</Link>
             },
             {
               key: 'settings',

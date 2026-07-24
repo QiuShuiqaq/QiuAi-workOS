@@ -7,7 +7,6 @@ import type {
 } from '@qiuai/api-contract';
 import { QiuMetricCard, QiuPage, QiuStatusTag } from '@qiuai/ui';
 import Alert from 'antd/es/alert';
-import Button from 'antd/es/button';
 import Card from 'antd/es/card';
 import Col from 'antd/es/col';
 import List from 'antd/es/list';
@@ -16,10 +15,9 @@ import Space from 'antd/es/space';
 import Tag from 'antd/es/tag';
 import Typography from 'antd/es/typography';
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 
 import { ConsoleShell } from '../../shared/console/ConsoleShell';
-import { createBrowserApiClient } from '../../shared/api/browser-api';
 import { withWorkspaceId } from '../common/workspace-href';
 
 export interface RolesPageClientProps {
@@ -51,8 +49,7 @@ export function RolesPageClient({
   templates,
   isApiFallback
 }: RolesPageClientProps) {
-  const [roles, setRoles] = useState(initialRoles);
-  const [installingTemplateId, setInstallingTemplateId] = useState<string | null>(null);
+  const roles = initialRoles;
   const workspaceId = currentAccount.activeWorkspaceId;
   const workspaceHref = (href: string) => withWorkspaceId(href, workspaceId);
 
@@ -60,36 +57,26 @@ export function RolesPageClient({
   const runningCount = useMemo(() => roles.filter((role) => role.status === 'running').length, [roles]);
   const monthlyCost = useMemo(() => roles.reduce((sum, role) => sum + role.kpis.monthlyCost, 0), [roles]);
 
-  async function installRole(templateId: string) {
-    setInstallingTemplateId(templateId);
-    try {
-      const response = await createBrowserApiClient().installRole(workspaceId, { templateId });
-      setRoles((current) => [response.data, ...current]);
-    } finally {
-      setInstallingTemplateId(null);
-    }
-  }
-
   return (
     <ConsoleShell currentAccount={currentAccount}>
-      <QiuPage title="AI 岗位" description="企业以岗位为核心安装、配置和管理数字员工。">
+      <QiuPage title="数字员工" description="查看本企业已安装和可用的数字员工。安装和执行在 PC 端完成。">
         {isApiFallback ? <Alert showIcon type="warning" message="后端 API 未连接，当前显示 fallback 数据。" /> : null}
 
         <Row gutter={[16, 16]}>
           <Col xs={24} md={8}>
-            <QiuMetricCard title="已安装岗位" value={String(roleCount)} trend={`${runningCount} 个运行中`} />
+            <QiuMetricCard title="已安装" value={String(roleCount)} trend={`${runningCount} 个运行中`} />
           </Col>
           <Col xs={24} md={8}>
-            <QiuMetricCard title="可安装模板" value={String(templates.data.length)} trend="岗位模板目录" />
+            <QiuMetricCard title="可用" value={String(templates.data.length)} trend="由平台上架" />
           </Col>
           <Col xs={24} md={8}>
-            <QiuMetricCard title="岗位月成本" value={`¥${monthlyCost.toFixed(2)}`} trend="来自真实成本记录" />
+            <QiuMetricCard title="月成本" value={`¥${monthlyCost.toFixed(2)}`} trend="来自任务记录" />
           </Col>
         </Row>
 
         <Row gutter={[16, 16]}>
           <Col xs={24} xl={14}>
-            <Card title="已安装 AI 岗位" bordered={false}>
+            <Card title="已安装" bordered={false}>
               <List
                 dataSource={roles}
                 renderItem={(role) => (
@@ -127,21 +114,12 @@ export function RolesPageClient({
             </Card>
           </Col>
           <Col xs={24} xl={10}>
-            <Card title="岗位模板" bordered={false}>
+            <Card title="可用员工" bordered={false}>
               <List
                 dataSource={templates.data}
                 renderItem={(template) => (
                   <List.Item
-                    actions={[
-                      <Button
-                        key="install"
-                        type="link"
-                        loading={installingTemplateId === template.id}
-                        onClick={() => installRole(template.id)}
-                      >
-                        安装
-                      </Button>
-                    ]}
+                    actions={[<Typography.Text key="install-on-pc" type="secondary">PC 端安装</Typography.Text>]}
                   >
                     <List.Item.Meta
                       title={

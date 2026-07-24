@@ -129,10 +129,10 @@ interface KnowledgeBindingCatalogEntry {
 }
 
 const sectionItems: Array<{ key: SectionKey; icon: ReactNode; label: string }> = [
-  { key: 'workbench', icon: <ControlOutlined />, label: '工作台' },
+  { key: 'workbench', icon: <ControlOutlined />, label: '对话' },
   { key: 'roles', icon: <RobotOutlined />, label: '数字员工' },
-  { key: 'files', icon: <FolderOpenOutlined />, label: '文件与产物' },
-  { key: 'settings', icon: <SettingOutlined />, label: '设置中心' }
+  { key: 'files', icon: <FolderOpenOutlined />, label: '文件' },
+  { key: 'settings', icon: <SettingOutlined />, label: '设置' }
 ];
 
 const settingsSectionItems: Array<{
@@ -141,10 +141,10 @@ const settingsSectionItems: Array<{
   label: string;
   description: string;
 }> = [
-  { key: 'models', icon: <ApiOutlined />, label: '模型', description: '供应商、模型角色和 API Key' },
-  { key: 'tools', icon: <ToolOutlined />, label: '工具', description: '网页搜索、本地文件和工具权限' },
-  { key: 'knowledge', icon: <FolderOpenOutlined />, label: '知识与文件', description: '本地资料、知识来源和绑定策略' },
-  { key: 'sync', icon: <CloudSyncOutlined />, label: '连接与同步', description: '服务端连接、备份和同步状态' }
+  { key: 'models', icon: <ApiOutlined />, label: '模型', description: '配置 API Key' },
+  { key: 'tools', icon: <ToolOutlined />, label: '工具', description: '文件、文档、网页搜索' },
+  { key: 'knowledge', icon: <FolderOpenOutlined />, label: '知识', description: '选择本地资料' },
+  { key: 'sync', icon: <CloudSyncOutlined />, label: '连接', description: '绑定、同步、备份' }
 ];
 
 const fallbackDesktopRoleTemplates: DesktopRoleTemplate[] = defaultRoleTemplateCatalog;
@@ -689,13 +689,13 @@ export default function App() {
       setRoleTemplateNotice(
         catalog.message ??
           (catalog.source === 'server'
-            ? `已加载服务端授权模板：${catalog.templates.length} 个`
-            : `使用本地内置模板：${catalog.templates.length} 个`)
+            ? `已同步 ${catalog.templates.length} 个数字员工`
+            : `使用内置数字员工：${catalog.templates.length} 个`)
       );
     } catch (error) {
       setAuthorizedRoleTemplateCatalog(initialAuthorizedRoleTemplateCatalog);
       setRoleTemplateNotice(
-        `模板目录加载失败，已使用本地内置模板：${error instanceof Error ? error.message : 'unknown error'}`
+        `数字员工同步失败，已使用内置列表：${error instanceof Error ? error.message : 'unknown error'}`
       );
     } finally {
       setIsLoadingRoleTemplates(false);
@@ -1579,15 +1579,15 @@ export default function App() {
             <Statistic title="运行中" value={installedRoleSummaries.filter((item) => item.state === 'running').length} />
           </Card>
           <Card bordered={false}>
-            <Statistic title="模板库" value={desktopRoleTemplates.length} />
+            <Statistic title="可安装" value={desktopRoleTemplates.length} />
           </Card>
           <Card bordered={false}>
-            <Statistic title="当前角色" value={activeRolePackage?.name ?? '未激活'} />
+            <Statistic title="当前员工" value={activeRolePackage?.name ?? '未选择'} />
           </Card>
         </div>
 
         <div className="main-grid">
-          <Card title="已安装角色" bordered={false}>
+          <Card title="已安装" bordered={false}>
             <List
               dataSource={runtimeState.rolePackages}
               renderItem={(rolePackage) => {
@@ -1620,17 +1620,12 @@ export default function App() {
                       title={
                         <Space size={8} wrap>
                           <Typography.Text strong>{rolePackage.name}</Typography.Text>
-                          <Tag color={isActive ? 'green' : 'blue'}>
-                            {isActive ? '运行中' : '已安装'}
-                          </Tag>
+                          <Tag color={isActive ? 'green' : 'blue'}>{isActive ? '当前' : '已安装'}</Tag>
                         </Space>
                       }
                       description={
                         <Space direction="vertical" size={4}>
                           <Space size={8} wrap>
-                            <Typography.Text type="secondary">
-                              {rolePackage.roleCode} · {rolePackage.version}
-                            </Typography.Text>
                             <Typography.Text type="secondary">
                               任务 {summary?.taskCount ?? 0}
                             </Typography.Text>
@@ -1643,7 +1638,7 @@ export default function App() {
                             </Space>
                           ) : null}
                           <Typography.Text type="secondary">
-                            模型 {rolePackage.modelProfileIds.length} / 工具 {rolePackage.toolIds.length} / 知识 {rolePackage.requiredKnowledgeSources.length}
+                            模型 {rolePackage.modelProfileIds.length} · 工具 {rolePackage.toolIds.length} · 知识 {rolePackage.requiredKnowledgeSources.length}
                           </Typography.Text>
                         </Space>
                       }
@@ -1654,7 +1649,7 @@ export default function App() {
             />
           </Card>
 
-          <Card title="可安装模板" bordered={false}>
+          <Card title="可安装" bordered={false}>
             {roleTemplateNotice ? (
               <Typography.Paragraph type="secondary">
                 {roleTemplateNotice}
@@ -1703,7 +1698,6 @@ export default function App() {
                       description={
                         <Space direction="vertical" size={4}>
                           <Typography.Text type="secondary">{template.summary}</Typography.Text>
-                          <Typography.Text type="secondary">{template.installNote}</Typography.Text>
                           <Typography.Text type="secondary">{template.businessGoal}</Typography.Text>
                           <Space size={6} wrap>
                             {template.skills.map((skill) => (
@@ -1716,7 +1710,7 @@ export default function App() {
                             ))}
                           </Space>
                           <Typography.Text type="secondary">
-                            模型 {template.modelProfileIds.length} / 工具 {template.toolIds.length} / 知识 {template.requiredKnowledgeSources.length}
+                            模型 {template.modelProfileIds.length} · 工具 {template.toolIds.length} · 知识 {template.requiredKnowledgeSources.length}
                           </Typography.Text>
                         </Space>
                       }
@@ -1732,12 +1726,12 @@ export default function App() {
           open={roleConfigModalOpen}
           title={
             roleConfigTemplate
-              ? `${roleConfigMode === 'install' ? '配置并安装' : '配置'} - ${roleConfigTemplate.name}`
+              ? `${roleConfigMode === 'install' ? '安装' : '配置'}：${roleConfigTemplate.name}`
               : roleConfigMode === 'install'
-                ? '配置并安装角色'
-                : '配置角色'
+                ? '安装数字员工'
+                : '配置数字员工'
           }
-          okText={roleConfigMode === 'install' ? '安装角色' : '保存配置'}
+          okText={roleConfigMode === 'install' ? '安装' : '保存'}
           onCancel={closeRoleConfig}
           onOk={() => roleConfigForm.submit()}
           width={820}
@@ -1746,10 +1740,9 @@ export default function App() {
           {roleConfigTemplate ? (
             <Space direction="vertical" size={16} style={{ width: '100%' }}>
               <Descriptions column={1} size="small" bordered>
-                <Descriptions.Item label="模板版本">{roleConfigTemplate.version}</Descriptions.Item>
+                <Descriptions.Item label="版本">{roleConfigTemplate.version}</Descriptions.Item>
                 <Descriptions.Item label="行业">{roleConfigTemplate.industry}</Descriptions.Item>
                 <Descriptions.Item label="场景">{roleConfigTemplate.scenario}</Descriptions.Item>
-                <Descriptions.Item label="安装说明">{roleConfigTemplate.installNote}</Descriptions.Item>
                 <Descriptions.Item label="业务目标">{roleConfigTemplate.businessGoal}</Descriptions.Item>
               </Descriptions>
 
@@ -1774,14 +1767,14 @@ export default function App() {
               >
                 <Form.Item
                   name="modelProfileIds"
-                  label="模型绑定"
+                  label="模型"
                   rules={[{ required: true, message: '至少选择一个模型绑定' }]}
                 >
                   <Select
                     mode="multiple"
                     allowClear
                     optionLabelProp="label"
-                    placeholder="选择角色可使用的模型"
+                    placeholder="选择可使用的模型"
                     options={runtimeState.modelProfiles.map((profile) => ({
                       label: `${profile.providerName} / ${profile.modelName}`,
                       value: profile.id
@@ -1789,12 +1782,12 @@ export default function App() {
                   />
                 </Form.Item>
 
-                <Form.Item name="toolIds" label="工具绑定">
+                <Form.Item name="toolIds" label="工具">
                   <Select
                     mode="multiple"
                     allowClear
                     optionLabelProp="label"
-                    placeholder="选择角色可调用的工具"
+                    placeholder="选择可调用的工具"
                     options={runtimeState.tools.map((tool) => ({
                       label: tool.name,
                       value: tool.id
@@ -1802,12 +1795,12 @@ export default function App() {
                   />
                 </Form.Item>
 
-                <Form.Item name="knowledgeSources" label="知识绑定">
+                <Form.Item name="knowledgeSources" label="知识">
                   <Select
                     mode="multiple"
                     allowClear
                     optionLabelProp="label"
-                    placeholder="选择角色依赖的知识来源"
+                    placeholder="选择要使用的知识"
                     options={knowledgeBindingCatalog.map((entry) => ({
                       label: entry.label,
                       value: entry.source
@@ -1817,7 +1810,7 @@ export default function App() {
               </Form>
             </Space>
           ) : (
-            <Empty description="未找到可配置的角色模板" />
+            <Empty description="未找到数字员工" />
           )}
         </Modal>
       </>
@@ -2737,10 +2730,10 @@ export default function App() {
           <Flex align="center" justify="space-between" gap={16} wrap="wrap">
             <div>
               <Typography.Title level={3} style={{ marginBottom: 4 }}>
-                统一配置中心
+                设置
               </Typography.Title>
               <Typography.Text type="secondary">
-                模型、工具、知识来源和同步策略都在这里集中维护，工作台只保留客户日常使用入口。
+                日常使用在对话页完成；这里只放配置。
               </Typography.Text>
             </div>
 
@@ -2796,7 +2789,7 @@ export default function App() {
           <aside className="settings-sidebar">
             <Space direction="vertical" size={4}>
               <Typography.Text strong>设置中心</Typography.Text>
-              <Typography.Text type="secondary">按能力模块维护桌面端运行配置。</Typography.Text>
+              <Typography.Text type="secondary">模型、工具、知识、连接。</Typography.Text>
             </Space>
 
             <nav className="settings-sidebar-nav">
@@ -3882,20 +3875,20 @@ function hasConfiguredModelApi(profile: ModelProfile): boolean {
 function sectionMeta(section: SectionKey) {
   const meta: Record<SectionKey, { title: string; description: string }> = {
     workbench: {
-      title: '工作台',
-      description: '选择数字员工，输入任务，并查看执行过程和输出结果。'
+      title: '对话',
+      description: '选员工，发任务，拿结果。'
     },
     roles: {
       title: '数字员工',
-      description: '管理企业可使用的岗位模板、技能组合和默认任务类型。'
+      description: '安装和配置可用员工。'
     },
     files: {
-      title: '文件与产物',
-      description: '查看本地任务产物、备份包和资产保存边界。'
+      title: '文件',
+      description: '查看本地产物和备份。'
     },
     settings: {
-      title: '设置中心',
-      description: '集中配置模型、工具、知识来源、连接和同步策略。'
+      title: '设置',
+      description: '模型、工具、知识和连接。'
     }
   };
 

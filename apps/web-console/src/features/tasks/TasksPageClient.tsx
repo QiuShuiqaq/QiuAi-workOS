@@ -84,7 +84,7 @@ export function TasksPageClient({
       )
     },
     {
-      title: 'AI 岗位',
+      title: '数字员工',
       dataIndex: 'roleName',
       responsive: ['md']
     },
@@ -145,7 +145,7 @@ export function TasksPageClient({
 
   return (
     <ConsoleShell currentAccount={currentAccount}>
-      <QiuPage title="任务中心" description="从岗位发起任务，跟踪执行状态，并进入详情查看产物、日志和成本。">
+      <QiuPage title="任务中心" description="查看任务状态、结果、日志和成本。">
         {isApiFallback ? <Alert showIcon type="warning" message="后端 API 未连接，当前显示 fallback 数据，创建任务需要启动后端。" /> : null}
         {errorMessage ? <Alert showIcon type="error" message={errorMessage} /> : null}
 
@@ -179,11 +179,11 @@ export function TasksPageClient({
               >
                 <Form.Item
                   name="roleInstanceId"
-                  label="执行岗位"
-                  rules={[{ required: true, message: '请选择执行任务的 AI 岗位' }]}
+                  label="数字员工"
+                  rules={[{ required: true, message: '请选择数字员工' }]}
                 >
                   <Select
-                    placeholder="选择 AI 岗位"
+                    placeholder="选择数字员工"
                     options={roles.map((role) => ({
                       label: `${role.name} / ${role.departmentName || '未分配'}`,
                       value: role.id

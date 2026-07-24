@@ -65,7 +65,7 @@ export function DashboardShell({ currentAccount, overview, isApiFallback }: Dash
         description={`当前空间：${overview.workspace.name} · ${overview.workspace.planCode}`}
         actions={
           <Link href={withWorkspaceId('/roles', currentAccount.activeWorkspaceId)}>
-            <Button type="primary">安装 AI 岗位</Button>
+            <Button type="primary">查看数字员工</Button>
           </Link>
         }
       >
@@ -83,7 +83,7 @@ export function DashboardShell({ currentAccount, overview, isApiFallback }: Dash
 
         <Row gutter={[16, 16]}>
           <Col xs={24} xl={12}>
-            <Card title="岗位运行" bordered={false}>
+            <Card title="数字员工" bordered={false}>
               <List
                 dataSource={overview.roles}
                 renderItem={(role) => (

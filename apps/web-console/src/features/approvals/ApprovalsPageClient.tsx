@@ -38,7 +38,7 @@ export function ApprovalsPageClient({
 
   return (
     <ConsoleShell currentAccount={currentAccount}>
-      <QiuPage title="审批中心" description="集中查看需要人工确认的 AI 岗位任务和可验收产物。">
+      <QiuPage title="审批中心" description="查看待确认任务和待验收结果。">
         {isApiFallback ? <Alert showIcon type="warning" message="后端 API 未连接，当前显示 fallback 数据。" /> : null}
 
         <Row gutter={[16, 16]}>

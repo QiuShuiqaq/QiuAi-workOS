@@ -401,10 +401,10 @@ export function AdminRoleTemplatesPageClient({
         : await apiClient.createAdminRoleTemplate(buildCreatePayload(values));
 
       replaceRow(response.data);
-      message.success(editingTemplate ? '模板已更新' : '模板已创建');
+      message.success(editingTemplate ? '数字员工已更新' : '数字员工已创建');
       closeEditor();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '模板保存失败');
+      message.error(error instanceof Error ? error.message : '保存失败');
     } finally {
       setSaving(false);
     }
@@ -420,13 +420,13 @@ export function AdminRoleTemplatesPageClient({
         templateName: template.name,
         ...response.data
       });
-      message.success(response.data.valid ? '模板测试通过' : '模板测试未通过');
+      message.success(response.data.valid ? '测试通过' : '测试未通过');
       replaceRow({
         ...template,
         lastTestedAt: new Date().toISOString()
       });
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '模板测试失败');
+      message.error(error instanceof Error ? error.message : '测试失败');
     } finally {
       setTestingTemplateId(null);
     }
@@ -437,9 +437,9 @@ export function AdminRoleTemplatesPageClient({
     try {
       const response = await createBrowserApiClient().publishAdminRoleTemplate(template.id);
       replaceRow(response.data);
-      message.success('模板已发布');
+      message.success('已上架');
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '模板发布失败');
+      message.error(error instanceof Error ? error.message : '上架失败');
     } finally {
       setActionTemplateId(null);
     }
@@ -450,9 +450,9 @@ export function AdminRoleTemplatesPageClient({
     try {
       const response = await createBrowserApiClient().archiveAdminRoleTemplate(template.id);
       replaceRow(response.data);
-      message.success('模板已归档');
+      message.success('已下架');
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '模板归档失败');
+      message.error(error instanceof Error ? error.message : '下架失败');
     } finally {
       setActionTemplateId(null);
     }
@@ -490,7 +490,7 @@ export function AdminRoleTemplatesPageClient({
 
   const columns: ColumnsType<AdminRoleTemplateDetail> = [
     {
-      title: '数字员工模板',
+      title: '数字员工',
       key: 'template',
       width: 260,
       render: (_value, template) => (
@@ -562,13 +562,13 @@ export function AdminRoleTemplatesPageClient({
           </Button>
           {template.status === 'PUBLISHED' ? (
             <Popconfirm
-              title="确认归档这个模板？"
-              okText="归档"
+              title="确认下架这个数字员工？"
+              okText="下架"
               cancelText="取消"
               onConfirm={() => handleArchive(template)}
             >
               <Button danger icon={<InboxOutlined />} loading={actionTemplateId === template.id}>
-                归档
+                下架
               </Button>
             </Popconfirm>
           ) : (
@@ -578,7 +578,7 @@ export function AdminRoleTemplatesPageClient({
               loading={actionTemplateId === template.id}
               onClick={() => handlePublish(template)}
             >
-              发布
+              上架
             </Button>
           )}
         </Space>
@@ -589,21 +589,21 @@ export function AdminRoleTemplatesPageClient({
   return (
     <AdminShell currentAccount={currentAccount}>
       <QiuPage
-        title="模板工厂"
-        description="统一维护数字员工模板、发布状态，以及套餐和企业白名单。"
+        title="数字员工"
+        description="搭建、测试、上架。PC 端直接同步可用员工。"
         actions={
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            新建模板
+            新建员工
           </Button>
         }
       >
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           <Card bordered={false}>
             <Space size={32} wrap>
-              <Typography.Text>总模板：{counts.total}</Typography.Text>
-              <Typography.Text>已发布：{counts.published}</Typography.Text>
+              <Typography.Text>总数：{counts.total}</Typography.Text>
+              <Typography.Text>已上架：{counts.published}</Typography.Text>
               <Typography.Text>草稿：{counts.draft}</Typography.Text>
-              <Typography.Text>已归档：{counts.archived}</Typography.Text>
+              <Typography.Text>已下架：{counts.archived}</Typography.Text>
             </Space>
           </Card>
 
@@ -625,7 +625,7 @@ export function AdminRoleTemplatesPageClient({
             />
           ) : null}
 
-          <Card title="模板目录" bordered={false}>
+          <Card title="员工列表" bordered={false}>
             <Table
               rowKey="id"
               columns={columns}
@@ -659,7 +659,7 @@ export function AdminRoleTemplatesPageClient({
       </QiuPage>
 
       <Drawer
-        title={editingTemplate ? `编辑模板：${editingTemplate.name}` : '新建数字员工模板'}
+        title={editingTemplate ? `编辑：${editingTemplate.name}` : '新建数字员工'}
         width={960}
         open={drawerOpen}
         onClose={closeEditor}
@@ -675,7 +675,7 @@ export function AdminRoleTemplatesPageClient({
       >
         <Form form={form} layout="vertical" onFinish={handleSave}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 160px', gap: 16 }}>
-            <Form.Item name="id" label="模板 ID" rules={[{ required: true, message: '请输入模板 ID' }]}>
+            <Form.Item name="id" label="员工 ID" rules={[{ required: true, message: '请输入员工 ID' }]}>
               <Input disabled={Boolean(editingTemplate)} placeholder="template_sales_assistant" />
             </Form.Item>
             <Form.Item name="version" label="版本" rules={[{ required: true, message: '请输入版本号' }]}>
@@ -684,7 +684,7 @@ export function AdminRoleTemplatesPageClient({
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入模板名称' }]}>
+            <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
               <Input placeholder="AI 销售助理" />
             </Form.Item>
             <Form.Item name="industry" label="行业/部门" rules={[{ required: true, message: '请输入行业或部门' }]}>
@@ -696,7 +696,7 @@ export function AdminRoleTemplatesPageClient({
             <Input placeholder="线索研究、外联文案和提案支持" />
           </Form.Item>
 
-          <Form.Item name="description" label="模板说明" rules={[{ required: true, message: '请输入模板说明' }]}>
+          <Form.Item name="description" label="说明" rules={[{ required: true, message: '请输入说明' }]}>
             <Input.TextArea rows={3} />
           </Form.Item>
 
@@ -870,7 +870,7 @@ export function AdminRoleTemplatesPageClient({
             </Form.Item>
           </div>
 
-          <Divider orientation="left">发布范围</Divider>
+          <Divider orientation="left">可见范围</Divider>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <Form.Item

@@ -58,7 +58,7 @@ export function CostsPageClient({ currentAccount, taskDetails, isApiFallback }: 
         </Link>
       )
     },
-    { title: 'AI 岗位', dataIndex: 'roleName', responsive: ['md'] },
+    { title: '数字员工', dataIndex: 'roleName', responsive: ['md'] },
     { title: '模型', dataIndex: 'modelName' },
     { title: '输入 Token', dataIndex: 'inputTokens', responsive: ['lg'] },
     { title: '输出 Token', dataIndex: 'outputTokens', responsive: ['lg'] },

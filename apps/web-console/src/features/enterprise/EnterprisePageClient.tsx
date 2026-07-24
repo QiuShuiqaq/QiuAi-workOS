@@ -39,7 +39,7 @@ export interface EnterprisePageClientProps {
 }
 
 const featureLabels: Record<string, string> = {
-  maxRoleInstances: 'AI 岗位数量',
+  maxRoleInstances: '数字员工数量',
   maxTasksPerMonth: '月任务数',
   maxKnowledgeBases: '知识库数量',
   maxStorageGB: '存储空间',
@@ -145,7 +145,7 @@ export function EnterprisePageClient({
       dataIndex: 'memberCount'
     },
     {
-      title: '岗位数',
+      title: '员工数',
       dataIndex: 'roleInstanceCount'
     }
   ];
@@ -374,9 +374,9 @@ export function EnterprisePageClient({
           </Col>
           <Col xs={24} md={12} xl={6}>
             <QiuMetricCard
-              title="岗位数量"
+              title="数字员工"
               value={String(overview.usage.find((item) => item.metricKey === 'roleInstances.count')?.usedValue ?? 0)}
-              trend="岗位驱动"
+              trend="PC 端使用"
             />
           </Col>
         </Row>

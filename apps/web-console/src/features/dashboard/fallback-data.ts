@@ -32,7 +32,7 @@ export const fallbackCurrentAccount: CurrentAccountResponse = {
 export const fallbackOverview: PlatformOverviewResponse = {
   workspace: fallbackCurrentAccount.workspaces[1],
   metrics: [
-    { key: 'roles', title: 'AI 岗位', value: '12', trend: '+2 本月' },
+    { key: 'roles', title: '数字员工', value: '12', trend: '+2 本月' },
     { key: 'tasks', title: '今日任务', value: '128', trend: '92% 完成' },
     { key: 'approvals', title: '待审批', value: '7', trend: '3 个高优先级' },
     { key: 'cost', title: '本月成本', value: '¥842', trend: '预算内' }
