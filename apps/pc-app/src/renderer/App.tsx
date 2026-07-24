@@ -68,8 +68,7 @@ import {
 } from '../shared/workbench-data';
 import { runDesktopTask } from '../shared/desktop-task-runner';
 
-type SectionKey = 'workbench' | 'roles' | 'files' | 'settings';
-type SettingsSectionKey = 'general' | 'models' | 'tools' | 'knowledge' | 'sync';
+type SectionKey = 'workbench' | 'roles' | 'files' | 'models' | 'tools' | 'knowledge' | 'sync' | 'settings';
 type DesktopThemePreference = 'light' | 'system';
 type DesktopDensityPreference = 'comfortable' | 'compact';
 
@@ -140,20 +139,11 @@ const sectionItems: Array<{ key: SectionKey; icon: ReactNode; label: string }> =
   { key: 'workbench', icon: <ControlOutlined />, label: '对话' },
   { key: 'roles', icon: <RobotOutlined />, label: '数字员工' },
   { key: 'files', icon: <FolderOpenOutlined />, label: '文件' },
+  { key: 'models', icon: <ApiOutlined />, label: '模型' },
+  { key: 'tools', icon: <ToolOutlined />, label: '工具' },
+  { key: 'knowledge', icon: <DatabaseOutlined />, label: '知识' },
+  { key: 'sync', icon: <CloudSyncOutlined />, label: '连接' },
   { key: 'settings', icon: <SettingOutlined />, label: '设置' }
-];
-
-const settingsSectionItems: Array<{
-  key: SettingsSectionKey;
-  icon: ReactNode;
-  label: string;
-  description: string;
-}> = [
-  { key: 'general', icon: <SettingOutlined />, label: '通用', description: '主题、启动、数据位置' },
-  { key: 'models', icon: <ApiOutlined />, label: '模型', description: '配置 API Key' },
-  { key: 'tools', icon: <ToolOutlined />, label: '工具', description: '文件、文档、网页搜索' },
-  { key: 'knowledge', icon: <DatabaseOutlined />, label: '知识', description: '选择本地资料' },
-  { key: 'sync', icon: <CloudSyncOutlined />, label: '连接', description: '绑定、同步、备份' }
 ];
 
 const desktopClientPreferenceStorageKey = 'qiuai.pc.client.preferences.v1';
@@ -520,10 +510,6 @@ function isSectionKey(value: string): value is SectionKey {
   return sectionItems.some((item) => item.key === value);
 }
 
-function isSettingsSectionKey(value: string): value is SettingsSectionKey {
-  return settingsSectionItems.some((item) => item.key === value);
-}
-
 function readDesktopClientPreferences(): DesktopClientPreferences {
   if (typeof window === 'undefined') {
     return defaultDesktopClientPreferences;
@@ -567,16 +553,7 @@ function readInitialSectionKey(): SectionKey {
     return 'files';
   }
 
-  if (isSettingsSectionKey(hashValue)) {
-    return 'settings';
-  }
-
   return isSectionKey(hashValue) ? hashValue : readDesktopClientPreferences().startupSection;
-}
-
-function readInitialSettingsSectionKey(): SettingsSectionKey {
-  const hashValue = window.location.hash.replace(/^#/, '');
-  return isSettingsSectionKey(hashValue) ? hashValue : 'general';
 }
 
 export default function App() {
@@ -584,9 +561,6 @@ export default function App() {
     createDesktopRuntimePreviewState()
   );
   const [selectedSection, setSelectedSection] = useState<SectionKey>(() => readInitialSectionKey());
-  const [selectedSettingsSection, setSelectedSettingsSection] = useState<SettingsSectionKey>(
-    () => readInitialSettingsSectionKey()
-  );
   const [clientPreferences, setClientPreferences] = useState<DesktopClientPreferences>(
     () => readDesktopClientPreferences()
   );
@@ -640,11 +614,7 @@ export default function App() {
 
   useEffect(() => {
     const handleHashChange = () => {
-      const nextSection = readInitialSectionKey();
-      setSelectedSection(nextSection);
-      if (nextSection === 'settings') {
-        setSelectedSettingsSection(readInitialSettingsSectionKey());
-      }
+      setSelectedSection(readInitialSectionKey());
     };
 
     window.addEventListener('hashchange', handleHashChange);
@@ -1093,6 +1063,10 @@ export default function App() {
                   {selectedSection === 'workbench' ? renderWorkbench() : null}
                   {selectedSection === 'roles' ? renderRoles() : null}
                   {selectedSection === 'files' ? renderFiles() : null}
+                  {selectedSection === 'models' ? renderModels() : null}
+                  {selectedSection === 'tools' ? renderTools() : null}
+                  {selectedSection === 'knowledge' ? renderKnowledge() : null}
+                  {selectedSection === 'sync' ? renderSync() : null}
                   {selectedSection === 'settings' ? renderSettings() : null}
                 </div>
               </div>
@@ -1398,8 +1372,8 @@ export default function App() {
               <Tag color="geekblue">运行中 {runningTaskCount}</Tag>
               <Tag color="gold">待处理 {waitingTaskCount}</Tag>
               <Tag color="green">已完成 {completedTaskCount}</Tag>
-              <Button size="small" onClick={() => navigateToSection('settings')}>
-                配置
+              <Button size="small" onClick={() => navigateToSection('models')}>
+                模型
               </Button>
             </Space>
           </header>
@@ -1627,8 +1601,11 @@ export default function App() {
                 <Button icon={<PlusOutlined />} onClick={() => navigateToSection('files')}>
                   添加文件
                 </Button>
-                <Button icon={<ToolOutlined />} onClick={() => navigateToSection('settings')}>
-                  工具与模型
+                <Button icon={<ApiOutlined />} onClick={() => navigateToSection('models')}>
+                  模型
+                </Button>
+                <Button icon={<ToolOutlined />} onClick={() => navigateToSection('tools')}>
+                  工具
                 </Button>
               </Space>
               <Button
@@ -2937,71 +2914,9 @@ export default function App() {
   }
 
   function renderSettings() {
-    const configuredModelCount = runtimeState.modelProfiles.filter(hasConfiguredModelApi).length;
-    const webSearchConfigured = Boolean(runtimeState.localRuntime.toolSettings?.webSearch?.endpoint);
-    const selectedSettingsContent =
-      selectedSettingsSection === 'general'
-        ? renderGeneralSettings()
-        : selectedSettingsSection === 'models'
-          ? renderModels()
-          : selectedSettingsSection === 'tools'
-            ? renderTools()
-            : selectedSettingsSection === 'knowledge'
-              ? renderKnowledge()
-              : renderSync();
-    const selectedSettingsItem =
-      settingsSectionItems.find((item) => item.key === selectedSettingsSection) ?? settingsSectionItems[0];
-
     return (
-      <div className="settings-page">
-        <div className="settings-layout">
-          <aside className="settings-sidebar">
-            <Space direction="vertical" size={4}>
-              <Typography.Text strong>设置</Typography.Text>
-              <Typography.Text type="secondary">PC 客户端</Typography.Text>
-            </Space>
-
-            <nav className="settings-sidebar-nav">
-              {settingsSectionItems.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  className={
-                    selectedSettingsSection === item.key
-                      ? 'settings-sidebar-item selected'
-                      : 'settings-sidebar-item'
-                  }
-                  onClick={() => navigateToSettingsSection(item.key)}
-                >
-                  <span className="settings-sidebar-icon">{item.icon}</span>
-                  <span className="settings-sidebar-main">
-                    <Typography.Text strong>{item.label}</Typography.Text>
-                    <Typography.Text type="secondary">{item.description}</Typography.Text>
-                  </span>
-                </button>
-              ))}
-            </nav>
-
-            <div className="settings-sidebar-footer">
-              <Typography.Text type="secondary">当前状态</Typography.Text>
-              <Space size={6} wrap>
-                <Tag color={configuredModelCount > 0 ? 'green' : 'orange'}>模型 {configuredModelCount}</Tag>
-                <Tag color={enabledToolCount > 0 ? 'green' : 'orange'}>工具 {enabledToolCount}</Tag>
-                <Tag color={webSearchConfigured ? 'green' : 'default'}>
-                  搜索 {webSearchConfigured ? '已配' : '未配'}
-                </Tag>
-              </Space>
-            </div>
-          </aside>
-
-          <section className="settings-section-panel">
-            <div className="settings-section-header">
-              <Typography.Title level={4}>{selectedSettingsItem.label}</Typography.Title>
-              <Typography.Text type="secondary">{selectedSettingsItem.description}</Typography.Text>
-            </div>
-            <div className="settings-section-body">{selectedSettingsContent}</div>
-          </section>
-        </div>
+      <div className="settings-page client-settings-page">
+        {renderGeneralSettings()}
       </div>
     );
   }
@@ -3688,16 +3603,6 @@ export default function App() {
     }
   }
 
-  function navigateToSettingsSection(section: SettingsSectionKey) {
-    setSelectedSection('settings');
-    setSelectedSettingsSection(section);
-
-    const nextHash = `#${section}`;
-    if (window.location.hash !== nextHash) {
-      window.history.replaceState(null, '', nextHash);
-    }
-  }
-
   async function runVerificationTask() {
     const sourceState = runtimeState;
     const rolePackage = activeRolePackage;
@@ -4055,9 +3960,25 @@ function sectionMeta(section: SectionKey) {
       title: '文件',
       description: '查看本地产物和备份。'
     },
+    models: {
+      title: '模型',
+      description: '配置和测试桌面端模型。'
+    },
+    tools: {
+      title: '工具',
+      description: '管理文件、文档和网页能力。'
+    },
+    knowledge: {
+      title: '知识',
+      description: '管理本地资料和知识来源。'
+    },
+    sync: {
+      title: '连接',
+      description: '绑定、同步和备份工作区。'
+    },
     settings: {
       title: '设置',
-      description: '模型、工具、知识和连接。'
+      description: '管理 PC 客户端偏好。'
     }
   };
 
