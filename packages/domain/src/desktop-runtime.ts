@@ -12,6 +12,7 @@ export type ToolEntryPoint = 'native' | 'bridge' | 'api' | 'mcp';
 
 export type ToolCapability =
   | 'web_search'
+  | 'document_extract'
   | 'document_edit'
   | 'presentation_edit'
   | 'spreadsheet_edit'
@@ -155,7 +156,7 @@ export function validateToolManifest(input: unknown): ToolManifest {
     capabilities: requireStringEnumArray(
       record.capabilities,
       'toolManifest.capabilities',
-      ['web_search', 'document_edit', 'presentation_edit', 'spreadsheet_edit', 'filesystem', 'browser_automation', 'custom_api', 'mcp']
+      ['web_search', 'document_extract', 'document_edit', 'presentation_edit', 'spreadsheet_edit', 'filesystem', 'browser_automation', 'custom_api', 'mcp']
     ),
     requiresApproval: optionalBoolean(record.requiresApproval, 'toolManifest.requiresApproval')
   };

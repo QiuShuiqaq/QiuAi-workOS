@@ -87,7 +87,7 @@ const initialTools: ToolManifest[] = [
     version: '0.1.0',
     scope: 'desktop',
     entryPoint: 'bridge',
-    capabilities: ['document_edit', 'presentation_edit', 'spreadsheet_edit'],
+    capabilities: ['document_extract', 'document_edit', 'presentation_edit', 'spreadsheet_edit'],
     requiresApproval: true
   },
   {

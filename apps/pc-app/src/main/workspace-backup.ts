@@ -625,7 +625,11 @@ function validateDesktopTaskExecutionContext(
     knowledgeBindingIds: requireStringArray(
       record.knowledgeBindingIds,
       'taskExecutionContext.knowledgeBindingIds'
-    )
+    ),
+    attachmentPaths:
+      record.attachmentPaths === undefined
+        ? undefined
+        : requireStringArray(record.attachmentPaths, 'taskExecutionContext.attachmentPaths')
   };
 }
 
@@ -700,6 +704,7 @@ function validateToolManifest(value: unknown): ToolManifest {
       'toolManifest.capabilities',
       [
         'web_search',
+        'document_extract',
         'document_edit',
         'presentation_edit',
         'spreadsheet_edit',

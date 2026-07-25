@@ -54,6 +54,19 @@ const allowedReadResult = await invokeDesktopTool(tempDir, {
 assert.equal(allowedReadResult.ok, true);
 assert.equal(allowedReadResult.output?.content, 'allowed local source text');
 
+const documentExtractResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'office-document',
+  action: 'document.extract_text',
+  input: {
+    path: allowedFilePath
+  },
+  allowedRootPaths: [allowedRootPath]
+});
+
+assert.equal(documentExtractResult.ok, true);
+assert.equal(documentExtractResult.output?.text, 'allowed local source text');
+
 const blockedReadResult = await invokeDesktopTool(tempDir, {
   workspaceId,
   toolId: 'local-filesystem',

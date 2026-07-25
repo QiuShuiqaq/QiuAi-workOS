@@ -12,6 +12,7 @@ export type ToolEntryPoint = 'native' | 'bridge' | 'api' | 'mcp';
 
 export type ToolCapability =
   | 'web_search'
+  | 'document_extract'
   | 'document_edit'
   | 'presentation_edit'
   | 'spreadsheet_edit'
@@ -74,6 +75,7 @@ export interface DesktopTaskExecutionContext {
   modelProfileIds: string[];
   toolIds: string[];
   knowledgeBindingIds: string[];
+  attachmentPaths?: string[];
 }
 
 export interface ModelProfile {

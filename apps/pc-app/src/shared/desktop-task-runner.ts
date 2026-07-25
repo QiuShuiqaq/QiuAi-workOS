@@ -1,4 +1,5 @@
 import type {
+  DesktopArtifactSummary,
   DesktopExecutionLogEntry,
   DesktopKnowledgeSourceSummary,
   DesktopTaskDetail,
@@ -23,6 +24,10 @@ export type DesktopToolInvoker = (
   request: DesktopToolInvocationRequest
 ) => Promise<DesktopToolInvocationResult>;
 
+export type DesktopTaskProgressCallback = (
+  task: DesktopTaskDetail
+) => void | Promise<void>;
+
 export interface RunDesktopTaskInput {
   task: DesktopTaskDetail;
   workspaceId?: string;
@@ -35,6 +40,7 @@ export interface RunDesktopTaskInput {
   enabledKnowledgeBindingIds: string[];
   modelInvoker?: DesktopModelInvoker;
   desktopToolInvoker?: DesktopToolInvoker;
+  onProgress?: DesktopTaskProgressCallback;
   completedAt?: string;
 }
 
@@ -58,6 +64,7 @@ interface ModelInvocationSuccess {
   response: DesktopModelChatResponse;
   logs: DesktopExecutionLogEntry[];
   usedToolIds: string[];
+  generatedArtifacts: DesktopArtifactSummary[];
 }
 
 interface ModelInvocationFailure {
@@ -74,11 +81,21 @@ interface DesktopToolCallInstruction {
   input: Record<string, unknown>;
 }
 
+interface AttachmentContextPreparation {
+  context: string;
+  logs: DesktopExecutionLogEntry[];
+  usedToolIds: string[];
+}
+
 const toolCallMarker = 'QIUAI_DESKTOP_TOOL_CALL:';
+const maxDesktopToolTurns = 3;
+const maxAttachmentContextFiles = 5;
+const maxAttachmentContextChars = 40_000;
 const supportedToolActions: DesktopToolInvocationAction[] = [
   'filesystem.write_text_file',
   'filesystem.read_text_file',
   'filesystem.list_directory',
+  'document.extract_text',
   'web.fetch_url',
   'web.search',
   'office.write_markdown_document',
@@ -86,13 +103,61 @@ const supportedToolActions: DesktopToolInvocationAction[] = [
   'presentation.write_outline_markdown'
 ];
 
+async function emitTaskProgress(input: {
+  onProgress?: DesktopTaskProgressCallback;
+  task: DesktopTaskDetail;
+  updatedAt: string;
+  executionLogs?: DesktopExecutionLogEntry[];
+  artifacts?: DesktopArtifactSummary[];
+  state?: DesktopTaskDetail['state'];
+  currentRunStatus?: NonNullable<DesktopTaskDetail['currentRun']>['status'];
+}): Promise<DesktopTaskDetail> {
+  const snapshot: DesktopTaskDetail = {
+    ...input.task,
+    state: input.state ?? input.task.state,
+    updatedAt: input.updatedAt,
+    artifactCount: input.artifacts ? input.artifacts.length : input.task.artifactCount,
+    artifacts: input.artifacts ?? input.task.artifacts,
+    executionLogs: [...input.task.executionLogs, ...(input.executionLogs ?? [])],
+    currentRun: input.task.currentRun
+      ? {
+          ...input.task.currentRun,
+          status: input.currentRunStatus ?? input.task.currentRun.status,
+          finishedAt:
+            input.currentRunStatus && input.currentRunStatus !== 'running'
+              ? input.updatedAt
+              : input.task.currentRun.finishedAt
+        }
+      : input.task.currentRun
+  };
+
+  if (!input.onProgress) {
+    return snapshot;
+  }
+
+  await input.onProgress(snapshot);
+  return snapshot;
+}
+
 export async function runDesktopTask(input: RunDesktopTaskInput): Promise<RunDesktopTaskResult> {
   const completedAt = input.completedAt ?? new Date().toISOString();
   const context = input.task.executionContext ?? buildContextFromRolePackage(input.rolePackage);
 
   if (!context) {
+    const failedTask = failTask(
+      input.task,
+      completedAt,
+      'Task has no execution context. Configure role models and tools first.'
+    );
+    await emitTaskProgress({
+      onProgress: input.onProgress,
+      task: failedTask,
+      updatedAt: completedAt,
+      state: 'failed',
+      currentRunStatus: 'failed'
+    });
     return {
-      task: failTask(input.task, completedAt, 'Task has no execution context. Configure role models and tools first.'),
+      task: failedTask,
       usedToolIds: []
     };
   }
@@ -108,23 +173,39 @@ export async function runDesktopTask(input: RunDesktopTaskInput): Promise<RunDes
   });
 
   if (binding.modelProfiles.length === 0) {
+    const failedTask = failTask(
+      input.task,
+      completedAt,
+      'No enabled model profile is available for this task. Enable a model profile before running it.'
+    );
+    await emitTaskProgress({
+      onProgress: input.onProgress,
+      task: failedTask,
+      updatedAt: completedAt,
+      state: 'failed',
+      currentRunStatus: 'failed'
+    });
     return {
-      task: failTask(
-        input.task,
-        completedAt,
-        'No enabled model profile is available for this task. Enable a model profile before running it.'
-      ),
+      task: failedTask,
       usedToolIds: []
     };
   }
 
   if (!input.modelInvoker) {
+    const failedTask = failTask(
+      input.task,
+      completedAt,
+      'Desktop model bridge is unavailable. Run the desktop app with the Electron bridge enabled.'
+    );
+    await emitTaskProgress({
+      onProgress: input.onProgress,
+      task: failedTask,
+      updatedAt: completedAt,
+      state: 'failed',
+      currentRunStatus: 'failed'
+    });
     return {
-      task: failTask(
-        input.task,
-        completedAt,
-        'Desktop model bridge is unavailable. Run the desktop app with the Electron bridge enabled.'
-      ),
+      task: failedTask,
       usedToolIds: []
     };
   }
@@ -132,13 +213,21 @@ export async function runDesktopTask(input: RunDesktopTaskInput): Promise<RunDes
   const configuredModelProfiles = binding.modelProfiles.filter(isModelApiConfigured);
 
   if (configuredModelProfiles.length === 0) {
+    const failedTask = failTask(
+      input.task,
+      completedAt,
+      'No configured model API profile is available for this task. Add API Base URL and API Key before running it.',
+      buildModelConfigWarningLogs(input.task, binding.modelProfiles, completedAt)
+    );
+    await emitTaskProgress({
+      onProgress: input.onProgress,
+      task: failedTask,
+      updatedAt: completedAt,
+      state: 'failed',
+      currentRunStatus: 'failed'
+    });
     return {
-      task: failTask(
-        input.task,
-        completedAt,
-        'No configured model API profile is available for this task. Add API Base URL and API Key before running it.',
-        buildModelConfigWarningLogs(input.task, binding.modelProfiles, completedAt)
-      ),
+      task: failedTask,
       usedToolIds: []
     };
   }
@@ -150,18 +239,36 @@ export async function runDesktopTask(input: RunDesktopTaskInput): Promise<RunDes
     modelInvoker: input.modelInvoker,
     desktopToolInvoker: input.desktopToolInvoker,
     workspaceId: input.workspaceId,
-    createdAt: completedAt
+    createdAt: completedAt,
+    onProgress: input.onProgress
   });
 
   if (!invocation.ok) {
+    const failedTask = failTask(input.task, completedAt, invocation.message, invocation.logs);
+    await emitTaskProgress({
+      onProgress: input.onProgress,
+      task: failedTask,
+      updatedAt: completedAt,
+      state: 'failed',
+      currentRunStatus: 'failed'
+    });
     return {
-      task: failTask(input.task, completedAt, invocation.message, invocation.logs),
+      task: failedTask,
       usedToolIds: []
     };
   }
 
+  const completedTask = completeTask(input.task, completedAt, binding, invocation);
+  await emitTaskProgress({
+    onProgress: input.onProgress,
+    task: completedTask,
+    updatedAt: completedAt,
+    artifacts: completedTask.artifacts,
+    state: 'completed',
+    currentRunStatus: 'completed'
+  });
   return {
-    task: completeTask(input.task, completedAt, binding, invocation),
+    task: completedTask,
     usedToolIds: invocation.usedToolIds
   };
 }
@@ -234,13 +341,14 @@ function completeTask(
   const inputTokens = invocation.response.inputTokens ?? estimateInputTokens(task);
   const outputTokens = invocation.response.outputTokens ?? estimateOutputTokens(task);
   const costCents = estimateCostCents(inputTokens, outputTokens, binding.modelProfiles);
-  const artifact = {
+  const reportArtifact = {
     id: `${task.taskId}-artifact-${Date.parse(completedAt) || Date.now()}`,
     type: 'report' as const,
     title: `${task.title} - Model execution report`,
     content: buildArtifactContent(task, binding, invocation.response),
     createdAt: completedAt
   };
+  const artifacts = [...task.artifacts, ...invocation.generatedArtifacts, reportArtifact];
   const executionLogs = [
     ...task.executionLogs,
     createLog(task.taskId, 'info', 'LOCAL_RUN_STARTED', 'Local desktop runner started the task.', completedAt),
@@ -259,7 +367,13 @@ function completeTask(
     ),
     ...invocation.logs,
     createLog(task.taskId, 'info', 'MODEL_RESPONSE_RECEIVED', 'Model response was received.', completedAt),
-    createLog(task.taskId, 'info', 'ARTIFACT_CREATED', 'Local execution report was created.', completedAt),
+    createLog(
+      task.taskId,
+      'info',
+      'ARTIFACT_CREATED',
+      `Task results were prepared: ${artifacts.length - task.artifacts.length}.`,
+      completedAt
+    ),
     createLog(task.taskId, 'info', 'TASK_COMPLETED', 'Task completed by local desktop runner.', completedAt)
   ];
 
@@ -267,9 +381,9 @@ function completeTask(
     ...task,
     state: 'completed',
     updatedAt: completedAt,
-    artifactCount: task.artifacts.length + 1,
+    artifactCount: artifacts.length,
     costCents: (task.costCents ?? 0) + costCents,
-    artifacts: [...task.artifacts, artifact],
+    artifacts,
     executionLogs,
     costRecords: [
       ...task.costRecords,
@@ -373,21 +487,48 @@ async function invokeConfiguredModel(input: {
   desktopToolInvoker?: DesktopToolInvoker;
   workspaceId?: string;
   createdAt: string;
+  onProgress?: DesktopTaskProgressCallback;
 }): Promise<ModelInvocationResult> {
   const logs: DesktopExecutionLogEntry[] = [];
-  const messages = buildModelMessages(input.task, input.binding);
+  let progressTask = input.task;
+  const attachmentContext = await prepareAttachmentContext({
+    task: input.task,
+    binding: input.binding,
+    desktopToolInvoker: input.desktopToolInvoker,
+    workspaceId: input.workspaceId,
+    createdAt: input.createdAt
+  });
+  logs.push(...attachmentContext.logs);
+  if (attachmentContext.logs.length > 0) {
+    progressTask = await emitTaskProgress({
+      onProgress: input.onProgress,
+      task: progressTask,
+      updatedAt: input.createdAt,
+      executionLogs: attachmentContext.logs,
+      state: 'running',
+      currentRunStatus: 'running'
+    });
+  }
+  const messages = buildModelMessages(input.task, input.binding, attachmentContext.context);
 
   for (const profile of input.profiles) {
-    logs.push(
-      createLog(
-        input.task.taskId,
-        'info',
-        'MODEL_REQUEST_STARTED',
-        `Invoking model: ${profile.providerName} / ${profile.modelName}.`,
-        input.createdAt,
-        profile.id
-      )
+    const modelRequestLog = createLog(
+      input.task.taskId,
+      'info',
+      'MODEL_REQUEST_STARTED',
+      `Invoking model: ${profile.providerName} / ${profile.modelName}.`,
+      input.createdAt,
+      profile.id
     );
+    logs.push(modelRequestLog);
+    progressTask = await emitTaskProgress({
+      onProgress: input.onProgress,
+      task: progressTask,
+      updatedAt: input.createdAt,
+      executionLogs: [modelRequestLog],
+      state: 'running',
+      currentRunStatus: 'running'
+    });
 
     try {
       const response = await input.modelInvoker({
@@ -404,29 +545,42 @@ async function invokeConfiguredModel(input: {
         modelInvoker: input.modelInvoker,
         desktopToolInvoker: input.desktopToolInvoker,
         workspaceId: input.workspaceId,
-        createdAt: input.createdAt
+        createdAt: input.createdAt,
+        onProgress: input.onProgress,
+        progressTask
       });
 
       logs.push(...toolExecution.logs);
+      if (toolExecution.progressTask) {
+        progressTask = toolExecution.progressTask;
+      }
 
       return {
         ok: true,
         profile,
         response: toolExecution.response,
         logs,
-        usedToolIds: toolExecution.usedToolIds
+        usedToolIds: [...new Set([...attachmentContext.usedToolIds, ...toolExecution.usedToolIds])],
+        generatedArtifacts: toolExecution.generatedArtifacts
       };
     } catch (error) {
-      logs.push(
-        createLog(
-          input.task.taskId,
-          'warning',
-          'MODEL_REQUEST_FAILED',
-          `Model failed: ${profile.providerName} / ${profile.modelName}. ${readErrorMessage(error)}`,
-          input.createdAt,
-          profile.id
-        )
+      const modelFailureLog = createLog(
+        input.task.taskId,
+        'warning',
+        'MODEL_REQUEST_FAILED',
+        `Model failed: ${profile.providerName} / ${profile.modelName}. ${readErrorMessage(error)}`,
+        input.createdAt,
+        profile.id
       );
+      logs.push(modelFailureLog);
+      progressTask = await emitTaskProgress({
+        onProgress: input.onProgress,
+        task: progressTask,
+        updatedAt: input.createdAt,
+        executionLogs: [modelFailureLog],
+        state: 'running',
+        currentRunStatus: 'running'
+      });
     }
   }
 
@@ -435,6 +589,138 @@ async function invokeConfiguredModel(input: {
     message: 'All configured model API profiles failed. Check API Base URL, API Key, model name, and network access.',
     logs
   };
+}
+
+async function prepareAttachmentContext(input: {
+  task: DesktopTaskDetail;
+  binding: ResolvedRuntimeBinding;
+  desktopToolInvoker?: DesktopToolInvoker;
+  workspaceId?: string;
+  createdAt: string;
+}): Promise<AttachmentContextPreparation> {
+  const attachmentPaths = (input.task.executionContext?.attachmentPaths ?? [])
+    .map((attachmentPath) => attachmentPath.trim())
+    .filter(Boolean)
+    .slice(0, maxAttachmentContextFiles);
+
+  if (attachmentPaths.length === 0) {
+    return { context: '', logs: [], usedToolIds: [] };
+  }
+
+  const logs: DesktopExecutionLogEntry[] = [];
+  const contextBlocks: string[] = [];
+  const usedToolIds: string[] = [];
+  const extractionTool =
+    input.binding.availableTools.find((tool) => tool.id === 'office-document') ??
+    input.binding.availableTools.find((tool) => tool.id === 'local-filesystem');
+
+  if (!input.desktopToolInvoker || !input.workspaceId || !extractionTool) {
+    logs.push(
+      createLog(
+        input.task.taskId,
+        'warning',
+        'ATTACHMENT_CONTEXT_SKIPPED',
+        'Attached files were provided, but no enabled desktop document extraction tool is available.',
+        input.createdAt
+      )
+    );
+    return { context: '', logs, usedToolIds };
+  }
+
+  for (const [attachmentIndex, attachmentPath] of attachmentPaths.entries()) {
+    const logSuffix = `attachment-${attachmentIndex + 1}`;
+    const action: DesktopToolInvocationAction =
+      extractionTool.id === 'office-document' ? 'document.extract_text' : 'filesystem.read_text_file';
+
+    try {
+      const result = await input.desktopToolInvoker({
+        workspaceId: input.workspaceId,
+        toolId: extractionTool.id,
+        action,
+        input: {
+          path: attachmentPath,
+          maxChars: Math.ceil(maxAttachmentContextChars / attachmentPaths.length)
+        },
+        allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+      });
+
+      if (!result.ok) {
+        logs.push(
+          createLog(
+            input.task.taskId,
+            'warning',
+            'ATTACHMENT_CONTEXT_FAILED',
+            result.message ?? `Failed to extract attached file: ${attachmentPath}.`,
+            input.createdAt,
+            logSuffix
+          )
+        );
+        continue;
+      }
+
+      const extractedText = readToolTextOutput(result.output);
+      if (!extractedText) {
+        logs.push(
+          createLog(
+            input.task.taskId,
+            'warning',
+            'ATTACHMENT_CONTEXT_EMPTY',
+            `Attached file did not produce readable text: ${attachmentPath}.`,
+            input.createdAt,
+            logSuffix
+          )
+        );
+        continue;
+      }
+
+      usedToolIds.push(extractionTool.id);
+      contextBlocks.push(
+        [
+          `Attachment: ${attachmentPath}`,
+          `Extraction tool: ${extractionTool.id}/${action}`,
+          'Content:',
+          truncateForPrompt(extractedText, Math.ceil(maxAttachmentContextChars / attachmentPaths.length))
+        ].join('\n')
+      );
+      logs.push(
+        createLog(
+          input.task.taskId,
+          'info',
+          'ATTACHMENT_CONTEXT_EXTRACTED',
+          `Attached file text extracted: ${attachmentPath}.`,
+          input.createdAt,
+          logSuffix
+        )
+      );
+    } catch (error) {
+      logs.push(
+        createLog(
+          input.task.taskId,
+          'warning',
+          'ATTACHMENT_CONTEXT_FAILED',
+          error instanceof Error ? error.message : `Failed to extract attached file: ${attachmentPath}.`,
+          input.createdAt,
+          logSuffix
+        )
+      );
+    }
+  }
+
+  return {
+    context: truncateForPrompt(contextBlocks.join('\n\n---\n\n'), maxAttachmentContextChars),
+    logs,
+    usedToolIds: [...new Set(usedToolIds)]
+  };
+}
+
+function readToolTextOutput(output: Record<string, unknown> | undefined): string | undefined {
+  const text = output?.text ?? output?.content;
+  if (typeof text !== 'string') {
+    return undefined;
+  }
+
+  const normalized = text.trim();
+  return normalized ? normalized : undefined;
 }
 
 async function maybeExecuteDesktopToolCall(input: {
@@ -447,199 +733,321 @@ async function maybeExecuteDesktopToolCall(input: {
   desktopToolInvoker?: DesktopToolInvoker;
   workspaceId?: string;
   createdAt: string;
+  onProgress?: DesktopTaskProgressCallback;
+  progressTask: DesktopTaskDetail;
 }): Promise<{
   response: DesktopModelChatResponse;
   logs: DesktopExecutionLogEntry[];
   usedToolIds: string[];
+  generatedArtifacts: DesktopArtifactSummary[];
+  progressTask: DesktopTaskDetail;
 }> {
   const logs: DesktopExecutionLogEntry[] = [];
-  const toolCall = parseDesktopToolCall(input.response.content);
+  const usedToolIds: string[] = [];
+  const generatedArtifacts: DesktopArtifactSummary[] = [];
+  let currentResponse = input.response;
+  let currentMessages = input.messages;
+  let progressTask = input.progressTask;
 
-  if (!toolCall) {
-    return {
-      response: input.response,
-      logs,
-      usedToolIds: []
-    };
-  }
+  for (let turnIndex = 0; turnIndex < maxDesktopToolTurns; turnIndex += 1) {
+    const toolCall = parseDesktopToolCall(currentResponse.content);
 
-  logs.push(
-    createLog(
+    if (!toolCall) {
+      return {
+        response: currentResponse,
+        logs,
+        usedToolIds,
+        generatedArtifacts,
+        progressTask
+      };
+    }
+
+    const toolCallDetectedLog = createLog(
       input.task.taskId,
       'info',
       'TOOL_CALL_DETECTED',
       `Model requested desktop tool action: ${toolCall.toolId}/${toolCall.action}.`,
-      input.createdAt
-    )
-  );
+      input.createdAt,
+      `turn-${turnIndex + 1}`
+    );
+    logs.push(toolCallDetectedLog);
+    progressTask = await emitTaskProgress({
+      onProgress: input.onProgress,
+      task: progressTask,
+      updatedAt: input.createdAt,
+      executionLogs: [toolCallDetectedLog],
+      state: 'running',
+      currentRunStatus: 'running'
+    });
 
-  const availableTool = input.binding.availableTools.find((tool) => tool.id === toolCall.toolId);
-  if (!availableTool) {
-    logs.push(
-      createLog(
+    const availableTool = input.binding.availableTools.find((tool) => tool.id === toolCall.toolId);
+    if (!availableTool) {
+      const toolRejectedLog = createLog(
         input.task.taskId,
         'warning',
         'TOOL_CALL_REJECTED',
         `Requested tool is not enabled for this task: ${toolCall.toolId}.`,
-        input.createdAt
-      )
-    );
-    return {
-      response: {
-        ...input.response,
-        content: removeToolCallBlock(input.response.content)
-      },
-      logs,
-      usedToolIds: []
-    };
-  }
+        input.createdAt,
+        `turn-${turnIndex + 1}`
+      );
+      logs.push(toolRejectedLog);
+      progressTask = await emitTaskProgress({
+        onProgress: input.onProgress,
+        task: progressTask,
+        updatedAt: input.createdAt,
+        executionLogs: [toolRejectedLog],
+        state: 'running',
+        currentRunStatus: 'running'
+      });
+      return {
+        response: {
+          ...currentResponse,
+          content: removeToolCallBlock(currentResponse.content)
+        },
+        logs,
+        usedToolIds,
+        generatedArtifacts,
+        progressTask
+      };
+    }
 
-  if (!input.desktopToolInvoker || !input.workspaceId) {
-    logs.push(
-      createLog(
+    if (!input.desktopToolInvoker || !input.workspaceId) {
+      const toolSkippedLog = createLog(
         input.task.taskId,
         'warning',
         'TOOL_CALL_SKIPPED',
         'Desktop tool bridge or workspace ID is unavailable.',
-        input.createdAt
-      )
-    );
-    return {
-      response: {
-        ...input.response,
-        content: removeToolCallBlock(input.response.content)
-      },
-      logs,
-      usedToolIds: []
-    };
-  }
+        input.createdAt,
+        `turn-${turnIndex + 1}`
+      );
+      logs.push(toolSkippedLog);
+      progressTask = await emitTaskProgress({
+        onProgress: input.onProgress,
+        task: progressTask,
+        updatedAt: input.createdAt,
+        executionLogs: [toolSkippedLog],
+        state: 'running',
+        currentRunStatus: 'running'
+      });
+      return {
+        response: {
+          ...currentResponse,
+          content: removeToolCallBlock(currentResponse.content)
+        },
+        logs,
+        usedToolIds,
+        generatedArtifacts,
+        progressTask
+      };
+    }
 
-  let toolResult: DesktopToolInvocationResult;
-  try {
-    toolResult = await input.desktopToolInvoker({
-      workspaceId: input.workspaceId,
-      toolId: toolCall.toolId,
-      action: toolCall.action,
-      input: toolCall.input,
-      allowedRootPaths: input.binding.availableKnowledgeSources.flatMap((source) =>
-        source.localPath ? [source.localPath] : []
-      )
-    });
-  } catch (error) {
-    logs.push(
-      createLog(
+    let toolResult: DesktopToolInvocationResult;
+    try {
+      toolResult = await input.desktopToolInvoker({
+        workspaceId: input.workspaceId,
+        toolId: toolCall.toolId,
+        action: toolCall.action,
+        input: toolCall.input,
+        allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+      });
+    } catch (error) {
+      const toolFailedLog = createLog(
         input.task.taskId,
         'warning',
         'TOOL_CALL_FAILED',
         error instanceof Error ? error.message : `Desktop tool failed: ${toolCall.toolId}/${toolCall.action}.`,
-        input.createdAt
-      )
-    );
-    return {
-      response: {
-        ...input.response,
-        content: removeToolCallBlock(input.response.content)
-      },
-      logs,
-      usedToolIds: []
-    };
-  }
+        input.createdAt,
+        `turn-${turnIndex + 1}`
+      );
+      logs.push(toolFailedLog);
+      progressTask = await emitTaskProgress({
+        onProgress: input.onProgress,
+        task: progressTask,
+        updatedAt: input.createdAt,
+        executionLogs: [toolFailedLog],
+        state: 'running',
+        currentRunStatus: 'running'
+      });
+      return {
+        response: {
+          ...currentResponse,
+          content: removeToolCallBlock(currentResponse.content)
+        },
+        logs,
+        usedToolIds,
+        generatedArtifacts,
+        progressTask
+      };
+    }
 
-  if (!toolResult.ok) {
-    logs.push(
-      createLog(
+    if (!toolResult.ok) {
+      const toolFailedLog = createLog(
         input.task.taskId,
         'warning',
         'TOOL_CALL_FAILED',
         toolResult.message ?? `Desktop tool failed: ${toolCall.toolId}/${toolCall.action}.`,
-        input.createdAt
-      )
-    );
-    return {
-      response: {
-        ...input.response,
-        content: removeToolCallBlock(input.response.content)
-      },
-      logs,
-      usedToolIds: []
-    };
-  }
+        input.createdAt,
+        `turn-${turnIndex + 1}`
+      );
+      logs.push(toolFailedLog);
+      progressTask = await emitTaskProgress({
+        onProgress: input.onProgress,
+        task: progressTask,
+        updatedAt: input.createdAt,
+        executionLogs: [toolFailedLog],
+        state: 'running',
+        currentRunStatus: 'running'
+      });
+      return {
+        response: {
+          ...currentResponse,
+          content: removeToolCallBlock(currentResponse.content)
+        },
+        logs,
+        usedToolIds,
+        generatedArtifacts,
+        progressTask
+      };
+    }
 
-  logs.push(
-    createLog(
+    usedToolIds.push(toolCall.toolId);
+    const generatedArtifact = buildGeneratedArtifactFromToolResult({
+      taskId: input.task.taskId,
+      toolId: toolCall.toolId,
+      action: toolCall.action,
+      output: toolResult.output,
+      createdAt: input.createdAt,
+      sequence: generatedArtifacts.length + 1
+    });
+    if (generatedArtifact) {
+      generatedArtifacts.push(generatedArtifact);
+    }
+
+    const toolInvokedLog = createLog(
       input.task.taskId,
       'info',
       'TOOL_INVOKED',
       `Desktop tool executed: ${availableTool.name} / ${toolCall.action}.`,
-      input.createdAt
-    )
-  );
-
-  let finalResponse: DesktopModelChatResponse;
-  try {
-    finalResponse = await input.modelInvoker({
-      profile: input.profile,
-      timeoutMs: 45_000,
-      messages: [
-        ...input.messages,
-        {
-          role: 'assistant',
-          content: input.response.content
-        },
-        {
-          role: 'user',
-          content: [
-            'Desktop tool result:',
-            JSON.stringify(toolResult, null, 2),
-            '',
-            'Now produce the final Chinese task result. Mention generated local paths when they are relevant.'
-          ].join('\n')
-        }
-      ]
+      input.createdAt,
+      `turn-${turnIndex + 1}`
+    );
+    logs.push(toolInvokedLog);
+    progressTask = await emitTaskProgress({
+      onProgress: input.onProgress,
+      task: progressTask,
+      updatedAt: input.createdAt,
+      executionLogs: [toolInvokedLog],
+      artifacts: generatedArtifact ? [...progressTask.artifacts, generatedArtifact] : progressTask.artifacts,
+      state: 'running',
+      currentRunStatus: 'running'
     });
-  } catch (error) {
-    logs.push(
-      createLog(
+
+    const nextMessages: DesktopModelChatMessage[] = [
+      ...currentMessages,
+      {
+        role: 'assistant',
+        content: currentResponse.content
+      },
+      {
+        role: 'user',
+        content: buildToolResultPrompt(toolResult, turnIndex + 1)
+      }
+    ];
+
+    let nextResponse: DesktopModelChatResponse;
+    try {
+      nextResponse = await input.modelInvoker({
+        profile: input.profile,
+        timeoutMs: 45_000,
+        messages: nextMessages
+      });
+    } catch (error) {
+      const finalizationFailedLog = createLog(
         input.task.taskId,
         'warning',
         'TOOL_RESULT_FINALIZATION_FAILED',
         error instanceof Error ? error.message : 'Model failed after desktop tool execution.',
-        input.createdAt
-      )
-    );
-    return {
-      response: {
-        ...input.response,
-        content: [
-          removeToolCallBlock(input.response.content),
-          '',
-          'Desktop tool result:',
-          JSON.stringify(toolResult, null, 2)
-        ].join('\n').trim()
-      },
-      logs,
-      usedToolIds: [toolCall.toolId]
-    };
-  }
+        input.createdAt,
+        `turn-${turnIndex + 1}`
+      );
+      logs.push(finalizationFailedLog);
+      progressTask = await emitTaskProgress({
+        onProgress: input.onProgress,
+        task: progressTask,
+        updatedAt: input.createdAt,
+        executionLogs: [finalizationFailedLog],
+        state: 'running',
+        currentRunStatus: 'running'
+      });
+      return {
+        response: {
+          ...currentResponse,
+          content: [
+            removeToolCallBlock(currentResponse.content),
+            '',
+            'Desktop tool result:',
+            JSON.stringify(toolResult, null, 2)
+          ].join('\n').trim()
+        },
+        logs,
+        usedToolIds,
+        generatedArtifacts,
+        progressTask
+      };
+    }
 
-  logs.push(
-    createLog(
+    const toolResultReturnedLog = createLog(
       input.task.taskId,
       'info',
       'TOOL_RESULT_RETURNED_TO_MODEL',
       `Desktop tool result was returned to model: ${toolCall.toolId}.`,
-      input.createdAt
-    )
+      input.createdAt,
+      `turn-${turnIndex + 1}`
+    );
+    logs.push(toolResultReturnedLog);
+    progressTask = await emitTaskProgress({
+      onProgress: input.onProgress,
+      task: progressTask,
+      updatedAt: input.createdAt,
+      executionLogs: [toolResultReturnedLog],
+      state: 'running',
+      currentRunStatus: 'running'
+    });
+
+    currentMessages = nextMessages;
+    currentResponse = {
+      ...nextResponse,
+      inputTokens: sumOptionalTokenCounts(currentResponse.inputTokens, nextResponse.inputTokens),
+      outputTokens: sumOptionalTokenCounts(currentResponse.outputTokens, nextResponse.outputTokens)
+    };
+  }
+
+  const limitReachedLog = createLog(
+    input.task.taskId,
+    'warning',
+    'TOOL_CALL_LIMIT_REACHED',
+    `Desktop tool call limit reached: ${maxDesktopToolTurns}.`,
+    input.createdAt
   );
+  logs.push(limitReachedLog);
+  progressTask = await emitTaskProgress({
+    onProgress: input.onProgress,
+    task: progressTask,
+    updatedAt: input.createdAt,
+    executionLogs: [limitReachedLog],
+    state: 'running',
+    currentRunStatus: 'running'
+  });
 
   return {
     response: {
-      ...finalResponse,
-      inputTokens: sumOptionalTokenCounts(input.response.inputTokens, finalResponse.inputTokens),
-      outputTokens: sumOptionalTokenCounts(input.response.outputTokens, finalResponse.outputTokens)
+      ...currentResponse,
+      content: removeToolCallBlock(currentResponse.content)
     },
     logs,
-    usedToolIds: [toolCall.toolId]
+    usedToolIds,
+    generatedArtifacts,
+    progressTask
   };
 }
 
@@ -666,12 +1074,54 @@ function buildModelConfigWarningLogs(
   ];
 }
 
+function buildGeneratedArtifactFromToolResult(input: {
+  taskId: string;
+  toolId: string;
+  action: DesktopToolInvocationAction;
+  output: Record<string, unknown> | undefined;
+  createdAt: string;
+  sequence: number;
+}): DesktopArtifactSummary | undefined {
+  const localPath = readLocalPath(input.output);
+  if (!localPath) {
+    return undefined;
+  }
+
+  const fileName = getPathFileName(localPath) ?? `${input.toolId}-output`;
+
+  return {
+    id: `${input.taskId}-tool-artifact-${input.sequence}-${Date.parse(input.createdAt) || Date.now()}`,
+    type: 'file',
+    title: fileName,
+    content: [
+      `工具：${input.toolId}`,
+      `动作：${input.action}`,
+      `本地文件：${localPath}`
+    ].join('\n'),
+    localPath,
+    createdAt: input.createdAt
+  };
+}
+
+function readLocalPath(output: Record<string, unknown> | undefined): string | undefined {
+  const localPath = output?.localPath;
+  return typeof localPath === 'string' && localPath.trim() ? localPath.trim() : undefined;
+}
+
+function getPathFileName(localPath: string): string | undefined {
+  const normalizedPath = localPath.replace(/\\/g, '/');
+  const fileName = normalizedPath.split('/').filter(Boolean).at(-1);
+  return fileName?.trim() || undefined;
+}
+
 function buildModelMessages(
   task: DesktopTaskDetail,
-  binding: ResolvedRuntimeBinding
+  binding: ResolvedRuntimeBinding,
+  attachmentContext = ''
 ): DesktopModelChatMessage[] {
   const tools = binding.availableTools.map((tool) => `${tool.name} (${tool.capabilities.join(', ')})`);
   const toolInstructions = buildToolInstructions(binding.availableTools);
+  const attachmentPaths = task.executionContext?.attachmentPaths ?? [];
   const verificationToolInstruction =
     task.taskType === 'desktop_runtime_verification'
       ? 'This is a desktop runtime verification task. If office-document or local-filesystem is available, request exactly one write tool before the final answer to prove local artifact generation.'
@@ -701,6 +1151,8 @@ function buildModelMessages(
       content: [
         `Task title: ${task.title}`,
         `Task input: ${task.input}`,
+        `Attached files: ${attachmentPaths.length > 0 ? attachmentPaths.join('; ') : 'none'}`,
+        `Attached file text context:\n${attachmentContext || 'none'}`,
         `Available tools: ${tools.length > 0 ? tools.join('; ') : 'none'}`,
         `Knowledge context:\n${knowledgeContext || 'none'}`,
         `Missing knowledge bindings: ${binding.missingKnowledgeBindingIds.join(', ') || 'none'}`
@@ -729,6 +1181,7 @@ function buildToolInstructions(tools: ToolManifest[]): string {
 
       if (tool.id === 'office-document') {
         return [
+          '- office-document/document.extract_text input: {"path":"absolute allowed local document path","maxChars":30000}',
           '- office-document/office.write_markdown_document input: {"title":"title","folder":"documents","fileName":"file-name","content":"markdown text"}',
           '- office-document/spreadsheet.write_csv input: {"folder":"spreadsheets","fileName":"file-name","rows":[["name","value"],["A","1"]]}',
           '- office-document/presentation.write_outline_markdown input: {"title":"title","folder":"presentations","fileName":"file-name","slides":[{"title":"slide","bullets":["point"]}]}'
@@ -740,13 +1193,67 @@ function buildToolInstructions(tools: ToolManifest[]): string {
     .join('\n');
 }
 
-function parseDesktopToolCall(content: string): DesktopToolCallInstruction | undefined {
-  const markerIndex = content.indexOf(toolCallMarker);
-  if (markerIndex < 0) {
-    return undefined;
+function buildAllowedRootPaths(
+  knowledgeSources: DesktopKnowledgeSourceSummary[],
+  executionContext?: DesktopTaskDetail['executionContext']
+): string[] {
+  const allowedRoots = knowledgeSources.flatMap((source) =>
+    source.localPath ? getAllowedRootPathsForLocalSource(source.localPath) : []
+  );
+  const attachmentRoots = (executionContext?.attachmentPaths ?? []).flatMap((attachmentPath) =>
+    getAllowedRootPathsForLocalSource(attachmentPath)
+  );
+
+  return [...new Set([...allowedRoots, ...attachmentRoots])];
+}
+
+function getAllowedRootPathsForLocalSource(localPath: string): string[] {
+  const parentPath = getParentPath(localPath);
+  return parentPath === localPath ? [localPath] : [localPath, parentPath];
+}
+
+function getParentPath(localPath: string): string {
+  const normalizedPath = localPath.replace(/\\/g, '/');
+  const separatorIndex = normalizedPath.lastIndexOf('/');
+  if (separatorIndex <= 0) {
+    return localPath;
   }
 
-  const jsonText = extractFirstJsonObject(content.slice(markerIndex + toolCallMarker.length));
+  return localPath.slice(0, separatorIndex);
+}
+
+function buildToolResultPrompt(toolResult: DesktopToolInvocationResult, toolTurn: number): string {
+  return [
+    `Desktop tool result for turn ${toolTurn}:`,
+    JSON.stringify(toolResult, null, 2),
+    '',
+    toolTurn < maxDesktopToolTurns
+      ? 'If another desktop tool is strictly needed, request exactly one next tool call. Otherwise produce the final Chinese task result and mention generated local paths when relevant.'
+      : 'Now produce the final Chinese task result. Mention generated local paths when they are relevant.'
+  ].join('\n');
+}
+
+function parseDesktopToolCall(content: string): DesktopToolCallInstruction | undefined {
+  const markerIndex = content.indexOf(toolCallMarker);
+  if (markerIndex >= 0) {
+    const jsonText = extractFirstJsonObject(content.slice(markerIndex + toolCallMarker.length));
+    const markerToolCall = parseDesktopToolCallJson(jsonText);
+    if (markerToolCall) {
+      return markerToolCall;
+    }
+  }
+
+  for (const fencedJsonText of extractFencedJsonBlocks(content)) {
+    const fencedToolCall = parseDesktopToolCallJson(extractFirstJsonObject(fencedJsonText));
+    if (fencedToolCall) {
+      return fencedToolCall;
+    }
+  }
+
+  return parseDesktopToolCallJson(extractFirstJsonObject(content));
+}
+
+function parseDesktopToolCallJson(jsonText: string | undefined): DesktopToolCallInstruction | undefined {
   if (!jsonText) {
     return undefined;
   }
@@ -771,6 +1278,21 @@ function parseDesktopToolCall(content: string): DesktopToolCallInstruction | und
   }
 
   return undefined;
+}
+
+function extractFencedJsonBlocks(value: string): string[] {
+  const blocks: string[] = [];
+  const pattern = /```(?:json)?\s*([\s\S]*?)```/gi;
+  let match = pattern.exec(value);
+
+  while (match) {
+    if (match[1]) {
+      blocks.push(match[1]);
+    }
+    match = pattern.exec(value);
+  }
+
+  return blocks;
 }
 
 function extractFirstJsonObject(value: string): string | undefined {
@@ -823,7 +1345,11 @@ function extractFirstJsonObject(value: string): string | undefined {
 function removeToolCallBlock(content: string): string {
   const markerIndex = content.indexOf(toolCallMarker);
   if (markerIndex < 0) {
-    return content;
+    const trimmedContent = content.trim();
+    const rawJsonToolCall = parseDesktopToolCallJson(extractFirstJsonObject(trimmedContent));
+    return rawJsonToolCall
+      ? 'Model requested a desktop tool, but the tool call was not executed.'
+      : content;
   }
 
   const beforeMarker = content.slice(0, markerIndex).trim();
@@ -857,11 +1383,13 @@ function buildArtifactContent(
   const knowledgeSources = binding.availableKnowledgeSources
     .map((source) => source.label)
     .join(', ') || 'No configured knowledge sources';
+  const attachmentPaths = task.executionContext?.attachmentPaths?.join(', ') || 'No attached files';
 
   return [
     `Task: ${task.title}`,
     `Role: ${task.roleName}`,
     `Input: ${task.input}`,
+    `Attached files: ${attachmentPaths}`,
     `Models: ${models}`,
     `Configured model connections: ${configuredModelCount}/${binding.modelProfiles.length}`,
     `Tools: ${tools}`,

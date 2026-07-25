@@ -110,6 +110,8 @@ assert.ok(
 );
 
 let toolCallingModelInvocationCount = 0;
+const toolCallingProgressSnapshots: string[][] = [];
+const toolCallingProgressArtifactPaths: string[][] = [];
 const toolCallingTask = await runDesktopTask({
   task: {
     ...task,
@@ -163,16 +165,36 @@ const toolCallingTask = await runDesktopTask({
       }
     };
   },
+  onProgress: (progressTask) => {
+    toolCallingProgressSnapshots.push(progressTask.executionLogs.map((log) => log.eventType));
+    toolCallingProgressArtifactPaths.push(
+      progressTask.artifacts.flatMap((artifact) => (artifact.localPath ? [artifact.localPath] : []))
+    );
+  },
   completedAt: '2026-07-20T10:00:10.000Z'
 });
 
 assert.equal(toolCallingModelInvocationCount, 2);
 assert.equal(toolCallingTask.task.state, 'completed');
 assert.deepEqual(toolCallingTask.usedToolIds, ['local-filesystem']);
-assert.match(toolCallingTask.task.artifacts[0]?.content ?? '', /after local filesystem tool execution/);
+assert.equal(toolCallingTask.task.artifacts.length, 2);
+assert.equal(toolCallingTask.task.artifacts[0]?.localPath, 'C:\\QiuAI\\workspace\\reports\\weekly-summary.md');
+assert.match(toolCallingTask.task.artifacts[1]?.content ?? '', /after local filesystem tool execution/);
 assert.ok(toolCallingTask.task.executionLogs.some((log) => log.eventType === 'TOOL_CALL_DETECTED'));
 assert.ok(toolCallingTask.task.executionLogs.some((log) => log.eventType === 'TOOL_INVOKED'));
 assert.ok(toolCallingTask.task.executionLogs.some((log) => log.eventType === 'TOOL_RESULT_RETURNED_TO_MODEL'));
+assert.ok(toolCallingProgressSnapshots.some((events) => events.includes('MODEL_REQUEST_STARTED')));
+assert.ok(toolCallingProgressSnapshots.some((events) => events.includes('TOOL_CALL_DETECTED')));
+assert.ok(toolCallingProgressSnapshots.some((events) => events.includes('TOOL_INVOKED')));
+assert.ok(toolCallingProgressSnapshots.some((events) => events.includes('TOOL_RESULT_RETURNED_TO_MODEL')));
+assert.ok(
+  toolCallingProgressSnapshots.at(-1)?.filter((eventType) => eventType === 'MODEL_REQUEST_STARTED').length === 1
+);
+assert.ok(
+  toolCallingProgressArtifactPaths.some((paths) =>
+    paths.includes('C:\\QiuAI\\workspace\\reports\\weekly-summary.md')
+  )
+);
 
 let officeToolModelInvocationCount = 0;
 const officeToolCallingTask = await runDesktopTask({
@@ -230,7 +252,118 @@ const officeToolCallingTask = await runDesktopTask({
 assert.equal(officeToolModelInvocationCount, 2);
 assert.equal(officeToolCallingTask.task.state, 'completed');
 assert.deepEqual(officeToolCallingTask.usedToolIds, ['office-document']);
-assert.match(officeToolCallingTask.task.artifacts[0]?.content ?? '', /office document tool execution/);
+assert.equal(officeToolCallingTask.task.artifacts.length, 2);
+assert.equal(officeToolCallingTask.task.artifacts[0]?.localPath, 'C:\\QiuAI\\workspace\\documents\\follow-up-plan.md');
+assert.match(officeToolCallingTask.task.artifacts[1]?.content ?? '', /office document tool execution/);
+
+let multiToolModelInvocationCount = 0;
+const multiToolRequests: Array<{ toolId: string; action: string }> = [];
+const multiToolTask = await runDesktopTask({
+  task: {
+    ...task,
+    taskId: 'task-runner-multi-tool-call-001',
+    executionContext: {
+      modelProfileIds: ['qiu-general-default'],
+      toolIds: ['local-filesystem', 'office-document'],
+      knowledgeBindingIds: [],
+      attachmentPaths: ['C:\\QiuAI\\input\\customer-notes.txt']
+    }
+  },
+  workspaceId: 'workspace-multi-tool-call',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['local-filesystem', 'office-document'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    multiToolModelInvocationCount += 1;
+
+    if (multiToolModelInvocationCount === 1) {
+      assert.match(request.messages[1]?.content ?? '', /Attached file text context/);
+      assert.match(request.messages[1]?.content ?? '', /Customer note content/);
+      return {
+        provider: request.profile.providerName,
+        modelName: request.profile.modelName,
+        content: [
+          '```json',
+          '{"toolId":"local-filesystem","action":"filesystem.read_text_file","input":{"path":"C:\\\\QiuAI\\\\input\\\\customer-notes.txt"}}',
+          '```'
+        ].join('\n')
+      };
+    }
+
+    if (multiToolModelInvocationCount === 2) {
+      assert.match(request.messages.at(-1)?.content ?? '', /Customer note content/);
+      return {
+        provider: request.profile.providerName,
+        modelName: request.profile.modelName,
+        content:
+          'QIUAI_DESKTOP_TOOL_CALL: {"toolId":"office-document","action":"office.write_markdown_document","input":{"title":"Customer Summary","folder":"documents","fileName":"customer-summary","content":"## Summary\\n\\nCustomer note content processed."}}'
+      };
+    }
+
+    assert.match(request.messages.at(-1)?.content ?? '', /customer-summary.md/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: 'Final result generated after reading input and writing office document.'
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    multiToolRequests.push({ toolId: request.toolId, action: request.action });
+
+    if (request.action === 'document.extract_text') {
+      assert.equal(request.toolId, 'office-document');
+      assert.equal(request.allowedRootPaths?.includes('C:\\QiuAI\\input\\customer-notes.txt'), true);
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          path: request.input.path,
+          text: 'Customer note content'
+        }
+      };
+    }
+
+    if (request.action === 'filesystem.read_text_file') {
+      assert.equal(request.allowedRootPaths?.includes('C:\\QiuAI\\input\\customer-notes.txt'), true);
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          path: request.input.path,
+          content: 'Customer note content'
+        }
+      };
+    }
+
+    assert.equal(request.action, 'office.write_markdown_document');
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\documents\\customer-summary.md'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:13.000Z'
+});
+
+assert.equal(multiToolModelInvocationCount, 3);
+assert.equal(multiToolTask.task.state, 'completed');
+assert.deepEqual(multiToolTask.usedToolIds, ['office-document', 'local-filesystem']);
+assert.deepEqual(multiToolRequests, [
+  { toolId: 'office-document', action: 'document.extract_text' },
+  { toolId: 'local-filesystem', action: 'filesystem.read_text_file' },
+  { toolId: 'office-document', action: 'office.write_markdown_document' }
+]);
+assert.equal(multiToolTask.task.artifacts.length, 2);
+assert.equal(multiToolTask.task.artifacts[0]?.localPath, 'C:\\QiuAI\\workspace\\documents\\customer-summary.md');
+assert.match(multiToolTask.task.artifacts[1]?.content ?? '', /reading input and writing office document/);
+assert.ok(multiToolTask.task.executionLogs.some((log) => log.eventType === 'ATTACHMENT_CONTEXT_EXTRACTED'));
 
 const unconfiguredKnowledge = await runDesktopTask({
   task,

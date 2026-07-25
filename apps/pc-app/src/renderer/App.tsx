@@ -1,21 +1,30 @@
 import {
   ApiOutlined,
   BorderOutlined,
+  CloudDownloadOutlined,
   CloudSyncOutlined,
   CloseOutlined,
   ControlOutlined,
   DatabaseOutlined,
+  FileAddOutlined,
+  FileTextOutlined,
   FolderOpenOutlined,
+  GlobalOutlined,
   DownloadOutlined,
+  InfoCircleOutlined,
+  LogoutOutlined,
   MinusOutlined,
+  PaperClipOutlined,
   PlayCircleOutlined,
   PlusOutlined,
+  QuestionCircleOutlined,
   RobotOutlined,
   SafetyCertificateOutlined,
   SettingOutlined,
   RollbackOutlined,
   ReloadOutlined,
-  ToolOutlined
+  ToolOutlined,
+  UserOutlined
 } from '@ant-design/icons';
 import { qiuAntTheme } from '@qiuai/design-tokens';
 import AppProvider from 'antd/es/app';
@@ -31,16 +40,14 @@ import Input from 'antd/es/input';
 import InputNumber from 'antd/es/input-number';
 import Layout from 'antd/es/layout';
 import List from 'antd/es/list';
-import Menu from 'antd/es/menu';
 import Modal from 'antd/es/modal';
 import Select from 'antd/es/select';
 import Space from 'antd/es/space';
-import Statistic from 'antd/es/statistic';
 import Switch from 'antd/es/switch';
 import Tag from 'antd/es/tag';
 import Typography from 'antd/es/typography';
 import zhCN from 'antd/es/locale/zh_CN';
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, type DragEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 
 import type {
   DesktopAuthorizedRoleTemplateCatalog,
@@ -57,7 +64,8 @@ import type {
   DesktopKnowledgeSourceSummary,
   KnowledgeBindingSource,
   ModelProfile,
-  RolePackageManifest
+  RolePackageManifest,
+  ToolManifest
 } from '../shared/desktop-contract';
 import { defaultRoleTemplateCatalog, type RoleTemplateCatalogEntry } from '@qiuai/domain';
 import { createDesktopRuntimePreviewState } from '../shared/desktop-state';
@@ -68,7 +76,7 @@ import {
 } from '../shared/workbench-data';
 import { runDesktopTask } from '../shared/desktop-task-runner';
 
-type SectionKey = 'workbench' | 'roles' | 'files' | 'models' | 'tools' | 'knowledge' | 'sync' | 'settings';
+type SectionKey = 'workbench' | 'roles' | 'models' | 'tools' | 'knowledge' | 'settings';
 type DesktopThemePreference = 'light' | 'system';
 type DesktopDensityPreference = 'comfortable' | 'compact';
 
@@ -84,6 +92,17 @@ interface TaskFormValues {
   roleCode: string;
   title: string;
   input?: string;
+}
+
+interface ComposerAttachment {
+  id: string;
+  name: string;
+  size: number;
+  type?: string;
+  localPath?: string;
+  progress: number;
+  status: 'uploading' | 'ready';
+  stagedAt: string;
 }
 
 interface ModelFormValues {
@@ -138,11 +157,9 @@ interface KnowledgeBindingCatalogEntry {
 const sectionItems: Array<{ key: SectionKey; icon: ReactNode; label: string }> = [
   { key: 'workbench', icon: <ControlOutlined />, label: '对话' },
   { key: 'roles', icon: <RobotOutlined />, label: '数字员工' },
-  { key: 'files', icon: <FolderOpenOutlined />, label: '文件' },
   { key: 'models', icon: <ApiOutlined />, label: '模型' },
   { key: 'tools', icon: <ToolOutlined />, label: '工具' },
-  { key: 'knowledge', icon: <DatabaseOutlined />, label: '知识' },
-  { key: 'sync', icon: <CloudSyncOutlined />, label: '连接' },
+  { key: 'knowledge', icon: <DatabaseOutlined />, label: '知识库' },
   { key: 'settings', icon: <SettingOutlined />, label: '设置' }
 ];
 
@@ -549,8 +566,12 @@ function writeDesktopClientPreferences(preferences: DesktopClientPreferences) {
 
 function readInitialSectionKey(): SectionKey {
   const hashValue = window.location.hash.replace(/^#/, '');
-  if (hashValue === 'runtime') {
-    return 'files';
+  if (hashValue === 'runtime' || hashValue === 'sync') {
+    return 'settings';
+  }
+
+  if (hashValue === 'files') {
+    return 'workbench';
   }
 
   return isSectionKey(hashValue) ? hashValue : readDesktopClientPreferences().startupSection;
@@ -583,6 +604,7 @@ export default function App() {
   const [hasLoadedPersistedState, setHasLoadedPersistedState] = useState(false);
   const [workspaceBackups, setWorkspaceBackups] = useState<DesktopBackupSummary[]>([]);
   const chatMessageListRef = useRef<HTMLDivElement | null>(null);
+  const composerFileInputRef = useRef<HTMLInputElement | null>(null);
   const [taskForm] = Form.useForm<TaskFormValues>();
   const [modelForm] = Form.useForm<ModelFormValues>();
   const [toolSettingsForm] = Form.useForm<ToolSettingsFormValues>();
@@ -594,19 +616,18 @@ export default function App() {
   const [roleConfigRoleCode, setRoleConfigRoleCode] = useState('');
   const [toolSettingsNotice, setToolSettingsNotice] = useState('');
   const [isSavingToolSettings, setIsSavingToolSettings] = useState(false);
-  const [verificationNotice, setVerificationNotice] = useState('');
-  const [isRunningVerification, setIsRunningVerification] = useState(false);
   const [modelSearchQuery, setModelSearchQuery] = useState('');
-  const [selectedModelNav, setSelectedModelNav] = useState<'catalog' | 'profiles' | 'advanced'>(
-    'catalog'
-  );
+  const [modelConfigOpen, setModelConfigOpen] = useState(false);
+  const [toolConfigToolId, setToolConfigToolId] = useState('');
   const [toolSearchQuery, setToolSearchQuery] = useState('');
-  const [selectedToolNav, setSelectedToolNav] = useState<'catalog' | 'web-search' | 'permissions'>(
-    'catalog'
+  const [selectedRoleCategory, setSelectedRoleCategory] = useState('全部');
+  const [selectedToolCategory, setSelectedToolCategory] = useState('全部');
+  const [selectedKnowledgeScope, setSelectedKnowledgeScope] = useState<'enterprise' | 'local'>(
+    'enterprise'
   );
-  const [selectedKnowledgeNav, setSelectedKnowledgeNav] = useState<'sources' | 'catalog' | 'policy'>(
-    'sources'
-  );
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
+  const [isComposerDragOver, setIsComposerDragOver] = useState(false);
 
   useEffect(() => {
     void loadRuntimeState();
@@ -840,6 +861,90 @@ export default function App() {
     }
   }
 
+  function stageComposerFiles(fileList: FileList | File[]) {
+    const files = Array.from(fileList).filter((file) => file.size >= 0);
+    if (files.length === 0) {
+      return;
+    }
+
+    const stagedAt = new Date().toISOString();
+    const attachments = files.map((file, index): ComposerAttachment => ({
+      id: `attachment-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
+      name: file.name || `附件 ${index + 1}`,
+      size: file.size,
+      type: file.type || undefined,
+      localPath: getFileLocalPath(file),
+      progress: 12,
+      status: 'uploading',
+      stagedAt
+    }));
+
+    setComposerAttachments((current) => [...current, ...attachments]);
+
+    for (const attachment of attachments) {
+      for (const [delay, progress] of [
+        [120, 42],
+        [280, 76],
+        [520, 100]
+      ] as const) {
+        window.setTimeout(() => {
+          setComposerAttachments((current) =>
+            current.map((item) =>
+              item.id === attachment.id
+                ? {
+                    ...item,
+                    progress,
+                    status: progress === 100 ? 'ready' : 'uploading'
+                  }
+                : item
+            )
+          );
+        }, delay);
+      }
+    }
+  }
+
+  function removeComposerAttachment(attachmentId: string) {
+    setComposerAttachments((current) => current.filter((attachment) => attachment.id !== attachmentId));
+  }
+
+  function handleComposerDragOver(event: DragEvent<HTMLFormElement>) {
+    if (!hasDraggedFiles(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setIsComposerDragOver(true);
+  }
+
+  function handleComposerDragLeave(event: DragEvent<HTMLFormElement>) {
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
+
+    setIsComposerDragOver(false);
+  }
+
+  function handleComposerDrop(event: DragEvent<HTMLFormElement>) {
+    if (!hasDraggedFiles(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    setIsComposerDragOver(false);
+    stageComposerFiles(event.dataTransfer.files);
+  }
+
+  function handleComposerFileInputChange(event: ChangeEvent<HTMLInputElement>) {
+    if (event.target.files) {
+      stageComposerFiles(event.target.files);
+    }
+
+    event.target.value = '';
+  }
+
   function handleWindowControl(action: DesktopWindowControlAction) {
     void window.qiuDesktop?.controlWindow(action);
   }
@@ -1062,11 +1167,9 @@ export default function App() {
                 >
                   {selectedSection === 'workbench' ? renderWorkbench() : null}
                   {selectedSection === 'roles' ? renderRoles() : null}
-                  {selectedSection === 'files' ? renderFiles() : null}
                   {selectedSection === 'models' ? renderModels() : null}
                   {selectedSection === 'tools' ? renderTools() : null}
                   {selectedSection === 'knowledge' ? renderKnowledge() : null}
-                  {selectedSection === 'sync' ? renderSync() : null}
                   {selectedSection === 'settings' ? renderSettings() : null}
                 </div>
               </div>
@@ -1139,15 +1242,6 @@ export default function App() {
   function renderProductRail() {
     return (
       <aside className="product-rail">
-        <button
-          type="button"
-          className="product-rail-brand"
-          title="QiuAI WorkOS"
-          onClick={() => navigateToSection('workbench')}
-        >
-          Q
-        </button>
-
         <div className="product-rail-actions">
           {sectionItems.map((item) => (
             <Button
@@ -1162,9 +1256,49 @@ export default function App() {
         </div>
 
         <div className="product-rail-footer">
-          <Tag color={connectionTone} title={runtimeState.app.serverBaseUrl}>
-            {runtimeState.serverConnection.state === 'online' ? '在线' : '连接'}
-          </Tag>
+          {accountMenuOpen ? (
+            <div className="account-popover">
+              <div className="account-popover-profile">
+                <span className="account-avatar">Q</span>
+                <span>
+                  <Typography.Text strong>QiuAI WorkOS</Typography.Text>
+                  <Typography.Text type="secondary">
+                    {connectionLabel(runtimeState.serverConnection.state)}
+                  </Typography.Text>
+                </span>
+              </div>
+              <div className="account-popover-list">
+                <button type="button">
+                  <UserOutlined />
+                  <span>个人资料</span>
+                </button>
+                <button type="button">
+                  <QuestionCircleOutlined />
+                  <span>帮助中心</span>
+                </button>
+                <button type="button">
+                  <InfoCircleOutlined />
+                  <span>发行说明</span>
+                </button>
+                <button type="button">
+                  <CloudDownloadOutlined />
+                  <span>下载应用</span>
+                </button>
+                <button type="button">
+                  <LogoutOutlined />
+                  <span>退出登录</span>
+                </button>
+              </div>
+            </div>
+          ) : null}
+          <button
+            type="button"
+            className="product-rail-brand"
+            title="QiuAI WorkOS"
+            onClick={() => setAccountMenuOpen((open) => !open)}
+          >
+            Q
+          </button>
         </div>
       </aside>
     );
@@ -1241,7 +1375,6 @@ export default function App() {
       (task) => task.state === 'queued' || task.state === 'waiting_approval'
     ).length;
     const completedTaskCount = orderedTasks.filter((task) => task.state === 'completed').length;
-    const configuredModelCount = runtimeState.modelProfiles.filter(hasConfiguredModelApi).length;
     const latestTaskByRole = new Map<string, DesktopTaskDetail>();
 
     for (const task of orderedTasks) {
@@ -1263,6 +1396,7 @@ export default function App() {
     const conversationRole =
       runtimeState.rolePackages.find((rolePackage) => rolePackage.roleCode === activeRoleCode) ??
       activeRolePackage;
+    const conversationFinalAnswer = conversationTask ? readConversationFinalAnswer(conversationTask) : '';
     const canRunConversationTask =
       conversationTask &&
       conversationTask.state !== 'running' &&
@@ -1322,34 +1456,6 @@ export default function App() {
               );
             })}
           </div>
-
-          <div className="agent-panel-footer">
-            <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              <Space size={6} wrap>
-                <Tag color={configuredModelCount > 0 ? 'green' : 'orange'}>
-                  模型 {configuredModelCount}/{enabledModelCount}
-                </Tag>
-                <Tag color={enabledToolCount > 0 ? 'green' : 'orange'}>
-                  工具 {enabledToolCount}/{runtimeState.tools.length}
-                </Tag>
-              </Space>
-              <Button
-                block
-                size="small"
-                icon={<PlayCircleOutlined />}
-                loading={isRunningVerification}
-                disabled={runtimeState.rolePackages.length === 0 || isRunningVerification}
-                onClick={() => void runVerificationTask()}
-              >
-                闭环测试
-              </Button>
-              {verificationNotice ? (
-                <Typography.Text type={verificationNotice.startsWith('失败') ? 'danger' : 'secondary'}>
-                  {verificationNotice}
-                </Typography.Text>
-              ) : null}
-            </Space>
-          </div>
         </aside>
 
         <section className="chat-workspace">
@@ -1389,7 +1495,7 @@ export default function App() {
               <>
                 <div className="chat-message-row user">
                   <div className="chat-bubble user-bubble">
-                    <Typography.Text>{conversationTask.input}</Typography.Text>
+                    {renderTaskInputMessage(conversationTask.input)}
                   </div>
                 </div>
 
@@ -1437,7 +1543,7 @@ export default function App() {
                                 <Typography.Text strong>{executionEventLabel(log.eventType)}</Typography.Text>
                                 <Typography.Text type="secondary">{formatDate(log.createdAt)}</Typography.Text>
                               </Space>
-                              <Typography.Text type="secondary">{log.message}</Typography.Text>
+                              <Typography.Text type="secondary">{executionEventMessage(log)}</Typography.Text>
                             </Space>
                           </div>
                         ))}
@@ -1449,6 +1555,18 @@ export default function App() {
                     )}
                   </div>
                 </div>
+
+                {conversationFinalAnswer ? (
+                  <div className="chat-message-row assistant">
+                    <span className="message-avatar">{roleAvatarText(conversationTask.roleName)}</span>
+                    <div className="chat-bubble assistant-bubble final-answer-bubble">
+                      <Typography.Text strong>结果总结</Typography.Text>
+                      <Typography.Paragraph className="final-answer-text">
+                        {conversationFinalAnswer}
+                      </Typography.Paragraph>
+                    </div>
+                  </div>
+                ) : null}
 
                 {conversationTask.artifacts.length > 0 ? (
                   <div className="chat-message-row assistant">
@@ -1473,21 +1591,16 @@ export default function App() {
                                     {artifact.localPath}
                                   </Typography.Text>
                                 ) : null}
-                                <Space size={8} wrap>
-                                  {artifact.localPath ? (
-                                    <Button
-                                      size="small"
-                                      type="primary"
-                                      icon={<FolderOpenOutlined />}
-                                      onClick={() => void openLocalPath(artifact.localPath)}
-                                    >
-                                      打开文件
-                                    </Button>
-                                  ) : null}
-                                  <Button size="small" onClick={() => navigateToSection('files')}>
-                                    查看产物
+                                {artifact.localPath ? (
+                                  <Button
+                                    size="small"
+                                    type="primary"
+                                    icon={<FolderOpenOutlined />}
+                                    onClick={() => void openLocalPath(artifact.localPath)}
+                                  >
+                                    打开文件
                                   </Button>
-                                </Space>
+                                ) : null}
                               </Space>
                             </Space>
                           </div>
@@ -1543,44 +1656,77 @@ export default function App() {
 
           <Form<TaskFormValues>
             form={taskForm}
-            className="chat-composer"
+            className={isComposerDragOver ? 'chat-composer dragging' : 'chat-composer'}
+            onDragOver={handleComposerDragOver}
+            onDragLeave={handleComposerDragLeave}
+            onDrop={handleComposerDrop}
             onFinish={(values) => {
               const input = values.input?.trim() ?? '';
-              if (!activeRoleCode || !input) {
+              if (!activeRoleCode || (!input && composerAttachments.length === 0)) {
                 return;
               }
 
+              const taskInput = buildTaskInputWithAttachments(input, composerAttachments);
               createTask({
                 roleCode: activeRoleCode,
-                title: createChatTaskTitle(input),
-                input
+                title: createChatTaskTitle(taskInput),
+                input: taskInput,
+                attachments: composerAttachments
               });
+              setComposerAttachments([]);
             }}
           >
-            <div className="chat-composer-status">
-              <Space size={8} wrap>
-                <Tag color={activeRoleCode ? 'blue' : 'orange'}>
-                  {conversationRole?.name ?? '未选择数字员工'}
-                </Tag>
-                <Tag color={configuredModelCount > 0 ? 'green' : 'orange'}>
-                  模型 {configuredModelCount}/{enabledModelCount}
-                </Tag>
-                <Tag color={enabledToolCount > 0 ? 'green' : 'orange'}>
-                  工具 {enabledToolCount}/{runtimeState.tools.length}
-                </Tag>
-                <Tag color={knowledgeBindingCount > 0 ? 'green' : 'default'}>
-                  知识 {knowledgeBindingCount}
-                </Tag>
-              </Space>
-              {!activeRoleCode ? (
-                <Typography.Text type="warning">请先在左侧选择或安装一个数字员工。</Typography.Text>
-              ) : configuredModelCount === 0 ? (
-                <Typography.Text type="warning">模型还未配置，任务可能无法真实执行。</Typography.Text>
-              ) : null}
-            </div>
+            {composerAttachments.length > 0 || isComposerDragOver ? (
+              <div className="composer-attachment-row">
+                {composerAttachments.map((attachment) => (
+                  <div key={attachment.id} className="composer-attachment-chip">
+                    <span className="attachment-file-icon">
+                      <PaperClipOutlined />
+                    </span>
+                    <span className="attachment-file-main">
+                      <Typography.Text strong ellipsis>
+                        {attachment.name}
+                      </Typography.Text>
+                      <Typography.Text type="secondary">
+                        {attachment.status === 'ready'
+                          ? `${formatFileSize(attachment.size)} · 已就绪`
+                          : `${attachment.progress}%`}
+                      </Typography.Text>
+                      <span className="attachment-progress">
+                        <span style={{ width: `${attachment.progress}%` }} />
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      className="attachment-remove"
+                      aria-label={`移除 ${attachment.name}`}
+                      onClick={() => removeComposerAttachment(attachment.id)}
+                    >
+                      <CloseOutlined />
+                    </button>
+                  </div>
+                ))}
+                {isComposerDragOver ? (
+                  <div className="composer-drop-hint">
+                    <PaperClipOutlined />
+                    <span>松开后添加到当前任务</span>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <Form.Item
               name="input"
-              rules={[{ required: true, message: '请输入要交给数字员工处理的任务' }]}
+              rules={[
+                {
+                  validator: async (_, value) => {
+                    if (String(value ?? '').trim() || composerAttachments.length > 0) {
+                      return;
+                    }
+
+                    throw new Error('请输入任务，或拖入要处理的文件');
+                  }
+                }
+              ]}
             >
               <Input.TextArea
                 autoSize={{ minRows: 3, maxRows: 7 }}
@@ -1593,20 +1739,21 @@ export default function App() {
                   event.preventDefault();
                   taskForm.submit();
                 }}
-                placeholder="输入任务，可以描述目标、文件位置、输出格式，也可以 @ 数字员工或引用本地文件"
+                placeholder="输入任务，或把文档、表格、图片直接拖到这里"
               />
             </Form.Item>
             <Flex align="center" justify="space-between" gap={12} wrap="wrap">
               <Space size={8} wrap>
-                <Button icon={<PlusOutlined />} onClick={() => navigateToSection('files')}>
+                <Button icon={<PaperClipOutlined />} onClick={() => composerFileInputRef.current?.click()}>
                   添加文件
                 </Button>
-                <Button icon={<ApiOutlined />} onClick={() => navigateToSection('models')}>
-                  模型
-                </Button>
-                <Button icon={<ToolOutlined />} onClick={() => navigateToSection('tools')}>
-                  工具
-                </Button>
+                <input
+                  ref={composerFileInputRef}
+                  className="composer-file-input"
+                  type="file"
+                  multiple
+                  onChange={handleComposerFileInputChange}
+                />
               </Space>
               <Button
                 type="primary"
@@ -1623,6 +1770,43 @@ export default function App() {
     );
   }
 
+  function renderTaskInputMessage(input: string) {
+    const attachmentMarker = '\n附件：\n';
+    if (!input.includes(attachmentMarker)) {
+      return <Typography.Text>{input}</Typography.Text>;
+    }
+
+    const [message, attachmentSection = ''] = input.split(attachmentMarker);
+    const attachmentLines = attachmentSection
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => /^\d+\.\s/.test(line));
+
+    return (
+      <Space direction="vertical" size={10} style={{ width: '100%' }}>
+        <Typography.Text>{message.trim()}</Typography.Text>
+        <div className="chat-input-attachment-grid">
+          {attachmentLines.map((line) => {
+            const attachment = parseTaskInputAttachmentLine(line);
+            return (
+              <div key={line} className="chat-input-attachment-card">
+                <PaperClipOutlined />
+                <span>
+                  <Typography.Text strong ellipsis>
+                    {attachment.name}
+                  </Typography.Text>
+                  <Typography.Text type="secondary" ellipsis>
+                    {attachment.meta}
+                  </Typography.Text>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </Space>
+    );
+  }
+
   function renderRoles() {
     const roleConfigTemplate = roleConfigRoleCode
       ? desktopRoleTemplateByRoleCode.get(roleConfigRoleCode)
@@ -1630,158 +1814,111 @@ export default function App() {
     const roleConfigRolePackage = runtimeState.rolePackages.find(
       (rolePackage) => rolePackage.roleCode === roleConfigRoleCode
     );
+    const installedRoleCodes = new Set(runtimeState.rolePackages.map((rolePackage) => rolePackage.roleCode));
+    const roleCategories = buildRoleCategoryTabs(desktopRoleTemplates);
+    const filteredRoleTemplates = desktopRoleTemplates.filter(
+      (template) => selectedRoleCategory === '全部' || roleTemplateCategory(template) === selectedRoleCategory
+    );
 
     return (
       <>
-        <div className="metric-grid">
-          <Card bordered={false}>
-            <Statistic title="已安装" value={runtimeState.rolePackages.length} />
-          </Card>
-          <Card bordered={false}>
-            <Statistic title="运行中" value={installedRoleSummaries.filter((item) => item.state === 'running').length} />
-          </Card>
-          <Card bordered={false}>
-            <Statistic title="可安装" value={desktopRoleTemplates.length} />
-          </Card>
-          <Card bordered={false}>
-            <Statistic title="当前员工" value={activeRolePackage?.name ?? '未选择'} />
-          </Card>
-        </div>
+        <div className="catalog-page">
+          <Flex align="center" justify="space-between" gap={16} wrap="wrap" className="catalog-page-header">
+            <div>
+              <Typography.Title level={2} className="page-title">
+                数字员工
+              </Typography.Title>
+              <Typography.Text type="secondary">
+                选择、安装和配置企业可用的数字员工。
+              </Typography.Text>
+            </div>
+            <Button icon={<ReloadOutlined />} loading={isLoadingRoleTemplates} onClick={loadAuthorizedRoleTemplates}>
+              刷新
+            </Button>
+          </Flex>
 
-        <div className="main-grid">
-          <Card title="已安装" bordered={false}>
-            <List
-              dataSource={runtimeState.rolePackages}
-              renderItem={(rolePackage) => {
-                const summary = installedRoleSummaries.find((item) => item.roleCode === rolePackage.roleCode);
-                const isActive = runtimeState.localRuntime.activeRoleCode === rolePackage.roleCode;
-                const template = desktopRoleTemplateByRoleCode.get(rolePackage.roleCode);
+          <div className="category-tabs">
+            {roleCategories.map((category) => (
+              <button
+                key={category}
+                type="button"
+                className={selectedRoleCategory === category ? 'category-tab active' : 'category-tab'}
+                onClick={() => setSelectedRoleCategory(category)}
+              >
+                {category}
+              </button>
+            ))}
+          </div>
 
-                return (
-                  <List.Item
-                    actions={[
-                      <Button
-                        key="configure"
-                        type="link"
-                        onClick={() => openRoleConfig(rolePackage.roleCode, 'configure')}
-                      >
-                        配置
-                      </Button>,
-                      <Button
-                        key="activate"
-                        type={isActive ? 'default' : 'link'}
-                        onClick={() => activateRole(rolePackage.roleCode)}
-                        disabled={isActive}
-                      >
-                        {isActive ? '当前使用' : '激活'}
-                      </Button>
-                    ]}
-                  >
-                    <List.Item.Meta
-                      avatar={<RobotOutlined className="list-icon" />}
-                      title={
-                        <Space size={8} wrap>
-                          <Typography.Text strong>{rolePackage.name}</Typography.Text>
-                          <Tag color={isActive ? 'green' : 'blue'}>{isActive ? '当前' : '已安装'}</Tag>
-                        </Space>
-                      }
-                      description={
-                        <Space direction="vertical" size={4}>
-                          <Space size={8} wrap>
-                            <Typography.Text type="secondary">
-                              任务 {summary?.taskCount ?? 0}
-                            </Typography.Text>
-                          </Space>
-                          {template ? (
-                            <Space size={6} wrap>
-                              {(summary?.skills ?? template.skills).slice(0, 4).map((skill) => (
-                                <Tag key={skill.code}>{skill.name}</Tag>
-                              ))}
-                            </Space>
-                          ) : null}
-                          <Typography.Text type="secondary">
-                            模型 {rolePackage.modelProfileIds.length} · 工具 {rolePackage.toolIds.length} · 知识 {rolePackage.requiredKnowledgeSources.length}
-                          </Typography.Text>
-                        </Space>
-                      }
-                    />
-                  </List.Item>
-                );
-              }}
-            />
-          </Card>
+          {roleTemplateNotice ? (
+            <Typography.Paragraph type="secondary">
+              {roleTemplateNotice}
+            </Typography.Paragraph>
+          ) : null}
 
-          <Card title="可安装" bordered={false}>
-            {roleTemplateNotice ? (
-              <Typography.Paragraph type="secondary">
-                {roleTemplateNotice}
-              </Typography.Paragraph>
-            ) : null}
-            <List
-              loading={isLoadingRoleTemplates}
-              dataSource={desktopRoleTemplates}
-              renderItem={(template) => {
-                const isInstalled = runtimeState.rolePackages.some(
-                  (rolePackage) => rolePackage.roleCode === template.roleCode
-                );
+          <div className="catalog-grid role-catalog-grid">
+            {filteredRoleTemplates.map((template) => {
+              const installed = installedRoleCodes.has(template.roleCode);
+              const active = runtimeState.localRuntime.activeRoleCode === template.roleCode;
+              const summary = installedRoleSummaries.find((item) => item.roleCode === template.roleCode);
 
-                return (
-                  <List.Item
-                    actions={[
-                      isInstalled ? (
+              return (
+                <Card key={template.roleCode} bordered={false} className="catalog-card role-catalog-card">
+                  <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                    <Flex align="flex-start" justify="space-between" gap={12}>
+                      <span className="catalog-card-icon">
+                        <RobotOutlined />
+                      </span>
+                      <Space size={6} wrap>
+                        <Tag color={active ? 'green' : installed ? 'blue' : 'default'}>
+                          {active ? '当前' : installed ? '已安装' : '可安装'}
+                        </Tag>
+                        <Tag>{roleTemplateCategory(template)}</Tag>
+                      </Space>
+                    </Flex>
+
+                    <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                      <Typography.Title level={5}>{template.name}</Typography.Title>
+                      <Typography.Paragraph type="secondary" ellipsis={{ rows: 2 }}>
+                        {template.summary}
+                      </Typography.Paragraph>
+                    </Space>
+
+                    <Space size={6} wrap>
+                      {template.skills.slice(0, 3).map((skill) => (
+                        <Tag key={skill.code}>{skill.name}</Tag>
+                      ))}
+                    </Space>
+
+                    <Typography.Text type="secondary" className="catalog-card-meta">
+                      {template.industry} · 任务 {summary?.taskCount ?? 0}
+                    </Typography.Text>
+
+                    <Space wrap>
+                      {installed ? (
                         <Button
-                          key="active"
-                          type="link"
-                          onClick={() => activateRole(template.roleCode)}
+                          type={active ? 'default' : 'primary'}
+                          onClick={() => {
+                            activateRole(template.roleCode);
+                            navigateToSection('workbench');
+                          }}
                         >
-                          {runtimeState.localRuntime.activeRoleCode === template.roleCode
-                            ? '当前使用'
-                            : '切换'}
+                          {active ? '进入对话' : '开始使用'}
                         </Button>
                       ) : (
-                        <Button
-                          key="install"
-                          type="link"
-                          icon={<RobotOutlined />}
-                          onClick={() => openRoleConfig(template.roleCode, 'install')}
-                        >
+                        <Button type="primary" onClick={() => openRoleConfig(template.roleCode, 'install')}>
                           安装
                         </Button>
-                      )
-                    ]}
-                  >
-                    <List.Item.Meta
-                      title={
-                        <Space size={8} wrap>
-                          <Typography.Text strong>{template.name}</Typography.Text>
-                          <Tag color="blue">{template.industry}</Tag>
-                        </Space>
-                      }
-                      description={
-                        <Space direction="vertical" size={4}>
-                          <Typography.Text type="secondary">{template.summary}</Typography.Text>
-                          <Typography.Text type="secondary">{template.businessGoal}</Typography.Text>
-                          <Space size={6} wrap>
-                            {template.skills.map((skill) => (
-                              <Tag key={skill.code}>{skill.name}</Tag>
-                            ))}
-                          </Space>
-                          <Space size={6} wrap>
-                            {template.defaultTaskTypes.map((type) => (
-                              <Tag key={type}>{type}</Tag>
-                            ))}
-                          </Space>
-                          <Typography.Text type="secondary">
-                            模型 {template.modelProfileIds.length} · 工具 {template.toolIds.length} · 知识 {template.requiredKnowledgeSources.length}
-                          </Typography.Text>
-                        </Space>
-                      }
-                    />
-                  </List.Item>
-                );
-              }}
-            />
-          </Card>
+                      )}
+                      <Button onClick={() => openRoleConfig(template.roleCode, installed ? 'configure' : 'install')}>
+                        配置
+                      </Button>
+                    </Space>
+                  </Space>
+                </Card>
+              );
+            })}
+          </div>
         </div>
 
         <Modal
@@ -1881,6 +2018,9 @@ export default function App() {
 
   function renderModels() {
     const configuredModelCount = runtimeState.modelProfiles.filter(hasConfiguredModelApi).length;
+    const enabledModelProfiles = runtimeState.modelProfiles.filter((profile) =>
+      runtimeState.localRuntime.enabledModelProfileIds.includes(profile.id)
+    );
     const filteredPresets = modelProviderPresets.filter((preset) => {
       const search = modelSearchQuery.trim().toLowerCase();
       if (!search) {
@@ -1897,362 +2037,192 @@ export default function App() {
       );
     });
 
-    const modelNavItems = [
-      { key: 'catalog', icon: <ApiOutlined />, label: '模型供应商' },
-      { key: 'profiles', icon: <RobotOutlined />, label: '模型角色' },
-      { key: 'advanced', icon: <SettingOutlined />, label: '高级配置' }
-    ];
-
     return (
       <>
-        <div className="dify-section-shell">
-          <aside className="dify-section-sidebar">
-            <Button
-              type="primary"
-              block
-              icon={<PlusOutlined />}
-              onClick={() => {
-                const preset = modelProviderPresets[0];
-                if (preset) {
+        <div className="catalog-page">
+          <Flex align="center" justify="space-between" gap={16} wrap="wrap" className="catalog-page-header">
+            <div>
+              <Typography.Title level={2} className="page-title">
+                模型配置
+              </Typography.Title>
+              <Typography.Text type="secondary">
+                选择供应商，填写 API Key，模型配置只保存在本机。
+              </Typography.Text>
+            </div>
+
+            <Space wrap>
+              <Input.Search
+                allowClear
+                value={modelSearchQuery}
+                onChange={(event) => setModelSearchQuery(event.target.value)}
+                placeholder="搜索供应商或模型"
+                style={{ width: 240 }}
+              />
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => {
+                  const preset = modelProviderPresets[0];
+                  if (!preset) return;
                   applyModelProviderPreset(preset, preset.models[0]);
-                  setSelectedModelNav('catalog');
-                }
-              }}
-            >
-              快速套用
-            </Button>
+                  setModelConfigOpen(true);
+                }}
+              >
+                新建配置
+              </Button>
+            </Space>
+          </Flex>
 
-            <Menu
-              mode="inline"
-              selectedKeys={[selectedModelNav]}
-              items={modelNavItems}
-              onClick={({ key }) => {
-                const nextKey = key as typeof selectedModelNav;
-                setSelectedModelNav(nextKey);
-              }}
-            />
-
-            <div className="sidebar-footer">
-              <Space direction="vertical" size={4}>
-                <Typography.Text strong>模型角色</Typography.Text>
-                <Typography.Text type="secondary">
-                  {configuredModelCount}/{runtimeState.modelProfiles.length} 已接通
-                </Typography.Text>
-              </Space>
-            </div>
-          </aside>
-
-          <div className="dify-section-content">
-            <Flex align="center" justify="space-between" gap={16} wrap="wrap" className="page-toolbar">
-              <div>
-                <Typography.Title level={2} className="page-title">
-                  {selectedModelNav === 'catalog'
-                    ? '模型供应商'
-                    : selectedModelNav === 'profiles'
-                      ? '模型角色'
-                      : '高级配置'}
-                </Typography.Title>
-                <Typography.Text type="secondary">
-                  {selectedModelNav === 'catalog'
-                    ? '先选择常用供应商，再填写本机保存的 API Key。'
-                    : selectedModelNav === 'profiles'
-                      ? '每个模型角色单独启停，避免把所有任务压在同一个模型上。'
-                      : '在这里调整 API、预算、温度和失败回退策略。'}
-                </Typography.Text>
-              </div>
-
-              <Space wrap>
-                {selectedModelNav === 'catalog' ? (
-                  <>
-                    <Input.Search
-                      allowClear
-                      value={modelSearchQuery}
-                      onChange={(event) => setModelSearchQuery(event.target.value)}
-                      placeholder="搜索模型供应商"
-                      style={{ width: 240 }}
-                    />
-                    <Button onClick={() => setModelSearchQuery('')}>清除筛选</Button>
-                  </>
-                ) : (
-                  <Button onClick={() => setSelectedModelNav('catalog')}>回到供应商</Button>
-                )}
-                {selectedModelNav !== 'advanced' ? (
-                  <Button type="primary" onClick={() => setSelectedModelNav('advanced')}>
-                    打开高级配置
-                  </Button>
-                ) : null}
-              </Space>
-            </Flex>
-
-            <div className="metric-grid model-metric-grid">
-              <Card bordered={false}>
-                <Statistic title="模型角色" value={runtimeState.modelProfiles.length} />
-              </Card>
-              <Card bordered={false}>
-                <Statistic title="已启用" value={enabledModelCount} />
-              </Card>
-              <Card bordered={false}>
-                <Statistic title="已接通" value={configuredModelCount} />
-              </Card>
-              <Card bordered={false}>
-                <Statistic title="当前模型" value={selectedModelProfile?.modelName ?? '未选择'} />
-              </Card>
-            </div>
-
-            <div className="models-workbench-grid">
-              <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                {selectedModelNav === 'catalog' ? (
-                  <Card id="model-provider-catalog" title="模型供应商" bordered={false}>
-                    <div className="provider-grid">
-                      {filteredPresets.length > 0 ? (
-                        filteredPresets.map((preset) => (
-                          <Card key={preset.id} size="small" bordered className="provider-card">
-                            <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                              <Space size={8} wrap>
-                                <Typography.Text strong>{preset.name}</Typography.Text>
-                                {preset.apiBaseUrl ? <Tag color="blue">OpenAI Compatible</Tag> : null}
-                              </Space>
-                              <Typography.Text type="secondary">{preset.summary}</Typography.Text>
-                              <Space size={6} wrap>
-                                {preset.models.map((model) => (
-                                  <Tag key={`${preset.id}-${model.modelName}`}>{model.label}</Tag>
-                                ))}
-                              </Space>
-                              <Space wrap>
-                                <Button
-                                  size="small"
-                                  type="primary"
-                                  onClick={() => {
-                                    applyModelProviderPreset(preset, preset.models[0]);
-                                    setSelectedModelNav('advanced');
-                                  }}
-                                >
-                                  套用预设
-                                </Button>
-                                <Button
-                                  size="small"
-                                  onClick={() => {
-                                    applyModelProviderPreset(preset, preset.models[0]);
-                                    setSelectedModelNav('advanced');
-                                  }}
-                                >
-                                  配置
-                                </Button>
-                              </Space>
-                            </Space>
-                          </Card>
-                        ))
-                      ) : (
-                        <div className="provider-empty">
-                          <Empty description="没有匹配的模型供应商" />
-                        </div>
-                      )}
-                    </div>
-                  </Card>
-                ) : null}
-
-                {selectedModelNav === 'profiles' ? (
-                  <Card id="model-role-profiles" title="模型角色" bordered={false}>
-                    <div className="model-role-grid">
-                      {runtimeState.modelProfiles.map((profile) => {
-                        const enabled = runtimeState.localRuntime.enabledModelProfileIds.includes(profile.id);
-                        const configured = hasConfiguredModelApi(profile);
-
-                        return (
-                          <Card
-                            key={profile.id}
-                            size="small"
-                            bordered
-                            className={selectedModelProfile?.id === profile.id ? 'model-role-card selected' : 'model-role-card'}
-                            onClick={() => setSelectedModelId(profile.id)}
-                          >
-                            <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                              <Space size={8} wrap>
-                                <Typography.Text strong>{modelPurposeLabel(profile.purpose)}</Typography.Text>
-                                <Tag color={enabled ? 'green' : 'default'}>{enabled ? '已启用' : '已停用'}</Tag>
-                                <Tag color={configured ? 'green' : 'orange'}>
-                                  {configured ? '已接通' : '待配置'}
-                                </Tag>
-                              </Space>
-                              <Typography.Text type="secondary">
-                                {profile.providerName} / {profile.modelName}
-                              </Typography.Text>
-                              <Space wrap>
-                                <Button
-                                  size="small"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    toggleModelProfile(profile.id, !enabled);
-                                  }}
-                                >
-                                  {enabled ? '停用' : '启用'}
-                                </Button>
-                                <Button
-                                  size="small"
-                                  type="link"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    setSelectedModelId(profile.id);
-                                    setSelectedModelNav('advanced');
-                                  }}
-                                >
-                                  编辑
-                                </Button>
-                              </Space>
-                            </Space>
-                          </Card>
-                        );
-                      })}
-                    </div>
-                  </Card>
-                ) : null}
-              </Space>
-
-              {selectedModelNav === 'advanced' ? (
-                <Card id="model-advanced-config" title="高级配置" bordered={false} className="model-config-panel">
-                  {selectedModelProfile ? (
-                    <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                      <div>
-                        <Typography.Text strong>{modelPurposeLabel(selectedModelProfile.purpose)}</Typography.Text>
-                        <Typography.Paragraph type="secondary" style={{ margin: '4px 0 0' }}>
-                          供应商预设已套用后，只需要填 API Key 并保存。
-                        </Typography.Paragraph>
-                      </div>
-
-                      <Form<ModelFormValues> form={modelForm} layout="vertical" onFinish={saveModelProfile}>
-                        <Form.Item name="apiKey" label="API Key">
-                          <Input.Password placeholder="只保存在本机，不上传服务端" />
-                        </Form.Item>
-                        <div className="inline-form-grid">
-                          <Form.Item name="providerName" label="供应商" rules={[{ required: true }]}>
-                            <Input />
-                          </Form.Item>
-                          <Form.Item name="modelName" label="模型" rules={[{ required: true }]}>
-                            <Input />
-                          </Form.Item>
-                        </div>
-                        <Form.Item name="purpose" label="模型角色" rules={[{ required: true }]}>
-                          <Select
-                            options={[
-                              { label: '通用执行', value: 'general' },
-                              { label: '深度推理', value: 'reasoning' },
-                              { label: '视觉理解', value: 'vision' },
-                              { label: '知识库向量', value: 'embeddings' },
-                              { label: '文档处理', value: 'document' }
-                            ]}
-                          />
-                        </Form.Item>
-
-                        <Divider style={{ margin: '8px 0 16px' }} />
-                        <Typography.Text strong>高级配置</Typography.Text>
-                        <Typography.Paragraph type="secondary" style={{ marginTop: 4 }}>
-                          企业私有模型、代理网关或本地模型需要调整这些字段。
-                        </Typography.Paragraph>
-                        <Form.Item name="apiBaseUrl" label="API Base URL">
-                          <Input placeholder="https://api.openai.com/v1" />
-                        </Form.Item>
-                        <div className="inline-form-grid">
-                          <Form.Item name="temperature" label="温度">
-                            <InputNumber min={0} max={2} step={0.1} style={{ width: '100%' }} />
-                          </Form.Item>
-                          <Form.Item name="maxTokens" label="最大输出">
-                            <InputNumber min={0} step={256} style={{ width: '100%' }} />
-                          </Form.Item>
-                        </div>
-                        <Form.Item name="monthlyBudgetCents" label="月度预算（分）">
-                          <InputNumber min={0} step={100} style={{ width: '100%' }} />
-                        </Form.Item>
-                        <Form.Item name="fallbackProfileId" label="失败时回退到">
-                          <Select
-                            allowClear
-                            options={runtimeState.modelProfiles
-                              .filter((profile) => profile.id !== selectedModelProfile.id)
-                              .map((profile) => ({
-                                label: `${modelPurposeLabel(profile.purpose)} · ${profile.providerName}/${profile.modelName}`,
-                                value: profile.id
-                              }))}
-                          />
-                        </Form.Item>
-                        <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                          <Space wrap>
-                            <Button type="primary" htmlType="submit" icon={<SettingOutlined />}>
-                              保存配置
-                            </Button>
-                            <Button
-                              icon={<ReloadOutlined />}
-                              loading={isTestingModel}
-                              onClick={() => void testSelectedModelConnection()}
-                            >
-                              测试连接
-                            </Button>
-                          </Space>
-                          {modelTestNotice ? (
-                            <Typography.Text
-                              type={modelTestNotice.startsWith('模型连接正常') ? 'success' : 'danger'}
-                            >
-                              {modelTestNotice}
-                            </Typography.Text>
-                          ) : null}
-                        </Space>
-                      </Form>
-                    </Space>
-                  ) : null}
-                </Card>
-              ) : null}
-            </div>
+          <div className="model-summary-row">
+            <Tag color={configuredModelCount > 0 ? 'green' : 'orange'}>
+              已接通 {configuredModelCount}/{runtimeState.modelProfiles.length}
+            </Tag>
+            <Tag color={enabledModelProfiles.length > 0 ? 'blue' : 'default'}>
+              已启用 {enabledModelProfiles.length}
+            </Tag>
           </div>
 
-          <aside className="dify-section-inspector">
-            <div className="inspector-panel">
-              <Typography.Title level={5}>模型运行摘要</Typography.Title>
-              <Descriptions column={1} size="small">
-                <Descriptions.Item label="已接通">
-                  {configuredModelCount}/{runtimeState.modelProfiles.length}
-                </Descriptions.Item>
-                <Descriptions.Item label="已启用">{enabledModelCount}</Descriptions.Item>
-                <Descriptions.Item label="当前模型">
-                  {selectedModelProfile
-                    ? `${selectedModelProfile.providerName} / ${selectedModelProfile.modelName}`
-                    : '未选择'}
-                </Descriptions.Item>
-                <Descriptions.Item label="连接状态">
-                  {selectedModelProfile && hasConfiguredModelApi(selectedModelProfile)
-                    ? '可测试'
-                    : '待填写 API Key'}
-                </Descriptions.Item>
-                <Descriptions.Item label="月度预算">
-                  {formatCents(selectedModelProfile?.monthlyBudgetCents)}
-                </Descriptions.Item>
-              </Descriptions>
-            </div>
+          <div className="catalog-grid model-provider-grid">
+            {filteredPresets.map((preset) => (
+              <Card key={preset.id} bordered={false} className="catalog-card model-provider-card">
+                <Space direction="vertical" size={12} className="catalog-card-content">
+                  <Flex align="flex-start" justify="space-between" gap={12}>
+                    <span className={`model-provider-logo provider-${preset.id}`}>
+                      {modelProviderLogoText(preset.name)}
+                    </span>
+                    {preset.apiBaseUrl ? <Tag color="blue">兼容接口</Tag> : null}
+                  </Flex>
 
-            <div className="inspector-panel">
-              <Typography.Title level={5}>建议配置顺序</Typography.Title>
-              <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                <Typography.Text type="secondary">
-                  先保证通用执行模型可用，再补推理、视觉和知识库向量模型。
-                </Typography.Text>
-                <Space size={6} wrap>
-                  <Tag color={runtimeState.modelProfiles.some((profile) => profile.purpose === 'general' && hasConfiguredModelApi(profile)) ? 'green' : 'orange'}>
-                    通用
-                  </Tag>
-                  <Tag color={runtimeState.modelProfiles.some((profile) => profile.purpose === 'reasoning' && hasConfiguredModelApi(profile)) ? 'green' : 'orange'}>
-                    推理
-                  </Tag>
-                  <Tag color={runtimeState.modelProfiles.some((profile) => profile.purpose === 'embeddings' && hasConfiguredModelApi(profile)) ? 'green' : 'default'}>
-                    向量
-                  </Tag>
-                  <Tag color={runtimeState.modelProfiles.some((profile) => profile.purpose === 'vision' && hasConfiguredModelApi(profile)) ? 'green' : 'default'}>
-                    视觉
-                  </Tag>
+                  <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                    <Typography.Title level={5}>{preset.name}</Typography.Title>
+                    <Typography.Paragraph type="secondary" ellipsis={{ rows: 2 }}>
+                      {preset.summary}
+                    </Typography.Paragraph>
+                  </Space>
+
+                  <Space size={6} wrap>
+                    {preset.models.slice(0, 4).map((model) => (
+                      <Tag key={`${preset.id}-${model.modelName}`}>{model.label}</Tag>
+                    ))}
+                  </Space>
+
+                  <div className="catalog-card-action-row">
+                    <Button
+                      type="primary"
+                      onClick={() => {
+                        applyModelProviderPreset(preset, preset.models[0]);
+                        setModelConfigOpen(true);
+                      }}
+                    >
+                      配置
+                    </Button>
+                  </div>
                 </Space>
-                <Button block onClick={() => setSelectedModelNav('advanced')}>
-                  检查当前配置
-                </Button>
-              </Space>
+              </Card>
+            ))}
+          </div>
+
+          {filteredPresets.length === 0 ? (
+            <div className="provider-empty">
+              <Empty description="没有匹配的模型供应商" />
             </div>
-          </aside>
+          ) : null}
         </div>
+
+        <Modal
+          open={modelConfigOpen}
+          title="模型配置"
+          okText="保存"
+          cancelText="关闭"
+          width={760}
+          destroyOnHidden
+          onCancel={() => setModelConfigOpen(false)}
+          onOk={() => modelForm.submit()}
+        >
+          {selectedModelProfile ? (
+            <Form<ModelFormValues> form={modelForm} layout="vertical" onFinish={saveModelProfile}>
+              <Form.Item name="apiKey" label="API Key">
+                <Input.Password placeholder="只保存在本机，不上传服务端" />
+              </Form.Item>
+              <div className="inline-form-grid">
+                <Form.Item name="providerName" label="供应商" rules={[{ required: true }]}>
+                  <Input />
+                </Form.Item>
+                <Form.Item name="modelName" label="模型" rules={[{ required: true }]}>
+                  <Input />
+                </Form.Item>
+              </div>
+              <Form.Item name="purpose" label="模型角色" rules={[{ required: true }]}>
+                <Select
+                  options={[
+                    { label: '通用执行', value: 'general' },
+                    { label: '深度推理', value: 'reasoning' },
+                    { label: '视觉理解', value: 'vision' },
+                    { label: '知识库向量', value: 'embeddings' },
+                    { label: '文档处理', value: 'document' }
+                  ]}
+                />
+              </Form.Item>
+
+              <Divider style={{ margin: '8px 0 16px' }} />
+              <div className="inline-form-grid">
+                <Form.Item name="apiBaseUrl" label="API Base URL">
+                  <Input placeholder="https://api.openai.com/v1" />
+                </Form.Item>
+                <Form.Item name="monthlyBudgetCents" label="月度预算（分）">
+                  <InputNumber min={0} step={100} style={{ width: '100%' }} />
+                </Form.Item>
+              </div>
+              <div className="inline-form-grid">
+                <Form.Item name="temperature" label="温度">
+                  <InputNumber min={0} max={2} step={0.1} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item name="maxTokens" label="最大输出">
+                  <InputNumber min={0} step={256} style={{ width: '100%' }} />
+                </Form.Item>
+              </div>
+              <Form.Item name="fallbackProfileId" label="失败时回退到">
+                <Select
+                  allowClear
+                  options={runtimeState.modelProfiles
+                    .filter((profile) => profile.id !== selectedModelProfile.id)
+                    .map((profile) => ({
+                      label: `${modelPurposeLabel(profile.purpose)} · ${profile.providerName}/${profile.modelName}`,
+                      value: profile.id
+                    }))}
+                />
+              </Form.Item>
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Space wrap>
+                  <Button
+                    onClick={() => toggleModelProfile(
+                      selectedModelProfile.id,
+                      !runtimeState.localRuntime.enabledModelProfileIds.includes(selectedModelProfile.id)
+                    )}
+                  >
+                    {runtimeState.localRuntime.enabledModelProfileIds.includes(selectedModelProfile.id)
+                      ? '停用'
+                      : '启用'}
+                  </Button>
+                  <Button
+                    icon={<ReloadOutlined />}
+                    loading={isTestingModel}
+                    onClick={() => void testSelectedModelConnection()}
+                  >
+                    测试连接
+                  </Button>
+                </Space>
+                {modelTestNotice ? (
+                  <Typography.Text type={modelTestNotice.startsWith('模型连接正常') ? 'success' : 'danger'}>
+                    {modelTestNotice}
+                  </Typography.Text>
+                ) : null}
+              </Space>
+            </Form>
+          ) : (
+            <Empty description="请选择模型供应商" />
+          )}
+        </Modal>
       </>
     );
   }
@@ -2260,304 +2230,193 @@ export default function App() {
   function renderTools() {
     const webSearchSettings = runtimeState.localRuntime.toolSettings?.webSearch;
     const webSearchConfigured = Boolean(webSearchSettings?.endpoint);
-    const bridgeToolCount = runtimeState.tools.filter((tool) => tool.entryPoint === 'bridge').length;
-    const approvalToolCount = runtimeState.tools.filter((tool) => tool.requiresApproval).length;
+    const toolCategories = buildToolCategoryTabs(runtimeState.tools);
     const filteredTools = runtimeState.tools.filter((tool) => {
       const search = toolSearchQuery.trim().toLowerCase();
-      if (!search) {
-        return true;
-      }
-
-      return (
+      const categoryMatch = selectedToolCategory === '全部' || toolCategory(tool) === selectedToolCategory;
+      const searchMatch = !search || (
         tool.name.toLowerCase().includes(search) ||
         tool.scope.toLowerCase().includes(search) ||
         tool.entryPoint.toLowerCase().includes(search) ||
         tool.capabilities.some((capability) => capability.toLowerCase().includes(search))
       );
+
+      return categoryMatch && searchMatch;
     });
-    const toolNavItems = [
-      { key: 'catalog', icon: <ToolOutlined />, label: '工具目录' },
-      { key: 'web-search', icon: <CloudSyncOutlined />, label: '网页搜索' },
-      { key: 'permissions', icon: <SafetyCertificateOutlined />, label: '权限边界' }
-    ];
+    const toolConfigTool = runtimeState.tools.find((tool) => tool.id === toolConfigToolId);
 
     return (
-      <div className="dify-section-shell">
-        <aside className="dify-section-sidebar">
-          <Button
-            type="primary"
-            block
-            icon={<PlusOutlined />}
-            onClick={() => {
-              setSelectedToolNav('web-search');
-            }}
-          >
-            配置网页搜索
-          </Button>
+      <div className="catalog-page">
+        <Flex align="center" justify="space-between" gap={16} wrap="wrap" className="catalog-page-header">
+          <div>
+            <Typography.Title level={2} className="page-title">
+              工具
+            </Typography.Title>
+            <Typography.Text type="secondary">
+              管理数字员工可调用的文档、网页和本地工具。
+            </Typography.Text>
+          </div>
 
-          <Menu
-            mode="inline"
-            selectedKeys={[selectedToolNav]}
-            items={toolNavItems}
-            onClick={({ key }) => {
-              const nextKey = key as typeof selectedToolNav;
-              setSelectedToolNav(nextKey);
-            }}
+          <Input.Search
+            allowClear
+            value={toolSearchQuery}
+            onChange={(event) => setToolSearchQuery(event.target.value)}
+            placeholder="搜索工具或能力"
+            style={{ width: 240 }}
           />
+        </Flex>
 
-          <div className="sidebar-footer">
-            <Space direction="vertical" size={4}>
-              <Typography.Text strong>工具状态</Typography.Text>
-              <Typography.Text type="secondary">
-                {enabledToolCount}/{runtimeState.tools.length} 已启用
-              </Typography.Text>
-            </Space>
-          </div>
-        </aside>
-
-        <div className="dify-section-content">
-          <Flex align="center" justify="space-between" gap={16} wrap="wrap" className="page-toolbar">
-            <div>
-              <Typography.Title level={2} className="page-title">
-                {selectedToolNav === 'catalog'
-                  ? '工具目录'
-                  : selectedToolNav === 'web-search'
-                    ? '网页搜索'
-                    : '权限边界'}
-              </Typography.Title>
-              <Typography.Text type="secondary">
-                {selectedToolNav === 'catalog'
-                  ? '管理桌面端可调用的网页、文件、Office 和本地桥接工具。'
-                  : selectedToolNav === 'web-search'
-                    ? '网页搜索是桌面任务常用的外部能力，配置会保存在本机。'
-                    : '敏感或破坏性操作应被单独标记和限制。'}
-              </Typography.Text>
-            </div>
-
-            <Space wrap>
-              {selectedToolNav === 'catalog' ? (
-                <>
-                  <Input.Search
-                    allowClear
-                    value={toolSearchQuery}
-                    onChange={(event) => setToolSearchQuery(event.target.value)}
-                    placeholder="搜索工具或能力"
-                    style={{ width: 240 }}
-                  />
-                  <Button onClick={() => setToolSearchQuery('')}>清除筛选</Button>
-                </>
-              ) : (
-                <Button onClick={() => setSelectedToolNav('catalog')}>回到目录</Button>
-              )}
-              {selectedToolNav !== 'web-search' ? (
-                <Button type="primary" onClick={() => setSelectedToolNav('web-search')}>
-                  打开网页搜索
-                </Button>
-              ) : null}
-            </Space>
-          </Flex>
-
-          <div className="metric-grid tool-metric-grid">
-            <Card bordered={false}>
-              <Statistic title="注册工具" value={runtimeState.tools.length} />
-            </Card>
-            <Card bordered={false}>
-              <Statistic title="已启用" value={enabledToolCount} />
-            </Card>
-            <Card bordered={false}>
-              <Statistic title="需审批" value={approvalToolCount} />
-            </Card>
-            <Card bordered={false}>
-              <Statistic title="桌面桥接" value={bridgeToolCount} />
-            </Card>
-          </div>
-
-          <div className="tools-workbench-grid">
-            {selectedToolNav === 'catalog' ? (
-              <Card id="tool-catalog" title="工具目录" bordered={false}>
-                <div className="tool-card-grid">
-                  {filteredTools.length > 0 ? (
-                    filteredTools.map((tool) => {
-                      const enabled = runtimeState.localRuntime.enabledToolIds.includes(tool.id);
-
-                      return (
-                        <Card key={tool.id} size="small" bordered className="tool-card">
-                          <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                            <Flex align="flex-start" justify="space-between" gap={12}>
-                              <Space size={8} wrap>
-                                <ToolOutlined className="list-icon" />
-                                <Typography.Text strong>{tool.name}</Typography.Text>
-                              </Space>
-                              <Switch
-                                size="small"
-                                checked={enabled}
-                                onChange={(checked) => toggleTool(tool.id, checked)}
-                              />
-                            </Flex>
-
-                            <Space size={6} wrap>
-                              <Tag color={enabled ? 'green' : 'default'}>
-                                {enabled ? '已启用' : '已停用'}
-                              </Tag>
-                              <Tag>{tool.scope}</Tag>
-                              <Tag>{tool.entryPoint}</Tag>
-                              {tool.requiresApproval ? <Tag color="gold">需审批</Tag> : null}
-                              {tool.id === 'web-search' ? (
-                                <Tag color={webSearchConfigured ? 'green' : 'orange'}>
-                                  {webSearchConfigured ? '已配置' : '待配置'}
-                                </Tag>
-                              ) : null}
-                            </Space>
-
-                            {tool.id === 'web-search' ? (
-                              <Typography.Text type="secondary">
-                                {webSearchSettings?.endpoint
-                                  ? webSearchSettings.endpoint
-                                  : '尚未设置搜索服务地址'}
-                              </Typography.Text>
-                            ) : null}
-
-                            <Space size={6} wrap>
-                              {tool.capabilities.map((capability) => (
-                                <Tag key={capability}>{capability}</Tag>
-                              ))}
-                            </Space>
-                          </Space>
-                        </Card>
-                      );
-                    })
-                  ) : (
-                    <div className="provider-empty">
-                      <Empty description="没有匹配的工具" />
-                    </div>
-                  )}
-                </div>
-              </Card>
-            ) : null}
-
-            {selectedToolNav === 'web-search' ? (
-              <Card
-                id="tool-web-search-config"
-                title="网页搜索配置"
-                bordered={false}
-                className="tool-config-panel"
-              >
-                <Form<ToolSettingsFormValues>
-                  form={toolSettingsForm}
-                  layout="vertical"
-                  onFinish={saveToolSettings}
-                >
-                  <Form.Item name="webSearchEndpoint" label="搜索服务地址">
-                    <Input placeholder="https://search.example.com/api/search" />
-                  </Form.Item>
-                  <Form.Item name="webSearchApiKey" label="搜索服务密钥">
-                    <Input.Password placeholder="只保存在本机" />
-                  </Form.Item>
-                  <Form.Item
-                    name="allowPrivateNetwork"
-                    label="允许私网访问"
-                    valuePropName="checked"
-                    extra="默认会拦截 127.0.0.1、10.x、192.168.x、172.16-31.x。"
-                  >
-                    <Switch />
-                  </Form.Item>
-                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                    <Typography.Text type="secondary">
-                      web.search 会优先使用这里保存的地址；web.fetch_url 直接读取公开网页。
-                    </Typography.Text>
-                    <Space wrap>
-                      <Button
-                        type="primary"
-                        htmlType="submit"
-                        icon={<SettingOutlined />}
-                        loading={isSavingToolSettings}
-                      >
-                        保存配置
-                      </Button>
-                    </Space>
-                    {toolSettingsNotice ? (
-                      <Typography.Text
-                        type={toolSettingsNotice.startsWith('工具配置已保存') ? 'success' : 'danger'}
-                      >
-                        {toolSettingsNotice}
-                      </Typography.Text>
-                    ) : null}
-                  </Space>
-                </Form>
-              </Card>
-            ) : null}
-
-            {selectedToolNav === 'permissions' ? (
-              <Card
-                id="tool-permission-boundary"
-                title="权限边界"
-                bordered={false}
-                className="tool-config-panel"
-              >
-                <Descriptions column={1} size="small" bordered>
-                  <Descriptions.Item label="本地文件">
-                    只通过桌面桥接访问用户授权范围内的路径。
-                  </Descriptions.Item>
-                  <Descriptions.Item label="网页访问">
-                    默认阻断私网地址，防止任务误访问本机或内网服务。
-                  </Descriptions.Item>
-                  <Descriptions.Item label="需审批工具">
-                    当前 {approvalToolCount} 个工具标记为敏感操作。
-                  </Descriptions.Item>
-                  <Descriptions.Item label="本机保存">
-                    工具密钥保存在桌面端本地运行配置，不上传服务端。
-                  </Descriptions.Item>
-                </Descriptions>
-              </Card>
-            ) : null}
-          </div>
+        <div className="category-tabs">
+          {toolCategories.map((category) => (
+            <button
+              key={category}
+              type="button"
+              className={selectedToolCategory === category ? 'category-tab active' : 'category-tab'}
+              onClick={() => setSelectedToolCategory(category)}
+            >
+              {category}
+            </button>
+          ))}
         </div>
 
-        <aside className="dify-section-inspector">
-          <div className="inspector-panel">
-            <Typography.Title level={5}>工具运行摘要</Typography.Title>
-            <Descriptions column={1} size="small">
-              <Descriptions.Item label="注册工具">{runtimeState.tools.length}</Descriptions.Item>
-              <Descriptions.Item label="已启用">{enabledToolCount}</Descriptions.Item>
-              <Descriptions.Item label="桌面桥接">{bridgeToolCount}</Descriptions.Item>
-              <Descriptions.Item label="需审批">{approvalToolCount}</Descriptions.Item>
-              <Descriptions.Item label="网页搜索">
-                {webSearchConfigured ? '已配置' : '待配置'}
-              </Descriptions.Item>
-            </Descriptions>
-          </div>
+        <div className="catalog-grid tool-card-grid">
+          {filteredTools.map((tool) => {
+            const enabled = runtimeState.localRuntime.enabledToolIds.includes(tool.id);
 
-          <div className="inspector-panel">
-            <Typography.Title level={5}>已启用能力</Typography.Title>
-            <Space size={6} wrap>
-              {runtimeState.tools
-                .filter((tool) => runtimeState.localRuntime.enabledToolIds.includes(tool.id))
-                .flatMap((tool) => tool.capabilities)
-                .slice(0, 12)
-                .map((capability) => (
-                  <Tag key={capability}>{capability}</Tag>
-                ))}
-            </Space>
-            {enabledToolCount === 0 ? (
-              <Typography.Text type="secondary">尚未启用工具。</Typography.Text>
-            ) : null}
-          </div>
+            return (
+              <Card key={tool.id} bordered={false} className="catalog-card tool-card">
+                <Space direction="vertical" size={12} className="catalog-card-content">
+                  <Flex align="flex-start" justify="space-between" gap={12}>
+                    <span className="catalog-card-icon">
+                      {toolCategoryIcon(tool)}
+                    </span>
+                    <Switch
+                      size="small"
+                      checked={enabled}
+                      onChange={(checked) => toggleTool(tool.id, checked)}
+                    />
+                  </Flex>
 
-          <div className="inspector-panel">
-            <Typography.Title level={5}>落地检查</Typography.Title>
-            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                    <Typography.Title level={5}>{tool.name}</Typography.Title>
+                    <Typography.Text type="secondary">
+                      {tool.entryPoint === 'bridge' ? '桌面桥接工具' : tool.scope}
+                    </Typography.Text>
+                  </Space>
+
+                  <Space size={6} wrap>
+                    <Tag color={enabled ? 'green' : 'default'}>{enabled ? '已启用' : '已停用'}</Tag>
+                    <Tag>{toolCategory(tool)}</Tag>
+                    {tool.requiresApproval ? <Tag color="gold">需审批</Tag> : null}
+                    {tool.id === 'web-search' ? (
+                      <Tag color={webSearchConfigured ? 'green' : 'orange'}>
+                        {webSearchConfigured ? '已配置' : '待配置'}
+                      </Tag>
+                    ) : null}
+                  </Space>
+
+                  <Space size={6} wrap>
+                    {tool.capabilities.slice(0, 4).map((capability) => (
+                      <Tag key={capability}>{capability}</Tag>
+                    ))}
+                  </Space>
+
+                  <div className="catalog-card-action-row">
+                    <Button
+                      onClick={() => {
+                        setToolSettingsNotice('');
+                        setToolConfigToolId(tool.id);
+                        if (tool.id === 'web-search') {
+                          toolSettingsForm.setFieldsValue({
+                            webSearchEndpoint: webSearchSettings?.endpoint,
+                            webSearchApiKey: webSearchSettings?.apiKey,
+                            allowPrivateNetwork: webSearchSettings?.allowPrivateNetwork ?? false
+                          });
+                        }
+                      }}
+                    >
+                      配置
+                    </Button>
+                  </div>
+                </Space>
+              </Card>
+            );
+          })}
+        </div>
+
+        {filteredTools.length === 0 ? (
+          <div className="provider-empty">
+            <Empty description="没有匹配的工具" />
+          </div>
+        ) : null}
+
+        <Modal
+          open={Boolean(toolConfigToolId)}
+          title={toolConfigTool ? `${toolConfigTool.name}配置` : '工具配置'}
+          okText={toolConfigToolId === 'web-search' ? '保存' : '关闭'}
+          cancelText="取消"
+          width={640}
+          destroyOnHidden
+          onCancel={() => setToolConfigToolId('')}
+          onOk={() => {
+            if (toolConfigToolId === 'web-search') {
+              toolSettingsForm.submit();
+              return;
+            }
+            setToolConfigToolId('');
+          }}
+          okButtonProps={toolConfigToolId === 'web-search' ? { loading: isSavingToolSettings } : undefined}
+        >
+          {toolConfigToolId === 'web-search' ? (
+            <Form<ToolSettingsFormValues>
+              form={toolSettingsForm}
+              layout="vertical"
+              onFinish={async (values) => {
+                const saved = await saveToolSettings(values);
+                if (saved) {
+                  setToolConfigToolId('');
+                }
+              }}
+            >
+              <Form.Item name="webSearchEndpoint" label="搜索服务地址">
+                <Input placeholder="https://search.example.com/api/search" />
+              </Form.Item>
+              <Form.Item name="webSearchApiKey" label="搜索服务密钥">
+                <Input.Password placeholder="只保存在本机" />
+              </Form.Item>
+              <Form.Item
+                name="allowPrivateNetwork"
+                label="允许私网访问"
+                valuePropName="checked"
+                extra="默认会拦截 127.0.0.1、10.x、192.168.x、172.16-31.x。"
+              >
+                <Switch />
+              </Form.Item>
+              {toolSettingsNotice ? (
+                <Typography.Text type={toolSettingsNotice.startsWith('工具配置已保存') ? 'success' : 'danger'}>
+                  {toolSettingsNotice}
+                </Typography.Text>
+              ) : null}
+            </Form>
+          ) : (
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Descriptions column={1} size="small">
+                <Descriptions.Item label="名称">
+                  {toolConfigTool?.name ?? '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="入口">
+                  {toolConfigTool?.entryPoint ?? '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="范围">
+                  {toolConfigTool?.scope ?? '-'}
+                </Descriptions.Item>
+              </Descriptions>
               <Typography.Text type="secondary">
-                试点前至少要保证本地文件、Office 文档和网页搜索三类能力可用。
+                该工具使用默认配置或本地桥接能力，无额外配置项。
               </Typography.Text>
-              <Button block onClick={() => setSelectedToolNav('web-search')}>
-                检查网页搜索
-              </Button>
-              <Button block onClick={() => setSelectedToolNav('permissions')}>
-                查看权限边界
-              </Button>
             </Space>
-          </div>
-        </aside>
+          )}
+        </Modal>
       </div>
     );
   }
@@ -2569,229 +2428,139 @@ export default function App() {
         : runtimeState.localRuntime.knowledgeBindingIds.map((bindingId) =>
             createKnowledgeSourceFromBindingId(bindingId)
           );
-    const localSourceCount = knowledgeSources.filter(
-      (source) => source.source === 'local_file' || source.source === 'local_folder'
-    ).length;
-    const knowledgeNavItems = [
-      { key: 'sources', icon: <DatabaseOutlined />, label: '当前来源' },
-      { key: 'catalog', icon: <PlusOutlined />, label: '添加来源' },
-      { key: 'policy', icon: <SafetyCertificateOutlined />, label: '同步策略' }
-    ];
+    const enterpriseOptions = knowledgeBindingCatalog.filter(
+      (entry) => entry.source === 'workspace_library' || entry.source === 'server_summary'
+    );
+    const localOptions = knowledgeBindingCatalog.filter(
+      (entry) => entry.source === 'local_file' || entry.source === 'local_folder'
+    );
+    const visibleOptions = selectedKnowledgeScope === 'enterprise' ? enterpriseOptions : localOptions;
+    const visibleSources = knowledgeSources.filter((source) =>
+      selectedKnowledgeScope === 'enterprise'
+        ? source.source === 'workspace_library' || source.source === 'server_summary'
+        : source.source === 'local_file' || source.source === 'local_folder'
+    );
 
     return (
-      <div className="dify-section-shell">
-        <aside className="dify-section-sidebar">
-          <Button
-            type="primary"
-            block
-            icon={<PlusOutlined />}
-            onClick={() => setSelectedKnowledgeNav('catalog')}
+      <div className="catalog-page">
+        <Flex align="center" justify="space-between" gap={16} wrap="wrap" className="catalog-page-header">
+          <div>
+            <Typography.Title level={2} className="page-title">
+              知识库
+            </Typography.Title>
+            <Typography.Text type="secondary">
+              同步企业知识库，或导入本地资料给数字员工使用。
+            </Typography.Text>
+          </div>
+
+          {selectedKnowledgeScope === 'enterprise' ? (
+            <Button type="primary" icon={<CloudSyncOutlined />} loading={isSyncing} onClick={syncRuntimeState}>
+              同步
+            </Button>
+          ) : (
+            <Button
+              type="primary"
+              icon={<FileAddOutlined />}
+              onClick={() => {
+                const localFileOption = localOptions.find((option) => option.source === 'local_file') ?? localOptions[0];
+                if (localFileOption) {
+                  void addKnowledgeBinding(localFileOption);
+                }
+              }}
+            >
+              导入
+            </Button>
+          )}
+        </Flex>
+
+        <div className="category-tabs">
+          <button
+            type="button"
+            className={selectedKnowledgeScope === 'enterprise' ? 'category-tab active' : 'category-tab'}
+            onClick={() => setSelectedKnowledgeScope('enterprise')}
           >
-            添加知识来源
-          </Button>
-
-          <Menu
-            mode="inline"
-            selectedKeys={[selectedKnowledgeNav]}
-            items={knowledgeNavItems}
-            onClick={({ key }) => {
-              const nextKey = key as typeof selectedKnowledgeNav;
-              setSelectedKnowledgeNav(nextKey);
-            }}
-          />
-
-          <div className="sidebar-footer">
-            <Space direction="vertical" size={4}>
-              <Typography.Text strong>知识状态</Typography.Text>
-              <Typography.Text type="secondary">
-                {knowledgeBindingCount}/{knowledgeBindingCatalog.length} 已绑定
-              </Typography.Text>
-            </Space>
-          </div>
-        </aside>
-
-        <div className="dify-section-content">
-          <Flex align="center" justify="space-between" gap={16} wrap="wrap" className="page-toolbar">
-            <div>
-              <Typography.Title level={2} className="page-title">
-                {selectedKnowledgeNav === 'sources'
-                  ? '当前来源'
-                  : selectedKnowledgeNav === 'catalog'
-                    ? '添加来源'
-                    : '同步策略'}
-              </Typography.Title>
-              <Typography.Text type="secondary">
-                {selectedKnowledgeNav === 'sources'
-                  ? '管理桌面端可读取的本地文件、文件夹和服务端摘要。'
-                  : selectedKnowledgeNav === 'catalog'
-                    ? '为数字员工绑定可用知识入口，实际资产仍保留在用户电脑。'
-                    : '明确哪些内容留在本机、哪些摘要可同步到服务端。'}
-              </Typography.Text>
-            </div>
-
-            <Space wrap>
-              {selectedKnowledgeNav !== 'catalog' ? (
-                <Button type="primary" onClick={() => setSelectedKnowledgeNav('catalog')}>
-                  添加来源
-                </Button>
-              ) : (
-                <Button onClick={() => setSelectedKnowledgeNav('sources')}>查看当前来源</Button>
-              )}
-            </Space>
-          </Flex>
-
-          <div className="metric-grid knowledge-metric-grid">
-            <Card bordered={false}>
-              <Statistic title="绑定数量" value={knowledgeBindingCount} />
-            </Card>
-            <Card bordered={false}>
-              <Statistic title="本地来源" value={localSourceCount} />
-            </Card>
-            <Card bordered={false}>
-              <Statistic title="可用来源" value={knowledgeBindingCatalog.length} />
-            </Card>
-            <Card bordered={false}>
-              <Statistic title="同步策略" value={syncPolicyLabel(runtimeState.localRuntime.syncPolicy)} />
-            </Card>
-          </div>
-
-          <div className="knowledge-workbench-grid">
-            {selectedKnowledgeNav === 'sources' ? (
-              <Card title="当前绑定" bordered={false}>
-                <List
-                  dataSource={knowledgeSources}
-                  locale={{ emptyText: '尚未绑定本地知识' }}
-                  renderItem={(source) => (
-                    <List.Item>
-                      <List.Item.Meta
-                        avatar={<DatabaseOutlined className="list-icon" />}
-                        title={
-                          <Space size={8} wrap>
-                            <Typography.Text strong>{source.label}</Typography.Text>
-                            <Tag>{source.source}</Tag>
-                            {source.enabled ? <Tag color="green">已启用</Tag> : <Tag>已停用</Tag>}
-                          </Space>
-                        }
-                        description={source.localPath ?? source.summary ?? source.id}
-                      />
-                    </List.Item>
-                  )}
-                />
-              </Card>
-            ) : null}
-
-            {selectedKnowledgeNav === 'catalog' ? (
-              <Card title="添加来源" bordered={false}>
-                <div className="knowledge-source-grid">
-                  {knowledgeBindingCatalog.map((option) => {
-                    const isBound = runtimeState.localRuntime.knowledgeBindingIds.includes(option.bindingId);
-
-                    return (
-                      <Card key={option.bindingId} size="small" bordered className="knowledge-source-card">
-                        <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                          <Space size={8} wrap>
-                            <DatabaseOutlined className="list-icon" />
-                            <Typography.Text strong>{option.label}</Typography.Text>
-                            <Tag color={isBound ? 'green' : 'default'}>
-                              {isBound ? '已绑定' : '可绑定'}
-                            </Tag>
-                          </Space>
-                          <Typography.Text type="secondary">{option.description}</Typography.Text>
-                          <Button
-                            type={isBound ? 'default' : 'primary'}
-                            disabled={isBound}
-                            onClick={() => void addKnowledgeBinding(option)}
-                          >
-                            {isBound ? '已绑定' : '绑定来源'}
-                          </Button>
-                        </Space>
-                      </Card>
-                    );
-                  })}
-                </div>
-              </Card>
-            ) : null}
-
-            {selectedKnowledgeNav === 'policy' ? (
-              <Card title="同步策略" bordered={false}>
-                <Descriptions column={1} size="small" bordered>
-                  <Descriptions.Item label="本地资产">
-                    原始文件、目录、产物和中间缓存默认保存在用户电脑。
-                  </Descriptions.Item>
-                  <Descriptions.Item label="服务端同步">
-                    服务端只接收工作区摘要、任务状态、授权和必要元数据。
-                  </Descriptions.Item>
-                  <Descriptions.Item label="恢复迁移">
-                    通过本地备份包导出、迁移和恢复，不要求用户单独安装数据库。
-                  </Descriptions.Item>
-                  <Descriptions.Item label="当前策略">
-                    {syncPolicyLabel(runtimeState.localRuntime.syncPolicy)}
-                  </Descriptions.Item>
-                </Descriptions>
-              </Card>
-            ) : null}
-          </div>
+            企业知识库
+          </button>
+          <button
+            type="button"
+            className={selectedKnowledgeScope === 'local' ? 'category-tab active' : 'category-tab'}
+            onClick={() => setSelectedKnowledgeScope('local')}
+          >
+            本地知识库
+          </button>
         </div>
 
-        <aside className="dify-section-inspector">
-          <div className="inspector-panel">
-            <Typography.Title level={5}>知识库摘要</Typography.Title>
-            <Descriptions column={1} size="small">
-              <Descriptions.Item label="绑定来源">{knowledgeBindingCount}</Descriptions.Item>
-              <Descriptions.Item label="本地来源">{localSourceCount}</Descriptions.Item>
-              <Descriptions.Item label="本地优先">是</Descriptions.Item>
-              <Descriptions.Item label="同步策略">
-                {syncPolicyLabel(runtimeState.localRuntime.syncPolicy)}
-              </Descriptions.Item>
-            </Descriptions>
-          </div>
+        <div className="catalog-grid knowledge-source-grid">
+          {visibleOptions.map((option) => {
+            const isBound = runtimeState.localRuntime.knowledgeBindingIds.includes(option.bindingId);
 
-          <div className="inspector-panel">
-            <Typography.Title level={5}>落地建议</Typography.Title>
-            <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              <Typography.Text type="secondary">
-                试点企业先绑定一个本地资料文件夹，再绑定服务端摘要即可跑通基础知识流。
-              </Typography.Text>
-              <Space size={6} wrap>
-                {knowledgeBindingCatalog.map((entry) => (
-                  <Tag
-                    key={entry.bindingId}
-                    color={runtimeState.localRuntime.knowledgeBindingIds.includes(entry.bindingId) ? 'green' : 'default'}
+            return (
+              <Card key={option.bindingId} bordered={false} className="catalog-card knowledge-source-card">
+                <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                  <Flex align="flex-start" justify="space-between" gap={12}>
+                    <span className="catalog-card-icon">
+                      {selectedKnowledgeScope === 'enterprise' ? <CloudSyncOutlined /> : <DatabaseOutlined />}
+                    </span>
+                    <Tag color={isBound ? 'green' : 'default'}>{isBound ? '已绑定' : '可绑定'}</Tag>
+                  </Flex>
+                  <Typography.Title level={5}>{option.label}</Typography.Title>
+                  <Typography.Paragraph type="secondary" ellipsis={{ rows: 2 }}>
+                    {option.description}
+                  </Typography.Paragraph>
+                  <Button
+                    type={isBound ? 'default' : 'primary'}
+                    disabled={isBound}
+                    onClick={() => void addKnowledgeBinding(option)}
                   >
-                    {entry.label}
-                  </Tag>
-                ))}
-              </Space>
-              <Button block onClick={() => setSelectedKnowledgeNav('policy')}>
-                查看同步边界
-              </Button>
-            </Space>
-          </div>
-        </aside>
+                    {isBound ? '已绑定' : selectedKnowledgeScope === 'enterprise' ? '添加' : '导入'}
+                  </Button>
+                </Space>
+              </Card>
+            );
+          })}
+        </div>
+
+        <section className="simple-panel">
+          <Typography.Title level={5}>已绑定</Typography.Title>
+          <List
+            dataSource={visibleSources}
+            locale={{ emptyText: selectedKnowledgeScope === 'enterprise' ? '尚未同步企业知识库' : '尚未导入本地知识库' }}
+            renderItem={(source) => (
+              <List.Item>
+                <List.Item.Meta
+                  avatar={<DatabaseOutlined className="list-icon" />}
+                  title={
+                    <Space size={8} wrap>
+                      <Typography.Text strong>{source.label}</Typography.Text>
+                      {source.enabled ? <Tag color="green">已启用</Tag> : <Tag>已停用</Tag>}
+                    </Space>
+                  }
+                  description={source.localPath ?? source.summary ?? source.id}
+                />
+              </List.Item>
+            )}
+          />
+          {syncNotice ? <Typography.Text type="secondary">{syncNotice}</Typography.Text> : null}
+        </section>
       </div>
     );
   }
 
   function renderGeneralSettings() {
-    const configuredModelCount = runtimeState.modelProfiles.filter(hasConfiguredModelApi).length;
-    const webSearchConfigured = Boolean(runtimeState.localRuntime.toolSettings?.webSearch?.endpoint);
     const startupOptions = sectionItems.map((item) => ({
       value: item.key,
       label: item.label
     }));
+    const latestBackup = workspaceBackups[0];
 
     return (
-      <div className="client-settings-grid">
-        <section className="client-settings-panel">
-          <div className="client-settings-panel-header">
-            <Typography.Title level={5}>外观</Typography.Title>
-            <Typography.Text type="secondary">客户端界面偏好</Typography.Text>
-          </div>
-
-          <div className="client-setting-row">
+      <div className="settings-list-page">
+        <section className="settings-list-section">
+          <Typography.Text strong className="settings-list-title">外观</Typography.Text>
+          <div className="settings-list-row">
             <div className="client-setting-copy">
               <Typography.Text strong>主题</Typography.Text>
-              <Typography.Text type="secondary">控制桌面端整体外观</Typography.Text>
+              <Typography.Text type="secondary">桌面端显示风格</Typography.Text>
             </div>
             <Select<DesktopThemePreference>
               value={clientPreferences.theme}
@@ -2801,10 +2570,10 @@ export default function App() {
             />
           </div>
 
-          <div className="client-setting-row">
+          <div className="settings-list-row">
             <div className="client-setting-copy">
               <Typography.Text strong>界面密度</Typography.Text>
-              <Typography.Text type="secondary">调整列表和面板间距</Typography.Text>
+              <Typography.Text type="secondary">列表和面板间距</Typography.Text>
             </div>
             <Select<DesktopDensityPreference>
               value={clientPreferences.density}
@@ -2815,16 +2584,12 @@ export default function App() {
           </div>
         </section>
 
-        <section className="client-settings-panel">
-          <div className="client-settings-panel-header">
-            <Typography.Title level={5}>启动</Typography.Title>
-            <Typography.Text type="secondary">打开客户端后的默认页面</Typography.Text>
-          </div>
-
-          <div className="client-setting-row">
+        <section className="settings-list-section">
+          <Typography.Text strong className="settings-list-title">启动</Typography.Text>
+          <div className="settings-list-row">
             <div className="client-setting-copy">
               <Typography.Text strong>启动页</Typography.Text>
-              <Typography.Text type="secondary">默认进入最常用的工作位置</Typography.Text>
+              <Typography.Text type="secondary">打开客户端后的默认页面</Typography.Text>
             </div>
             <Select<SectionKey>
               value={clientPreferences.startupSection}
@@ -2835,78 +2600,85 @@ export default function App() {
           </div>
         </section>
 
-        <section className="client-settings-panel client-settings-panel-wide">
-          <div className="client-settings-panel-header">
-            <Typography.Title level={5}>本地数据</Typography.Title>
-            <Typography.Text type="secondary">运行数据、产物和备份位置</Typography.Text>
+        <section className="settings-list-section">
+          <Typography.Text strong className="settings-list-title">连接</Typography.Text>
+          <div className="settings-list-row">
+            <div className="client-setting-copy">
+              <Typography.Text strong>控制端</Typography.Text>
+              <Typography.Text type="secondary">{runtimeState.app.serverBaseUrl}</Typography.Text>
+            </div>
+            <Space wrap>
+              <Tag color={connectionTone}>{connectionLabel(runtimeState.serverConnection.state)}</Tag>
+              <Button size="small" icon={<CloudSyncOutlined />} loading={isRefreshing} onClick={refreshConnection}>
+                检查
+              </Button>
+            </Space>
           </div>
 
-          <div className="client-setting-path">
-            <Typography.Text copyable>{runtimeState.app.userDataPath}</Typography.Text>
+          <div className="settings-list-row">
+            <div className="client-setting-copy">
+              <Typography.Text strong>同步摘要</Typography.Text>
+              <Typography.Text type="secondary">
+                {syncNotice || `当前策略：${syncPolicyLabel(runtimeState.localRuntime.syncPolicy)}`}
+              </Typography.Text>
+            </div>
+            <Button size="small" type="primary" loading={isSyncing} onClick={syncRuntimeState}>
+              同步
+            </Button>
           </div>
-
-          <Space wrap>
-            <Button
-              icon={<FolderOpenOutlined />}
-              onClick={() => void openLocalPath(runtimeState.app.userDataPath)}
-            >
-              打开目录
-            </Button>
-            <Button
-              icon={<DownloadOutlined />}
-              loading={isBackupBusy}
-              onClick={() => void createWorkspaceBackup()}
-            >
-              创建备份
-            </Button>
-          </Space>
-
-          {backupNotice ? (
-            <Typography.Text type={backupNotice.startsWith('已创建备份') ? 'success' : 'danger'}>
-              {backupNotice}
-            </Typography.Text>
-          ) : null}
         </section>
 
-        <section className="client-settings-panel client-settings-panel-wide">
-          <div className="client-settings-panel-header">
-            <Typography.Title level={5}>运行状态</Typography.Title>
-            <Typography.Text type="secondary">当前客户端能力概览</Typography.Text>
+        <section className="settings-list-section">
+          <Typography.Text strong className="settings-list-title">本地数据</Typography.Text>
+          <div className="settings-list-row">
+            <div className="client-setting-copy">
+              <Typography.Text strong>数据目录</Typography.Text>
+              <Typography.Text type="secondary" ellipsis copyable>
+                {runtimeState.app.userDataPath}
+              </Typography.Text>
+            </div>
+            <Button size="small" icon={<FolderOpenOutlined />} onClick={() => void openLocalPath(runtimeState.app.userDataPath)}>
+              打开
+            </Button>
           </div>
 
-          <div className="client-status-grid">
-            <div className="client-status-item">
-              <Typography.Text type="secondary">模型</Typography.Text>
-              <Tag color={configuredModelCount > 0 ? 'green' : 'orange'}>
-                {configuredModelCount}/{runtimeState.modelProfiles.length}
-              </Tag>
+          <div className="settings-list-row">
+            <div className="client-setting-copy">
+              <Typography.Text strong>备份</Typography.Text>
+              <Typography.Text type="secondary">
+                {backupNotice || '创建本机备份，用于迁移和恢复。'}
+              </Typography.Text>
             </div>
-            <div className="client-status-item">
-              <Typography.Text type="secondary">工具</Typography.Text>
-              <Tag color={enabledToolCount > 0 ? 'green' : 'orange'}>
-                {enabledToolCount}/{runtimeState.tools.length}
-              </Tag>
+            <Button size="small" icon={<DownloadOutlined />} loading={isBackupBusy} onClick={() => void createWorkspaceBackup()}>
+              创建
+            </Button>
+          </div>
+
+          <div className="settings-list-row">
+            <div className="client-setting-copy">
+              <Typography.Text strong>恢复</Typography.Text>
+              <Typography.Text type="secondary">
+                {latestBackup ? `最近备份：${formatDate(latestBackup.createdAt)}` : '暂无可恢复备份'}
+              </Typography.Text>
             </div>
-            <div className="client-status-item">
-              <Typography.Text type="secondary">知识</Typography.Text>
-              <Tag color={knowledgeBindingCount > 0 ? 'green' : 'default'}>
-                {knowledgeBindingCount}/{knowledgeBindingCatalog.length}
-              </Tag>
-            </div>
-            <div className="client-status-item">
-              <Typography.Text type="secondary">连接</Typography.Text>
-              <Tag color={connectionTone}>{connectionLabel(runtimeState.serverConnection.state)}</Tag>
-            </div>
-            <div className="client-status-item">
-              <Typography.Text type="secondary">网页搜索</Typography.Text>
-              <Tag color={webSearchConfigured ? 'green' : 'default'}>
-                {webSearchConfigured ? '已配置' : '未配置'}
-              </Tag>
-            </div>
-            <div className="client-status-item">
-              <Typography.Text type="secondary">同步策略</Typography.Text>
-              <Tag>{syncPolicyLabel(runtimeState.localRuntime.syncPolicy)}</Tag>
-            </div>
+            <Space wrap>
+              <Button size="small" icon={<ReloadOutlined />} loading={isRefreshing} onClick={loadWorkspaceBackups}>
+                刷新
+              </Button>
+              <Button
+                size="small"
+                icon={<RollbackOutlined />}
+                disabled={!latestBackup}
+                loading={isBackupBusy}
+                onClick={() => {
+                  if (latestBackup) {
+                    void restoreWorkspaceBackup(latestBackup.bundlePath);
+                  }
+                }}
+              >
+                恢复最近
+              </Button>
+            </Space>
           </div>
         </section>
       </div>
@@ -2917,212 +2689,6 @@ export default function App() {
     return (
       <div className="settings-page client-settings-page">
         {renderGeneralSettings()}
-      </div>
-    );
-  }
-
-  function renderFiles() {
-    const artifacts = taskDetails
-      .flatMap((task) =>
-        task.artifacts.map((artifact) => ({
-          ...artifact,
-          roleName: task.roleName,
-          taskTitle: task.title
-        }))
-      )
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-
-    return (
-      <div className="files-page">
-        <div className="metric-grid">
-          <Card bordered={false}>
-            <Statistic title="本地产物" value={artifacts.length} />
-          </Card>
-          <Card bordered={false}>
-            <Statistic title="任务记录" value={orderedTasks.length} />
-          </Card>
-          <Card bordered={false}>
-            <Statistic title="备份包" value={workspaceBackups.length} />
-          </Card>
-          <Card bordered={false}>
-            <Statistic title="同步策略" value={syncPolicyLabel(runtimeState.localRuntime.syncPolicy)} />
-          </Card>
-        </div>
-
-        <div className="main-grid">
-          <Card title="最近产物" bordered={false}>
-            <List
-              dataSource={artifacts}
-              locale={{ emptyText: '暂无产物，先在工作台下达或运行一条任务。' }}
-              renderItem={(artifact) => (
-                <List.Item
-                  actions={
-                    artifact.localPath
-                      ? [
-                          <Button
-                            key="open"
-                            type="link"
-                            icon={<FolderOpenOutlined />}
-                            onClick={() => void openLocalPath(artifact.localPath)}
-                          >
-                            打开
-                          </Button>
-                        ]
-                      : undefined
-                  }
-                >
-                  <List.Item.Meta
-                    avatar={<FolderOpenOutlined className="list-icon" />}
-                    title={
-                      <Space size={8} wrap>
-                        <Typography.Text strong>{artifact.title}</Typography.Text>
-                        <Tag>{artifact.type}</Tag>
-                      </Space>
-                    }
-                    description={
-                      <Space direction="vertical" size={4}>
-                        <Typography.Text type="secondary">
-                          {artifact.roleName} · {artifact.taskTitle} · {formatDate(artifact.createdAt)}
-                        </Typography.Text>
-                        <Typography.Paragraph type="secondary" ellipsis={{ rows: 2 }} style={{ margin: 0 }}>
-                          {artifact.content}
-                        </Typography.Paragraph>
-                      </Space>
-                    }
-                  />
-                </List.Item>
-              )}
-            />
-          </Card>
-
-          <Card title="备份与恢复" bordered={false}>
-            <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              <Space wrap>
-                <Button
-                  type="primary"
-                  icon={<DownloadOutlined />}
-                  loading={isBackupBusy}
-                  onClick={createWorkspaceBackup}
-                >
-                  创建备份
-                </Button>
-                <Button icon={<ReloadOutlined />} loading={isRefreshing} onClick={loadWorkspaceBackups}>
-                  刷新列表
-                </Button>
-              </Space>
-              <Typography.Text type="secondary">
-                {backupNotice || '备份保存在用户电脑，可用于导出、迁移和恢复。'}
-              </Typography.Text>
-
-              <Divider style={{ margin: '8px 0' }} />
-
-              <List
-                dataSource={workspaceBackups}
-                locale={{ emptyText: '尚未生成备份' }}
-                renderItem={(backup) => (
-                  <List.Item
-                    actions={[
-                      <Button
-                        key="restore"
-                        type="link"
-                        icon={<RollbackOutlined />}
-                        loading={isBackupBusy}
-                        onClick={() => restoreWorkspaceBackup(backup.bundlePath)}
-                      >
-                        恢复
-                      </Button>
-                    ]}
-                  >
-                    <List.Item.Meta
-                      avatar={<DownloadOutlined className="list-icon" />}
-                      title={
-                        <Space size={8} wrap>
-                          <Typography.Text strong>备份 {formatDate(backup.createdAt)}</Typography.Text>
-                          <Tag color="blue">{backup.appVersion}</Tag>
-                        </Space>
-                      }
-                      description={backup.bundlePath}
-                    />
-                  </List.Item>
-                )}
-              />
-            </Space>
-          </Card>
-        </div>
-
-        <Card title="本地存储边界" bordered={false}>
-          <Descriptions column={1} size="small" bordered>
-            <Descriptions.Item label="本地目录">
-              <Space size={8} wrap>
-                <Typography.Text>{runtimeState.app.userDataPath}</Typography.Text>
-                <Button
-                  size="small"
-                  icon={<FolderOpenOutlined />}
-                  onClick={() => void openLocalPath(runtimeState.app.userDataPath)}
-                >
-                  打开
-                </Button>
-              </Space>
-            </Descriptions.Item>
-            <Descriptions.Item label="原始资产">
-              文档、素材、产物和中间缓存默认保留在用户电脑。
-            </Descriptions.Item>
-            <Descriptions.Item label="服务端同步">
-              服务端只同步任务状态、工作区摘要、授权和必要元数据。
-            </Descriptions.Item>
-            <Descriptions.Item label="控制端">
-              {runtimeState.serverConnection.serverBaseUrl}
-            </Descriptions.Item>
-          </Descriptions>
-        </Card>
-      </div>
-    );
-  }
-
-  function renderSync() {
-    return (
-      <div className="main-grid">
-        <Card title="同步控制" bordered={false}>
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Button
-              type="primary"
-              icon={<CloudSyncOutlined />}
-              loading={isSyncing}
-              onClick={syncRuntimeState}
-            >
-              推送本地摘要
-            </Button>
-            <Typography.Text type="secondary">
-              {syncNotice || '仅同步角色、工具、任务摘要，不上传本地文件和私有素材。'}
-            </Typography.Text>
-          </Space>
-        </Card>
-        <Card title="连接状态" bordered={false}>
-          <Descriptions column={1} size="small" bordered>
-            <Descriptions.Item label="状态">
-              {connectionLabel(runtimeState.serverConnection.state)}
-            </Descriptions.Item>
-            <Descriptions.Item label="延迟">
-              {runtimeState.serverConnection.latencyMs ? `${runtimeState.serverConnection.latencyMs} ms` : '—'}
-            </Descriptions.Item>
-            <Descriptions.Item label="服务">
-              {runtimeState.serverConnection.service ?? '—'}
-            </Descriptions.Item>
-            <Descriptions.Item label="检查时间">
-              {formatDate(runtimeState.serverConnection.checkedAt)}
-            </Descriptions.Item>
-          </Descriptions>
-        </Card>
-
-        <Card title="摘要信息" bordered={false}>
-          <Descriptions column={1} size="small" bordered>
-            <Descriptions.Item label="角色数">{runtimeState.rolePackages.length}</Descriptions.Item>
-            <Descriptions.Item label="模型数">{runtimeState.modelProfiles.length}</Descriptions.Item>
-            <Descriptions.Item label="工具数">{runtimeState.tools.length}</Descriptions.Item>
-            <Descriptions.Item label="任务数">{runtimeState.runtimeSnapshot.tasks.length}</Descriptions.Item>
-            <Descriptions.Item label="知识绑定">{knowledgeBindingCount}</Descriptions.Item>
-          </Descriptions>
-        </Card>
       </div>
     );
   }
@@ -3398,8 +2964,10 @@ export default function App() {
         }
       }));
       setToolSettingsNotice('工具配置已保存到本地。');
+      return true;
     } catch (error) {
       setToolSettingsNotice(`工具配置保存失败：${error instanceof Error ? error.message : 'unknown error'}`);
+      return false;
     } finally {
       setIsSavingToolSettings(false);
     }
@@ -3548,7 +3116,7 @@ export default function App() {
     closeRoleConfig();
   }
 
-  function createTask(values: TaskFormValues) {
+  function createTask(values: TaskFormValues & { attachments?: ComposerAttachment[] }) {
     const title = values.title.trim();
     if (!title) {
       return;
@@ -3556,8 +3124,11 @@ export default function App() {
 
     const roleCode = values.roleCode;
     const roleName = resolveRoleName(runtimeState.rolePackages, roleCode);
-    const executionContext = buildExecutionContextForRole(runtimeState.rolePackages, roleCode);
     const input = values.input?.trim() || `请处理任务：${title}`;
+    const executionContext = buildTaskExecutionContextWithAttachments(
+      buildExecutionContextForRole(runtimeState.rolePackages, roleCode),
+      values.attachments ?? []
+    );
     const taskDetail = createMockTaskDetail({
       roleCode,
       roleName,
@@ -3570,97 +3141,24 @@ export default function App() {
     });
     const task = toDesktopTaskSummary(taskDetail);
 
-    setRuntimeState((current) => {
-      const taskDetails = [taskDetail, ...(current.taskDetails ?? [])];
-      const tasks = [task, ...current.runtimeSnapshot.tasks];
-
-      return {
-        ...current,
-        taskDetails,
-        runtimeSnapshot: {
-          ...current.runtimeSnapshot,
-          tasks,
-          rolePackages: rebuildRoleSummaries(
-            current.rolePackages,
-            tasks,
-            current.runtimeSnapshot.rolePackages,
-            current.localRuntime.activeRoleCode
-          )
-        }
-      };
-    });
-
+    const nextState = upsertTaskDetailInRuntimeState(runtimeState, taskDetail);
+    setRuntimeState(nextState);
     setSelectedTaskId(task.taskId);
     taskForm.resetFields(['title', 'input']);
+
+    const startedAt = new Date().toISOString();
+    void runTaskDetail(nextState, startTaskRun(taskDetail, startedAt)).catch(() => {
+      // runTaskDetail already writes the failed task state; avoid an unhandled rejection in the renderer.
+    });
   }
 
   function navigateToSection(section: SectionKey) {
     setSelectedSection(section);
+    setAccountMenuOpen(false);
 
     const nextHash = `#${section}`;
     if (window.location.hash !== nextHash) {
       window.history.replaceState(null, '', nextHash);
-    }
-  }
-
-  async function runVerificationTask() {
-    const sourceState = runtimeState;
-    const rolePackage = activeRolePackage;
-
-    if (!rolePackage) {
-      setVerificationNotice('失败：请先安装并激活一个数字员工。');
-      return;
-    }
-
-    const startedAt = new Date().toISOString();
-    const baseTask = createMockTaskDetail({
-      roleCode: rolePackage.roleCode,
-      roleName: rolePackage.name,
-      title: `真实闭环测试 ${formatDate(startedAt)}`,
-      taskType: 'desktop_runtime_verification',
-      input: buildVerificationTaskInput(sourceState, rolePackage),
-      priority: 'high',
-      state: 'queued',
-      createdAt: startedAt,
-      updatedAt: startedAt,
-      artifactCount: 0,
-      costCents: 0,
-      executionContext: buildVerificationExecutionContext(sourceState, rolePackage)
-    });
-    const verificationTask = appendTaskExecutionLog(
-      baseTask,
-      createTaskExecutionLog(
-        baseTask.taskId,
-        'info',
-        'WORKOS_VERIFICATION_STARTED',
-        '真实闭环测试已创建：将验证模型调用、工具调用、本地产物、日志和成本记录。',
-        startedAt
-      )
-    );
-    const runningTask = startTaskRun(verificationTask, startedAt);
-
-    setIsRunningVerification(true);
-    setVerificationNotice('闭环测试已开始，请在任务明细里查看状态和日志。');
-    setSelectedTaskId(runningTask.taskId);
-    upsertTaskDetail(runningTask);
-
-    try {
-      const completedTask = await runTaskDetail(sourceState, runningTask, {
-        completedEventType: 'WORKOS_VERIFICATION_COMPLETED',
-        completedMessage: '真实闭环测试已完成，请检查产物、本地文件路径、工具日志和成本记录。',
-        failedEventType: 'WORKOS_VERIFICATION_FAILED',
-        failedMessage: '真实闭环测试未通过，请检查模型 API、工具启用状态、网页搜索配置和本地桥接。'
-      });
-
-      setVerificationNotice(
-        completedTask.state === 'completed'
-          ? `闭环测试已完成：生成 ${completedTask.artifacts.length} 个产物。`
-          : `闭环测试未通过：当前状态为 ${taskStateLabel(completedTask.state)}，请查看执行日志。`
-      );
-    } catch (error) {
-      setVerificationNotice(`失败：${error instanceof Error ? error.message : 'unknown error'}`);
-    } finally {
-      setIsRunningVerification(false);
     }
   }
 
@@ -3716,6 +3214,9 @@ export default function App() {
         enabledKnowledgeBindingIds: sourceState.localRuntime.knowledgeBindingIds,
         modelInvoker: window.qiuDesktop?.invokeModelChat,
         desktopToolInvoker: window.qiuDesktop?.invokeDesktopTool,
+        onProgress: (progressTask) => {
+          upsertTaskDetail(progressTask, [], progressTask.updatedAt);
+        },
         completedAt
       });
       const persistedTask = await persistTaskArtifacts(
@@ -3914,36 +3415,63 @@ function buildVerificationExecutionContext(
   };
 }
 
-function buildVerificationTaskInput(
-  state: DesktopRuntimeState,
-  rolePackage: RolePackageManifest
-): string {
-  const enabledToolNames = state.tools
-    .filter((tool) => state.localRuntime.enabledToolIds.includes(tool.id))
-    .map((tool) => tool.name)
-    .join('、') || '无';
-  const configuredModelCount = state.modelProfiles.filter(
-    (profile) =>
-      state.localRuntime.enabledModelProfileIds.includes(profile.id) && hasConfiguredModelApi(profile)
-  ).length;
-
-  return [
-    '请执行一次 QiuAI WorkOS 桌面端真实闭环测试。',
-    `当前数字员工：${rolePackage.name}`,
-    `已配置可用模型数：${configuredModelCount}`,
-    `已启用工具：${enabledToolNames}`,
-    '',
-    '验收目标：确认模型调用、桌面工具调用、本地产物生成、执行日志、成本记录可以形成闭环。',
-    '执行要求：',
-    '1. 先判断当前任务适合调用哪些桌面工具。',
-    '2. 如果 office-document 或 local-filesystem 可用，必须尝试生成一份本地 Markdown 验收报告。',
-    '3. 如果 web-search 已配置可用，可以搜索“企业数字员工 桌面端 试点 检查清单”，并把摘要写入报告；如果未配置，不要强行搜索，记录为缺口。',
-    '4. 最终用中文输出验收结论、发现的问题、下一步处理建议。'
-  ].join('\n');
-}
-
 function hasConfiguredModelApi(profile: ModelProfile): boolean {
   return Boolean(profile.apiBaseUrl?.trim() && profile.apiKey?.trim());
+}
+
+function roleTemplateCategory(template: DesktopRoleTemplate): string {
+  const text = [template.name, template.industry, template.scenario, template.summary, template.businessGoal].join(' ');
+  if (includesAny(text, ['教育', '课程', '培训', '学习'])) return '教育';
+  if (includesAny(text, ['医疗', '健康', '医生', '医药', '康复'])) return '医疗';
+  if (includesAny(text, ['销售', '线索', '客户', '外联', '回访'])) return '销售';
+  if (includesAny(text, ['运营', '内容', '私域', '发布', '社群'])) return '运营';
+  if (includesAny(text, ['人力', '招聘', '简历', '面试', '候选人'])) return '人力';
+  if (includesAny(text, ['财务', '报销', '对账', '发票', '单据'])) return '财务';
+  if (includesAny(text, ['法律', '合同', '法务', '条款'])) return '法务';
+  if (includesAny(text, ['行政', '会议', '日程', '纪要'])) return '行政';
+  if (includesAny(text, ['数据', '研究', '调研', '报告'])) return '研究';
+  return '通用';
+}
+
+function buildRoleCategoryTabs(templates: DesktopRoleTemplate[]): string[] {
+  const fixedCategories = ['全部', '教育', '医疗', '销售', '运营', '人力', '财务', '法务', '行政', '研究', '通用'];
+  const availableCategories = new Set(templates.map(roleTemplateCategory));
+  return fixedCategories.filter((category) => category === '全部' || availableCategories.has(category));
+}
+
+function toolCategory(tool: ToolManifest): string {
+  const text = [tool.id, tool.name, tool.scope, tool.entryPoint, ...tool.capabilities].join(' ');
+  if (includesAny(text, ['document', 'office', 'word', 'ppt', 'spreadsheet', '文档', '表格', '演示'])) return '文档';
+  if (includesAny(text, ['web', 'search', 'fetch', 'url', '网页', '搜索'])) return '网页';
+  if (includesAny(text, ['file', 'filesystem', 'folder', 'local', '文件', '目录'])) return '文件';
+  if (tool.requiresApproval) return '安全';
+  if (tool.entryPoint === 'bridge') return '本地';
+  return '通用';
+}
+
+function buildToolCategoryTabs(tools: ToolManifest[]): string[] {
+  const fixedCategories = ['全部', '文档', '网页', '文件', '本地', '安全', '通用'];
+  const availableCategories = new Set(tools.map(toolCategory));
+  return fixedCategories.filter((category) => category === '全部' || availableCategories.has(category));
+}
+
+function toolCategoryIcon(tool: ToolManifest): ReactNode {
+  const category = toolCategory(tool);
+  if (category === '文档') return <FileTextOutlined />;
+  if (category === '网页') return <GlobalOutlined />;
+  if (category === '文件') return <FolderOpenOutlined />;
+  if (category === '安全') return <SafetyCertificateOutlined />;
+  return <ToolOutlined />;
+}
+
+function modelProviderLogoText(providerName: string): string {
+  const normalizedName = providerName.trim();
+  if (!normalizedName) return 'AI';
+  if (/deepseek/i.test(normalizedName)) return 'DS';
+  if (/openai/i.test(normalizedName)) return 'OA';
+  if (/qwen|通义/i.test(normalizedName)) return 'QW';
+  if (/claude|anthropic/i.test(normalizedName)) return 'CL';
+  return normalizedName.slice(0, 2).toUpperCase();
 }
 
 function sectionMeta(section: SectionKey) {
@@ -3956,10 +3484,6 @@ function sectionMeta(section: SectionKey) {
       title: '数字员工',
       description: '安装和配置可用员工。'
     },
-    files: {
-      title: '文件',
-      description: '查看本地产物和备份。'
-    },
     models: {
       title: '模型',
       description: '配置和测试桌面端模型。'
@@ -3969,12 +3493,8 @@ function sectionMeta(section: SectionKey) {
       description: '管理文件、文档和网页能力。'
     },
     knowledge: {
-      title: '知识',
+      title: '知识库',
       description: '管理本地资料和知识来源。'
-    },
-    sync: {
-      title: '连接',
-      description: '绑定、同步和备份工作区。'
     },
     settings: {
       title: '设置',
@@ -4041,12 +3561,116 @@ function formatCents(value?: number) {
 }
 
 function createChatTaskTitle(input: string) {
-  const normalized = input.replace(/\s+/g, ' ').trim();
+  const normalized = input
+    .split('\n')
+    .find((line) => line.trim() && !line.trim().startsWith('附件：'))
+    ?.replace(/\s+/g, ' ')
+    .trim() ?? input.replace(/\s+/g, ' ').trim();
   if (!normalized) {
     return '新的数字员工任务';
   }
 
   return normalized.length > 28 ? `${normalized.slice(0, 28)}...` : normalized;
+}
+
+function hasDraggedFiles(dataTransfer: DataTransfer) {
+  return Array.from(dataTransfer.types).includes('Files');
+}
+
+function getFileLocalPath(file: File): string | undefined {
+  const candidate = file as File & { path?: unknown };
+  return typeof candidate.path === 'string' && candidate.path.trim() ? candidate.path.trim() : undefined;
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+
+  if (size < 1024 * 1024 * 1024) {
+    return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+function buildTaskInputWithAttachments(input: string, attachments: ComposerAttachment[]) {
+  const normalizedInput = input.trim() || '请处理已添加的文件。';
+  if (attachments.length === 0) {
+    return normalizedInput;
+  }
+
+  const attachmentLines = attachments.map((attachment, index) =>
+    [
+      `${index + 1}. ${attachment.name}`,
+      `大小：${formatFileSize(attachment.size)}`,
+      attachment.localPath ? `本地路径：${attachment.localPath}` : '本地路径：当前运行环境未暴露路径',
+      attachment.type ? `类型：${attachment.type}` : undefined
+    ]
+      .filter(Boolean)
+      .join('；')
+  );
+
+  return [
+    normalizedInput,
+    '',
+    '附件：',
+    ...attachmentLines,
+    '',
+    '请优先根据上述附件完成任务；如果需要读取附件内容，请调用本地文件工具读取对应本地路径。'
+  ].join('\n');
+}
+
+function parseTaskInputAttachmentLine(line: string) {
+  const withoutIndex = line.replace(/^\d+\.\s*/, '');
+  const parts = withoutIndex.split('；');
+  const name = parts[0]?.trim() || '附件';
+  const size = parts.find((part) => part.startsWith('大小：'))?.replace('大小：', '').trim();
+  const path = parts.find((part) => part.startsWith('本地路径：'))?.replace('本地路径：', '').trim();
+  const type = parts.find((part) => part.startsWith('类型：'))?.replace('类型：', '').trim();
+  const meta = [size, type, path].filter(Boolean).join(' · ');
+
+  return {
+    name,
+    meta: meta || '已添加到任务'
+  };
+}
+
+function readConversationFinalAnswer(task: DesktopTaskDetail): string {
+  if (task.state !== 'completed') {
+    return '';
+  }
+
+  const reportArtifact = [...task.artifacts].reverse().find((artifact) => artifact.type === 'report');
+  const content = reportArtifact?.content ?? '';
+  const marker = '\nModel output:\n';
+  const markerIndex = content.indexOf(marker);
+  const answer = markerIndex >= 0 ? content.slice(markerIndex + marker.length).trim() : content.trim();
+
+  return answer.length > 0 ? answer : '';
+}
+
+function buildTaskExecutionContextWithAttachments(
+  executionContext: NonNullable<DesktopTaskDetail['executionContext']> | undefined,
+  attachments: ComposerAttachment[]
+): NonNullable<DesktopTaskDetail['executionContext']> | undefined {
+  if (!executionContext) {
+    return undefined;
+  }
+
+  const attachmentPaths = attachments.flatMap((attachment) => (attachment.localPath ? [attachment.localPath] : []));
+  if (attachmentPaths.length === 0) {
+    return executionContext;
+  }
+
+  return {
+    ...executionContext,
+    attachmentPaths
+  };
 }
 
 function roleAvatarText(name: string) {
@@ -4069,20 +3693,86 @@ function roleAvatarText(name: string) {
 
 function executionEventLabel(eventType: string) {
   const labels: Record<string, string> = {
-    WORKOS_VERIFICATION_STARTED: '闭环测试开始',
-    WORKOS_VERIFICATION_COMPLETED: '闭环测试完成',
-    WORKOS_VERIFICATION_FAILED: '闭环测试失败',
+    WORKOS_TASK_RUN_STARTED: '接收任务',
     WORKOS_TASK_RUN_FAILED: '任务运行失败',
     LOCAL_RUN_STARTED: '开始本地执行',
-    MODEL_INVOCATION_STARTED: '调用模型',
-    MODEL_INVOCATION_COMPLETED: '模型返回结果',
-    TOOL_CALL_REQUESTED: '请求工具调用',
-    TOOL_CALL_COMPLETED: '工具调用完成',
+    TOOL_BINDING_SKIPPED: '跳过未启用工具',
+    KNOWLEDGE_BINDING_MISSING: '知识库未启用',
+    KNOWLEDGE_SOURCE_UNCONFIGURED: '知识库未配置',
+    MODEL_API_CONFIG_MISSING: '模型配置不完整',
+    MODEL_SELECTED: '选择模型',
+    MODEL_REQUEST_STARTED: '调用模型',
+    MODEL_REQUEST_FAILED: '模型调用失败',
+    MODEL_RESPONSE_RECEIVED: '模型返回结果',
+    ATTACHMENT_CONTEXT_EXTRACTED: '读取附件',
+    ATTACHMENT_CONTEXT_SKIPPED: '跳过附件读取',
+    ATTACHMENT_CONTEXT_FAILED: '附件读取失败',
+    ATTACHMENT_CONTEXT_EMPTY: '附件内容为空',
+    TOOL_CALL_DETECTED: '请求工具',
+    TOOL_CALL_REJECTED: '工具被拒绝',
+    TOOL_CALL_SKIPPED: '跳过工具',
+    TOOL_CALL_FAILED: '工具失败',
+    TOOL_INVOKED: '工具完成',
+    TOOL_RESULT_RETURNED_TO_MODEL: '工具结果回传',
+    TOOL_RESULT_FINALIZATION_FAILED: '结果整理失败',
+    TOOL_CALL_LIMIT_REACHED: '工具轮次上限',
     ARTIFACT_CREATED: '生成产物',
+    ARTIFACT_FILE_WRITTEN: '写入本地文件',
+    ARTIFACT_FILE_WRITE_FAILED: '文件写入失败',
     TASK_COMPLETED: '任务完成'
   };
 
   return labels[eventType] ?? eventType.replace(/_/g, ' ').toLowerCase();
+}
+
+function executionEventMessage(log: DesktopTaskDetail['executionLogs'][number]) {
+  const messages: Record<string, string> = {
+    WORKOS_TASK_RUN_STARTED: '任务已进入桌面端执行队列。',
+    LOCAL_RUN_STARTED: '数字员工开始在本机处理任务。',
+    MODEL_SELECTED: formatModelLogMessage(log.message),
+    MODEL_REQUEST_STARTED: formatModelLogMessage(log.message),
+    MODEL_RESPONSE_RECEIVED: '模型已返回可用于整理结果的内容。',
+    ATTACHMENT_CONTEXT_EXTRACTED: formatPathLogMessage(log.message, '已读取附件内容'),
+    ATTACHMENT_CONTEXT_SKIPPED: '已收到附件，但当前员工没有可用的文档读取工具。',
+    ATTACHMENT_CONTEXT_EMPTY: formatPathLogMessage(log.message, '附件未读取到有效文本'),
+    TOOL_CALL_DETECTED: formatToolLogMessage(log.message, '模型请求调用工具'),
+    TOOL_INVOKED: formatToolLogMessage(log.message, '工具已执行完成'),
+    TOOL_RESULT_RETURNED_TO_MODEL: formatToolLogMessage(log.message, '工具结果已交回模型整理'),
+    ARTIFACT_CREATED: '结果文件和执行报告已准备好。',
+    ARTIFACT_FILE_WRITTEN: formatPathLogMessage(log.message, '已写入本地结果文件'),
+    TASK_COMPLETED: '任务已完成，可以查看结果或打开文件。'
+  };
+
+  return messages[log.eventType] ?? log.message;
+}
+
+function formatModelLogMessage(message: string) {
+  const normalized = message.replace(/^Primary model:\s*/i, '').replace(/^Invoking model:\s*/i, '').trim();
+  return normalized ? `使用模型：${normalized}` : message;
+}
+
+function formatToolLogMessage(message: string, prefix: string) {
+  const normalized = message
+    .replace(/^Model requested desktop tool action:\s*/i, '')
+    .replace(/^Desktop tool executed:\s*/i, '')
+    .replace(/^Desktop tool result was returned to model:\s*/i, '')
+    .replace(/\.$/, '')
+    .trim();
+  return normalized ? `${prefix}：${normalized}` : prefix;
+}
+
+function formatPathLogMessage(message: string, prefix: string) {
+  const details = readMessageDetails(message);
+  return details ? `${prefix}：${details}` : message;
+}
+
+function readMessageDetails(message: string) {
+  const detailIndex = message.indexOf(': ');
+  if (detailIndex < 0) {
+    return '';
+  }
+
+  return message.slice(detailIndex + 2).replace(/\.$/, '').trim();
 }
 
 function toInstalledRolePackage(template: DesktopRoleTemplate): RolePackageManifest {

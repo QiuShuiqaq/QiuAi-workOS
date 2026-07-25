@@ -7,6 +7,7 @@ import {
   writeFileSync
 } from 'node:fs';
 import path from 'node:path';
+import JSZip from 'jszip';
 
 import type {
   DesktopToolInvocationRequest,
@@ -25,6 +26,7 @@ const officeDocumentToolId = 'office-document';
 const maxReadBytes = 64 * 1024;
 const maxDirectoryEntries = 100;
 const maxWebTextChars = 24_000;
+const maxExtractedDocumentChars = 30_000;
 const webFetchTimeoutMs = 15_000;
 
 export async function invokeDesktopTool(
@@ -44,7 +46,7 @@ export async function invokeDesktopTool(
     }
 
     if (request.toolId === officeDocumentToolId) {
-      return invokeOfficeDocumentTool(userDataPath, request);
+      return await invokeOfficeDocumentTool(userDataPath, request);
     }
 
     return fail(request, `Unsupported desktop tool: ${request.toolId}`);
@@ -87,11 +89,13 @@ async function invokeWebSearchTool(
   }
 }
 
-function invokeOfficeDocumentTool(
+async function invokeOfficeDocumentTool(
   userDataPath: string,
   request: DesktopToolInvocationRequest
-): DesktopToolInvocationResult {
+): Promise<DesktopToolInvocationResult> {
   switch (request.action) {
+    case 'document.extract_text':
+      return extractDocumentText(request);
     case 'office.write_markdown_document':
       return writeOfficeMarkdownDocument(userDataPath, request);
     case 'spreadsheet.write_csv':
@@ -101,6 +105,55 @@ function invokeOfficeDocumentTool(
     default:
       return fail(request, `Unsupported office document action: ${request.action}`);
   }
+}
+
+async function extractDocumentText(request: DesktopToolInvocationRequest): Promise<DesktopToolInvocationResult> {
+  const filePath = readRequiredString(request.input.path, 'path');
+  assertReadPathAllowed(request, filePath);
+  const stats = statSync(filePath);
+
+  if (!stats.isFile()) {
+    return fail(request, `Path is not a file: ${filePath}`);
+  }
+
+  const maxChars = readOptionalPositiveInteger(request.input.maxChars, maxExtractedDocumentChars);
+  const extension = path.extname(filePath).toLowerCase();
+  let text: string;
+
+  if (isPlainTextDocumentExtension(extension)) {
+    const rawText = readFileSync(filePath, 'utf8');
+    text = extension === '.html' || extension === '.htm'
+      ? extractReadableTextFromHtml(rawText)
+      : rawText;
+  } else if (extension === '.docx') {
+    text = await extractDocxText(filePath);
+  } else if (extension === '.pptx') {
+    text = await extractPptxText(filePath);
+  } else if (extension === '.xlsx') {
+    text = await extractXlsxText(filePath);
+  } else if (extension === '.pdf') {
+    return fail(request, 'PDF text extraction is not supported yet. Convert the PDF to text or Word for this version.');
+  } else {
+    return fail(request, `Unsupported document extension for text extraction: ${extension || 'unknown'}.`);
+  }
+
+  const normalizedText = normalizeExtractedText(text);
+  const truncatedText = truncate(normalizedText, maxChars);
+
+  return {
+    toolId: request.toolId,
+    action: request.action,
+    ok: true,
+    output: {
+      path: filePath,
+      fileName: path.basename(filePath),
+      extension: extension || undefined,
+      sizeBytes: stats.size,
+      modifiedAt: stats.mtime.toISOString(),
+      text: truncatedText,
+      truncated: normalizedText.length > truncatedText.length
+    }
+  };
 }
 
 function writeTextFile(
@@ -388,6 +441,77 @@ function writeToolAssetFile(
       bytes: Buffer.byteLength(input.content, 'utf8')
     }
   };
+}
+
+function isPlainTextDocumentExtension(extension: string): boolean {
+  return [
+    '.txt',
+    '.md',
+    '.markdown',
+    '.csv',
+    '.tsv',
+    '.json',
+    '.jsonl',
+    '.log',
+    '.xml',
+    '.html',
+    '.htm'
+  ].includes(extension);
+}
+
+async function extractDocxText(filePath: string): Promise<string> {
+  const zip = await JSZip.loadAsync(readFileSync(filePath));
+  const xmlFiles = await readZipXmlFiles(zip, /^word\/(?:document|footnotes|endnotes|comments|header\d+|footer\d+)\.xml$/);
+  return xmlFiles.map(extractTextFromXml).filter(Boolean).join('\n\n');
+}
+
+async function extractPptxText(filePath: string): Promise<string> {
+  const zip = await JSZip.loadAsync(readFileSync(filePath));
+  const slideFiles = await readZipXmlFiles(zip, /^ppt\/slides\/slide\d+\.xml$/);
+  return slideFiles
+    .map((xml, index) => {
+      const text = extractTextFromXml(xml);
+      return text ? `Slide ${index + 1}\n${text}` : '';
+    })
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+async function extractXlsxText(filePath: string): Promise<string> {
+  const zip = await JSZip.loadAsync(readFileSync(filePath));
+  const sharedStrings = await readZipXmlFiles(zip, /^xl\/sharedStrings\.xml$/);
+  const worksheets = await readZipXmlFiles(zip, /^xl\/worksheets\/sheet\d+\.xml$/);
+  const sharedText = sharedStrings.map(extractTextFromXml).filter(Boolean).join('\n');
+  const worksheetText = worksheets
+    .map((xml, index) => {
+      const text = extractTextFromXml(xml);
+      return text ? `Sheet ${index + 1}\n${text}` : '';
+    })
+    .filter(Boolean)
+    .join('\n\n');
+
+  return [sharedText, worksheetText].filter(Boolean).join('\n\n');
+}
+
+async function readZipXmlFiles(zip: JSZip, pattern: RegExp): Promise<string[]> {
+  const files = Object.values(zip.files)
+    .filter((file) => !file.dir && pattern.test(file.name))
+    .sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true }));
+
+  return Promise.all(files.map((file) => file.async('string')));
+}
+
+function extractTextFromXml(xml: string): string {
+  return decodeHtmlEntities(
+    xml
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
+}
+
+function normalizeExtractedText(value: string): string {
+  return value.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function fail(
