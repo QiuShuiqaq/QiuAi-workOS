@@ -153,7 +153,7 @@ chmod +x deploy/alicloud-ecs/start-pm2.sh
 ./deploy/alicloud-ecs/start-pm2.sh
 ```
 
-`start-pm2.sh` loads `.env`, installs dependencies with `npm ci`, generates the Prisma client, runs migrations and seed when `WORKOS_PERSISTENCE_MODE=database`, builds the app, runs `npm run check:deploy`, and only then reloads PM2. Do not unset `DATABASE_URL` after switching to database mode.
+`start-pm2.sh` loads `.env`, installs dependencies with `npm ci`, generates the Prisma client, runs migrations and seed when `WORKOS_PERSISTENCE_MODE=database`, builds the server deployment with `npm run build:deploy`, runs `npm run check:deploy`, and only then reloads PM2. Do not unset `DATABASE_URL` after switching to database mode.
 
 Install Nginx config:
 

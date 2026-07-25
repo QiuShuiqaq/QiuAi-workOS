@@ -30,8 +30,8 @@ if [[ "${WORKOS_PERSISTENCE_MODE:-mock}" == "database" ]]; then
   npm run db:seed
 fi
 
-echo "==> Building QiuAI WorkOS"
-npm run build
+echo "==> Building QiuAI WorkOS server deployment"
+npm run build:deploy
 
 echo "==> Checking deployment readiness"
 npm run check:deploy
