@@ -230,32 +230,6 @@ test('admin role template factory governs publication and workspace visibility',
       false
     );
 
-    const updateResponse = await app.inject({
-      method: 'PATCH',
-      url: `/api/v1/admin/role-templates/${encodeURIComponent(templateId)}`,
-      headers,
-      payload: {
-        recommendedPlanCode: 'ENTERPRISE_BASIC_MONTHLY',
-        allowedPlanCodes: ['ENTERPRISE_BASIC_MONTHLY']
-      }
-    });
-    assert.equal(updateResponse.statusCode, 200);
-
-    const visibleTemplatesResponse = await app.inject({
-      method: 'GET',
-      url: '/api/v1/workspaces/enterprise/roles/templates',
-      headers: {
-        cookie
-      }
-    });
-    assert.equal(visibleTemplatesResponse.statusCode, 200);
-    assert.equal(
-      JSON.parse(visibleTemplatesResponse.body).data.find(
-        (template: { id: string }) => template.id === templateId
-      )?.workflowSteps.length,
-      2
-    );
-
     const desktopTemplatesWithoutTokenResponse = await app.inject({
       method: 'GET',
       url: '/api/v1/workspaces/enterprise/desktop/role-templates'
@@ -290,6 +264,47 @@ test('admin role template factory governs publication and workspace visibility',
     });
     assert.equal(redeemResponse.statusCode, 201);
     const deviceToken = JSON.parse(redeemResponse.body).data.deviceToken as string;
+
+    const proOnlyDesktopTemplatesResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/workspaces/enterprise/desktop/role-templates',
+      headers: {
+        'x-qiuai-device-token': deviceToken
+      }
+    });
+    assert.equal(proOnlyDesktopTemplatesResponse.statusCode, 200);
+    assert.equal(
+      JSON.parse(proOnlyDesktopTemplatesResponse.body).data.find(
+        (template: { id: string }) => template.id === templateId
+      )?.workflowSteps.length,
+      2
+    );
+
+    const updateResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/admin/role-templates/${encodeURIComponent(templateId)}`,
+      headers,
+      payload: {
+        recommendedPlanCode: 'ENTERPRISE_BASIC_MONTHLY',
+        allowedPlanCodes: ['ENTERPRISE_BASIC_MONTHLY']
+      }
+    });
+    assert.equal(updateResponse.statusCode, 200);
+
+    const visibleTemplatesResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/workspaces/enterprise/roles/templates',
+      headers: {
+        cookie
+      }
+    });
+    assert.equal(visibleTemplatesResponse.statusCode, 200);
+    assert.equal(
+      JSON.parse(visibleTemplatesResponse.body).data.find(
+        (template: { id: string }) => template.id === templateId
+      )?.workflowSteps.length,
+      2
+    );
 
     const desktopTemplatesResponse = await app.inject({
       method: 'GET',

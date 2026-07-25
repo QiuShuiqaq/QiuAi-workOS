@@ -65,7 +65,7 @@ export class DesktopSyncService {
   async listAuthorizedRoleTemplates(workspaceId: string, deviceToken?: string) {
     if (isDatabasePersistenceEnabled()) {
       await this.requireDatabaseDeviceTokenForWorkspace(workspaceId, deviceToken);
-      return this.roleService.listTemplates(workspaceId);
+      return this.roleService.listPublishedTemplatesForDesktop();
     }
 
     if (!this.store.workspaceExists(workspaceId)) {
@@ -80,7 +80,7 @@ export class DesktopSyncService {
       });
     }
     this.requireMockDeviceTokenForWorkspace(workspaceId, deviceToken, new Date());
-    return this.roleService.listTemplates(workspaceId);
+    return this.roleService.listPublishedTemplatesForDesktop();
   }
 
   async listDevices(workspaceId: string, cookieHeader?: string): Promise<ListDesktopDevicesResponse> {

@@ -1,7 +1,6 @@
 import type {
   CurrentAccountResponse,
   ListRoleInstancesResponse,
-  ListRoleTemplatesResponse,
   RoleInstanceDetail
 } from '@qiuai/api-contract';
 
@@ -9,12 +8,11 @@ import { createServerApiClient } from '../../shared/api/server-api';
 import { rethrowIfFrontendFallbackDisabled } from '../common/api-fallback';
 import { loadCurrentAccount } from '../common/load-current-account';
 import { resolveWorkspaceId } from '../common/resolve-workspace-id';
-import { fallbackRoleDetail, fallbackRoles, fallbackRoleTemplates } from './fallback-data';
+import { fallbackRoleDetail, fallbackRoles } from './fallback-data';
 
 export interface RolesPageData {
   currentAccount: CurrentAccountResponse;
   roles: ListRoleInstancesResponse;
-  templates: ListRoleTemplatesResponse;
   isApiFallback: boolean;
 }
 
@@ -24,17 +22,13 @@ export async function loadRolesPageData(requestedWorkspaceId?: string): Promise<
   const apiClient = await createServerApiClient();
 
   try {
-    const [roles, templates] = await Promise.all([
-      apiClient.listRoles(workspaceId),
-      apiClient.listRoleTemplates(workspaceId)
-    ]);
+    const roles = await apiClient.listRoles(workspaceId);
     return {
       currentAccount: {
         ...currentAccount,
         activeWorkspaceId: workspaceId
       },
       roles,
-      templates,
       isApiFallback: false
     };
   } catch (error) {
@@ -46,7 +40,6 @@ export async function loadRolesPageData(requestedWorkspaceId?: string): Promise<
         activeWorkspaceId: workspaceId
       },
       roles: fallbackRoles,
-      templates: fallbackRoleTemplates,
       isApiFallback: true
     };
   }

@@ -97,8 +97,13 @@ const completed = await runDesktopTask({
 });
 
 assert.equal(completed.task.state, 'completed');
-assert.equal(completed.task.artifacts.length, 1);
-assert.match(completed.task.artifacts[0]?.content ?? '', /Customer follow-up summary/);
+assert.equal(completed.task.artifacts.filter((artifact) => artifact.type !== 'report').length, 1);
+assert.equal(completed.task.artifacts.filter((artifact) => artifact.type === 'report').length, 1);
+assert.equal(completed.task.artifactCount, 1);
+assert.match(
+  completed.task.artifacts.find((artifact) => artifact.type !== 'report')?.content ?? '',
+  /Customer follow-up summary/
+);
 assert.equal(completed.task.costRecords.length, 1);
 assert.equal(completed.task.costRecords[0]?.inputTokens, 300);
 assert.deepEqual(completed.usedToolIds, []);

@@ -1,34 +1,10 @@
-﻿import type {
+import type {
   ListRoleInstancesResponse,
-  ListRoleTemplatesResponse,
   RoleInstanceDetail
 } from '@qiuai/api-contract';
-import {
-  defaultRoleTemplateCatalog,
-  getDefaultRoleTemplateByTemplateId
-} from '@qiuai/domain';
+import { getDefaultRoleTemplateByTemplateId } from '@qiuai/domain';
 
 import { fallbackOverview } from '../dashboard/fallback-data';
-
-export const fallbackRoleTemplates: ListRoleTemplatesResponse = {
-  data: defaultRoleTemplateCatalog.map((template) => ({
-    id: template.templateId,
-    version: template.version,
-    name: template.name,
-    industry: template.industry,
-    scenario: template.scenario,
-    description: template.description,
-    recommendedPlanCode: template.recommendedPlanCode,
-    businessGoal: template.businessGoal,
-    knowledgeSources: template.knowledgeSources,
-    tools: template.tools,
-    skills: template.skills,
-    workflowSteps: template.workflowSteps ?? [],
-    sampleInputs: template.sampleInputs ?? [],
-    outputFormat: template.outputFormat ?? '',
-    approvalPolicy: template.approvalPolicy
-  }))
-};
 
 export const fallbackRoles: ListRoleInstancesResponse = {
   data: fallbackOverview.roles.map((role) => {

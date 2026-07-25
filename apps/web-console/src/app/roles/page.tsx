@@ -13,7 +13,6 @@ export default async function RolesPage({
     <RolesPageClient
       currentAccount={data.currentAccount}
       initialRoles={data.roles.data}
-      templates={data.templates}
       isApiFallback={data.isApiFallback}
     />
   );

@@ -348,7 +348,20 @@ function completeTask(
     content: buildArtifactContent(task, binding, invocation.response),
     createdAt: completedAt
   };
-  const artifacts = [...task.artifacts, ...invocation.generatedArtifacts, reportArtifact];
+  const userArtifacts = [...task.artifacts, ...invocation.generatedArtifacts].filter(
+    isUserDeliverableArtifact
+  );
+  const finalAnswerArtifact =
+    userArtifacts.length > 0
+      ? undefined
+      : buildFinalAnswerArtifact(task, invocation.response, completedAt);
+  const artifacts = [
+    ...task.artifacts,
+    ...invocation.generatedArtifacts,
+    ...(finalAnswerArtifact ? [finalAnswerArtifact] : []),
+    reportArtifact
+  ];
+  const userArtifactCount = artifacts.filter(isUserDeliverableArtifact).length;
   const executionLogs = [
     ...task.executionLogs,
     createLog(task.taskId, 'info', 'LOCAL_RUN_STARTED', 'Local desktop runner started the task.', completedAt),
@@ -371,7 +384,7 @@ function completeTask(
       task.taskId,
       'info',
       'ARTIFACT_CREATED',
-      `Task results were prepared: ${artifacts.length - task.artifacts.length}.`,
+      `Task deliverables were prepared: ${userArtifactCount}.`,
       completedAt
     ),
     createLog(task.taskId, 'info', 'TASK_COMPLETED', 'Task completed by local desktop runner.', completedAt)
@@ -381,7 +394,7 @@ function completeTask(
     ...task,
     state: 'completed',
     updatedAt: completedAt,
-    artifactCount: artifacts.length,
+    artifactCount: userArtifactCount,
     costCents: (task.costCents ?? 0) + costCents,
     artifacts,
     executionLogs,
@@ -1101,6 +1114,26 @@ function buildGeneratedArtifactFromToolResult(input: {
     localPath,
     createdAt: input.createdAt
   };
+}
+
+function buildFinalAnswerArtifact(
+  task: DesktopTaskDetail,
+  response: DesktopModelChatResponse,
+  createdAt: string
+): DesktopArtifactSummary {
+  const content = response.content.trim() || '模型已完成任务，但没有返回可展示的文本结果。';
+
+  return {
+    id: `${task.taskId}-result-${Date.parse(createdAt) || Date.now()}`,
+    type: 'text',
+    title: `${task.title} - 任务结果`,
+    content,
+    createdAt
+  };
+}
+
+function isUserDeliverableArtifact(artifact: DesktopArtifactSummary) {
+  return artifact.type !== 'report';
 }
 
 function readLocalPath(output: Record<string, unknown> | undefined): string | undefined {

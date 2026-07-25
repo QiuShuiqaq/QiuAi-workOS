@@ -371,6 +371,7 @@ const currencyFormatter = new Intl.NumberFormat('zh-CN', {
   maximumFractionDigits: 0
 });
 const pendingWorkspaceId = 'workspace_pending_login';
+const newTaskSelectionId = '__qiuai_new_task__';
 const initialAuthorizedRoleTemplateCatalog: DesktopAuthorizedRoleTemplateCatalog = {
   source: 'local_fallback',
   workspaceId: pendingWorkspaceId,
@@ -694,6 +695,10 @@ export default function App() {
   }, [runtimeState.modelProfiles, selectedModelId]);
 
   useEffect(() => {
+    if (selectedTaskId === newTaskSelectionId) {
+      return;
+    }
+
     const firstTaskId = runtimeState.runtimeSnapshot.tasks[0]?.taskId;
     if (!selectedTaskId && firstTaskId) {
       setSelectedTaskId(firstTaskId);
@@ -1037,6 +1042,10 @@ export default function App() {
 
   const selectedTask = useMemo(() => {
     if (!taskDetails.length) {
+      return undefined;
+    }
+
+    if (selectedTaskId === newTaskSelectionId) {
       return undefined;
     }
 
@@ -1389,14 +1398,23 @@ export default function App() {
     }
 
     const activeRoleCode = activeRolePackage?.roleCode ?? runtimeState.rolePackages[0]?.roleCode ?? '';
+    const activeRoleTasks = taskDetails
+      .filter((task) => task.roleCode === activeRoleCode)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    const isCreatingNewTask = selectedTaskId === newTaskSelectionId;
     const conversationTask =
-      selectedTask && selectedTask.roleCode === activeRoleCode
+      isCreatingNewTask
+        ? undefined
+        : selectedTask && selectedTask.roleCode === activeRoleCode
         ? selectedTask
-        : latestTaskByRole.get(activeRoleCode) ?? selectedTask;
+        : activeRoleTasks[0];
     const conversationRole =
       runtimeState.rolePackages.find((rolePackage) => rolePackage.roleCode === activeRoleCode) ??
       activeRolePackage;
     const conversationFinalAnswer = conversationTask ? readConversationFinalAnswer(conversationTask) : '';
+    const conversationArtifacts = conversationTask
+      ? conversationTask.artifacts.filter(isUserDeliverableArtifact)
+      : [];
     const canRunConversationTask =
       conversationTask &&
       conversationTask.state !== 'running' &&
@@ -1456,6 +1474,47 @@ export default function App() {
               );
             })}
           </div>
+
+          <div className="task-history-section">
+            <Flex align="center" justify="space-between" gap={8} className="task-history-header">
+              <Typography.Text strong>历史任务</Typography.Text>
+              <Button
+                size="small"
+                onClick={() => {
+                  setSelectedTaskId(newTaskSelectionId);
+                  taskForm.resetFields(['input']);
+                }}
+              >
+                新任务
+              </Button>
+            </Flex>
+
+            {activeRoleTasks.length > 0 ? (
+              <div className="task-history-list">
+                {activeRoleTasks.slice(0, 20).map((task) => (
+                  <button
+                    key={task.taskId}
+                    type="button"
+                    className={
+                      conversationTask?.taskId === task.taskId
+                        ? 'task-history-item selected'
+                        : 'task-history-item'
+                    }
+                    onClick={() => setSelectedTaskId(task.taskId)}
+                  >
+                    <span className="task-history-title">{task.title}</span>
+                    <span className="task-history-meta">
+                      <Tag color={taskStateColor(task.state)}>{taskStateLabel(task.state)}</Tag>
+                      <span>{formatShortTime(task.updatedAt)}</span>
+                      <span>产物 {countUserDeliverableArtifacts(task)}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无历史任务" />
+            )}
+          </div>
         </aside>
 
         <section className="chat-workspace">
@@ -1511,7 +1570,7 @@ export default function App() {
                         {taskStateLabel(conversationTask.state)}
                       </Tag>
                       <Tag>{conversationTask.taskType}</Tag>
-                      <Tag>产物 {conversationTask.artifacts.length}</Tag>
+                      <Tag>产物 {conversationArtifacts.length}</Tag>
                     </Space>
                   </div>
                 </div>
@@ -1568,13 +1627,13 @@ export default function App() {
                   </div>
                 ) : null}
 
-                {conversationTask.artifacts.length > 0 ? (
+                {conversationArtifacts.length > 0 ? (
                   <div className="chat-message-row assistant">
                     <span className="message-avatar"><FolderOpenOutlined /></span>
                     <div className="chat-bubble assistant-bubble artifact-bubble">
                       <Typography.Text strong>结果已生成</Typography.Text>
                       <div className="chat-artifact-grid">
-                        {conversationTask.artifacts.map((artifact) => (
+                        {conversationArtifacts.map((artifact) => (
                           <div key={artifact.id} className="chat-artifact-card">
                             <Space align="start" size={10}>
                               <FolderOpenOutlined className="list-icon" />
@@ -1617,11 +1676,11 @@ export default function App() {
                   <div className="chat-message-row assistant">
                     <span className="message-avatar"><DatabaseOutlined /></span>
                     <div className="chat-bubble assistant-bubble cost-bubble">
-                      <Typography.Text strong>本次成本</Typography.Text>
+                      <Typography.Text strong>预估成本</Typography.Text>
                       <Space size={8} wrap>
                         {conversationTask.costRecords.map((record) => (
                           <Tag key={record.id}>
-                            {record.provider} / {record.modelName} / {formatCents(record.costCents)}
+                            {record.provider} / {record.modelName} / {formatEstimatedCostCents(record.costCents)}
                           </Tag>
                         ))}
                       </Space>
@@ -3558,6 +3617,26 @@ function formatCents(value?: number) {
   }
 
   return currencyFormatter.format(value / 100);
+}
+
+function formatEstimatedCostCents(value?: number) {
+  if (value === undefined || value === null) {
+    return '未统计';
+  }
+
+  if (value <= 0) {
+    return '暂未产生费用';
+  }
+
+  return `约 ¥${(value / 100).toFixed(2)}`;
+}
+
+function isUserDeliverableArtifact(artifact: DesktopTaskDetail['artifacts'][number]) {
+  return artifact.type !== 'report';
+}
+
+function countUserDeliverableArtifacts(task: DesktopTaskDetail) {
+  return task.artifacts.filter(isUserDeliverableArtifact).length;
 }
 
 function createChatTaskTitle(input: string) {

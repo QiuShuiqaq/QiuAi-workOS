@@ -377,6 +377,71 @@ body,
   margin-inline-end: 0;
 }
 
+.task-history-section {
+  display: flex;
+  flex: 0 0 250px;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px;
+  border-top: 1px solid #eef2f7;
+  background: #fff;
+}
+
+.task-history-header {
+  margin-bottom: 10px;
+}
+
+.task-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.task-history-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.task-history-item:hover,
+.task-history-item.selected {
+  border-color: #dbeafe;
+  background: #f8fbff;
+}
+
+.task-history-title {
+  overflow: hidden;
+  color: #1f2328;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-history-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.task-history-meta .ant-tag {
+  margin-inline-end: 0;
+}
+
 .agent-panel-footer {
   padding: 12px;
   border-top: 1px solid #eef2f7;
@@ -424,23 +489,27 @@ body,
 }
 
 .chat-message-list,
-.agent-session-list {
+.agent-session-list,
+.task-history-list {
   scrollbar-color: #c7d0dd transparent;
   scrollbar-width: thin;
 }
 
 .chat-message-list::-webkit-scrollbar,
-.agent-session-list::-webkit-scrollbar {
+.agent-session-list::-webkit-scrollbar,
+.task-history-list::-webkit-scrollbar {
   width: 10px;
 }
 
 .chat-message-list::-webkit-scrollbar-track,
-.agent-session-list::-webkit-scrollbar-track {
+.agent-session-list::-webkit-scrollbar-track,
+.task-history-list::-webkit-scrollbar-track {
   background: transparent;
 }
 
 .chat-message-list::-webkit-scrollbar-thumb,
-.agent-session-list::-webkit-scrollbar-thumb {
+.agent-session-list::-webkit-scrollbar-thumb,
+.task-history-list::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: 999px;
   background: #c7d0dd;
@@ -448,7 +517,8 @@ body,
 }
 
 .chat-message-list::-webkit-scrollbar-thumb:hover,
-.agent-session-list::-webkit-scrollbar-thumb:hover {
+.agent-session-list::-webkit-scrollbar-thumb:hover,
+.task-history-list::-webkit-scrollbar-thumb:hover {
   background: #9aa8b8;
   background-clip: content-box;
 }

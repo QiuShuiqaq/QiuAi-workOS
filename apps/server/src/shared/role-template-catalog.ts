@@ -104,7 +104,46 @@ const additionalSkills = {
   correctionAdvice: skill('correction_advice', '整改建议', '输出责任归因、整改动作和复检重点。'),
   companyResearch: skill('company_research', '企业调研', '检索并整理目标企业背景、业务、融资和竞争信息。'),
   industryBriefing: skill('industry_briefing', '行业简报', '汇总行业趋势、机会、风险和可引用来源。'),
-  competitorComparison: skill('competitor_comparison', '竞品对比', '形成竞品矩阵、优劣势和行动建议。')
+  competitorComparison: skill('competitor_comparison', '竞品对比', '形成竞品矩阵、优劣势和行动建议。'),
+  customerIntentTriage: skill('customer_intent_triage', '客户意图分流', '识别咨询、投诉、售后、退款和高风险情绪。'),
+  supportReplyDrafting: skill('support_reply_drafting', '客服回复草拟', '生成符合品牌口径的多轮客服回复和补充追问。'),
+  knowledgeBaseImprovement: skill('knowledge_base_improvement', '知识库补全', '沉淀高频问题、缺失答案和知识库更新建议。'),
+  seoKeywordResearch: skill('seo_keyword_research', 'SEO 关键词研究', '整理关键词、搜索意图、内容缺口和优先级。'),
+  searchContentBrief: skill('search_content_brief', '搜索内容简报', '生成面向自然搜索的文章结构、标题和摘要。'),
+  growthExperimentRecap: skill('growth_experiment_recap', '增长实验复盘', '汇总实验数据、结论、风险和下一轮动作。'),
+  productRequirementDrafting: skill('product_requirement_drafting', '需求文档草拟', '把用户反馈和业务目标整理为 PRD、用户故事和验收标准。'),
+  roadmapPrioritization: skill('roadmap_prioritization', '路线图排序', '按价值、成本、风险和依赖关系排序产品需求。'),
+  acceptanceCriteria: skill('acceptance_criteria', '验收标准', '输出清晰可测试的验收标准和边界条件。'),
+  projectPlanning: skill('project_planning', '项目计划', '拆解里程碑、任务、负责人、依赖和时间风险。'),
+  riskTracking: skill('risk_tracking', '风险跟踪', '识别项目风险、阻塞项、影响范围和应对动作。'),
+  weeklyStatusReporting: skill('weekly_status_reporting', '周报汇总', '生成项目周报、进展摘要、问题清单和下周计划。'),
+  itIssueDiagnosis: skill('it_issue_diagnosis', 'IT 问题诊断', '根据现象、环境和日志定位常见 IT 问题方向。'),
+  runbookExecution: skill('runbook_execution', '运维手册执行', '按标准操作手册输出排查步骤、确认项和升级条件。'),
+  accessRequestReview: skill('access_request_review', '权限申请复核', '检查账号、系统、权限范围和审批证据是否完整。'),
+  supplierResearch: skill('supplier_research', '供应商调研', '整理供应商资质、产品能力、风险和备选方案。'),
+  quoteComparison: skill('quote_comparison', '报价对比', '对比报价、付款条件、交期、风险和议价空间。'),
+  purchaseChecklist: skill('purchase_checklist', '采购清单', '生成采购规格、验收标准、合同注意点和决策建议。'),
+  inventoryExceptionAnalysis: skill('inventory_exception_analysis', '库存异常分析', '识别缺货、积压、周转异常和补货风险。'),
+  logisticsTrackingSummary: skill('logistics_tracking_summary', '物流跟踪汇总', '汇总运输节点、异常原因、影响订单和处理建议。'),
+  replenishmentPlanning: skill('replenishment_planning', '补货计划', '生成补货优先级、安全库存和执行清单。'),
+  productionPlanReview: skill('production_plan_review', '生产计划复核', '检查产能、物料、工序、交期和风险。'),
+  workOrderSummary: skill('work_order_summary', '工单汇总', '整理生产工单进展、异常、责任人和下一步动作。'),
+  defectRootCause: skill('defect_root_cause', '缺陷归因', '根据质检和生产记录归纳缺陷原因和改善建议。'),
+  courseOutlineDesign: skill('course_outline_design', '课程大纲设计', '把培训目标拆成课程模块、练习和交付标准。'),
+  learningMaterialDrafting: skill('learning_material_drafting', '培训材料草拟', '生成课件大纲、讲义、测验和作业说明。'),
+  learningAssessment: skill('learning_assessment', '学习评估', '整理学员反馈、测验结果和改进建议。'),
+  medicalRecordStructuring: skill('medical_record_structuring', '病历信息整理', '把非诊断类资料整理成结构化摘要和待确认事项。'),
+  appointmentFollowup: skill('appointment_followup', '预约随访整理', '整理预约、随访、提醒和服务记录。'),
+  complianceReminder: skill('compliance_reminder', '合规提醒', '提示医疗、隐私和对外沟通中的合规边界。'),
+  auditEvidenceChecklist: skill('audit_evidence_checklist', '审计证据清单', '整理制度、记录、凭证和缺失证据。'),
+  policyGapAnalysis: skill('policy_gap_analysis', '制度差距分析', '识别制度、流程和执行记录之间的缺口。'),
+  remediationTracking: skill('remediation_tracking', '整改跟踪', '输出整改任务、责任人、截止日期和复核标准。'),
+  spreadsheetAnalysis: skill('spreadsheet_analysis', '表格分析', '读取表格字段、指标、异常值和趋势。'),
+  metricDashboardBrief: skill('metric_dashboard_brief', '指标看板简报', '生成指标摘要、变化原因、风险和行动建议。'),
+  dataCleaningPlan: skill('data_cleaning_plan', '数据清洗计划', '识别缺失、重复、异常和字段标准化动作。'),
+  brandBriefing: skill('brand_briefing', '品牌简报', '整理品牌定位、受众、风格关键词和传播目标。'),
+  creativeDirection: skill('creative_direction', '创意方向', '生成创意概念、视觉方向、文案方向和素材清单。'),
+  designReviewChecklist: skill('design_review_checklist', '设计审核清单', '检查视觉、信息层级、合规和交付规格。')
 } as const;
 
 function inferWorkflowToolIds(template: BaseServerRoleTemplateCatalogEntry): string[] {
@@ -505,6 +544,351 @@ const baseServerRoleTemplateCatalog: BaseServerRoleTemplateCatalogEntry[] = [
     ],
     outputFormat: '调研简报、来源列表、竞品矩阵、风险提示和下一步行动建议。',
     approvalPolicy: '对外引用、投资判断和战略结论必须由负责人复核。'
+  },
+  {
+    templateId: 'template_customer_support_agent',
+    version: '1.0.0',
+    name: 'AI 客服支持专员',
+    industry: '客服与售后',
+    scenario: '客户意图分流、回复草拟、知识库补全',
+    description: '整理客户咨询和投诉记录，识别问题类型、情绪风险和处理优先级，生成客服回复与知识库补全建议。',
+    recommendedPlanCode: 'ENTERPRISE_BASIC_MONTHLY',
+    businessGoal: '降低客服重复回复成本，提升问题分流、升级和知识库沉淀效率。',
+    knowledgeSources: ['客服话术库', '售后政策', '产品 FAQ', '历史工单'],
+    tools: ['office-document', 'local-filesystem'],
+    skills: [
+      additionalSkills.customerIntentTriage,
+      additionalSkills.supportReplyDrafting,
+      additionalSkills.knowledgeBaseImprovement
+    ],
+    sampleInputs: [
+      '请整理这批客服聊天记录，按咨询、售后、退款、投诉和高风险情绪分组，并生成处理建议。',
+      '请根据这 20 条高频问题，生成客服回复模板和需要补充到知识库的条目。'
+    ],
+    outputFormat: '问题分流表、客户情绪风险、建议回复、升级条件、知识库补全清单。',
+    approvalPolicy: '涉及退款、赔偿、承诺、投诉升级和敏感客户时必须人工确认。'
+  },
+  {
+    templateId: 'template_seo_growth_specialist',
+    version: '1.0.0',
+    name: 'AI SEO 增长专员',
+    industry: '市场增长',
+    scenario: '关键词研究、搜索内容简报、增长实验复盘',
+    description: '围绕产品和行业主题整理关键词、搜索意图、内容机会和实验复盘，输出可执行增长内容计划。',
+    recommendedPlanCode: 'ENTERPRISE_BASIC_MONTHLY',
+    businessGoal: '帮助企业低成本规划自然搜索内容，提高内容选题、页面结构和实验复盘质量。',
+    knowledgeSources: ['产品资料', '目标客户画像', '历史内容数据', '竞品页面资料'],
+    tools: ['web-search', 'office-document', 'local-filesystem'],
+    skills: [
+      additionalSkills.seoKeywordResearch,
+      additionalSkills.searchContentBrief,
+      additionalSkills.growthExperimentRecap
+    ],
+    sampleInputs: [
+      '请围绕“企业数字员工”做一组 SEO 关键词研究，并输出内容优先级。',
+      '请把这批历史文章数据整理成增长复盘，给出下一轮内容选题。'
+    ],
+    outputFormat: '关键词矩阵、搜索意图、内容简报、标题建议、实验复盘和下一步动作。',
+    approvalPolicy: '对外发布内容、竞品结论和效果承诺必须由市场负责人确认。'
+  },
+  {
+    templateId: 'template_product_manager',
+    version: '1.0.0',
+    name: 'AI 产品经理',
+    industry: '产品管理',
+    scenario: '用户反馈整理、PRD 草拟、路线图排序和验收标准',
+    description: '把业务需求、用户反馈和竞品信息整理成需求文档、用户故事、验收标准和优先级建议。',
+    recommendedPlanCode: 'ENTERPRISE_STANDARD_MONTHLY',
+    businessGoal: '提升需求澄清、文档输出和产品决策效率，让研发能拿到更清晰的输入。',
+    knowledgeSources: ['用户反馈', '产品说明', '竞品资料', '研发约束'],
+    tools: ['web-search', 'office-document', 'local-filesystem'],
+    skills: [
+      additionalSkills.productRequirementDrafting,
+      additionalSkills.roadmapPrioritization,
+      additionalSkills.acceptanceCriteria
+    ],
+    sampleInputs: [
+      '请根据这批用户反馈，整理一个 PRD 草案，包含目标、范围、用户故事和验收标准。',
+      '请把这些需求按业务价值、实现成本和风险排序，输出下个版本建议路线图。'
+    ],
+    outputFormat: 'PRD 草案、用户故事、验收标准、优先级矩阵、风险和待确认问题。',
+    approvalPolicy: '进入研发排期前必须由产品负责人和技术负责人确认。'
+  },
+  {
+    templateId: 'template_project_manager',
+    version: '1.0.0',
+    name: 'AI 项目经理',
+    industry: '项目管理',
+    scenario: '项目计划、风险跟踪、周报汇总',
+    description: '根据项目资料和进展记录拆解计划、跟踪风险、整理周报和待办，帮助项目负责人保持节奏。',
+    recommendedPlanCode: 'ENTERPRISE_STANDARD_MONTHLY',
+    businessGoal: '减少项目沟通和汇总成本，提高里程碑、风险和责任人的透明度。',
+    knowledgeSources: ['项目计划', '会议纪要', '任务清单', '交付标准'],
+    tools: ['office-document', 'local-filesystem'],
+    skills: [
+      additionalSkills.projectPlanning,
+      additionalSkills.riskTracking,
+      additionalSkills.weeklyStatusReporting
+    ],
+    sampleInputs: [
+      '请根据项目会议纪要生成本周项目周报，包含进展、风险、阻塞和下周计划。',
+      '请把这个实施项目拆解成里程碑、任务、负责人、依赖和验收标准。'
+    ],
+    outputFormat: '项目计划、周报、风险清单、阻塞项、责任人和下一步动作。',
+    approvalPolicy: '涉及交付承诺、延期说明和资源调整时必须由项目负责人确认。'
+  },
+  {
+    templateId: 'template_it_helpdesk',
+    version: '1.0.0',
+    name: 'AI IT 支持专员',
+    industry: 'IT 与运维',
+    scenario: 'IT 问题诊断、运维手册执行、权限申请复核',
+    description: '整理内部 IT 工单、日志和标准手册，给出排查步骤、升级条件和权限申请复核建议。',
+    recommendedPlanCode: 'ENTERPRISE_STANDARD_MONTHLY',
+    businessGoal: '提升一线 IT 工单处理效率，降低重复排查和权限审批风险。',
+    knowledgeSources: ['IT 运维手册', '系统 FAQ', '权限矩阵', '历史工单'],
+    tools: ['web-search', 'office-document', 'local-filesystem'],
+    skills: [
+      additionalSkills.itIssueDiagnosis,
+      additionalSkills.runbookExecution,
+      additionalSkills.accessRequestReview
+    ],
+    sampleInputs: [
+      '请根据这条故障描述和日志，给出一线 IT 排查步骤、可能原因和升级条件。',
+      '请复核这批权限申请，检查系统、角色、权限范围和审批证据是否完整。'
+    ],
+    outputFormat: '故障诊断步骤、确认项、升级条件、权限复核表和风险提示。',
+    approvalPolicy: '涉及生产系统变更、管理员权限和安全策略调整时必须人工审批。'
+  },
+  {
+    templateId: 'template_procurement_assistant',
+    version: '1.0.0',
+    name: 'AI 采购助理',
+    industry: '采购管理',
+    scenario: '供应商调研、报价对比、采购清单生成',
+    description: '协助采购整理供应商资料、对比报价和付款条件，生成采购建议与验收清单。',
+    recommendedPlanCode: 'ENTERPRISE_STANDARD_MONTHLY',
+    businessGoal: '提升供应商筛选和报价对比效率，降低采购决策遗漏风险。',
+    knowledgeSources: ['采购制度', '供应商库', '报价单', '合同模板'],
+    tools: ['web-search', 'office-document', 'local-filesystem'],
+    skills: [
+      additionalSkills.supplierResearch,
+      additionalSkills.quoteComparison,
+      additionalSkills.purchaseChecklist
+    ],
+    sampleInputs: [
+      '请对比这三份供应商报价，输出价格、交期、付款、风险和推荐方案。',
+      '请根据采购需求生成供应商调研清单、验收标准和合同注意点。'
+    ],
+    outputFormat: '供应商对比表、报价分析、风险清单、采购规格、验收标准和推荐结论。',
+    approvalPolicy: '涉及最终供应商选择、付款条件和合同条款时必须由采购负责人确认。'
+  },
+  {
+    templateId: 'template_inventory_logistics',
+    version: '1.0.0',
+    name: 'AI 库存物流专员',
+    industry: '供应链与物流',
+    scenario: '库存异常分析、物流跟踪汇总、补货计划',
+    description: '根据库存、订单和物流记录识别缺货、积压、运输异常和补货优先级。',
+    recommendedPlanCode: 'ENTERPRISE_STANDARD_MONTHLY',
+    businessGoal: '提高库存和物流异常处理效率，减少缺货、积压和订单延误。',
+    knowledgeSources: ['库存台账', '订单记录', '物流节点', '补货规则'],
+    tools: ['office-document', 'local-filesystem'],
+    skills: [
+      additionalSkills.inventoryExceptionAnalysis,
+      additionalSkills.logisticsTrackingSummary,
+      additionalSkills.replenishmentPlanning
+    ],
+    sampleInputs: [
+      '请分析这份库存表，找出缺货、积压、周转异常和补货优先级。',
+      '请汇总这批异常物流订单，按影响客户、原因和处理动作排序。'
+    ],
+    outputFormat: '库存异常表、物流异常汇总、补货计划、客户影响和处理优先级。',
+    approvalPolicy: '涉及采购补货、客户赔付和发货承诺时必须人工确认。'
+  },
+  {
+    templateId: 'template_manufacturing_planner',
+    version: '1.0.0',
+    name: 'AI 生产计划专员',
+    industry: '制造与生产',
+    scenario: '生产计划复核、工单汇总、缺陷归因',
+    description: '整理生产计划、工单进展和质检记录，识别交期、物料、产能和缺陷风险。',
+    recommendedPlanCode: 'ENTERPRISE_PRO_MONTHLY',
+    businessGoal: '提升生产计划复核和异常归因效率，帮助管理者更快发现交付风险。',
+    knowledgeSources: ['生产计划', '工单记录', '物料清单', '质检记录'],
+    tools: ['office-document', 'local-filesystem'],
+    skills: [
+      additionalSkills.productionPlanReview,
+      additionalSkills.workOrderSummary,
+      additionalSkills.defectRootCause
+    ],
+    sampleInputs: [
+      '请复核本周生产计划，检查产能、物料、工序、交期和风险。',
+      '请根据质检记录和工单数据，归纳主要缺陷原因和改善动作。'
+    ],
+    outputFormat: '生产计划复核表、工单进展、异常风险、缺陷归因和改善建议。',
+    approvalPolicy: '涉及排产调整、交期承诺和质量责任认定时必须由生产负责人确认。'
+  },
+  {
+    templateId: 'template_training_designer',
+    version: '1.0.0',
+    name: 'AI 培训课程设计师',
+    industry: '教育培训',
+    scenario: '课程大纲设计、培训材料草拟、学习评估',
+    description: '根据岗位能力目标设计培训课程、讲义、测验和评估方案，适合企业内部培训和客户培训。',
+    recommendedPlanCode: 'ENTERPRISE_BASIC_MONTHLY',
+    businessGoal: '降低培训内容设计成本，提高课程结构、材料和评估的一致性。',
+    knowledgeSources: ['岗位能力模型', '培训资料', '产品说明', '学员反馈'],
+    tools: ['office-document', 'local-filesystem'],
+    skills: [
+      additionalSkills.courseOutlineDesign,
+      additionalSkills.learningMaterialDrafting,
+      additionalSkills.learningAssessment
+    ],
+    sampleInputs: [
+      '请为新销售设计一套 2 小时产品培训课，包含大纲、练习和测验。',
+      '请根据这批学员反馈，整理培训复盘和下一版课程优化建议。'
+    ],
+    outputFormat: '课程大纲、讲义结构、练习题、测验题、评估标准和优化建议。',
+    approvalPolicy: '对外客户培训材料和考试评价标准必须由培训负责人确认。'
+  },
+  {
+    templateId: 'template_medical_admin_assistant',
+    version: '1.0.0',
+    name: 'AI 医疗运营助理',
+    industry: '医疗服务运营',
+    scenario: '非诊断资料整理、预约随访、合规提醒',
+    description: '仅处理非诊断类运营资料，整理预约、随访、服务记录和待确认事项，提示隐私与合规边界。',
+    recommendedPlanCode: 'ENTERPRISE_PRO_MONTHLY',
+    businessGoal: '提升医疗服务运营资料整理效率，同时明确不替代医生诊断和治疗建议。',
+    knowledgeSources: ['服务流程', '预约规则', '随访模板', '隐私合规规范'],
+    tools: ['office-document', 'local-filesystem'],
+    skills: [
+      additionalSkills.medicalRecordStructuring,
+      additionalSkills.appointmentFollowup,
+      additionalSkills.complianceReminder
+    ],
+    sampleInputs: [
+      '请整理这批预约和随访记录，输出待跟进事项、时间提醒和缺失信息。',
+      '请把这份非诊断类服务记录整理成结构化摘要，并标注需要人工确认的问题。'
+    ],
+    outputFormat: '预约随访清单、非诊断资料摘要、缺失信息、合规提醒和人工确认项。',
+    approvalPolicy: '不得输出诊断、用药、治疗建议；涉及医疗判断必须转人工专业人员确认。'
+  },
+  {
+    templateId: 'template_audit_compliance_assistant',
+    version: '1.0.0',
+    name: 'AI 审计合规助理',
+    industry: '审计与合规',
+    scenario: '审计证据清单、制度差距分析、整改跟踪',
+    description: '整理审计资料、制度文件和执行记录，识别证据缺口、制度差距和整改追踪事项。',
+    recommendedPlanCode: 'ENTERPRISE_PRO_MONTHLY',
+    businessGoal: '提升审计准备和合规复核效率，形成可追踪的整改闭环。',
+    knowledgeSources: ['制度文件', '审计清单', '流程记录', '整改台账'],
+    tools: ['office-document', 'local-filesystem'],
+    skills: [
+      additionalSkills.auditEvidenceChecklist,
+      additionalSkills.policyGapAnalysis,
+      additionalSkills.remediationTracking
+    ],
+    sampleInputs: [
+      '请根据这批审计资料，整理证据清单、缺失材料和整改建议。',
+      '请对比制度要求和执行记录，输出差距分析和整改跟踪表。'
+    ],
+    outputFormat: '审计证据清单、制度差距表、整改任务、责任人、截止日期和复核标准。',
+    approvalPolicy: '涉及合规结论、责任认定和对外审计回复时必须人工复核。'
+  },
+  {
+    templateId: 'template_spreadsheet_analyst',
+    version: '1.0.0',
+    name: 'AI 表格数据分析师',
+    industry: '数据分析',
+    scenario: '表格分析、指标看板简报、数据清洗计划',
+    description: '读取表格和 CSV 数据，整理指标、异常、趋势和清洗建议，输出给业务负责人可读的分析结果。',
+    recommendedPlanCode: 'ENTERPRISE_BASIC_MONTHLY',
+    businessGoal: '让非技术团队快速理解表格数据，形成可执行的数据分析结论。',
+    knowledgeSources: ['指标口径', '业务规则', '历史报表', '数据字典'],
+    tools: ['office-document', 'local-filesystem'],
+    skills: [
+      additionalSkills.spreadsheetAnalysis,
+      additionalSkills.metricDashboardBrief,
+      additionalSkills.dataCleaningPlan
+    ],
+    sampleInputs: [
+      '请分析这个销售表格，找出主要指标、异常客户、趋势变化和下一步建议。',
+      '请检查这份 CSV 的缺失值、重复值和字段不一致问题，并给出清洗计划。'
+    ],
+    outputFormat: '指标摘要、异常值、趋势解释、数据质量问题、清洗计划和业务动作建议。',
+    approvalPolicy: '涉及经营决策、财务口径和对外披露数据时必须由负责人确认。'
+  },
+  {
+    templateId: 'template_brand_creative_planner',
+    version: '1.0.0',
+    name: 'AI 品牌创意策划',
+    industry: '品牌与设计',
+    scenario: '品牌简报、创意方向、设计审核清单',
+    description: '根据品牌资料和活动目标整理创意 brief、视觉方向、文案方向和设计审核清单。',
+    recommendedPlanCode: 'ENTERPRISE_BASIC_MONTHLY',
+    businessGoal: '提升品牌活动策划和设计沟通效率，让创意输入更清晰、可评审。',
+    knowledgeSources: ['品牌手册', '活动目标', '受众画像', '历史物料'],
+    tools: ['web-search', 'office-document', 'local-filesystem'],
+    skills: [
+      additionalSkills.brandBriefing,
+      additionalSkills.creativeDirection,
+      additionalSkills.designReviewChecklist
+    ],
+    sampleInputs: [
+      '请根据这次活动目标生成一份品牌创意 brief，包含受众、卖点、视觉方向和物料清单。',
+      '请审核这批海报文案和视觉说明，输出信息层级、合规风险和修改建议。'
+    ],
+    outputFormat: '创意 brief、视觉方向、文案方向、素材清单、设计审核清单和修改建议。',
+    approvalPolicy: '对外发布物料、品牌主张和合规敏感内容必须由品牌负责人确认。'
+  },
+  {
+    templateId: 'template_social_media_operator',
+    version: '1.0.0',
+    name: 'AI 社媒运营专员',
+    industry: '社交媒体运营',
+    scenario: '账号内容规划、互动回复、发布复盘',
+    description: '围绕社媒账号定位、热点主题和用户互动记录，输出内容日历、互动回复和发布复盘建议。',
+    recommendedPlanCode: 'ENTERPRISE_BASIC_MONTHLY',
+    businessGoal: '提高社媒内容规划和互动响应效率，让账号运营更稳定可复盘。',
+    knowledgeSources: ['账号定位', '品牌话术', '历史发布数据', '互动评论记录'],
+    tools: ['web-search', 'office-document', 'local-filesystem'],
+    skills: [
+      skills.contentPlanning,
+      additionalSkills.communityReplyDrafting,
+      additionalSkills.campaignRecap
+    ],
+    sampleInputs: [
+      '请根据本月活动目标，生成一份小红书/公众号/视频号内容日历和选题说明。',
+      '请整理这批评论和私信，生成回复建议、风险提醒和高价值线索列表。'
+    ],
+    outputFormat: '内容日历、选题说明、互动回复、风险提醒、线索清单和发布复盘。',
+    approvalPolicy: '涉及对外发布、价格承诺、医疗/法律/财务敏感内容时必须人工确认。'
+  },
+  {
+    templateId: 'template_store_operations_assistant',
+    version: '1.0.0',
+    name: 'AI 门店运营助理',
+    industry: '门店与本地生活',
+    scenario: '门店日报、客诉整理、排班和物料提醒',
+    description: '整理门店经营记录、客户反馈、人员排班和物料情况，输出日报、异常事项和改善动作。',
+    recommendedPlanCode: 'ENTERPRISE_BASIC_MONTHLY',
+    businessGoal: '帮助门店负责人快速掌握经营异常、客户反馈和执行待办。',
+    knowledgeSources: ['门店 SOP', '客户反馈记录', '排班表', '物料台账'],
+    tools: ['office-document', 'local-filesystem'],
+    skills: [
+      additionalSkills.customerIntentTriage,
+      additionalSkills.inventoryExceptionAnalysis,
+      additionalSkills.weeklyStatusReporting
+    ],
+    sampleInputs: [
+      '请根据今天的门店记录生成门店日报，包含销售、客诉、人员、物料和异常事项。',
+      '请整理这批客户反馈，输出高频问题、处理优先级和门店整改建议。'
+    ],
+    outputFormat: '门店日报、客诉分流、物料提醒、排班风险、整改动作和负责人清单。',
+    approvalPolicy: '涉及赔付、人员处罚、价格承诺和对外回复时必须由门店负责人确认。'
   },
   {
     templateId: 'template_data_research',
