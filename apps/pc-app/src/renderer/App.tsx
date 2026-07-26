@@ -83,8 +83,14 @@ import {
   findFirstUnreadyRequiredModelProfileId,
   getRoleModelRuntimeRequirementStatuses,
   readRequiredModelProfileIdsForRolePackage,
-  readWorkflowRequiredModelProfileIds
+  readWorkflowRequiredModelProfileIds,
+  type RoleModelRuntimeIssue
 } from '../shared/desktop-role-requirements';
+import {
+  selectModelProfileForPreset,
+  type ModelProviderPreset,
+  type ModelProviderPresetModel
+} from '../shared/desktop-model-presets';
 
 type SectionKey = 'workbench' | 'roles' | 'models' | 'tools' | 'knowledge' | 'settings';
 type AccountModalKey = 'enterprise' | 'help' | 'release' | 'download' | 'logout';
@@ -162,20 +168,6 @@ interface ToolSettingsFormValues {
   webSearchEndpoint?: string;
   webSearchApiKey?: string;
   allowPrivateNetwork?: boolean;
-}
-
-interface ModelProviderPreset {
-  id: string;
-  name: string;
-  summary: string;
-  apiBaseUrl?: string;
-  models: Array<{
-    label: string;
-    modelName: string;
-    purpose: ModelProfile['purpose'];
-    temperature?: number;
-    maxTokens?: number;
-  }>;
 }
 
 interface KnowledgeBindingCatalogEntry {
@@ -258,18 +250,32 @@ const modelProviderPresets: ModelProviderPreset[] = [
   {
     id: 'deepseek',
     name: 'DeepSeek',
-    summary: '适合国内中小企业试点，成本可控，支持 OpenAI 兼容接口。',
+    summary: '国内常用低成本模型，适合企业试点、通用对话、报告生成和推理任务。',
     apiBaseUrl: 'https://api.deepseek.com',
     models: [
       {
-        label: 'V4 Flash · 省钱通用',
+        label: 'V4 Flash / 快速通用',
         modelName: 'deepseek-v4-flash',
         purpose: 'general',
         temperature: 0.4,
         maxTokens: 4096
       },
       {
-        label: 'V4 Pro · 深度推理',
+        label: 'DeepSeek Chat / 通用',
+        modelName: 'deepseek-chat',
+        purpose: 'general',
+        temperature: 0.4,
+        maxTokens: 4096
+      },
+      {
+        label: 'DeepSeek Reasoner / 推理',
+        modelName: 'deepseek-reasoner',
+        purpose: 'reasoning',
+        temperature: 0.2,
+        maxTokens: 8192
+      },
+      {
+        label: 'V4 Pro / 深度推理',
         modelName: 'deepseek-v4-pro',
         purpose: 'reasoning',
         temperature: 0.2,
@@ -280,63 +286,242 @@ const modelProviderPresets: ModelProviderPreset[] = [
   {
     id: 'openai',
     name: 'OpenAI',
-    summary: '适合质量优先和复杂任务；当前桌面端先按兼容接口配置。',
+    summary: '适合质量优先、复杂任务和多模态能力；接口按 Chat Completions 兼容方式调用。',
     apiBaseUrl: 'https://api.openai.com/v1',
     models: [
       {
-        label: 'GPT-5.6 Terra · 质量成本平衡',
+        label: 'GPT-5.6 Terra / 平衡',
         modelName: 'gpt-5.6-terra',
         purpose: 'general',
         temperature: 0.3,
         maxTokens: 4096
       },
       {
-        label: 'GPT-5.6 Luna · 低成本批量',
+        label: 'GPT-5.6 Luna / 低成本',
         modelName: 'gpt-5.6-luna',
         purpose: 'general',
         temperature: 0.4,
         maxTokens: 4096
       },
       {
-        label: 'GPT-5.6 Sol · 高质量复杂任务',
+        label: 'GPT-5.6 Sol / 高质量',
         modelName: 'gpt-5.6-sol',
         purpose: 'reasoning',
         temperature: 0.2,
         maxTokens: 8192
+      },
+      {
+        label: 'GPT-4o / 多模态',
+        modelName: 'gpt-4o',
+        purpose: 'vision',
+        temperature: 0.3,
+        maxTokens: 4096
+      },
+      {
+        label: 'GPT-4o mini / 轻量',
+        modelName: 'gpt-4o-mini',
+        purpose: 'general',
+        temperature: 0.4,
+        maxTokens: 4096
       }
     ]
   },
   {
     id: 'dashscope',
     name: '通义千问',
-    summary: '阿里云 DashScope 兼容模式，适合国内部署和企业网络环境。',
+    summary: '阿里云 DashScope 兼容模式，适合国内企业网络、知识库问答和中文办公场景。',
     apiBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     models: [
       {
-        label: 'Qwen Plus · 通用',
+        label: 'Qwen Plus / 通用',
         modelName: 'qwen-plus',
         purpose: 'general',
         temperature: 0.4,
         maxTokens: 4096
       },
       {
-        label: 'Qwen Max · 高质量',
+        label: 'Qwen Max / 高质量',
         modelName: 'qwen-max',
         purpose: 'reasoning',
         temperature: 0.2,
         maxTokens: 8192
+      },
+      {
+        label: 'Qwen Turbo / 批量',
+        modelName: 'qwen-turbo',
+        purpose: 'general',
+        temperature: 0.5,
+        maxTokens: 4096
+      },
+      {
+        label: 'Qwen Long / 长文档',
+        modelName: 'qwen-long',
+        purpose: 'document',
+        temperature: 0.3,
+        maxTokens: 8192
+      },
+      {
+        label: 'Qwen VL Max / 图片理解',
+        modelName: 'qwen-vl-max',
+        purpose: 'vision',
+        temperature: 0.2,
+        maxTokens: 4096
       }
     ]
   },
   {
     id: 'moonshot',
     name: 'Kimi / Moonshot',
-    summary: '适合长文本阅读、材料整理和报告生成。',
+    summary: '适合长文本阅读、材料整理、合同/报告分析和内容改写。',
     apiBaseUrl: 'https://api.moonshot.cn/v1',
     models: [
       {
-        label: 'Kimi K2 · 通用',
+        label: 'Kimi K2 / 通用',
         modelName: 'kimi-k2-0711-preview',
+        purpose: 'general',
+        temperature: 0.4,
+        maxTokens: 4096
+      },
+      {
+        label: 'Kimi Latest / 默认',
+        modelName: 'kimi-latest',
+        purpose: 'general',
+        temperature: 0.4,
+        maxTokens: 4096
+      },
+      {
+        label: 'Moonshot 32K / 长文档',
+        modelName: 'moonshot-v1-32k',
+        purpose: 'document',
+        temperature: 0.3,
+        maxTokens: 8192
+      },
+      {
+        label: 'Moonshot 128K / 超长文档',
+        modelName: 'moonshot-v1-128k',
+        purpose: 'document',
+        temperature: 0.3,
+        maxTokens: 8192
+      }
+    ]
+  },
+  {
+    id: 'siliconflow',
+    name: 'SiliconFlow',
+    summary: '聚合开源模型服务，适合快速切换 Qwen、DeepSeek、GLM 等不同模型。',
+    apiBaseUrl: 'https://api.siliconflow.cn/v1',
+    models: [
+      {
+        label: 'Qwen3 32B / 通用',
+        modelName: 'Qwen/Qwen3-32B',
+        purpose: 'general',
+        temperature: 0.4,
+        maxTokens: 4096
+      },
+      {
+        label: 'DeepSeek V3 / 通用',
+        modelName: 'deepseek-ai/DeepSeek-V3',
+        purpose: 'general',
+        temperature: 0.4,
+        maxTokens: 4096
+      },
+      {
+        label: 'DeepSeek R1 / 推理',
+        modelName: 'deepseek-ai/DeepSeek-R1',
+        purpose: 'reasoning',
+        temperature: 0.2,
+        maxTokens: 8192
+      },
+      {
+        label: 'Qwen2.5 VL / 图片理解',
+        modelName: 'Qwen/Qwen2.5-VL-72B-Instruct',
+        purpose: 'vision',
+        temperature: 0.2,
+        maxTokens: 4096
+      }
+    ]
+  },
+  {
+    id: 'zhipu',
+    name: '智谱 GLM',
+    summary: '国内常用企业模型，适合中文办公、推理和多模态任务。',
+    apiBaseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    models: [
+      {
+        label: 'GLM-4.5 / 通用推理',
+        modelName: 'glm-4.5',
+        purpose: 'reasoning',
+        temperature: 0.3,
+        maxTokens: 8192
+      },
+      {
+        label: 'GLM-4.5 Flash / 低成本',
+        modelName: 'glm-4.5-flash',
+        purpose: 'general',
+        temperature: 0.4,
+        maxTokens: 4096
+      },
+      {
+        label: 'GLM-4V / 图片理解',
+        modelName: 'glm-4v',
+        purpose: 'vision',
+        temperature: 0.2,
+        maxTokens: 4096
+      }
+    ]
+  },
+  {
+    id: 'minimax',
+    name: 'MiniMax',
+    summary: '适合客服、营销文案、长文本生成和中文场景的兼容接口。',
+    apiBaseUrl: 'https://api.minimax.chat/v1',
+    models: [
+      {
+        label: 'MiniMax M1 / 推理',
+        modelName: 'MiniMax-M1',
+        purpose: 'reasoning',
+        temperature: 0.2,
+        maxTokens: 8192
+      },
+      {
+        label: 'MiniMax Text / 通用',
+        modelName: 'MiniMax-Text-01',
+        purpose: 'general',
+        temperature: 0.4,
+        maxTokens: 4096
+      },
+      {
+        label: 'MiniMax VL / 图片理解',
+        modelName: 'MiniMax-VL-01',
+        purpose: 'vision',
+        temperature: 0.2,
+        maxTokens: 4096
+      }
+    ]
+  },
+  {
+    id: 'volcengine-ark',
+    name: '火山方舟',
+    summary: '字节火山方舟兼容接口，模型名通常填写控制台里的 Endpoint ID。',
+    apiBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    models: [
+      {
+        label: 'Doubao Seed / 通用',
+        modelName: 'doubao-seed-1-6',
+        purpose: 'general',
+        temperature: 0.4,
+        maxTokens: 4096
+      },
+      {
+        label: 'Doubao Thinking / 推理',
+        modelName: 'doubao-seed-1-6-thinking',
+        purpose: 'reasoning',
+        temperature: 0.2,
+        maxTokens: 8192
+      },
+      {
+        label: 'Ark Endpoint / 自填',
+        modelName: 'your-ark-endpoint-id',
         purpose: 'general',
         temperature: 0.4,
         maxTokens: 4096
@@ -344,16 +529,66 @@ const modelProviderPresets: ModelProviderPreset[] = [
     ]
   },
   {
-    id: 'siliconflow',
-    name: 'SiliconFlow',
-    summary: '聚合模型服务，适合快速替换和对比不同开源模型。',
-    apiBaseUrl: 'https://api.siliconflow.cn/v1',
+    id: 'openrouter',
+    name: 'OpenRouter',
+    summary: '海外聚合网关，适合统一接入不同模型并做对比测试。',
+    apiBaseUrl: 'https://openrouter.ai/api/v1',
     models: [
       {
-        label: '自选模型',
-        modelName: 'Qwen/Qwen3-32B',
+        label: 'GPT-4o mini / 通用',
+        modelName: 'openai/gpt-4o-mini',
         purpose: 'general',
         temperature: 0.4,
+        maxTokens: 4096
+      },
+      {
+        label: 'Claude Sonnet / 高质量',
+        modelName: 'anthropic/claude-3.5-sonnet',
+        purpose: 'reasoning',
+        temperature: 0.3,
+        maxTokens: 8192
+      },
+      {
+        label: 'Gemini Flash / 快速',
+        modelName: 'google/gemini-2.5-flash',
+        purpose: 'general',
+        temperature: 0.4,
+        maxTokens: 4096
+      },
+      {
+        label: 'DeepSeek Chat / 低成本',
+        modelName: 'deepseek/deepseek-chat',
+        purpose: 'general',
+        temperature: 0.4,
+        maxTokens: 4096
+      }
+    ]
+  },
+  {
+    id: 'gemini-openai',
+    name: 'Gemini 兼容接口',
+    summary: 'Google Gemini 的 OpenAI-compatible 入口，适合图片理解和长上下文任务。',
+    apiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    models: [
+      {
+        label: 'Gemini 2.5 Flash / 快速',
+        modelName: 'gemini-2.5-flash',
+        purpose: 'general',
+        temperature: 0.4,
+        maxTokens: 4096
+      },
+      {
+        label: 'Gemini 2.5 Pro / 高质量',
+        modelName: 'gemini-2.5-pro',
+        purpose: 'reasoning',
+        temperature: 0.3,
+        maxTokens: 8192
+      },
+      {
+        label: 'Gemini Flash Vision / 图片',
+        modelName: 'gemini-2.5-flash',
+        purpose: 'vision',
+        temperature: 0.2,
         maxTokens: 4096
       }
     ]
@@ -377,13 +612,20 @@ const modelProviderPresets: ModelProviderPreset[] = [
         purpose: 'general',
         temperature: 0.4,
         maxTokens: 4096
+      },
+      {
+        label: '本地 DeepSeek R1',
+        modelName: 'deepseek-r1',
+        purpose: 'reasoning',
+        temperature: 0.2,
+        maxTokens: 8192
       }
     ]
   },
   {
     id: 'custom',
     name: '自定义兼容接口',
-    summary: '用于企业私有模型、代理网关或其他 OpenAI-compatible 服务。',
+    summary: '用于企业私有模型、代理网关、Dify/MCP 网关或其他 OpenAI-compatible 服务。',
     models: [
       {
         label: '自定义模型',
@@ -2332,28 +2574,58 @@ export default function App() {
                       {roleConfigHasUnreadyModel ? '待配置' : '已就绪'}
                     </Tag>
                   </Flex>
-                  <Space size={[6, 6]} wrap>
-                    {roleConfigModelRequirements.map((requirement) => (
-                      <Tag
-                        key={requirement.profile.id}
-                        color={requirement.ready ? 'green' : requirement.issue === 'disabled' ? 'red' : 'orange'}
+                  <List
+                    size="small"
+                    dataSource={roleConfigModelRequirements}
+                    locale={{ emptyText: '当前数字员工没有声明模型需求' }}
+                    renderItem={(requirement) => (
+                      <List.Item
+                        actions={[
+                          <Button
+                            key="configure"
+                            size="small"
+                            type={requirement.ready ? 'default' : 'primary'}
+                            onClick={() => openRequiredModelProfileConfig(requirement.profile)}
+                          >
+                            {requirement.ready ? '查看配置' : '配置模型'}
+                          </Button>
+                        ]}
                       >
-                        {requirement.profile.providerName} / {requirement.profile.modelName}
-                        {requirement.requiredByNodeIds.length > 0
-                          ? ` · ${requirement.requiredByNodeIds.length} 个节点`
-                          : ''}
-                        {requirement.issue === 'disabled'
-                          ? ' · 未启用'
-                          : requirement.issue === 'missing'
-                            ? ' · 待创建'
-                            : requirement.issue === 'unconfigured'
-                              ? ' · 待填 Key'
-                              : ''}
-                      </Tag>
-                    ))}
-                  </Space>
+                        <List.Item.Meta
+                          title={
+                            <Space size={6} wrap>
+                              <Typography.Text strong>
+                                {requirement.profile.providerName} / {requirement.profile.modelName}
+                              </Typography.Text>
+                              <Tag>{modelPurposeLabel(requirement.profile.purpose)}</Tag>
+                              <Tag color={requirement.ready ? 'green' : 'orange'}>
+                                {renderModelRequirementStatusLabel(requirement.issue)}
+                              </Tag>
+                            </Space>
+                          }
+                          description={
+                            <Space direction="vertical" size={2}>
+                              <Typography.Text type="secondary">
+                                Profile ID：{requirement.profile.id}
+                              </Typography.Text>
+                              <Typography.Text type="secondary">
+                                Base URL：{requirement.profile.apiBaseUrl || '待填写'}
+                              </Typography.Text>
+                              <Typography.Text type="secondary">
+                                API Key：{requirement.configured ? '已填写' : '待填写'} · 启用：
+                                {requirement.enabled ? '已启用' : '未启用'} · 节点：
+                                {requirement.requiredByNodeIds.length > 0
+                                  ? requirement.requiredByNodeIds.join('、')
+                                  : '通用绑定'}
+                              </Typography.Text>
+                            </Space>
+                          }
+                        />
+                      </List.Item>
+                    )}
+                  />
                   <Typography.Text type="secondary">
-                    API Key 只保存在当前电脑。本员工安装后，如果模型未配置，会自动打开模型配置。
+                    API Key 只保存在当前电脑；从 admin-console 上架的员工如果声明了多个 LLM，这里会逐项列出。
                   </Typography.Text>
                 </Space>
               </Card>
@@ -2508,9 +2780,19 @@ export default function App() {
                   </Space>
 
                   <Space size={6} wrap>
-                    {preset.models.slice(0, 4).map((model) => (
-                      <Tag key={`${preset.id}-${model.modelName}`}>{model.label}</Tag>
+                    {preset.models.slice(0, 5).map((model) => (
+                      <Tag
+                        key={`${preset.id}-${model.modelName}-${model.purpose}`}
+                        className="model-preset-tag"
+                        onClick={() => {
+                          applyModelProviderPreset(preset, model);
+                          setModelConfigOpen(true);
+                        }}
+                      >
+                        {model.label}
+                      </Tag>
                     ))}
+                    {preset.models.length > 5 ? <Tag>+{preset.models.length - 5}</Tag> : null}
                   </Space>
 
                   <div className="catalog-card-action-row">
@@ -3213,6 +3495,27 @@ export default function App() {
     });
   }
 
+  function openRequiredModelProfileConfig(profile: ModelProfile) {
+    setRuntimeState((current) => {
+      const hasProfile = current.modelProfiles.some((item) => item.id === profile.id);
+      const enabledModelProfileIds = mergeUniqueStrings(
+        current.localRuntime.enabledModelProfileIds,
+        [profile.id]
+      );
+
+      return {
+        ...current,
+        modelProfiles: hasProfile ? current.modelProfiles : [...current.modelProfiles, profile],
+        localRuntime: {
+          ...current.localRuntime,
+          enabledModelProfileIds
+        }
+      };
+    });
+    setSelectedModelId(profile.id);
+    setModelConfigOpen(true);
+  }
+
   function saveModelProfile(values: ModelFormValues) {
     if (!selectedModelProfile) {
       return;
@@ -3224,6 +3527,7 @@ export default function App() {
         profile.id === selectedModelProfile.id
           ? {
               ...profile,
+              providerId: selectedModelProfile.providerId,
               providerName: values.providerName.trim(),
               modelName: values.modelName.trim(),
               purpose: values.purpose,
@@ -3241,44 +3545,29 @@ export default function App() {
 
   function applyModelProviderPreset(
     preset: ModelProviderPreset,
-    model: ModelProviderPreset['models'][number]
+    model: ModelProviderPresetModel
   ) {
-    const targetProfile =
-      runtimeState.modelProfiles.find((profile) => profile.purpose === model.purpose) ??
-      selectedModelProfile ??
-      runtimeState.modelProfiles[0];
+    const selection = selectModelProfileForPreset(runtimeState.modelProfiles, preset, model);
 
-    if (!targetProfile) {
+    if (!selection) {
       return;
     }
 
-    setSelectedModelId(targetProfile.id);
+    setSelectedModelId(selection.profile.id);
     setRuntimeState((current) => ({
       ...current,
-      modelProfiles: current.modelProfiles.map((profile) =>
-        profile.id === targetProfile.id
-          ? {
-              ...profile,
-              providerName: preset.name,
-              modelName: model.modelName,
-              purpose: model.purpose,
-              apiBaseUrl: preset.apiBaseUrl,
-              temperature: model.temperature,
-              maxTokens: model.maxTokens
-            }
-          : profile
-      )
+      modelProfiles: selection.modelProfiles
     }));
     modelForm.setFieldsValue({
       providerName: preset.name,
       modelName: model.modelName,
       purpose: model.purpose,
-      apiBaseUrl: preset.apiBaseUrl,
-      apiKey: targetProfile.apiKey,
-      temperature: model.temperature,
-      maxTokens: model.maxTokens,
-      monthlyBudgetCents: targetProfile.monthlyBudgetCents,
-      fallbackProfileId: targetProfile.fallbackProfileId
+      apiBaseUrl: selection.profile.apiBaseUrl,
+      apiKey: selection.apiKeyPreserved ? selection.profile.apiKey : undefined,
+      temperature: selection.profile.temperature,
+      maxTokens: selection.profile.maxTokens,
+      monthlyBudgetCents: selection.profile.monthlyBudgetCents,
+      fallbackProfileId: selection.profile.fallbackProfileId
     });
     setModelTestNotice(`已套用 ${preset.name} / ${model.modelName}，请填写 API Key 后保存并测试连接。`);
   }
@@ -4734,6 +5023,20 @@ function modelPurposeLabel(purpose: ModelProfile['purpose']): string {
   };
 
   return labels[purpose];
+}
+
+function renderModelRequirementStatusLabel(issue: RoleModelRuntimeIssue | undefined): string {
+  if (!issue) {
+    return '已就绪';
+  }
+
+  const labels: Record<RoleModelRuntimeIssue, string> = {
+    missing: '待创建',
+    disabled: '未启用',
+    unconfigured: '待填 Key'
+  };
+
+  return labels[issue];
 }
 
 function syncPolicyLabel(policy: DesktopRuntimeState['localRuntime']['syncPolicy']): string {

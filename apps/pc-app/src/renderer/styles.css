@@ -1033,12 +1033,58 @@ body,
   background: #111827;
 }
 
-.provider-qwen {
+.provider-dashscope {
   background: #615ced;
 }
 
-.provider-claude {
-  background: #7c4a2d;
+.provider-moonshot {
+  background: #0f766e;
+}
+
+.provider-siliconflow {
+  background: #2563eb;
+}
+
+.provider-zhipu {
+  background: #7c3aed;
+}
+
+.provider-minimax {
+  background: #be123c;
+}
+
+.provider-volcengine-ark {
+  background: #ea580c;
+}
+
+.provider-openrouter {
+  background: #334155;
+}
+
+.provider-gemini-openai {
+  background: #0ea5e9;
+}
+
+.provider-ollama {
+  background: #374151;
+}
+
+.provider-custom {
+  background: #52525b;
+}
+
+.model-preset-tag {
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.model-preset-tag:hover {
+  border-color: #1677ff;
+  color: #1677ff;
+  background: #f0f6ff;
 }
 
 .catalog-card h5.ant-typography {
