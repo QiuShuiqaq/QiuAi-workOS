@@ -146,6 +146,9 @@ export function SettingsPageClient({
   const currentPlan = plans.find((plan) => plan.code === activeWorkspace.planCode) ?? plans[0];
   const alipayStatus = billing.paymentProviders.find((provider) => provider.provider === 'ALIPAY');
   const missingAlipayKeys = alipayStatus?.missingEnvKeys.join(', ') || '-';
+  const purchasablePlans = plans.filter(
+    (plan) => plan.billingCycle === 'MONTHLY' || plan.billingCycle === 'ANNUAL'
+  );
 
   async function createAlipayOrder(plan: PlanDetail) {
     if (!plan.priceCents) {
@@ -570,8 +573,16 @@ export function SettingsPageClient({
             />
           </Card>
 
-          <Card title="商业版本" bordered={false}>
-            <Table rowKey="code" columns={planColumns} dataSource={plans} pagination={false} />
+          <Card title="购买套餐" bordered={false}>
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Alert
+                showIcon
+                type="info"
+                message="企业套餐正式价格"
+                description="企业基础版 588 元/月，企业标准版 1088 元/月，企业专业版 2888 元/月；年付按 10 个月计费。"
+              />
+              <Table rowKey="code" columns={planColumns} dataSource={purchasablePlans} pagination={false} />
+            </Space>
           </Card>
 
           <Card

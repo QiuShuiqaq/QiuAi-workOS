@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 
 const root = process.cwd();
 const envFilePath = path.resolve(root, process.env.WORKOS_ENV_FILE ?? '.env');
@@ -232,14 +233,16 @@ async function checkDatabase() {
 
   try {
     await prisma.$connect();
-    const expectedPaidPlans = new Map([
-      ['ENTERPRISE_BASIC_MONTHLY', 29900],
-      ['ENTERPRISE_BASIC_ANNUAL', 299000],
-      ['ENTERPRISE_STANDARD_MONTHLY', 59900],
-      ['ENTERPRISE_STANDARD_ANNUAL', 599000],
-      ['ENTERPRISE_PRO_MONTHLY', 98000],
-      ['ENTERPRISE_PRO_ANNUAL', 980000]
-    ]);
+    const { qiuaiPlanCatalog } = await import(
+      pathToFileURL(path.resolve(root, 'packages/api-contract/dist/plan-catalog.js')).href
+    );
+    const expectedPaidPlans = new Map(
+      qiuaiPlanCatalog
+        .filter((plan) => plan.code.startsWith('ENTERPRISE_'))
+        .filter((plan) => plan.billingCycle === 'MONTHLY' || plan.billingCycle === 'ANNUAL')
+        .filter((plan) => typeof plan.priceCents === 'number')
+        .map((plan) => [plan.code, plan.priceCents])
+    );
 
     const [planCount, workspaceCount, enterprisePlans] = await Promise.all([
       prisma.plan.count(),
