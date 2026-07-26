@@ -98,6 +98,24 @@ const initialTools: ToolManifest[] = [
     entryPoint: 'native',
     capabilities: ['filesystem'],
     requiresApproval: true
+  },
+  {
+    id: 'http-request',
+    name: 'HTTP Request',
+    version: '0.1.0',
+    scope: 'desktop',
+    entryPoint: 'api',
+    capabilities: ['custom_api'],
+    requiresApproval: true
+  },
+  {
+    id: 'mcp',
+    name: 'MCP Gateway',
+    version: '0.1.0',
+    scope: 'desktop',
+    entryPoint: 'mcp',
+    capabilities: ['mcp'],
+    requiresApproval: true
   }
 ];
 
@@ -110,7 +128,7 @@ export function createInitialDesktopRuntimeState(
   const taskCountByRole = countTasksByRole(runtimeTasks);
   const lastTaskAtByRole = lastTaskAtMap(runtimeTasks);
   const enabledToolIds = initialTools
-    .filter((tool) => tool.id !== 'office-document')
+    .filter((tool) => ['web-search', 'local-filesystem'].includes(tool.id))
     .map((tool) => tool.id);
   const enabledModelProfileIds = initialModelProfiles
     .filter((modelProfile) => modelProfile.purpose !== 'reasoning')

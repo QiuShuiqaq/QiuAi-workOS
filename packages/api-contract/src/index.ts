@@ -16,3 +16,4 @@ export * from './task';
 export * from './workspace';
 export * from './plan-catalog';
 export * from './role-template';
+export * from './workflow-graph';

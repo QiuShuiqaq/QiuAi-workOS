@@ -1,3 +1,5 @@
+import type { RoleWorkflowGraph } from './workflow-graph';
+
 export interface RoleSkillSummary {
   code: string;
   name: string;
@@ -35,6 +37,7 @@ export interface RoleTemplateSummary {
   tools: string[];
   skills: RoleSkillSummary[];
   workflowSteps: RoleTemplateWorkflowStep[];
+  workflowGraph?: RoleWorkflowGraph;
   sampleInputs: string[];
   outputFormat: string;
   approvalPolicy: string;

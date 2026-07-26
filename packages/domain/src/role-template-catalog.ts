@@ -1,3 +1,5 @@
+import type { RoleWorkflowGraph } from './workflow-graph';
+
 export type RoleKnowledgeSource =
   | 'local_folder'
   | 'local_file'
@@ -46,6 +48,7 @@ export interface RoleTemplateCatalogEntry {
   approvalPolicy: string;
   skills: RoleSkill[];
   workflowSteps?: RoleTemplateWorkflowStep[];
+  workflowGraph?: RoleWorkflowGraph;
   sampleInputs?: string[];
   outputFormat?: string;
   modelProfileIds: string[];

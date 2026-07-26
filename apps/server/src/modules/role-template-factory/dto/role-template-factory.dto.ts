@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   Min,
@@ -82,6 +83,9 @@ export class AdminRoleTemplateDetailDto {
 
   @ApiProperty({ type: [AdminRoleTemplateWorkflowStepDto] })
   workflowSteps!: AdminRoleTemplateWorkflowStepDto[];
+
+  @ApiPropertyOptional({ type: Object })
+  workflowGraph?: unknown;
 
   @ApiProperty({ type: [String] })
   sampleInputs!: string[];
@@ -242,6 +246,11 @@ export class CreateAdminRoleTemplateRequestDto {
   @Type(() => AdminRoleTemplateWorkflowStepInputDto)
   workflowSteps?: AdminRoleTemplateWorkflowStepInputDto[];
 
+  @ApiPropertyOptional({ type: Object })
+  @IsOptional()
+  @IsObject()
+  workflowGraph?: Record<string, unknown>;
+
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()
   @IsArray()
@@ -345,6 +354,11 @@ export class UpdateAdminRoleTemplateRequestDto {
   @Type(() => AdminRoleTemplateWorkflowStepInputDto)
   workflowSteps?: AdminRoleTemplateWorkflowStepInputDto[];
 
+  @ApiPropertyOptional({ type: Object })
+  @IsOptional()
+  @IsObject()
+  workflowGraph?: Record<string, unknown>;
+
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()
   @IsArray()
@@ -412,6 +426,43 @@ export class TestAdminRoleTemplateRequestDto {
   sampleWorkspaceId?: string;
 }
 
+export class AdminRoleTemplateTestNodeTraceDto {
+  @ApiProperty({ example: 'draft_result' })
+  nodeId!: string;
+
+  @ApiProperty({ example: 'Draft result' })
+  nodeName!: string;
+
+  @ApiProperty({ example: 'llm' })
+  nodeType!: string;
+
+  @ApiProperty({ enum: ['passed', 'warning', 'failed'] })
+  status!: 'passed' | 'warning' | 'failed';
+
+  @ApiProperty({ example: 'Reads start.text and gather_context.text.' })
+  inputPreview!: string;
+
+  @ApiProperty({ example: 'Writes draft_text.' })
+  outputPreview!: string;
+
+  @ApiProperty({ type: [String] })
+  warnings!: string[];
+}
+
+export class AdminRoleTemplateTestGraphTraceDto {
+  @ApiProperty({ example: 'start' })
+  entryNodeId!: string;
+
+  @ApiProperty({ example: 5 })
+  nodeCount!: number;
+
+  @ApiProperty({ example: 4 })
+  edgeCount!: number;
+
+  @ApiProperty({ type: [AdminRoleTemplateTestNodeTraceDto] })
+  nodes!: AdminRoleTemplateTestNodeTraceDto[];
+}
+
 export class TestAdminRoleTemplateResponseDto {
   @ApiProperty({
     example: {
@@ -430,5 +481,6 @@ export class TestAdminRoleTemplateResponseDto {
     message: string;
     warnings: string[];
     sampleInput?: string;
+    graphTrace?: AdminRoleTemplateTestGraphTraceDto;
   };
 }

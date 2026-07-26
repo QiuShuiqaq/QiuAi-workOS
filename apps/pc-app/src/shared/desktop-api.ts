@@ -89,6 +89,7 @@ export interface DesktopAuthorizedRoleTemplateSummary {
   tools: string[];
   skills: DesktopAuthorizedRoleSkillSummary[];
   workflowSteps: DesktopAuthorizedRoleTemplateWorkflowStep[];
+  workflowGraph?: unknown;
   sampleInputs: string[];
   outputFormat: string;
   approvalPolicy: string;
@@ -156,8 +157,13 @@ export type DesktopToolInvocationAction =
   | 'document.extract_text'
   | 'web.fetch_url'
   | 'web.search'
+  | 'http.request'
+  | 'mcp.call'
   | 'office.write_markdown_document'
+  | 'office.write_docx_document'
   | 'spreadsheet.write_csv'
+  | 'spreadsheet.write_xlsx'
+  | 'presentation.write_pptx'
   | 'presentation.write_outline_markdown';
 
 export interface DesktopToolInvocationRequest {

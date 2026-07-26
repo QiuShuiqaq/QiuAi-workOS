@@ -50,6 +50,7 @@ export interface DesktopExecutionLogEntry {
   eventType: string;
   message: string;
   createdAt: string;
+  details?: Record<string, unknown>;
 }
 
 export interface DesktopCostRecordSummary {
@@ -135,6 +136,7 @@ export interface RolePackageManifest {
   templateVersion?: string;
   skills?: DesktopRoleSkillSummary[];
   workflowSteps?: DesktopRoleWorkflowStep[];
+  workflowGraph?: unknown;
   sampleInputs?: string[];
   outputFormat?: string;
   modelProfileIds: string[];

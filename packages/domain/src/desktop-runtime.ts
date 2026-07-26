@@ -1,3 +1,5 @@
+import type { RoleWorkflowGraph } from './workflow-graph';
+
 export type KnowledgeBindingSource =
   | 'local_folder'
   | 'local_file'
@@ -88,6 +90,7 @@ export interface RolePackageManifest {
     summary: string;
   }>;
   workflowSteps?: RoleWorkflowStep[];
+  workflowGraph?: RoleWorkflowGraph;
   sampleInputs?: string[];
   outputFormat?: string;
   modelProfileIds: string[];
@@ -194,6 +197,10 @@ export function validateRolePackageManifest(input: unknown): RolePackageManifest
     workflowSteps: Array.isArray(record.workflowSteps)
       ? record.workflowSteps.map(validateRoleWorkflowStep)
       : undefined,
+    workflowGraph:
+      record.workflowGraph === undefined
+        ? undefined
+        : validateRoleWorkflowGraph(record.workflowGraph, 'rolePackage.workflowGraph'),
     sampleInputs: requireStringArray(record.sampleInputs, 'rolePackage.sampleInputs'),
     outputFormat: optionalString(record.outputFormat, 'rolePackage.outputFormat'),
     modelProfileIds,
@@ -235,6 +242,183 @@ function validateRoleWorkflowStep(input: unknown): RoleWorkflowStep {
     instruction: requireString(record.instruction, 'roleWorkflowStep.instruction'),
     toolIds: requireStringArray(record.toolIds, 'roleWorkflowStep.toolIds'),
     requiresApproval: optionalBoolean(record.requiresApproval, 'roleWorkflowStep.requiresApproval')
+  };
+}
+
+function validateRoleWorkflowGraph(input: unknown, fieldName: string): RoleWorkflowGraph {
+  const record = requireRecord(input, fieldName);
+  const version = requireEnum(record.version, `${fieldName}.version`, ['1.0.0']);
+  const nodes = requireWorkflowGraphNodes(record.nodes, `${fieldName}.nodes`);
+  const edges = requireWorkflowGraphEdges(record.edges, `${fieldName}.edges`);
+  const entryNodeId = requireString(record.entryNodeId, `${fieldName}.entryNodeId`);
+  const nodeIds = new Set(nodes.map((node) => node.id));
+
+  if (!nodeIds.has(entryNodeId)) {
+    throw new Error(`${fieldName}.entryNodeId must reference an existing node.`);
+  }
+
+  for (const edge of edges) {
+    if (!nodeIds.has(edge.sourceNodeId) || !nodeIds.has(edge.targetNodeId)) {
+      throw new Error(`${fieldName}.edges must reference existing nodes.`);
+    }
+  }
+
+  return {
+    version,
+    nodes,
+    edges,
+    entryNodeId,
+    variables: Array.isArray(record.variables)
+      ? record.variables.map((item, index) =>
+          validateWorkflowGraphVariable(item, `${fieldName}.variables[${index}]`)
+        )
+      : undefined,
+    runtimePolicy: validateWorkflowGraphRuntimePolicy(
+      record.runtimePolicy,
+      `${fieldName}.runtimePolicy`
+    )
+  };
+}
+
+function requireWorkflowGraphNodes(value: unknown, fieldName: string): RoleWorkflowGraph['nodes'] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`${fieldName} must contain at least one node.`);
+  }
+
+  const nodeIds = new Set<string>();
+  return value.map((item, index) => {
+    const record = requireRecord(item, `${fieldName}[${index}]`);
+    const id = requireString(record.id, `${fieldName}[${index}].id`);
+    const artifactType =
+      record.artifactType === undefined || record.artifactType === null
+        ? undefined
+        : requireEnum(record.artifactType, `${fieldName}[${index}].artifactType`, [
+            'markdown',
+            'docx',
+            'xlsx',
+            'pptx',
+            'pdf',
+            'png',
+            'jpg',
+            'csv',
+            'zip'
+          ]) as RoleWorkflowGraph['nodes'][number]['artifactType'];
+    if (nodeIds.has(id)) {
+      throw new Error(`${fieldName} ids must be unique.`);
+    }
+    nodeIds.add(id);
+
+    return {
+      id,
+      type: requireEnum(record.type, `${fieldName}[${index}].type`, [
+        'start',
+        'input',
+        'knowledge',
+        'reasoning',
+        'llm',
+        'tool',
+        'condition',
+        'artifact',
+        'approval',
+        'output'
+      ]),
+      name: requireString(record.name, `${fieldName}[${index}].name`),
+      description: optionalString(record.description, `${fieldName}[${index}].description`),
+      instruction: optionalString(record.instruction, `${fieldName}[${index}].instruction`),
+      modelProfileId: optionalString(record.modelProfileId, `${fieldName}[${index}].modelProfileId`),
+      toolId: optionalString(record.toolId, `${fieldName}[${index}].toolId`),
+      artifactType,
+      inputVariables: requireStringArray(record.inputVariables, `${fieldName}[${index}].inputVariables`),
+      outputVariables: requireStringArray(record.outputVariables, `${fieldName}[${index}].outputVariables`),
+      requiresApproval: optionalBoolean(record.requiresApproval, `${fieldName}[${index}].requiresApproval`),
+      config: optionalRecord(record.config, `${fieldName}[${index}].config`)
+    };
+  });
+}
+
+function requireWorkflowGraphEdges(value: unknown, fieldName: string): RoleWorkflowGraph['edges'] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error(`${fieldName} must be an array.`);
+  }
+
+  const edgeIds = new Set<string>();
+  return value.map((item, index) => {
+    const record = requireRecord(item, `${fieldName}[${index}]`);
+    const id = requireString(record.id, `${fieldName}[${index}].id`);
+    if (edgeIds.has(id)) {
+      throw new Error(`${fieldName} ids must be unique.`);
+    }
+    edgeIds.add(id);
+
+    return {
+      id,
+      sourceNodeId: requireString(record.sourceNodeId, `${fieldName}[${index}].sourceNodeId`),
+      targetNodeId: requireString(record.targetNodeId, `${fieldName}[${index}].targetNodeId`),
+      condition: validateWorkflowGraphEdgeCondition(
+        record.condition,
+        `${fieldName}[${index}].condition`
+      )
+    };
+  });
+}
+
+function validateWorkflowGraphEdgeCondition(
+  value: unknown,
+  fieldName: string
+): RoleWorkflowGraph['edges'][number]['condition'] {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const record = requireRecord(value, fieldName);
+  return {
+    type: requireEnum(record.type, `${fieldName}.type`, [
+      'always',
+      'equals',
+      'contains',
+      'exists',
+      'expression'
+    ]),
+    variable: optionalString(record.variable, `${fieldName}.variable`),
+    value: record.value,
+    expression: optionalString(record.expression, `${fieldName}.expression`)
+  };
+}
+
+function validateWorkflowGraphVariable(
+  value: unknown,
+  fieldName: string
+): NonNullable<RoleWorkflowGraph['variables']>[number] {
+  const record = requireRecord(value, fieldName);
+
+  return {
+    name: requireString(record.name, `${fieldName}.name`),
+    description: optionalString(record.description, `${fieldName}.description`),
+    required: optionalBoolean(record.required, `${fieldName}.required`),
+    defaultValue: record.defaultValue
+  };
+}
+
+function validateWorkflowGraphRuntimePolicy(
+  value: unknown,
+  fieldName: string
+): RoleWorkflowGraph['runtimePolicy'] {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const record = requireRecord(value, fieldName);
+  return {
+    maxNodeExecutions: optionalPositiveInteger(record.maxNodeExecutions, `${fieldName}.maxNodeExecutions`),
+    maxLoopIterations: optionalPositiveInteger(record.maxLoopIterations, `${fieldName}.maxLoopIterations`),
+    requireApprovalBeforeTools: optionalBoolean(
+      record.requireApprovalBeforeTools,
+      `${fieldName}.requireApprovalBeforeTools`
+    )
   };
 }
 
@@ -383,6 +567,18 @@ function optionalToolSettings(
       )
     }
   };
+}
+
+function optionalRecord(value: unknown, fieldName: string): Record<string, unknown> | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${fieldName} must be an object.`);
+  }
+
+  return value as Record<string, unknown>;
 }
 
 function requireStringArray(value: unknown, fieldName: string): string[] {

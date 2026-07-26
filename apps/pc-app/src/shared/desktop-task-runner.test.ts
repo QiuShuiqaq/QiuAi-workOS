@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import type { ModelProfile, ToolManifest } from './desktop-contract.js';
+import type { ModelProfile, RolePackageManifest, ToolManifest } from './desktop-contract.js';
 import { runDesktopTask } from './desktop-task-runner.js';
 import { createMockTaskDetail } from './workbench-data.js';
 
@@ -42,6 +42,24 @@ const tools: ToolManifest[] = [
     scope: 'desktop',
     entryPoint: 'native',
     capabilities: ['filesystem'],
+    requiresApproval: true
+  },
+  {
+    id: 'http-request',
+    name: 'HTTP Request',
+    version: '1.0.0',
+    scope: 'desktop',
+    entryPoint: 'api',
+    capabilities: ['custom_api'],
+    requiresApproval: true
+  },
+  {
+    id: 'mcp',
+    name: 'MCP Gateway',
+    version: '1.0.0',
+    scope: 'desktop',
+    entryPoint: 'mcp',
+    capabilities: ['mcp'],
     requiresApproval: true
   }
 ];
@@ -112,6 +130,1147 @@ assert.ok(
 );
 assert.ok(
   completed.task.executionLogs.some((log) => log.eventType === 'MODEL_RESPONSE_RECEIVED')
+);
+
+const workflowRolePackage: RolePackageManifest = {
+  roleCode: 'ai-ops',
+  name: 'AI Ops',
+  version: '1.0.0',
+  workflowGraph: {
+    version: '1.0.0',
+    entryNodeId: 'start',
+    runtimePolicy: {
+      maxNodeExecutions: 16,
+      maxLoopIterations: 4,
+      requireApprovalBeforeTools: false
+    },
+    nodes: [
+      { id: 'start', type: 'start', name: 'Start' },
+      {
+        id: 'research',
+        type: 'tool',
+        name: 'Research current market signal',
+        instruction: 'Search for fresh market context before writing.',
+        toolId: 'web-search'
+      },
+      {
+        id: 'write',
+        type: 'artifact',
+        name: 'Write customer follow-up document',
+        instruction: 'Produce an operator-ready follow-up document.',
+        artifactType: 'docx'
+      }
+    ],
+    edges: [
+      {
+        id: 'start-research',
+        sourceNodeId: 'start',
+        targetNodeId: 'research',
+        condition: { type: 'always' }
+      },
+      {
+        id: 'research-write',
+        sourceNodeId: 'research',
+        targetNodeId: 'write',
+        condition: { type: 'always' }
+      }
+    ]
+  },
+  modelProfileIds: ['qiu-general-default'],
+  toolIds: ['web-search'],
+  requiredKnowledgeSources: [],
+  defaultTaskTypes: ['customer_follow_up'],
+  syncPolicy: 'summary_only'
+};
+
+const workflowPromptTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-prompt-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Prepare workflow-backed follow-up',
+    input: 'Create a follow-up plan with recent context.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: workflowRolePackage,
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['web-search'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    const prompt = request.messages.map((message) => message.content).join('\n');
+    assert.match(prompt, /workflow node executor/);
+    assert.match(prompt, /Write customer follow-up document/);
+    assert.match(prompt, /Produce an operator-ready follow-up document/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: 'Workflow-backed result generated.'
+    };
+  },
+  completedAt: '2026-07-20T10:00:05.000Z'
+});
+
+assert.equal(workflowPromptTask.task.state, 'completed');
+assert.ok(
+  workflowPromptTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_GRAPH_LOADED')
+);
+assert.ok(
+  workflowPromptTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_GRAPH_NODE_PLANNED')
+);
+assert.ok(
+  workflowPromptTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_RUNTIME_STARTED')
+);
+assert.ok(
+  workflowPromptTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_RUNTIME_NODE_COMPLETED')
+);
+const workflowPromptNodeLog = workflowPromptTask.task.executionLogs.find(
+  (log) => log.eventType === 'WORKFLOW_RUNTIME_NODE_COMPLETED' && /Write customer follow-up document/.test(log.message)
+);
+assert.ok(workflowPromptNodeLog?.details);
+const workflowPromptNodeDetail = workflowPromptNodeLog.details.workflowNode as {
+  name?: string;
+  status?: string;
+  outputs?: unknown[];
+};
+assert.equal(workflowPromptNodeDetail.name, 'Write customer follow-up document');
+assert.equal(workflowPromptNodeDetail.status, 'completed');
+assert.ok(Array.isArray(workflowPromptNodeDetail.outputs));
+assert.match(
+  workflowPromptTask.task.artifacts.find((artifact) => artifact.type === 'report')?.content ?? '',
+  /Workflow graph: enabled/
+);
+assert.match(
+  workflowPromptTask.task.artifacts.find((artifact) => artifact.type === 'report')?.content ?? '',
+  /Workflow runtime trace:/
+);
+assert.match(
+  workflowPromptTask.task.artifacts.find((artifact) => artifact.type === 'report')?.content ?? '',
+  /Write customer follow-up document \(artifact\) - completed/
+);
+
+let workflowToolModelInvocationCount = 0;
+const workflowToolTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-tool-call-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Research competitor updates',
+    input: 'Search competitor updates and summarize the key signal.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: workflowRolePackage,
+  workspaceId: 'workspace-workflow-tool-call',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['web-search'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    workflowToolModelInvocationCount += 1;
+    const prompt = request.messages.map((message) => message.content).join('\n');
+    assert.match(prompt, /Write customer follow-up document/);
+    assert.match(prompt, /Competitor launch note/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: 'Final research summary after web search.'
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    assert.equal(request.workspaceId, 'workspace-workflow-tool-call');
+    assert.equal(request.toolId, 'web-search');
+    assert.equal(request.action, 'web.search');
+    assert.match(String(request.input.query), /Search competitor updates/);
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        results: [
+          {
+            title: 'Competitor launch note',
+            url: 'https://example.com/competitor',
+            snippet: 'Competitor released a new workflow feature.'
+          }
+        ]
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:05.500Z'
+});
+
+assert.equal(workflowToolModelInvocationCount, 1);
+assert.deepEqual(workflowToolTask.usedToolIds, ['web-search']);
+assert.doesNotMatch(
+  workflowToolTask.task.artifacts.find((artifact) => artifact.type === 'report')?.content ?? '',
+  /Research current market signal \(tool\) - completed \[tools=web-search; tools_not_used=web-search\]/
+);
+assert.match(
+  workflowToolTask.task.artifacts.find((artifact) => artifact.type === 'report')?.content ?? '',
+  /Research current market signal \(tool\) - completed \[tool=web-search/
+);
+
+const integrationToolCalls: Array<{ toolId: string; action: string; input: Record<string, unknown> }> = [];
+const workflowIntegrationToolTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-integration-tool-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Call integration tools',
+    input: 'Fetch lead status and enrich it through MCP.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    toolIds: ['http-request', 'mcp'],
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'http_lead_status',
+          type: 'tool',
+          name: 'Fetch lead status',
+          toolId: 'http-request',
+          inputVariables: ['start.text'],
+          outputVariables: ['lead_status'],
+          config: {
+            url: 'https://api.example.com/leads',
+            method: 'POST',
+            body: {
+              query: '{{start.text}}'
+            }
+          }
+        },
+        {
+          id: 'mcp_enrich',
+          type: 'tool',
+          name: 'Enrich lead with MCP',
+          toolId: 'mcp',
+          inputVariables: ['http_lead_status.text'],
+          outputVariables: ['enriched_lead'],
+          config: {
+            endpoint: 'http://127.0.0.1:3001/mcp',
+            toolName: 'enrich_lead',
+            arguments: {
+              lead: '{{http_lead_status.text}}'
+            },
+            allowPrivateNetwork: true
+          }
+        },
+        {
+          id: 'summarize',
+          type: 'llm',
+          name: 'Summarize integration result',
+          instruction: 'Summarize the enriched lead result.',
+          inputVariables: ['lead_status', 'enriched_lead']
+        }
+      ],
+      edges: [
+        { id: 'start-http', sourceNodeId: 'start', targetNodeId: 'http_lead_status' },
+        { id: 'http-mcp', sourceNodeId: 'http_lead_status', targetNodeId: 'mcp_enrich' },
+        { id: 'mcp-summarize', sourceNodeId: 'mcp_enrich', targetNodeId: 'summarize' }
+      ]
+    }
+  },
+  workspaceId: 'workspace-workflow-integration-tool',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['http-request', 'mcp'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    const prompt = request.messages.map((message) => message.content).join('\n');
+    assert.match(prompt, /lead_status/);
+    assert.match(prompt, /enriched_lead/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: 'Integration summary generated.'
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    integrationToolCalls.push({
+      toolId: request.toolId,
+      action: request.action,
+      input: request.input
+    });
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        text: request.toolId === 'http-request' ? 'lead status active' : 'enriched lead score 91'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:06.000Z'
+});
+
+assert.equal(workflowIntegrationToolTask.task.state, 'completed');
+assert.deepEqual(
+  integrationToolCalls.map((call) => `${call.toolId}/${call.action}`),
+  ['http-request/http.request', 'mcp/mcp.call']
+);
+assert.equal((integrationToolCalls[0]?.input.body as { query?: string }).query, 'Fetch lead status and enrich it through MCP.');
+assert.equal((integrationToolCalls[1]?.input.arguments as { lead?: string }).lead, 'lead status active');
+assert.ok(
+  workflowIntegrationToolTask.task.executionLogs.some(
+    (log) => log.eventType === 'WORKFLOW_RUNTIME_NODE_COMPLETED' && /Fetch lead status/.test(log.message)
+  )
+);
+
+let knowledgeRetrievalToolCallCount = 0;
+const workflowKnowledgeTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-knowledge-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Use local knowledge',
+    input: 'Summarize the customer policy.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    toolIds: ['office-document'],
+    requiredKnowledgeSources: ['local_file'],
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'gather_context',
+          type: 'knowledge',
+          name: 'Gather policy knowledge',
+          outputVariables: ['knowledge_context']
+        },
+        {
+          id: 'summarize_policy',
+          type: 'llm',
+          name: 'Summarize policy',
+          inputVariables: ['knowledge_context']
+        }
+      ],
+      edges: [
+        { id: 'start-knowledge', sourceNodeId: 'start', targetNodeId: 'gather_context' },
+        { id: 'knowledge-summary', sourceNodeId: 'gather_context', targetNodeId: 'summarize_policy' }
+      ]
+    }
+  },
+  workspaceId: 'workspace-workflow-knowledge',
+  modelProfiles,
+  tools,
+  knowledgeSources: [
+    {
+      id: 'local_file',
+      source: 'local_file',
+      label: 'Policy File',
+      enabled: true,
+      createdAt: '2026-07-20T10:00:00.000Z',
+      localPath: 'C:\\QiuAI\\Knowledge\\policy.md',
+      summary: 'Customer policy source.'
+    }
+  ],
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['office-document'],
+  enabledKnowledgeBindingIds: ['local_file'],
+  modelInvoker: async (request) => {
+    const prompt = request.messages.map((message) => message.content).join('\n');
+    assert.match(prompt, /Customer policy snippet/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: 'Policy summary generated.'
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    knowledgeRetrievalToolCallCount += 1;
+    assert.equal(request.toolId, 'office-document');
+    assert.equal(request.action, 'document.extract_text');
+    assert.equal(request.input.path, 'C:\\QiuAI\\Knowledge\\policy.md');
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        text: 'Customer policy snippet: approve renewal requests within two business days.'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:06.500Z'
+});
+
+assert.equal(workflowKnowledgeTask.task.state, 'completed');
+assert.equal(knowledgeRetrievalToolCallCount, 1);
+assert.ok(
+  workflowKnowledgeTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_RUNTIME_KNOWLEDGE_RETRIEVED')
+);
+
+const workflowVariableTransformTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-variable-transform-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Transform variables',
+    input: '{"customer":"Acme","goal":"renewal"}',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'assign_context',
+          type: 'assign',
+          name: 'Assign customer context',
+          outputVariables: ['customer_name', 'customer_goal'],
+          config: {
+            assignments: [
+              { name: 'customer_name', from: 'start.customer' },
+              { name: 'customer_goal', from: 'start.goal' }
+            ]
+          }
+        },
+        {
+          id: 'render_brief',
+          type: 'template',
+          name: 'Render customer brief',
+          inputVariables: ['customer_name', 'customer_goal'],
+          outputVariables: ['customer_brief'],
+          config: {
+            template: 'Customer: {{customer_name}}\\nGoal: {{customer_goal}}'
+          }
+        },
+        {
+          id: 'draft',
+          type: 'llm',
+          name: 'Draft response',
+          inputVariables: ['customer_brief']
+        }
+      ],
+      edges: [
+        { id: 'start-assign', sourceNodeId: 'start', targetNodeId: 'assign_context' },
+        { id: 'assign-template', sourceNodeId: 'assign_context', targetNodeId: 'render_brief' },
+        { id: 'template-draft', sourceNodeId: 'render_brief', targetNodeId: 'draft' }
+      ]
+    }
+  },
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: [],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    const prompt = request.messages.map((message) => message.content).join('\n');
+    assert.match(prompt, /Customer: Acme/);
+    assert.match(prompt, /Goal: renewal/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: 'Variable transformed response.'
+    };
+  },
+  completedAt: '2026-07-20T10:00:07.000Z'
+});
+
+assert.equal(workflowVariableTransformTask.task.state, 'completed');
+assert.ok(
+  workflowVariableTransformTask.task.executionLogs.some(
+    (log) => log.eventType === 'WORKFLOW_RUNTIME_NODE_COMPLETED' && /Render customer brief/.test(log.message)
+  )
+);
+
+let workflowFallbackArtifactToolCallCount = 0;
+const workflowArtifactFallbackTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-artifact-fallback-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Create customer playbook',
+    input: 'Write a customer playbook as a document.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    toolIds: ['office-document'],
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'write-playbook',
+          type: 'artifact',
+          name: 'Write playbook document',
+          instruction: 'Write the final customer playbook document.',
+          artifactType: 'docx'
+        }
+      ],
+      edges: [
+        {
+          id: 'start-write-playbook',
+          sourceNodeId: 'start',
+          targetNodeId: 'write-playbook',
+          condition: { type: 'always' }
+        }
+      ]
+    }
+  },
+  workspaceId: 'workspace-workflow-artifact-fallback',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['office-document'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    const prompt = request.messages.map((message) => message.content).join('\n');
+    assert.match(prompt, /workflow node executor/);
+    assert.match(prompt, /Write playbook document/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: '## Customer playbook\n\n- Segment customers\n- Prepare follow-up actions'
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    workflowFallbackArtifactToolCallCount += 1;
+    assert.equal(request.workspaceId, 'workspace-workflow-artifact-fallback');
+    assert.equal(request.toolId, 'office-document');
+    assert.equal(request.action, 'office.write_docx_document');
+    assert.equal(request.input.folder, 'documents');
+    assert.match(String(request.input.content), /Customer playbook/);
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\documents\\customer-playbook.docx'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:05.750Z'
+});
+
+assert.equal(workflowFallbackArtifactToolCallCount, 1);
+assert.equal(workflowArtifactFallbackTask.task.state, 'completed');
+assert.deepEqual(workflowArtifactFallbackTask.usedToolIds, ['office-document']);
+assert.equal(workflowArtifactFallbackTask.task.artifacts.length, 2);
+assert.equal(
+  workflowArtifactFallbackTask.task.artifacts[0]?.localPath,
+  'C:\\QiuAI\\workspace\\documents\\customer-playbook.docx'
+);
+assert.ok(
+  workflowArtifactFallbackTask.task.executionLogs.some(
+    (log) => log.eventType === 'WORKFLOW_RUNTIME_ARTIFACT_WRITTEN'
+  )
+);
+
+let workflowVariableArtifactModelInvocationCount = 0;
+let workflowVariableArtifactToolCallCount = 0;
+const workflowVariableArtifactTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-variable-artifact-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Create renewal proposal',
+    input: 'Draft a renewal proposal.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    toolIds: ['office-document'],
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'llm_1',
+          type: 'llm',
+          name: 'Draft proposal body',
+          instruction: 'Draft the proposal body.',
+          outputVariables: ['proposal_body']
+        },
+        {
+          id: 'artifact_1',
+          type: 'artifact',
+          name: 'Write proposal document',
+          instruction: 'Write the proposal body into a Word document.',
+          artifactType: 'docx',
+          inputVariables: ['llm_1.text']
+        }
+      ],
+      edges: [
+        { id: 'start-llm', sourceNodeId: 'start', targetNodeId: 'llm_1', condition: { type: 'always' } },
+        { id: 'llm-artifact', sourceNodeId: 'llm_1', targetNodeId: 'artifact_1', condition: { type: 'always' } }
+      ]
+    }
+  },
+  workspaceId: 'workspace-workflow-variable-artifact',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['office-document'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    workflowVariableArtifactModelInvocationCount += 1;
+    const prompt = request.messages.map((message) => message.content).join('\n');
+    assert.match(prompt, /Draft proposal body/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: 'LLM proposal body ready for Word output.'
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    workflowVariableArtifactToolCallCount += 1;
+    assert.equal(request.toolId, 'office-document');
+    assert.equal(request.action, 'office.write_docx_document');
+    assert.match(String(request.input.content), /LLM proposal body ready/);
+    assert.doesNotMatch(String(request.input.content), /Variable: llm_1\.text/);
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\documents\\renewal-proposal.docx'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:05.900Z'
+});
+
+assert.equal(workflowVariableArtifactModelInvocationCount, 1);
+assert.equal(workflowVariableArtifactToolCallCount, 1);
+assert.equal(workflowVariableArtifactTask.task.state, 'completed');
+assert.deepEqual(workflowVariableArtifactTask.usedToolIds, ['office-document']);
+assert.equal(
+  workflowVariableArtifactTask.task.artifacts[0]?.localPath,
+  'C:\\QiuAI\\workspace\\documents\\renewal-proposal.docx'
+);
+assert.ok(
+  workflowVariableArtifactTask.task.executionLogs.some(
+    (log) => log.eventType === 'WORKFLOW_RUNTIME_ARTIFACT_INPUT_RESOLVED'
+  )
+);
+
+let workflowPptxArtifactToolCallCount = 0;
+const workflowPptxArtifactTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-pptx-artifact-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Create onboarding deck',
+    input: 'Create an onboarding PPT.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    toolIds: ['office-document'],
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'llm_1',
+          type: 'llm',
+          name: 'Draft slides',
+          instruction: 'Draft slide titles and bullet points.',
+          outputVariables: ['slide_text']
+        },
+        {
+          id: 'artifact_1',
+          type: 'artifact',
+          name: 'Write PPT deck',
+          instruction: 'Write the slide content into a PPTX file.',
+          toolId: 'office-document',
+          artifactType: 'pptx',
+          inputVariables: ['llm_1.text']
+        }
+      ],
+      edges: [
+        { id: 'start-llm', sourceNodeId: 'start', targetNodeId: 'llm_1', condition: { type: 'always' } },
+        { id: 'llm-artifact', sourceNodeId: 'llm_1', targetNodeId: 'artifact_1', condition: { type: 'always' } }
+      ]
+    }
+  },
+  workspaceId: 'workspace-workflow-pptx-artifact',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['office-document'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => ({
+    provider: request.profile.providerName,
+    modelName: request.profile.modelName,
+    content: '## Pilot Goals\n\n- Reduce repetitive work\n- Confirm measurable outcome'
+  }),
+  desktopToolInvoker: async (request) => {
+    workflowPptxArtifactToolCallCount += 1;
+    assert.equal(request.toolId, 'office-document');
+    assert.equal(request.action, 'presentation.write_pptx');
+    assert.match(String(request.input.content), /Pilot Goals/);
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\presentations\\onboarding-deck.pptx'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:05.920Z'
+});
+
+assert.equal(workflowPptxArtifactToolCallCount, 1);
+assert.equal(workflowPptxArtifactTask.task.state, 'completed');
+assert.equal(
+  workflowPptxArtifactTask.task.artifacts[0]?.localPath,
+  'C:\\QiuAI\\workspace\\presentations\\onboarding-deck.pptx'
+);
+
+let workflowAttachmentModelInvocationCount = 0;
+let workflowAttachmentExtractionCount = 0;
+const workflowAttachmentTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-attachment-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Summarize attached briefing',
+    input: 'Read the attached briefing and summarize the renewal risk.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0,
+    executionContext: {
+      modelProfileIds: ['qiu-general-default'],
+      toolIds: ['office-document'],
+      knowledgeBindingIds: [],
+      attachmentPaths: ['C:\\QiuAI\\input\\renewal-brief.docx']
+    }
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    toolIds: ['office-document'],
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'llm_1',
+          type: 'llm',
+          name: 'Summarize briefing',
+          instruction: 'Summarize the attached renewal briefing.',
+          inputVariables: ['start.text', 'start.files']
+        }
+      ],
+      edges: [
+        { id: 'start-llm', sourceNodeId: 'start', targetNodeId: 'llm_1', condition: { type: 'always' } }
+      ]
+    }
+  },
+  workspaceId: 'workspace-workflow-attachment',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['office-document'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    workflowAttachmentModelInvocationCount += 1;
+    const prompt = request.messages.map((message) => message.content).join('\n');
+    assert.match(prompt, /Renewal risk extracted from briefing/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: 'Attachment summary generated.'
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    workflowAttachmentExtractionCount += 1;
+    assert.equal(request.toolId, 'office-document');
+    assert.equal(request.action, 'document.extract_text');
+    assert.equal(request.input.path, 'C:\\QiuAI\\input\\renewal-brief.docx');
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        text: 'Renewal risk extracted from briefing.'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:05.950Z'
+});
+
+assert.equal(workflowAttachmentModelInvocationCount, 1);
+assert.equal(workflowAttachmentExtractionCount, 1);
+assert.equal(workflowAttachmentTask.task.state, 'completed');
+assert.deepEqual(workflowAttachmentTask.usedToolIds, ['office-document']);
+assert.ok(
+  workflowAttachmentTask.task.executionLogs.some(
+    (log) => log.eventType === 'WORKFLOW_RUNTIME_FILE_CONTEXT_EXTRACTED'
+  )
+);
+
+const branchingRolePackage: RolePackageManifest = {
+  ...workflowRolePackage,
+  workflowGraph: {
+    version: '1.0.0',
+    entryNodeId: 'start',
+    nodes: [
+      { id: 'start', type: 'start', name: 'Start' },
+      {
+        id: 'route',
+        type: 'condition',
+        name: 'Route by requested artifact',
+        instruction: 'Choose the output format requested by the user.'
+      },
+      {
+        id: 'ppt',
+        type: 'artifact',
+        name: 'Create PPT outline',
+        instruction: 'Create slide-by-slide PPT content.',
+        artifactType: 'pptx'
+      },
+      {
+        id: 'doc',
+        type: 'artifact',
+        name: 'Create Word brief',
+        instruction: 'Create a Word-style document brief.',
+        artifactType: 'docx'
+      }
+    ],
+    edges: [
+      { id: 'start-route', sourceNodeId: 'start', targetNodeId: 'route', condition: { type: 'always' } },
+      {
+        id: 'route-ppt',
+        sourceNodeId: 'route',
+        targetNodeId: 'ppt',
+        condition: { type: 'contains', variable: 'task.input', value: 'PPT' }
+      },
+      { id: 'route-doc', sourceNodeId: 'route', targetNodeId: 'doc', condition: { type: 'always' } }
+    ]
+  }
+};
+
+const branchingTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-branch-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Create training material',
+    input: 'Please create a PPT for onboarding.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: branchingRolePackage,
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['web-search'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    const prompt = request.messages.map((message) => message.content).join('\n');
+    assert.match(prompt, /Create PPT outline/);
+    assert.doesNotMatch(prompt, /Create Word brief/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: 'Branch-specific PPT result generated.'
+    };
+  },
+  completedAt: '2026-07-20T10:00:06.000Z'
+});
+
+assert.equal(branchingTask.task.state, 'completed');
+assert.ok(
+  branchingTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_GRAPH_NODE_PLANNED')
+);
+
+let runtimeJsonBranchModelInvocationCount = 0;
+const runtimeJsonBranchToolRequests: Array<{ toolId: string; action: string; input: Record<string, unknown> }> = [];
+const runtimeJsonBranchTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-json-branch-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Create proposal from classified intent',
+    input: '客户要一份企业 AI 入门方案，请联网补充信息并写成 Word。',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    toolIds: [],
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'classify',
+          type: 'llm',
+          name: 'Classify intent',
+          instruction: 'Return JSON with intent and query fields.',
+          outputVariables: ['intent_payload']
+        },
+        {
+          id: 'route',
+          type: 'condition',
+          name: 'Route by model JSON',
+          instruction: 'Use classify.json.intent to choose the branch.'
+        },
+        {
+          id: 'research',
+          type: 'tool',
+          name: 'Research proposal context',
+          toolId: 'web-search',
+          config: {
+            action: 'web.search',
+            input: {
+              query: '{{classify.json.query}}',
+              maxResults: 3
+            }
+          },
+          inputVariables: ['classify.json.query'],
+          outputVariables: ['research_context']
+        },
+        {
+          id: 'draft',
+          type: 'llm',
+          name: 'Draft proposal body',
+          instruction: 'Draft the final proposal body using research context.',
+          inputVariables: ['classify.json.query', 'research.text'],
+          outputVariables: ['proposal_body']
+        },
+        {
+          id: 'write_doc',
+          type: 'artifact',
+          name: 'Write proposal document',
+          toolId: 'office-document',
+          artifactType: 'docx',
+          inputVariables: ['draft.text'],
+          outputVariables: ['proposal_file']
+        },
+        {
+          id: 'fallback',
+          type: 'output',
+          name: 'Fallback answer',
+          instruction: 'Explain that no proposal branch matched.'
+        }
+      ],
+      edges: [
+        { id: 'start-classify', sourceNodeId: 'start', targetNodeId: 'classify', condition: { type: 'always' } },
+        { id: 'classify-route', sourceNodeId: 'classify', targetNodeId: 'route', condition: { type: 'always' } },
+        {
+          id: 'route-research',
+          sourceNodeId: 'route',
+          targetNodeId: 'research',
+          condition: { type: 'equals', variable: 'classify.json.intent', value: 'proposal' }
+        },
+        { id: 'route-fallback', sourceNodeId: 'route', targetNodeId: 'fallback', condition: { type: 'always' } },
+        { id: 'research-draft', sourceNodeId: 'research', targetNodeId: 'draft', condition: { type: 'always' } },
+        { id: 'draft-write-doc', sourceNodeId: 'draft', targetNodeId: 'write_doc', condition: { type: 'always' } }
+      ],
+      runtimePolicy: {
+        maxNodeExecutions: 16,
+        maxLoopIterations: 4,
+        requireApprovalBeforeTools: false
+      }
+    }
+  },
+  workspaceId: 'workspace-workflow-json-branch',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['web-search', 'office-document'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    runtimeJsonBranchModelInvocationCount += 1;
+    const prompt = request.messages.map((message) => message.content).join('\n');
+
+    if (runtimeJsonBranchModelInvocationCount === 1) {
+      assert.match(prompt, /Classify intent/);
+      return {
+        provider: request.profile.providerName,
+        modelName: request.profile.modelName,
+        content: ['模型分类如下：', '```json', '{"intent":"proposal","query":"enterprise AI onboarding"}', '```'].join('\n')
+      };
+    }
+
+    assert.match(prompt, /Draft proposal body/);
+    assert.match(prompt, /enterprise AI onboarding/);
+    assert.match(prompt, /Acme found enterprise onboarding demand/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: 'Proposal Word body with researched context.'
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    runtimeJsonBranchToolRequests.push({
+      toolId: request.toolId,
+      action: request.action,
+      input: request.input
+    });
+
+    if (request.action === 'web.search') {
+      assert.equal(request.toolId, 'web-search');
+      assert.equal(request.input.query, 'enterprise AI onboarding');
+      assert.equal(request.input.maxResults, 3);
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          text: 'Acme found enterprise onboarding demand in manufacturing and education.'
+        }
+      };
+    }
+
+    assert.equal(request.toolId, 'office-document');
+    assert.equal(request.action, 'office.write_docx_document');
+    assert.match(String(request.input.content), /Proposal Word body/);
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\documents\\proposal-from-json-branch.docx'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:06.500Z'
+});
+
+assert.equal(runtimeJsonBranchModelInvocationCount, 2);
+assert.deepEqual(
+  runtimeJsonBranchToolRequests.map((request) => `${request.toolId}/${request.action}`),
+  ['web-search/web.search', 'office-document/office.write_docx_document']
+);
+assert.equal(runtimeJsonBranchTask.task.state, 'completed');
+assert.deepEqual(runtimeJsonBranchTask.usedToolIds, ['web-search', 'office-document']);
+assert.equal(
+  runtimeJsonBranchTask.task.artifacts[0]?.localPath,
+  'C:\\QiuAI\\workspace\\documents\\proposal-from-json-branch.docx'
+);
+assert.ok(
+  runtimeJsonBranchTask.task.executionLogs.some(
+    (log) => log.eventType === 'WORKFLOW_RUNTIME_NODE_COMPLETED' && /Research proposal context/.test(log.message)
+  )
+);
+assert.ok(
+  runtimeJsonBranchTask.task.executionLogs.some(
+    (log) => log.eventType === 'WORKFLOW_RUNTIME_NODE_COMPLETED' && /Write proposal document/.test(log.message)
+  )
+);
+assert.doesNotMatch(
+  runtimeJsonBranchTask.task.artifacts.find((artifact) => artifact.type === 'report')?.content ?? '',
+  /Fallback answer/
+);
+
+const malformedWorkflowTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-malformed-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Fallback from malformed graph',
+    input: 'Run with standard prompt.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'missing',
+      nodes: [],
+      edges: []
+    }
+  },
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['web-search'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    const prompt = request.messages.map((message) => message.content).join('\n');
+    assert.doesNotMatch(prompt, /Workflow graph selected execution path/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: 'Fallback result generated.'
+    };
+  },
+  completedAt: '2026-07-20T10:00:07.000Z'
+});
+
+assert.equal(malformedWorkflowTask.task.state, 'completed');
+assert.ok(
+  malformedWorkflowTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_GRAPH_SKIPPED')
+);
+
+const failedWorkflowRunTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-failed-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Fail workflow-backed run',
+    input: 'Trigger model failure.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: workflowRolePackage,
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['web-search'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async () => {
+    throw new Error('model unavailable');
+  },
+  completedAt: '2026-07-20T10:00:08.000Z'
+});
+
+assert.equal(failedWorkflowRunTask.task.state, 'failed');
+assert.ok(
+  failedWorkflowRunTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_RUNTIME_NODE_STARTED')
+);
+assert.ok(
+  failedWorkflowRunTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_RUNTIME_NODE_FAILED')
+);
+assert.ok(
+  failedWorkflowRunTask.task.executionLogs.some(
+    (log) => log.eventType === 'WORKFLOW_RUNTIME_NODE_FAILED' && /model unavailable/.test(log.message)
+  )
 );
 
 let toolCallingModelInvocationCount = 0;

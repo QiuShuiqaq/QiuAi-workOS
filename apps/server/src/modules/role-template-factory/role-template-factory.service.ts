@@ -11,6 +11,13 @@ import type { Prisma, RoleTemplateStatus } from '@prisma/client';
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import {
+  buildWorkflowGraphFromSteps,
+  normalizeWorkflowGraph,
+  normalizeWorkflowGraphOrFallback,
+  type ServerRoleWorkflowGraph,
+  type ServerRoleWorkflowGraphNode
+} from '../../shared/workflow-graph';
 import { AuthService } from '../auth/auth.service';
 import type { CurrentAccountResponseDto } from '../workspace/dto/current-account-response.dto';
 import {
@@ -69,6 +76,7 @@ type RoleTemplateRecord = {
   tools: unknown;
   skills: unknown;
   workflowSteps: unknown;
+  workflowGraph: unknown;
   sampleInputs: unknown;
   outputFormat?: string | null;
   approvalPolicy: string;
@@ -97,6 +105,7 @@ interface NormalizedRoleTemplateInput {
     summary: string;
   }>;
   workflowSteps: RoleTemplateWorkflowStep[];
+  workflowGraph: ServerRoleWorkflowGraph;
   sampleInputs: string[];
   outputFormat: string;
   approvalPolicy: string;
@@ -534,6 +543,7 @@ export class RoleTemplateFactoryService {
     const allowedPlanCodes = input.allowedPlanCodes
       ? this.normalizePlanCodes(input.allowedPlanCodes)
       : this.expandDefaultAllowedPlanCodes(recommendedPlanCode);
+    const workflowSteps = this.normalizeWorkflowSteps(input.workflowSteps ?? []);
 
     return {
       version: this.requireText(input.version, 'Version cannot be empty.'),
@@ -546,7 +556,8 @@ export class RoleTemplateFactoryService {
       knowledgeSources: this.normalizeStringArray(input.knowledgeSources),
       tools: this.normalizeStringArray(input.tools),
       skills: this.normalizeSkills(input.skills),
-      workflowSteps: this.normalizeWorkflowSteps(input.workflowSteps ?? []),
+      workflowSteps,
+      workflowGraph: this.normalizeWorkflowGraphInput(input.workflowGraph, workflowSteps),
       sampleInputs: this.normalizeStringArray(input.sampleInputs ?? []),
       outputFormat: this.normalizeOptionalText(
         input.outputFormat,
@@ -583,6 +594,14 @@ export class RoleTemplateFactoryService {
     if (input.tools !== undefined) normalized.tools = this.normalizeStringArray(input.tools);
     if (input.skills !== undefined) normalized.skills = this.normalizeSkills(input.skills);
     if (input.workflowSteps !== undefined) normalized.workflowSteps = this.normalizeWorkflowSteps(input.workflowSteps);
+    if (input.workflowGraph !== undefined) {
+      normalized.workflowGraph = this.normalizeWorkflowGraphInput(
+        input.workflowGraph,
+        normalized.workflowSteps ?? []
+      );
+    } else if (normalized.workflowSteps !== undefined) {
+      normalized.workflowGraph = buildWorkflowGraphFromSteps(normalized.workflowSteps);
+    }
     if (input.sampleInputs !== undefined) normalized.sampleInputs = this.normalizeStringArray(input.sampleInputs);
     if (input.outputFormat !== undefined) {
       normalized.outputFormat = this.normalizeOptionalText(
@@ -616,6 +635,7 @@ export class RoleTemplateFactoryService {
       tools: input.tools,
       skills: input.skills,
       workflowSteps: input.workflowSteps,
+      workflowGraph: input.workflowGraph as unknown as Prisma.InputJsonValue,
       sampleInputs: input.sampleInputs,
       outputFormat: input.outputFormat,
       approvalPolicy: input.approvalPolicy,
@@ -642,6 +662,9 @@ export class RoleTemplateFactoryService {
     if (input.tools !== undefined) data.tools = input.tools;
     if (input.skills !== undefined) data.skills = input.skills;
     if (input.workflowSteps !== undefined) data.workflowSteps = input.workflowSteps;
+    if (input.workflowGraph !== undefined) {
+      data.workflowGraph = input.workflowGraph as unknown as Prisma.InputJsonValue;
+    }
     if (input.sampleInputs !== undefined) data.sampleInputs = input.sampleInputs;
     if (input.outputFormat !== undefined) data.outputFormat = input.outputFormat;
     if (input.approvalPolicy !== undefined) data.approvalPolicy = input.approvalPolicy;
@@ -658,6 +681,8 @@ export class RoleTemplateFactoryService {
   }
 
   private toAdminTemplateDetail(template: RoleTemplateRecord): AdminRoleTemplateDetailDto {
+    const workflowSteps = this.toWorkflowSteps(template.workflowSteps);
+
     return {
       id: template.id,
       version: template.version,
@@ -670,7 +695,8 @@ export class RoleTemplateFactoryService {
       knowledgeSources: this.toStringArray(template.knowledgeSources),
       tools: this.toStringArray(template.tools),
       skills: this.toSkillSummaries(template.skills),
-      workflowSteps: this.toWorkflowSteps(template.workflowSteps),
+      workflowSteps,
+      workflowGraph: normalizeWorkflowGraphOrFallback(template.workflowGraph, workflowSteps),
       sampleInputs: this.toStringArray(template.sampleInputs),
       outputFormat: template.outputFormat?.trim() || '',
       approvalPolicy: template.approvalPolicy,
@@ -718,9 +744,170 @@ export class RoleTemplateFactoryService {
           ? 'Template passed basic factory validation.'
           : 'Template failed basic factory validation.',
         warnings,
-        sampleInput: input.sampleInput?.trim()
+        sampleInput: input.sampleInput?.trim(),
+        graphTrace: this.buildTemplateTestGraphTrace(template, input)
       }
     };
+  }
+
+  private buildTemplateTestGraphTrace(
+    template: RoleTemplateRecord,
+    input: TestAdminRoleTemplateRequestDto
+  ): NonNullable<TestAdminRoleTemplateResponseDto['data']['graphTrace']> {
+    const workflowSteps = this.toWorkflowSteps(template.workflowSteps);
+    const graph = normalizeWorkflowGraphOrFallback(template.workflowGraph, workflowSteps);
+    const templateTools = new Set(this.toStringArray(template.tools));
+    const knowledgeSources = this.toStringArray(template.knowledgeSources);
+    const outgoingEdgesByNodeId = new Map<string, string[]>();
+
+    for (const edge of graph.edges) {
+      const targets = outgoingEdgesByNodeId.get(edge.sourceNodeId) ?? [];
+      const condition = edge.condition?.type && edge.condition.type !== 'always'
+        ? ` when ${edge.condition.type}${edge.condition.variable ? `(${edge.condition.variable})` : ''}`
+        : '';
+      targets.push(`${edge.targetNodeId}${condition}`);
+      outgoingEdgesByNodeId.set(edge.sourceNodeId, targets);
+    }
+
+    return {
+      entryNodeId: graph.entryNodeId,
+      nodeCount: graph.nodes.length,
+      edgeCount: graph.edges.length,
+      nodes: graph.nodes.map((node) => {
+        const warnings = this.getWorkflowNodeTraceWarnings(node, templateTools);
+        return {
+          nodeId: node.id,
+          nodeName: node.name,
+          nodeType: node.type,
+          status: warnings.length > 0 ? 'warning' : 'passed',
+          inputPreview: this.describeWorkflowNodeInput(node, input, knowledgeSources),
+          outputPreview: this.describeWorkflowNodeOutput(node, outgoingEdgesByNodeId.get(node.id) ?? []),
+          warnings
+        };
+      })
+    };
+  }
+
+  private getWorkflowNodeTraceWarnings(
+    node: ServerRoleWorkflowGraphNode,
+    templateTools: Set<string>
+  ): string[] {
+    const warnings: string[] = [];
+
+    if (node.type === 'tool') {
+      if (!node.toolId) {
+        warnings.push('Tool node has no toolId.');
+      } else if (!templateTools.has(node.toolId)) {
+        warnings.push(`Tool node references ${node.toolId}, but the template tools list does not include it.`);
+      }
+    }
+
+    if (node.type === 'artifact' && !node.artifactType) {
+      warnings.push('Artifact node has no artifactType.');
+    }
+
+    if (node.type === 'llm' && !node.instruction?.trim()) {
+      warnings.push('LLM node has no instruction.');
+    }
+
+    return warnings;
+  }
+
+  private describeWorkflowNodeInput(
+    node: ServerRoleWorkflowGraphNode,
+    input: TestAdminRoleTemplateRequestDto,
+    knowledgeSources: string[]
+  ): string {
+    const variables = this.joinPreviewList(node.inputVariables ?? []);
+    const sampleInput = input.sampleInput?.trim();
+
+    switch (node.type) {
+      case 'start':
+      case 'input':
+        return sampleInput
+          ? `Sample task: ${this.compactPreview(sampleInput)}`
+          : variables || 'No sample task was provided.';
+      case 'knowledge':
+        return [
+          variables,
+          knowledgeSources.length > 0 ? `Knowledge sources: ${this.joinPreviewList(knowledgeSources)}` : ''
+        ].filter(Boolean).join(' ');
+      case 'tool':
+        return [
+          variables,
+          node.toolId ? `Tool: ${node.toolId}.` : 'Tool: missing.',
+          this.describeNodeConfig(node.config)
+        ].filter(Boolean).join(' ');
+      case 'condition':
+        return variables || this.describeNodeConfig(node.config) || 'Reads workflow state for branch selection.';
+      case 'assign':
+        return this.describeNodeConfig(node.config) || variables || 'Assigns workflow variables from config.';
+      case 'template':
+        return this.describeNodeConfig(node.config) || variables || 'Renders a template from workflow variables.';
+      case 'artifact':
+        return [
+          variables,
+          node.artifactType ? `Target artifact: ${node.artifactType}.` : ''
+        ].filter(Boolean).join(' ');
+      default:
+        return variables || node.instruction || 'Uses workflow state.';
+    }
+  }
+
+  private describeWorkflowNodeOutput(
+    node: ServerRoleWorkflowGraphNode,
+    outgoingTargets: string[]
+  ): string {
+    const variables = this.joinPreviewList(node.outputVariables ?? []);
+    const targetText = outgoingTargets.length > 0 ? `Next: ${this.joinPreviewList(outgoingTargets)}` : '';
+
+    switch (node.type) {
+      case 'start':
+        return targetText || 'Workflow starts.';
+      case 'knowledge':
+        return variables || 'Prepares knowledge context.';
+      case 'tool':
+        return variables || 'Prepares tool result for later nodes.';
+      case 'condition':
+        return targetText || 'Chooses the next branch.';
+      case 'assign':
+        return variables || 'Writes assigned workflow variables.';
+      case 'template':
+        return variables || 'Writes rendered template text.';
+      case 'artifact':
+        return variables || `Generates local ${node.artifactType ?? 'artifact'} deliverable.`;
+      case 'output':
+        return variables || 'Returns final response to the desktop client.';
+      default:
+        return [variables || 'Produces node result.', targetText].filter(Boolean).join(' ');
+    }
+  }
+
+  private describeNodeConfig(config: Record<string, unknown> | undefined): string {
+    if (!config) {
+      return '';
+    }
+
+    const action = typeof config.action === 'string' ? config.action.trim() : '';
+    if (action) {
+      return `Action: ${action}.`;
+    }
+
+    return `Config: ${this.compactPreview(JSON.stringify(config))}`;
+  }
+
+  private joinPreviewList(values: string[]): string {
+    const normalized = values.map((value) => value.trim()).filter(Boolean);
+    if (normalized.length === 0) {
+      return '';
+    }
+
+    return normalized.slice(0, 6).join(', ') + (normalized.length > 6 ? `, +${normalized.length - 6}` : '');
+  }
+
+  private compactPreview(value: string): string {
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    return normalized.length > 180 ? `${normalized.slice(0, 177)}...` : normalized;
   }
 
   private validateTemplateForPublish(template: RoleTemplateRecord): string[] {
@@ -729,8 +916,14 @@ export class RoleTemplateFactoryService {
     if (this.toSkillSummaries(template.skills).length === 0) {
       issues.push('Template must define at least one skill.');
     }
-    if (this.toWorkflowSteps(template.workflowSteps).length === 0) {
+    const workflowSteps = this.toWorkflowSteps(template.workflowSteps);
+    if (workflowSteps.length === 0) {
       issues.push('Template must define at least one workflow step.');
+    }
+    try {
+      normalizeWorkflowGraph(template.workflowGraph, workflowSteps);
+    } catch (error) {
+      issues.push(error instanceof Error ? error.message : 'Template workflow graph is invalid.');
     }
     if (
       this.toStringArray(template.allowedPlanCodes).length === 0 &&
@@ -880,6 +1073,22 @@ export class RoleTemplateFactoryService {
     });
 
     return normalized.sort((left, right) => left.order - right.order);
+  }
+
+  private normalizeWorkflowGraphInput(
+    value: unknown,
+    fallbackSteps: RoleTemplateWorkflowStep[]
+  ): ServerRoleWorkflowGraph {
+    try {
+      return normalizeWorkflowGraph(value, fallbackSteps);
+    } catch (error) {
+      throw new BadRequestException({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: error instanceof Error ? error.message : 'Workflow graph is invalid.'
+        }
+      });
+    }
   }
 
   private normalizeOptionalText(value: string | undefined, fallback: string): string {

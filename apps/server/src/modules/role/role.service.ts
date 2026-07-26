@@ -3,7 +3,20 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import {
+  normalizeWorkflowGraphOrFallback,
+  type WorkflowStepLike
+} from '../../shared/workflow-graph';
 import { EntitlementService } from '../entitlement/entitlement.service';
+
+const workflowStepTypeSet = new Set<string>([
+  'input',
+  'reasoning',
+  'knowledge',
+  'tool',
+  'approval',
+  'output'
+]);
 
 interface InstallRoleInput {
   templateId: string;
@@ -24,6 +37,7 @@ type DatabaseRoleTemplate = {
   tools: unknown;
   skills: unknown;
   workflowSteps: unknown;
+  workflowGraph: unknown;
   sampleInputs: unknown;
   outputFormat?: string | null;
   approvalPolicy: string;
@@ -371,6 +385,8 @@ export class RoleService {
   }
 
   private toTemplateSummary(template: DatabaseRoleTemplate) {
+    const workflowSteps = this.toWorkflowSteps(template.workflowSteps);
+
     return {
       id: template.id,
       version: template.version,
@@ -383,7 +399,8 @@ export class RoleService {
       knowledgeSources: this.toStringArray(template.knowledgeSources),
       tools: this.toStringArray(template.tools),
       skills: this.toSkillSummaries(template.skills),
-      workflowSteps: this.toWorkflowSteps(template.workflowSteps),
+      workflowSteps,
+      workflowGraph: normalizeWorkflowGraphOrFallback(template.workflowGraph, workflowSteps),
       sampleInputs: this.toStringArray(template.sampleInputs),
       outputFormat: template.outputFormat?.trim() || '',
       approvalPolicy: template.approvalPolicy
@@ -536,7 +553,7 @@ export class RoleService {
     });
   }
 
-  private toWorkflowSteps(value: unknown) {
+  private toWorkflowSteps(value: unknown): WorkflowStepLike[] {
     if (!Array.isArray(value)) {
       return [];
     }
@@ -553,7 +570,7 @@ export class RoleService {
       const instruction = typeof record.instruction === 'string' ? record.instruction.trim() : '';
       const order = typeof record.order === 'number' && Number.isInteger(record.order) ? record.order : 0;
 
-      if (!id || !type || !name || !instruction || order <= 0) {
+      if (!id || !workflowStepTypeSet.has(type) || !name || !instruction || order <= 0) {
         return [];
       }
 
@@ -561,7 +578,7 @@ export class RoleService {
         {
           id,
           order,
-          type,
+          type: type as WorkflowStepLike['type'],
           name,
           instruction,
           toolIds: this.toStringArray(record.toolIds),

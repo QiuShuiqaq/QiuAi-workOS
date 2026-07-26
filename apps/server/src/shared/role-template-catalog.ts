@@ -1,3 +1,5 @@
+import type { ServerRoleWorkflowGraph } from './workflow-graph';
+
 export interface ServerRoleSkill {
   code: string;
   name: string;
@@ -35,6 +37,7 @@ export interface ServerRoleTemplateCatalogEntry {
   tools: string[];
   skills: ServerRoleSkill[];
   workflowSteps: ServerRoleTemplateWorkflowStep[];
+  workflowGraph: ServerRoleWorkflowGraph;
   sampleInputs: string[];
   outputFormat: string;
   approvalPolicy: string;
@@ -43,9 +46,10 @@ export interface ServerRoleTemplateCatalogEntry {
 
 type BaseServerRoleTemplateCatalogEntry = Omit<
   ServerRoleTemplateCatalogEntry,
-  'workflowSteps' | 'sampleInputs' | 'outputFormat' | 'allowedPlanCodes'
+  'workflowSteps' | 'workflowGraph' | 'sampleInputs' | 'outputFormat' | 'allowedPlanCodes'
 > & {
   workflowSteps?: ServerRoleTemplateWorkflowStep[];
+  workflowGraph?: ServerRoleWorkflowGraph;
   sampleInputs?: string[];
   outputFormat?: string;
   allowedPlanCodes?: string[];
@@ -194,6 +198,162 @@ function inferWorkflowToolIds(template: BaseServerRoleTemplateCatalogEntry): str
   return toolIds.length > 0 ? [...new Set(toolIds)] : ['office-document'];
 }
 
+function inferWorkflowArtifactType(
+  template: BaseServerRoleTemplateCatalogEntry,
+  workflowSteps: ServerRoleTemplateWorkflowStep[]
+): NonNullable<ServerRoleWorkflowGraph['nodes'][number]['artifactType']> {
+  const text = [
+    template.templateId,
+    template.name,
+    template.industry,
+    template.scenario,
+    template.description,
+    template.outputFormat,
+    ...template.skills.flatMap((item) => [item.code, item.name, item.summary]),
+    ...workflowSteps.flatMap((step) => [step.id, step.name, step.instruction, ...(step.toolIds ?? [])])
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  if (/\b(ppt|pptx|slides?|presentation|course|training)\b/.test(text)) {
+    return 'pptx';
+  }
+
+  if (
+    /\b(xlsx?|spreadsheet|csv|excel|finance|invoice|reimbursement|inventory|metrics?|dashboard|quote|reconciliation)\b/.test(
+      text
+    )
+  ) {
+    return 'xlsx';
+  }
+
+  return 'docx';
+}
+
+function buildRunnableWorkflowGraphForTemplate(
+  template: BaseServerRoleTemplateCatalogEntry,
+  workflowSteps: ServerRoleTemplateWorkflowStep[]
+): ServerRoleWorkflowGraph {
+  const stepToolIds = workflowSteps.flatMap((step) => step.toolIds ?? []);
+  const toolIds = [...new Set([...inferWorkflowToolIds(template), ...stepToolIds])];
+  const hasWebSearch = toolIds.includes('web-search');
+  const hasKnowledge = workflowSteps.some((step) => step.type === 'knowledge') || template.knowledgeSources.length > 0;
+  const artifactType = inferWorkflowArtifactType(template, workflowSteps);
+  const sourceInstruction = workflowSteps
+    .map((step) => `${step.order}. ${step.name}: ${step.instruction}`)
+    .join('\n');
+  const nodes: ServerRoleWorkflowGraph['nodes'] = [
+    {
+      id: 'start',
+      type: 'start',
+      name: 'Start',
+      description: 'Workflow entry node.'
+    },
+    {
+      id: 'receive_input',
+      type: 'input',
+      name: 'Receive task',
+      instruction: 'Normalize the user task, attached files, goal, constraints, and expected deliverable.',
+      inputVariables: ['start.text', 'start.files'],
+      outputVariables: ['task_brief'],
+      config: {
+        source: 'default_template_graph'
+      }
+    },
+    ...(hasKnowledge
+      ? [
+          {
+            id: 'gather_context',
+            type: 'knowledge' as const,
+            name: 'Gather context',
+            instruction: `Read available knowledge context: ${template.knowledgeSources.join(', ') || 'workspace knowledge'}.`,
+            inputVariables: ['start.text'],
+            outputVariables: ['knowledge_context']
+          }
+        ]
+      : []),
+    ...(hasWebSearch
+      ? [
+          {
+            id: 'web_research',
+            type: 'tool' as const,
+            name: 'Web research',
+            instruction: 'Search web context when the task needs external or fresh information.',
+            toolId: 'web-search',
+            inputVariables: ['start.text'],
+            outputVariables: ['web_context'],
+            config: {
+              action: 'web.search',
+              input: {
+                query: '{{start.text}}',
+                maxResults: 5
+              }
+            }
+          }
+        ]
+      : []),
+    {
+      id: 'draft_result',
+      type: 'llm',
+      name: 'Draft result',
+      instruction:
+        sourceInstruction ||
+        `Complete the digital employee task for ${template.scenario} and produce a business-ready result.`,
+      inputVariables: [
+        'start.text',
+        hasKnowledge ? 'gather_context.text' : undefined,
+        hasWebSearch ? 'web_research.text' : undefined
+      ].filter((value): value is string => Boolean(value)),
+      outputVariables: ['draft_text']
+    },
+    {
+      id: 'write_artifact',
+      type: 'artifact',
+      name: 'Write deliverable',
+      instruction: `Write the final deliverable as ${artifactType}.`,
+      toolId: 'office-document',
+      artifactType,
+      inputVariables: ['draft_result.text'],
+      outputVariables: ['deliverable_file']
+    },
+    {
+      id: 'final_output',
+      type: 'output',
+      name: 'Final response',
+      instruction: 'Summarize the completed work, mention generated local file paths, and list next actions.',
+      inputVariables: ['draft_result.text', 'write_artifact.file'],
+      outputVariables: ['final_answer']
+    }
+  ];
+  const edges: ServerRoleWorkflowGraph['edges'] = [];
+  let previousNodeId = 'start';
+
+  for (const node of nodes.filter((node) => node.id !== 'start')) {
+    edges.push({
+      id: `${previousNodeId}__${node.id}`,
+      sourceNodeId: previousNodeId,
+      targetNodeId: node.id,
+      condition: {
+        type: 'always'
+      }
+    });
+    previousNodeId = node.id;
+  }
+
+  return {
+    version: '1.0.0',
+    nodes,
+    edges,
+    entryNodeId: 'start',
+    runtimePolicy: {
+      maxNodeExecutions: 64,
+      maxLoopIterations: 8,
+      requireApprovalBeforeTools: false
+    }
+  };
+}
+
 function defaultWorkflowSteps(template: BaseServerRoleTemplateCatalogEntry): ServerRoleTemplateWorkflowStep[] {
   const toolIds = inferWorkflowToolIds(template);
 
@@ -280,9 +440,12 @@ function allowedPlanCodesFrom(planCode: string): string[] {
 function completeCatalogEntry(
   template: BaseServerRoleTemplateCatalogEntry
 ): ServerRoleTemplateCatalogEntry {
+  const workflowSteps = template.workflowSteps ?? defaultWorkflowSteps(template);
+
   return {
     ...template,
-    workflowSteps: template.workflowSteps ?? defaultWorkflowSteps(template),
+    workflowSteps,
+    workflowGraph: template.workflowGraph ?? buildRunnableWorkflowGraphForTemplate(template, workflowSteps),
     sampleInputs: template.sampleInputs ?? [
       `请按「${template.name}」的标准处理这个任务：${template.scenario}。`,
       `基于企业资料，输出一份可直接给负责人确认的${template.industry}工作结果。`

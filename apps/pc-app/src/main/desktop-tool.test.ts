@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -13,6 +14,46 @@ const allowedFilePath = path.join(allowedRootPath, 'allowed.txt');
 mkdirSync(allowedRootPath, { recursive: true });
 writeFileSync(sourceFilePath, 'local source text', { encoding: 'utf8' });
 writeFileSync(allowedFilePath, 'allowed local source text', { encoding: 'utf8' });
+
+const server = createServer((request, response) => {
+  const chunks: Buffer[] = [];
+  request.on('data', (chunk: Buffer) => chunks.push(chunk));
+  request.on('end', () => {
+    const bodyText = Buffer.concat(chunks).toString('utf8');
+    response.setHeader('content-type', 'application/json');
+
+    if (request.url === '/api') {
+      response.end(JSON.stringify({ ok: true, method: request.method, body: bodyText ? JSON.parse(bodyText) : null }));
+      return;
+    }
+
+    if (request.url === '/mcp') {
+      const body = bodyText ? JSON.parse(bodyText) : {};
+      response.end(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: body.id,
+          result: {
+            content: [
+              {
+                type: 'text',
+                text: `MCP echo: ${body.params?.arguments?.text ?? ''}`
+              }
+            ]
+          }
+        })
+      );
+      return;
+    }
+
+    response.statusCode = 404;
+    response.end(JSON.stringify({ ok: false }));
+  });
+});
+await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+const serverAddress = server.address();
+assert.ok(serverAddress && typeof serverAddress === 'object');
+const localServerBaseUrl = `http://127.0.0.1:${serverAddress.port}`;
 
 const writeResult = await invokeDesktopTool(tempDir, {
   workspaceId,
@@ -108,6 +149,36 @@ assert.equal(documentResult.ok, true);
 assert.equal(typeof documentResult.output?.localPath, 'string');
 assert.ok(existsSync(String(documentResult.output?.localPath)));
 
+const docxResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'office-document',
+  action: 'office.write_docx_document',
+  input: {
+    title: 'Customer Follow-up Plan',
+    folder: 'documents',
+    fileName: 'follow-up-plan-docx',
+    content: 'Next actions\nCall customer owner'
+  }
+});
+
+assert.equal(docxResult.ok, true);
+assert.equal(typeof docxResult.output?.localPath, 'string');
+assert.ok(String(docxResult.output?.localPath).endsWith('.docx'));
+assert.ok(existsSync(String(docxResult.output?.localPath)));
+
+const docxExtractResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'office-document',
+  action: 'document.extract_text',
+  input: {
+    path: String(docxResult.output?.localPath)
+  }
+});
+
+assert.equal(docxExtractResult.ok, true);
+assert.match(String(docxExtractResult.output?.text), /Customer Follow-up Plan/);
+assert.match(String(docxExtractResult.output?.text), /Call customer owner/);
+
 const spreadsheetResult = await invokeDesktopTool(tempDir, {
   workspaceId,
   toolId: 'office-document',
@@ -126,6 +197,78 @@ assert.equal(spreadsheetResult.ok, true);
 assert.equal(typeof spreadsheetResult.output?.localPath, 'string');
 assert.ok(existsSync(String(spreadsheetResult.output?.localPath)));
 
+const xlsxResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'office-document',
+  action: 'spreadsheet.write_xlsx',
+  input: {
+    folder: 'sheets',
+    fileName: 'lead-score-xlsx',
+    rows: [
+      ['name', 'score'],
+      ['Acme', 92]
+    ]
+  }
+});
+
+assert.equal(xlsxResult.ok, true);
+assert.equal(typeof xlsxResult.output?.localPath, 'string');
+assert.ok(String(xlsxResult.output?.localPath).endsWith('.xlsx'));
+assert.ok(existsSync(String(xlsxResult.output?.localPath)));
+
+const xlsxExtractResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'office-document',
+  action: 'document.extract_text',
+  input: {
+    path: String(xlsxResult.output?.localPath)
+  }
+});
+
+assert.equal(xlsxExtractResult.ok, true);
+assert.match(String(xlsxExtractResult.output?.text), /Acme/);
+assert.match(String(xlsxExtractResult.output?.text), /92/);
+
+const pptxResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'office-document',
+  action: 'presentation.write_pptx',
+  input: {
+    title: 'Enterprise AI Pilot Plan',
+    folder: 'presentations',
+    fileName: 'enterprise-ai-pilot',
+    slides: [
+      {
+        title: 'Pilot Goals',
+        bullets: ['Reduce repetitive work', 'Create measurable delivery outcomes']
+      },
+      {
+        title: 'Next Actions',
+        bullets: ['Confirm pilot team', 'Start with one digital employee']
+      }
+    ]
+  }
+});
+
+assert.equal(pptxResult.ok, true);
+assert.equal(typeof pptxResult.output?.localPath, 'string');
+assert.ok(String(pptxResult.output?.localPath).endsWith('.pptx'));
+assert.ok(existsSync(String(pptxResult.output?.localPath)));
+
+const pptxExtractResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'office-document',
+  action: 'document.extract_text',
+  input: {
+    path: String(pptxResult.output?.localPath)
+  }
+});
+
+assert.equal(pptxExtractResult.ok, true);
+assert.match(String(pptxExtractResult.output?.text), /Pilot Goals/);
+assert.match(String(pptxExtractResult.output?.text), /Reduce repetitive work/);
+assert.match(String(pptxExtractResult.output?.text), /Next Actions/);
+
 const blockedWebResult = await invokeDesktopTool(tempDir, {
   workspaceId,
   toolId: 'web-search',
@@ -138,6 +281,53 @@ const blockedWebResult = await invokeDesktopTool(tempDir, {
 assert.equal(blockedWebResult.ok, false);
 assert.match(blockedWebResult.message ?? '', /private network URLs are blocked/);
 
+const blockedHttpResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'http-request',
+  action: 'http.request',
+  input: {
+    url: `${localServerBaseUrl}/api`
+  }
+});
+
+assert.equal(blockedHttpResult.ok, false);
+assert.match(blockedHttpResult.message ?? '', /private network URLs are blocked/);
+
+const httpResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'http-request',
+  action: 'http.request',
+  input: {
+    method: 'POST',
+    url: `${localServerBaseUrl}/api`,
+    body: {
+      message: 'hello'
+    },
+    allowPrivateNetwork: true
+  }
+});
+
+assert.equal(httpResult.ok, true);
+assert.equal((httpResult.output?.json as { ok?: boolean }).ok, true);
+assert.equal((httpResult.output?.json as { body?: { message?: string } }).body?.message, 'hello');
+
+const mcpResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'mcp',
+  action: 'mcp.call',
+  input: {
+    endpoint: `${localServerBaseUrl}/mcp`,
+    toolName: 'echo',
+    arguments: {
+      text: 'hello'
+    },
+    allowPrivateNetwork: true
+  }
+});
+
+assert.equal(mcpResult.ok, true);
+assert.equal(mcpResult.output?.text, 'MCP echo: hello');
+
 const unsupported = await invokeDesktopTool(tempDir, {
   workspaceId,
   toolId: 'unknown-tool',
@@ -148,5 +338,16 @@ const unsupported = await invokeDesktopTool(tempDir, {
 });
 
 assert.equal(unsupported.ok, false);
+
+await new Promise<void>((resolve, reject) => {
+  server.close((error) => {
+    if (error) {
+      reject(error);
+      return;
+    }
+
+    resolve();
+  });
+});
 
 console.log('Desktop local filesystem tool passed.');

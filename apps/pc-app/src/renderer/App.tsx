@@ -6,6 +6,7 @@ import {
   CloseOutlined,
   ControlOutlined,
   DatabaseOutlined,
+  DownOutlined,
   FileAddOutlined,
   FileTextOutlined,
   FolderOpenOutlined,
@@ -41,6 +42,7 @@ import InputNumber from 'antd/es/input-number';
 import Layout from 'antd/es/layout';
 import List from 'antd/es/list';
 import Modal from 'antd/es/modal';
+import Popover from 'antd/es/popover';
 import Select from 'antd/es/select';
 import Space from 'antd/es/space';
 import Switch from 'antd/es/switch';
@@ -103,6 +105,26 @@ interface ComposerAttachment {
   progress: number;
   status: 'uploading' | 'ready';
   stagedAt: string;
+}
+
+interface WorkflowRuntimeLogVariable {
+  name: string;
+  valueType: string;
+  preview: string;
+}
+
+interface WorkflowRuntimeNodeLogDetail {
+  id: string;
+  type: string;
+  name: string;
+  status: string;
+  message?: string;
+  modelProfileId?: string;
+  toolId?: string;
+  artifactType?: string;
+  artifactPath?: string;
+  inputs: WorkflowRuntimeLogVariable[];
+  outputs: WorkflowRuntimeLogVariable[];
 }
 
 interface ModelFormValues {
@@ -379,6 +401,10 @@ const initialAuthorizedRoleTemplateCatalog: DesktopAuthorizedRoleTemplateCatalog
   templates: fallbackDesktopRoleTemplates.map(toRoleTemplateSummary)
 };
 
+function cloneJsonValue<T>(value: T | undefined): T | undefined {
+  return value === undefined ? undefined : (JSON.parse(JSON.stringify(value)) as T);
+}
+
 function toRoleTemplateSummary(template: DesktopRoleTemplate): DesktopAuthorizedRoleTemplateSummary {
   return {
     id: template.templateId,
@@ -396,6 +422,7 @@ function toRoleTemplateSummary(template: DesktopRoleTemplate): DesktopAuthorized
       ...step,
       toolIds: step.toolIds ? [...step.toolIds] : undefined
     })),
+    workflowGraph: cloneJsonValue(template.workflowGraph),
     sampleInputs: [...(template.sampleInputs ?? [])],
     outputFormat: template.outputFormat ?? '',
     approvalPolicy: template.approvalPolicy
@@ -425,6 +452,7 @@ function toDesktopRoleTemplate(summary: DesktopAuthorizedRoleTemplateSummary): D
       ...step,
       toolIds: step.toolIds ? [...step.toolIds] : undefined
     })),
+    workflowGraph: cloneJsonValue(summary.workflowGraph) as DesktopRoleTemplate['workflowGraph'],
     sampleInputs: [...(summary.sampleInputs ?? [])],
     outputFormat: summary.outputFormat ?? '',
     modelProfileIds: fallback?.modelProfileIds ?? ['qiu-general-default'],
@@ -466,6 +494,14 @@ function inferDesktopToolIds(summary: DesktopAuthorizedRoleTemplateSummary): str
 
   if (includesAny(text, ['file', 'folder', 'local', 'filesystem', '本地', '文件', '目录', '素材', '附件'])) {
     toolIds.push('local-filesystem');
+  }
+
+  if (includesAny(text, ['http', 'api', 'webhook', '接口', '请求'])) {
+    toolIds.push('http-request');
+  }
+
+  if (includesAny(text, ['mcp', 'model context protocol'])) {
+    toolIds.push('mcp');
   }
 
   return toolIds.length > 0 ? mergeUniqueStrings(toolIds, []) : ['web-search', 'office-document'];
@@ -629,6 +665,7 @@ export default function App() {
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
   const [isComposerDragOver, setIsComposerDragOver] = useState(false);
+  const [taskHistoryOpen, setTaskHistoryOpen] = useState(false);
 
   useEffect(() => {
     void loadRuntimeState();
@@ -1420,6 +1457,51 @@ export default function App() {
       conversationTask.state !== 'running' &&
       conversationTask.state !== 'completed' &&
       conversationTask.state !== 'cancelled';
+    const startNewConversationTask = () => {
+      setSelectedTaskId(newTaskSelectionId);
+      taskForm.resetFields(['input']);
+      setTaskHistoryOpen(false);
+    };
+    const selectConversationTask = (taskId: string) => {
+      setSelectedTaskId(taskId);
+      setTaskHistoryOpen(false);
+    };
+    const taskHistoryContent = (
+      <div className="task-history-popover">
+        <Flex align="center" justify="space-between" gap={8} className="task-history-header">
+          <Typography.Text strong>任务记录</Typography.Text>
+          <Button size="small" onClick={startNewConversationTask}>
+            新任务
+          </Button>
+        </Flex>
+
+        {activeRoleTasks.length > 0 ? (
+          <div className="task-history-list">
+            {activeRoleTasks.slice(0, 20).map((task) => (
+              <button
+                key={task.taskId}
+                type="button"
+                className={
+                  conversationTask?.taskId === task.taskId
+                    ? 'task-history-item selected'
+                    : 'task-history-item'
+                }
+                onClick={() => selectConversationTask(task.taskId)}
+              >
+                <span className="task-history-title">{task.title}</span>
+                <span className="task-history-meta">
+                  <Tag color={taskStateColor(task.state)}>{taskStateLabel(task.state)}</Tag>
+                  <span>{formatShortTime(task.updatedAt)}</span>
+                  <span>产物 {countUserDeliverableArtifacts(task)}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无历史任务" />
+        )}
+      </div>
+    );
 
     return (
       <div className="workbench-page">
@@ -1445,6 +1527,7 @@ export default function App() {
                   className={isActive ? 'agent-session-item selected' : 'agent-session-item'}
                   onClick={() => {
                     activateRole(rolePackage.roleCode);
+                    setTaskHistoryOpen(false);
                     if (latestTask) {
                       setSelectedTaskId(latestTask.taskId);
                     }
@@ -1474,47 +1557,6 @@ export default function App() {
               );
             })}
           </div>
-
-          <div className="task-history-section">
-            <Flex align="center" justify="space-between" gap={8} className="task-history-header">
-              <Typography.Text strong>历史任务</Typography.Text>
-              <Button
-                size="small"
-                onClick={() => {
-                  setSelectedTaskId(newTaskSelectionId);
-                  taskForm.resetFields(['input']);
-                }}
-              >
-                新任务
-              </Button>
-            </Flex>
-
-            {activeRoleTasks.length > 0 ? (
-              <div className="task-history-list">
-                {activeRoleTasks.slice(0, 20).map((task) => (
-                  <button
-                    key={task.taskId}
-                    type="button"
-                    className={
-                      conversationTask?.taskId === task.taskId
-                        ? 'task-history-item selected'
-                        : 'task-history-item'
-                    }
-                    onClick={() => setSelectedTaskId(task.taskId)}
-                  >
-                    <span className="task-history-title">{task.title}</span>
-                    <span className="task-history-meta">
-                      <Tag color={taskStateColor(task.state)}>{taskStateLabel(task.state)}</Tag>
-                      <span>{formatShortTime(task.updatedAt)}</span>
-                      <span>产物 {countUserDeliverableArtifacts(task)}</span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无历史任务" />
-            )}
-          </div>
         </aside>
 
         <section className="chat-workspace">
@@ -1523,10 +1565,26 @@ export default function App() {
               <span className="chat-agent-avatar">
                 {roleAvatarText(conversationRole?.name ?? '数字员工')}
               </span>
-              <Space direction="vertical" size={0}>
-                <Typography.Text strong>
-                  {conversationRole?.name ?? '选择一个数字员工'}
-                </Typography.Text>
+              <Space direction="vertical" size={2} className="chat-header-main">
+                <span className="chat-header-title-row">
+                  <Typography.Text strong>
+                    {conversationRole?.name ?? '选择一个数字员工'}
+                  </Typography.Text>
+                  <Popover
+                    trigger="click"
+                    placement="bottomLeft"
+                    open={taskHistoryOpen}
+                    onOpenChange={setTaskHistoryOpen}
+                    content={taskHistoryContent}
+                  >
+                    <Button size="small" className="task-switcher-button">
+                      <span className="task-switcher-label">
+                        {conversationTask?.title ?? '新任务'}
+                      </span>
+                      <DownOutlined />
+                    </Button>
+                  </Popover>
+                </span>
                 <Typography.Text type="secondary">
                   {conversationRole?.summary ?? '选择左侧员工后，直接用自然语言下达任务。'}
                 </Typography.Text>
@@ -1537,6 +1595,9 @@ export default function App() {
               <Tag color="geekblue">运行中 {runningTaskCount}</Tag>
               <Tag color="gold">待处理 {waitingTaskCount}</Tag>
               <Tag color="green">已完成 {completedTaskCount}</Tag>
+              <Button size="small" onClick={startNewConversationTask}>
+                新任务
+              </Button>
               <Button size="small" onClick={() => navigateToSection('models')}>
                 模型
               </Button>
@@ -1594,18 +1655,22 @@ export default function App() {
 
                     {conversationTask.executionLogs.length > 0 ? (
                       <div className="process-step-list">
-                        {conversationTask.executionLogs.map((log) => (
-                          <div key={log.id} className={`process-step ${log.level}`}>
-                            <span className="process-dot" />
-                            <Space direction="vertical" size={2}>
-                              <Space size={8} wrap>
-                                <Typography.Text strong>{executionEventLabel(log.eventType)}</Typography.Text>
-                                <Typography.Text type="secondary">{formatDate(log.createdAt)}</Typography.Text>
+                        {conversationTask.executionLogs.map((log) => {
+                          const workflowNodeDetail = readWorkflowNodeLogDetail(log);
+                          return (
+                            <div key={log.id} className={`process-step ${log.level}`}>
+                              <span className="process-dot" />
+                              <Space direction="vertical" size={6}>
+                                <Space size={8} wrap>
+                                  <Typography.Text strong>{executionEventLabel(log.eventType)}</Typography.Text>
+                                  <Typography.Text type="secondary">{formatDate(log.createdAt)}</Typography.Text>
+                                </Space>
+                                <Typography.Text type="secondary">{executionEventMessage(log)}</Typography.Text>
+                                {workflowNodeDetail ? renderWorkflowNodeLogDetail(workflowNodeDetail) : null}
                               </Space>
-                              <Typography.Text type="secondary">{executionEventMessage(log)}</Typography.Text>
-                            </Space>
-                          </div>
-                        ))}
+                            </div>
+                          );
+                        })}
                       </div>
                     ) : (
                       <Typography.Text type="secondary">
@@ -1643,7 +1708,7 @@ export default function App() {
                                   <Tag>{artifact.type}</Tag>
                                 </Space>
                                 <Typography.Paragraph type="secondary" ellipsis={{ rows: 2 }} style={{ margin: 0 }}>
-                                  {artifact.content}
+                                  {formatArtifactPreview(artifact)}
                                 </Typography.Paragraph>
                                 {artifact.localPath ? (
                                   <Typography.Text type="secondary" ellipsis>
@@ -3503,13 +3568,14 @@ function toolCategory(tool: ToolManifest): string {
   if (includesAny(text, ['document', 'office', 'word', 'ppt', 'spreadsheet', '文档', '表格', '演示'])) return '文档';
   if (includesAny(text, ['web', 'search', 'fetch', 'url', '网页', '搜索'])) return '网页';
   if (includesAny(text, ['file', 'filesystem', 'folder', 'local', '文件', '目录'])) return '文件';
+  if (includesAny(text, ['http', 'api', 'custom_api', 'mcp', '接口'])) return '接口';
   if (tool.requiresApproval) return '安全';
   if (tool.entryPoint === 'bridge') return '本地';
   return '通用';
 }
 
 function buildToolCategoryTabs(tools: ToolManifest[]): string[] {
-  const fixedCategories = ['全部', '文档', '网页', '文件', '本地', '安全', '通用'];
+  const fixedCategories = ['全部', '文档', '网页', '文件', '接口', '本地', '安全', '通用'];
   const availableCategories = new Set(tools.map(toolCategory));
   return fixedCategories.filter((category) => category === '全部' || availableCategories.has(category));
 }
@@ -3519,6 +3585,7 @@ function toolCategoryIcon(tool: ToolManifest): ReactNode {
   if (category === '文档') return <FileTextOutlined />;
   if (category === '网页') return <GlobalOutlined />;
   if (category === '文件') return <FolderOpenOutlined />;
+  if (category === '接口') return <ApiOutlined />;
   if (category === '安全') return <SafetyCertificateOutlined />;
   return <ToolOutlined />;
 }
@@ -3633,6 +3700,14 @@ function formatEstimatedCostCents(value?: number) {
 
 function isUserDeliverableArtifact(artifact: DesktopTaskDetail['artifacts'][number]) {
   return artifact.type !== 'report';
+}
+
+function formatArtifactPreview(artifact: DesktopTaskDetail['artifacts'][number]) {
+  if (artifact.localPath) {
+    return `已生成本地文件：${artifact.title}`;
+  }
+
+  return artifact.content;
 }
 
 function countUserDeliverableArtifacts(task: DesktopTaskDetail) {
@@ -3770,6 +3845,125 @@ function roleAvatarText(name: string) {
   return normalized.slice(0, 2);
 }
 
+function renderWorkflowNodeLogDetail(detail: WorkflowRuntimeNodeLogDetail): ReactNode {
+  return (
+    <div className="workflow-node-detail">
+      <div className="workflow-node-meta">
+        <Tag>{detail.type}</Tag>
+        <Tag color={detail.status === 'failed' ? 'red' : detail.status === 'running' ? 'blue' : 'green'}>
+          {detail.status}
+        </Tag>
+        {detail.modelProfileId ? <Tag>模型 {detail.modelProfileId}</Tag> : null}
+        {detail.toolId ? <Tag>工具 {detail.toolId}</Tag> : null}
+        {detail.artifactType ? <Tag>产物 {detail.artifactType}</Tag> : null}
+      </div>
+      {detail.message ? (
+        <Typography.Text type="secondary" className="workflow-node-message">
+          {detail.message}
+        </Typography.Text>
+      ) : null}
+      <div className="workflow-node-vars">
+        {renderWorkflowVariableGroup('输入', detail.inputs)}
+        {renderWorkflowVariableGroup('输出', detail.outputs)}
+      </div>
+      {detail.artifactPath ? (
+        <Typography.Text type="secondary" ellipsis>
+          文件：{detail.artifactPath}
+        </Typography.Text>
+      ) : null}
+    </div>
+  );
+}
+
+function renderWorkflowVariableGroup(title: string, variables: WorkflowRuntimeLogVariable[]): ReactNode {
+  return (
+    <div className="workflow-node-var-group">
+      <Typography.Text strong>{title}</Typography.Text>
+      {variables.length > 0 ? (
+        <div className="workflow-node-var-list">
+          {variables.map((variable) => (
+            <div key={`${title}-${variable.name}`} className="workflow-node-var">
+              <span className="workflow-node-var-name">{variable.name}</span>
+              <span className="workflow-node-var-type">{variable.valueType}</span>
+              <Typography.Paragraph type="secondary" ellipsis={{ rows: 2 }} style={{ margin: 0 }}>
+                {variable.preview}
+              </Typography.Paragraph>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <Typography.Text type="secondary">无</Typography.Text>
+      )}
+    </div>
+  );
+}
+
+function readWorkflowNodeLogDetail(
+  log: DesktopTaskDetail['executionLogs'][number]
+): WorkflowRuntimeNodeLogDetail | undefined {
+  const detail = log.details?.workflowNode;
+  if (!isPlainObject(detail)) {
+    return undefined;
+  }
+
+  const id = readString(detail.id);
+  const type = readString(detail.type);
+  const name = readString(detail.name);
+  const status = readString(detail.status);
+  if (!id || !type || !name || !status) {
+    return undefined;
+  }
+
+  return {
+    id,
+    type,
+    name,
+    status,
+    message: readString(detail.message),
+    modelProfileId: readString(detail.modelProfileId),
+    toolId: readString(detail.toolId),
+    artifactType: readString(detail.artifactType),
+    artifactPath: readString(detail.artifactPath),
+    inputs: readWorkflowRuntimeLogVariables(detail.inputs),
+    outputs: readWorkflowRuntimeLogVariables(detail.outputs)
+  };
+}
+
+function readWorkflowRuntimeLogVariables(value: unknown): WorkflowRuntimeLogVariable[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!isPlainObject(item)) {
+      return [];
+    }
+
+    const name = readString(item.name);
+    const valueType = readString(item.valueType);
+    const preview = readString(item.preview);
+    if (!name || !valueType) {
+      return [];
+    }
+
+    return [
+      {
+        name,
+        valueType,
+        preview: preview || '-'
+      }
+    ];
+  });
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function executionEventLabel(eventType: string) {
   const labels: Record<string, string> = {
     WORKOS_TASK_RUN_STARTED: '接收任务',
@@ -3801,7 +3995,7 @@ function executionEventLabel(eventType: string) {
     TASK_COMPLETED: '任务完成'
   };
 
-  return labels[eventType] ?? eventType.replace(/_/g, ' ').toLowerCase();
+  return labels[eventType] ?? workflowExecutionEventLabel(eventType) ?? eventType.replace(/_/g, ' ').toLowerCase();
 }
 
 function executionEventMessage(log: DesktopTaskDetail['executionLogs'][number]) {
@@ -3822,7 +4016,74 @@ function executionEventMessage(log: DesktopTaskDetail['executionLogs'][number]) 
     TASK_COMPLETED: '任务已完成，可以查看结果或打开文件。'
   };
 
-  return messages[log.eventType] ?? log.message;
+  return messages[log.eventType] ?? workflowExecutionEventMessage(log) ?? log.message;
+}
+
+function workflowExecutionEventLabel(eventType: string) {
+  const labels: Record<string, string> = {
+    WORKFLOW_GRAPH_LOADED: '加载工作流',
+    WORKFLOW_GRAPH_NODE_PLANNED: '规划步骤',
+    WORKFLOW_GRAPH_SKIPPED: '跳过工作流',
+    WORKFLOW_GRAPH_CONDITION_DEFERRED: '延后判断',
+    WORKFLOW_RUNTIME_STARTED: '开始工作流',
+    WORKFLOW_RUNTIME_FILE_CONTEXT_EXTRACTED: '读取文件',
+    WORKFLOW_RUNTIME_FILE_CONTEXT_SKIPPED: '跳过文件读取',
+    WORKFLOW_RUNTIME_FILE_CONTEXT_FAILED: '文件读取失败',
+    WORKFLOW_RUNTIME_KNOWLEDGE_RETRIEVED: '检索知识',
+    WORKFLOW_RUNTIME_KNOWLEDGE_RETRIEVAL_SKIPPED: '跳过知识检索',
+    WORKFLOW_RUNTIME_KNOWLEDGE_RETRIEVAL_FAILED: '知识检索失败',
+    WORKFLOW_RUNTIME_NODE_STARTED: '执行节点',
+    WORKFLOW_RUNTIME_MODEL_INVOKED: '节点调用模型',
+    WORKFLOW_RUNTIME_TOOL_INVOKED: '节点调用工具',
+    WORKFLOW_RUNTIME_ARTIFACT_INPUT_RESOLVED: '整理产物内容',
+    WORKFLOW_RUNTIME_ARTIFACT_WRITTEN: '写入产物',
+    WORKFLOW_RUNTIME_NODE_COMPLETED: '节点完成',
+    WORKFLOW_RUNTIME_NODE_FAILED: '节点失败',
+    WORKFLOW_RUNTIME_CONDITION_DEFERRED: '条件延后',
+    WORKFLOW_RUNTIME_LOOP_LIMIT_REACHED: '循环上限',
+    WORKFLOW_RUNTIME_NODE_LIMIT_REACHED: '节点上限',
+    WORKFLOW_RUNTIME_COMPLETED: '工作流完成',
+    WORKFLOW_ARTIFACT_FALLBACK_STARTED: '写入产物',
+    WORKFLOW_ARTIFACT_FALLBACK_CREATED: '产物完成',
+    WORKFLOW_ARTIFACT_FALLBACK_FAILED: '产物失败',
+    WORKFLOW_ARTIFACT_FALLBACK_SKIPPED: '跳过产物'
+  };
+
+  return labels[eventType];
+}
+
+function workflowExecutionEventMessage(log: DesktopTaskDetail['executionLogs'][number]) {
+  if (!log.eventType.startsWith('WORKFLOW_')) {
+    return undefined;
+  }
+
+  if (log.eventType === 'WORKFLOW_GRAPH_SKIPPED') {
+    return '工作流配置不可用，已回退到普通执行模式。';
+  }
+
+  if (log.eventType === 'WORKFLOW_RUNTIME_FILE_CONTEXT_SKIPPED') {
+    return '已收到文件，但当前员工没有可用的读取工具。';
+  }
+
+  if (
+    log.eventType === 'WORKFLOW_RUNTIME_ARTIFACT_WRITTEN' ||
+    log.eventType === 'WORKFLOW_ARTIFACT_FALLBACK_CREATED'
+  ) {
+    return formatPathLogMessage(log.message, '已生成本地文件');
+  }
+
+  if (
+    log.eventType === 'WORKFLOW_RUNTIME_FILE_CONTEXT_EXTRACTED' ||
+    log.eventType === 'WORKFLOW_RUNTIME_FILE_CONTEXT_FAILED'
+  ) {
+    return formatPathLogMessage(log.message, '已处理任务文件');
+  }
+
+  return formatWorkflowLogMessage(log.message);
+}
+
+function formatWorkflowLogMessage(message: string) {
+  return message.replace(/\.$/, '').trim();
 }
 
 function formatModelLogMessage(message: string) {
@@ -3867,6 +4128,7 @@ function toInstalledRolePackage(template: DesktopRoleTemplate): RolePackageManif
       ...step,
       toolIds: step.toolIds ? [...step.toolIds] : undefined
     })),
+    workflowGraph: cloneJsonValue(template.workflowGraph),
     sampleInputs: [...(template.sampleInputs ?? [])],
     outputFormat: template.outputFormat,
     modelProfileIds: [...template.modelProfileIds],

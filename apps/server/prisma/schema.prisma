@@ -565,6 +565,7 @@ model RoleTemplate {
   tools               Json
   skills              Json
   workflowSteps       Json     @default("[]") @map("workflow_steps")
+  workflowGraph       Json     @default("{}") @map("workflow_graph")
   sampleInputs        Json     @default("[]") @map("sample_inputs")
   outputFormat        String?  @map("output_format")
   approvalPolicy      String   @map("approval_policy")

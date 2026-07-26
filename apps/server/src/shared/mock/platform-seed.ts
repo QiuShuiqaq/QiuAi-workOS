@@ -4,6 +4,7 @@ import {
   type ServerRoleSkill,
   type ServerRoleTemplateWorkflowStep
 } from '../role-template-catalog';
+import type { ServerRoleWorkflowGraph } from '../workflow-graph';
 
 export interface MockWorkspaceSummary {
   id: string;
@@ -43,6 +44,7 @@ export interface MockRoleTemplateSummary {
   tools: string[];
   skills: ServerRoleSkill[];
   workflowSteps: ServerRoleTemplateWorkflowStep[];
+  workflowGraph: ServerRoleWorkflowGraph;
   sampleInputs: string[];
   outputFormat: string;
   approvalPolicy: string;
@@ -332,6 +334,7 @@ export const demoRoleTemplates: MockRoleTemplateSummary[] = serverRoleTemplateCa
       ...step,
       toolIds: step.toolIds ? [...step.toolIds] : undefined
     })),
+    workflowGraph: template.workflowGraph,
     sampleInputs: [...template.sampleInputs],
     outputFormat: template.outputFormat,
     approvalPolicy: template.approvalPolicy,

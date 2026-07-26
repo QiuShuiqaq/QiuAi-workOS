@@ -4,3 +4,4 @@ export * from './role-template-catalog';
 export * from './role';
 export * from './task';
 export * from './workspace';
+export * from './workflow-graph';

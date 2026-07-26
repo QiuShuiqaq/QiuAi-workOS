@@ -750,6 +750,7 @@ function validateRolePackageManifest(value: unknown): RolePackageManifest {
     workflowSteps: Array.isArray(record.workflowSteps)
       ? record.workflowSteps.map(validateDesktopRoleWorkflowStep)
       : undefined,
+    workflowGraph: record.workflowGraph,
     sampleInputs: requireStringArray(record.sampleInputs, 'rolePackage.sampleInputs'),
     outputFormat: optionalString(record.outputFormat, 'rolePackage.outputFormat'),
     modelProfileIds,

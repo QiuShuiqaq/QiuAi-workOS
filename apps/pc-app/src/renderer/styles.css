@@ -377,14 +377,37 @@ body,
   margin-inline-end: 0;
 }
 
-.task-history-section {
+.chat-header-main {
+  min-width: 0;
+}
+
+.chat-header-title-row {
   display: flex;
-  flex: 0 0 250px;
-  flex-direction: column;
-  min-height: 0;
-  padding: 12px;
-  border-top: 1px solid #eef2f7;
-  background: #fff;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.task-switcher-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: min(360px, 42vw);
+  min-width: 112px;
+  padding-inline: 10px;
+}
+
+.task-switcher-label {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-history-popover {
+  width: min(380px, calc(100vw - 48px));
+  max-width: 100%;
 }
 
 .task-history-header {
@@ -400,6 +423,11 @@ body,
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+}
+
+.task-history-popover .task-history-list {
+  max-height: 360px;
+  padding-right: 4px;
 }
 
 .task-history-item {
@@ -605,6 +633,70 @@ body,
 
 .process-step.error .process-dot {
   background: #ff4d4f;
+}
+
+.workflow-node-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 760px;
+  padding: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.workflow-node-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.workflow-node-message {
+  display: block;
+}
+
+.workflow-node-vars {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.workflow-node-var-group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.workflow-node-var-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.workflow-node-var {
+  display: grid;
+  grid-template-columns: minmax(80px, 0.8fr) auto minmax(0, 1.4fr);
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid #eef2f7;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.workflow-node-var-name,
+.workflow-node-var-type {
+  overflow: hidden;
+  color: #4b5563;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-node-var-type {
+  color: #1677ff;
 }
 
 .chat-artifact-grid {

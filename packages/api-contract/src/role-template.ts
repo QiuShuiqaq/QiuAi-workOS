@@ -1,5 +1,6 @@
 import type { PaginationMeta } from './pagination';
 import type { RoleSkillSummary, RoleTemplateWorkflowStep } from './role';
+import type { RoleWorkflowGraph } from './workflow-graph';
 
 export type AdminRoleTemplateStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
 
@@ -16,6 +17,7 @@ export interface AdminRoleTemplateDetail {
   tools: string[];
   skills: RoleSkillSummary[];
   workflowSteps: RoleTemplateWorkflowStep[];
+  workflowGraph?: RoleWorkflowGraph;
   sampleInputs: string[];
   outputFormat: string;
   approvalPolicy: string;
@@ -51,6 +53,7 @@ export interface CreateAdminRoleTemplateRequest {
   tools: string[];
   skills: AdminRoleTemplateSkillInput[];
   workflowSteps?: RoleTemplateWorkflowStep[];
+  workflowGraph?: RoleWorkflowGraph;
   sampleInputs?: string[];
   outputFormat?: string;
   approvalPolicy: string;
@@ -71,6 +74,7 @@ export interface UpdateAdminRoleTemplateRequest {
   tools?: string[];
   skills?: AdminRoleTemplateSkillInput[];
   workflowSteps?: RoleTemplateWorkflowStep[];
+  workflowGraph?: RoleWorkflowGraph;
   sampleInputs?: string[];
   outputFormat?: string;
   approvalPolicy?: string;
@@ -84,6 +88,23 @@ export interface TestAdminRoleTemplateRequest {
   sampleWorkspaceId?: string;
 }
 
+export interface AdminRoleTemplateTestNodeTrace {
+  nodeId: string;
+  nodeName: string;
+  nodeType: string;
+  status: 'passed' | 'warning' | 'failed';
+  inputPreview: string;
+  outputPreview: string;
+  warnings: string[];
+}
+
+export interface AdminRoleTemplateTestGraphTrace {
+  entryNodeId: string;
+  nodeCount: number;
+  edgeCount: number;
+  nodes: AdminRoleTemplateTestNodeTrace[];
+}
+
 export interface TestAdminRoleTemplateResponse {
   data: {
     templateId: string;
@@ -92,6 +113,7 @@ export interface TestAdminRoleTemplateResponse {
     message: string;
     warnings: string[];
     sampleInput?: string;
+    graphTrace?: AdminRoleTemplateTestGraphTrace;
   };
 }
 

@@ -204,7 +204,18 @@ test('admin role template factory governs publication and workspace visibility',
       }
     });
     assert.equal(testResponse.statusCode, 201);
-    assert.equal(JSON.parse(testResponse.body).data.valid, true);
+    const testResponseData = JSON.parse(testResponse.body).data;
+    assert.equal(testResponseData.valid, true);
+    assert.ok(testResponseData.graphTrace);
+    assert.ok(testResponseData.graphTrace.nodes.length >= 2);
+    assert.ok(
+      testResponseData.graphTrace.nodes.some(
+        (node: { nodeId: string; inputPreview: string; outputPreview: string }) =>
+          node.nodeId === 'receive_input' &&
+          node.inputPreview.includes('Please verify the template factory flow.') &&
+          node.outputPreview.length > 0
+      )
+    );
 
     const publishResponse = await app.inject({
       method: 'POST',

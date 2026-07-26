@@ -99,7 +99,10 @@ export function createMockTaskDetail(seed: MockTaskDetailSeed): DesktopTaskDetai
       ? {
           modelProfileIds: [...seed.executionContext.modelProfileIds],
           toolIds: [...seed.executionContext.toolIds],
-          knowledgeBindingIds: [...seed.executionContext.knowledgeBindingIds]
+          knowledgeBindingIds: [...seed.executionContext.knowledgeBindingIds],
+          attachmentPaths: seed.executionContext.attachmentPaths
+            ? [...seed.executionContext.attachmentPaths]
+            : undefined
         }
       : undefined
   };
