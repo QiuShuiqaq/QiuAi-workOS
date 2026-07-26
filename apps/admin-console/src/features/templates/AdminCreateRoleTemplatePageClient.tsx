@@ -1,6 +1,15 @@
 ﻿'use client';
 
-import { ArrowLeftOutlined, DeleteOutlined, PlayCircleOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons';
+import {
+  AppstoreAddOutlined,
+  ArrowLeftOutlined,
+  DeleteOutlined,
+  PlayCircleOutlined,
+  PlusOutlined,
+  RocketOutlined,
+  SaveOutlined,
+  SettingOutlined
+} from '@ant-design/icons';
 import type {
   AdminPlanDetail,
   AdminRoleTemplateDetail,
@@ -18,15 +27,17 @@ import { QiuPage } from '@qiuai/ui';
 import Alert from 'antd/es/alert';
 import Button from 'antd/es/button';
 import Card from 'antd/es/card';
+import Divider from 'antd/es/divider';
+import Drawer from 'antd/es/drawer';
 import Form from 'antd/es/form';
 import Input from 'antd/es/input';
 import InputNumber from 'antd/es/input-number';
+import Modal from 'antd/es/modal';
 import Select from 'antd/es/select';
 import Space from 'antd/es/space';
 import Tag from 'antd/es/tag';
 import Typography from 'antd/es/typography';
 import message from 'antd/es/message';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -73,6 +84,16 @@ type WorkflowFlowNodeData = {
 } & Record<string, unknown>;
 type WorkflowFlowNode = FlowNode<WorkflowFlowNodeData, 'workflowNode'>;
 type WorkflowFlowEdge = FlowEdge<{ conditionLabel: string }>;
+type WorkflowCapabilitySummary = {
+  modelProfileIds: string[];
+  toolIds: string[];
+  knowledgeSources: string[];
+  artifactTypes: string[];
+  approvalRequired: boolean;
+  nodeCount: number;
+  edgeCount: number;
+  warnings: string[];
+};
 
 type ToolConfigField = {
   key: string;
@@ -339,6 +360,45 @@ const workflowNodeTypeOptions: Array<{ value: WorkflowNodeType; label: string }>
   { value: 'output', label: '输出' }
 ];
 
+const workflowNodeCatalogGroups: Array<{
+  title: string;
+  description: string;
+  nodes: Array<{ value: WorkflowNodeType; label: string; hint: string }>;
+}> = [
+  {
+    title: 'AI',
+    description: '模型生成、分析、任务拆解',
+    nodes: [
+      { value: 'llm', label: 'LLM', hint: '调用模型生成、总结或分析' },
+      { value: 'condition', label: '条件判断', hint: '根据变量结果进入不同分支' }
+    ]
+  },
+  {
+    title: '数据',
+    description: '接收输入、读取知识',
+    nodes: [
+      { value: 'input', label: '输入', hint: '声明用户任务和附件输入' },
+      { value: 'knowledge', label: '知识库', hint: '读取企业或本地知识' }
+    ]
+  },
+  {
+    title: '工具',
+    description: '执行外部动作',
+    nodes: [
+      { value: 'tool', label: '工具调用', hint: '网页搜索、Office、MCP、HTTP 等' },
+      { value: 'artifact', label: '生成产物', hint: '生成 Word、表格、PPT、PDF 等文件' }
+    ]
+  },
+  {
+    title: '交付',
+    description: '确认和输出',
+    nodes: [
+      { value: 'approval', label: '人工确认', hint: '高风险步骤前让用户确认' },
+      { value: 'output', label: '输出结果', hint: '定义最终展示和下载内容' }
+    ]
+  }
+];
+
 const modelProfileOptions = [
   { value: 'qiu-general-default', label: '通用执行模型（PC 端配置）' },
   { value: 'qiu-reasoning-default', label: '深度推理模型（PC 端配置）' },
@@ -536,6 +596,74 @@ function readWorkflowGraphToolIds(graph: RoleWorkflowGraph): string[] {
   );
 }
 
+function deriveWorkflowKnowledgeSources(graph: RoleWorkflowGraph): string[] {
+  const sources = graph.nodes.flatMap((node) => {
+    if (node.type !== 'knowledge') return [];
+    const configSources = Array.isArray(node.config?.sources) ? node.config.sources : [];
+    return configSources.filter((source): source is string => typeof source === 'string');
+  });
+
+  return uniqueTags(sources.length ? sources : graph.nodes.some((node) => node.type === 'knowledge') ? ['workspace_library'] : []);
+}
+
+function deriveWorkflowModelProfileIds(graph: RoleWorkflowGraph): string[] {
+  return uniqueTags(
+    graph.nodes
+      .filter((node) => node.type === 'llm' || node.type === 'reasoning')
+      .map((node) => node.modelProfileId ?? 'qiu-general-default')
+  );
+}
+
+function deriveWorkflowArtifactTypes(graph: RoleWorkflowGraph): string[] {
+  return uniqueTags(
+    graph.nodes
+      .filter((node) => node.type === 'artifact')
+      .map((node) => node.artifactType ?? 'docx')
+  );
+}
+
+function deriveWorkflowSkills(graph: RoleWorkflowGraph): Array<{ code: string; name: string; summary: string }> {
+  const skillNodes = graph.nodes.filter((node) =>
+    node.type === 'llm' ||
+    node.type === 'reasoning' ||
+    node.type === 'tool' ||
+    node.type === 'knowledge' ||
+    node.type === 'artifact'
+  );
+
+  return skillNodes.slice(0, 8).map((node) => ({
+    code: node.id,
+    name: node.name,
+    summary: node.instruction ?? node.description ?? `${node.name} 节点能力`
+  }));
+}
+
+function deriveWorkflowCapabilitySummary(graph: RoleWorkflowGraph): WorkflowCapabilitySummary {
+  const incomingTargets = new Set(graph.edges.map((edge) => edge.targetNodeId));
+  const outgoingSources = new Set(graph.edges.map((edge) => edge.sourceNodeId));
+  const orphanNodes = graph.nodes.filter(
+    (node) =>
+      node.id !== graph.entryNodeId &&
+      !incomingTargets.has(node.id) &&
+      !outgoingSources.has(node.id)
+  );
+  const hasOutputNode = graph.nodes.some((node) => node.type === 'output');
+
+  return {
+    modelProfileIds: deriveWorkflowModelProfileIds(graph),
+    toolIds: readWorkflowGraphToolIds(graph),
+    knowledgeSources: deriveWorkflowKnowledgeSources(graph),
+    artifactTypes: deriveWorkflowArtifactTypes(graph),
+    approvalRequired: graph.nodes.some((node) => node.requiresApproval || node.type === 'approval'),
+    nodeCount: graph.nodes.length,
+    edgeCount: graph.edges.length,
+    warnings: [
+      ...(!hasOutputNode ? ['缺少输出节点，PC 端可能无法明确展示最终结果。'] : []),
+      ...(orphanNodes.length ? [`存在 ${orphanNodes.length} 个孤立节点，请确认是否需要连线。`] : [])
+    ]
+  };
+}
+
 function formatConditionLabel(condition: WorkflowEdge['condition']) {
   if (!condition || condition.type === 'always') return 'always';
   if (condition.type === 'expression') return `expr: ${condition.expression ?? '-'}`;
@@ -563,16 +691,6 @@ function rebuildLinearEdges(graph: RoleWorkflowGraph): RoleWorkflowGraph {
   }
 
   return { ...graph, edges };
-}
-
-function normalizeSkills(values?: SkillForm[]) {
-  return (values ?? [])
-    .map((skill) => ({
-      code: skill.code?.trim() ?? '',
-      name: skill.name?.trim() ?? '',
-      summary: skill.summary?.trim() ?? ''
-    }))
-    .filter((skill) => skill.code && skill.name && skill.summary);
 }
 
 function deriveWorkflowStepsFromGraph(graph: RoleWorkflowGraph): RoleWorkflowGraphSourceStep[] {
@@ -905,10 +1023,11 @@ function WorkflowReactFlowEditor({
     type: 'node',
     id: graph.entryNodeId
   });
-  const [newEdgeSourceId, setNewEdgeSourceId] = useState(graph.entryNodeId);
-  const [newEdgeTargetId, setNewEdgeTargetId] = useState(
-    graph.nodes.find((node) => node.id !== graph.entryNodeId)?.id ?? graph.entryNodeId
-  );
+  const [nodePicker, setNodePicker] = useState<{
+    open: boolean;
+    sourceNodeId?: string;
+    edgeId?: string;
+  }>({ open: false });
   const flowNodes = useMemo(() => toWorkflowFlowNodes(graph), [graph]);
   const flowEdges = useMemo(() => toWorkflowFlowEdges(graph), [graph]);
   const nodePositions = useMemo(
@@ -1035,36 +1154,69 @@ function WorkflowReactFlowEditor({
     [graph, onChange]
   );
 
-  function addNode(type: WorkflowNodeType) {
-    const sourcePosition = selectedNode
-      ? nodePositions.get(selectedNode.id)
-      : nodePositions.get(graph.entryNodeId);
-    const node = writeWorkflowNodeCanvasPosition(createCanvasNode(type, graph.nodes), {
-      x: (sourcePosition?.x ?? 80) + 260,
-      y: Math.max(80, sourcePosition?.y ?? 180)
+  function openNodePicker(options?: { sourceNodeId?: string; edgeId?: string }) {
+    setNodePicker({
+      open: true,
+      sourceNodeId: options?.sourceNodeId ?? selectedNode?.id ?? graph.entryNodeId,
+      edgeId: options?.edgeId
     });
-    const selectedNodeIndex = graph.nodes.findIndex((item) => item.id === selectedNode?.id);
+  }
+
+  function closeNodePicker() {
+    setNodePicker({ open: false });
+  }
+
+  function addNode(type: WorkflowNodeType, options?: { sourceNodeId?: string; edgeId?: string }) {
+    const edgeId = options?.edgeId ?? nodePicker.edgeId;
+    const edgeToInsert = edgeId
+      ? graph.edges.find((edge) => edge.id === edgeId)
+      : undefined;
+    const sourceNodeId =
+      edgeToInsert?.sourceNodeId ?? options?.sourceNodeId ?? nodePicker.sourceNodeId ?? selectedNode?.id ?? graph.entryNodeId;
+    const sourcePosition = nodePositions.get(sourceNodeId);
+    const targetPosition = edgeToInsert ? nodePositions.get(edgeToInsert.targetNodeId) : undefined;
+    const node = writeWorkflowNodeCanvasPosition(createCanvasNode(type, graph.nodes), {
+      x: targetPosition ? Math.round(((sourcePosition?.x ?? 80) + targetPosition.x) / 2) : (sourcePosition?.x ?? 80) + 260,
+      y: targetPosition ? Math.round(((sourcePosition?.y ?? 180) + targetPosition.y) / 2) + 80 : Math.max(80, sourcePosition?.y ?? 180)
+    });
+    const selectedNodeIndex = graph.nodes.findIndex((item) => item.id === sourceNodeId);
     const insertIndex = selectedNodeIndex >= 0 ? selectedNodeIndex + 1 : graph.nodes.length;
     const nodes = [
       ...graph.nodes.slice(0, insertIndex),
       node,
       ...graph.nodes.slice(insertIndex)
     ];
-    const sourceNodeId = selectedNode?.id ?? graph.entryNodeId;
-    const edges: WorkflowEdge[] = graph.edges.some((edge) => edge.sourceNodeId === sourceNodeId && edge.targetNodeId === node.id)
-      ? graph.edges
-      : [
-          ...graph.edges,
+
+    const edges: WorkflowEdge[] = edgeToInsert
+      ? [
+          ...graph.edges.filter((edge) => edge.id !== edgeToInsert.id),
           {
-            id: createWorkflowEdgeId(sourceNodeId, node.id, graph.edges),
-            sourceNodeId,
+            id: createWorkflowEdgeId(edgeToInsert.sourceNodeId, node.id, graph.edges),
+            sourceNodeId: edgeToInsert.sourceNodeId,
             targetNodeId: node.id,
+            condition: edgeToInsert.condition ?? { type: 'always' as const }
+          },
+          {
+            id: createWorkflowEdgeId(node.id, edgeToInsert.targetNodeId, graph.edges),
+            sourceNodeId: node.id,
+            targetNodeId: edgeToInsert.targetNodeId,
             condition: { type: 'always' as const }
           }
-        ];
+        ]
+      : graph.edges.some((edge) => edge.sourceNodeId === sourceNodeId && edge.targetNodeId === node.id)
+        ? graph.edges
+        : [
+            ...graph.edges,
+            {
+              id: createWorkflowEdgeId(sourceNodeId, node.id, graph.edges),
+              sourceNodeId,
+              targetNodeId: node.id,
+              condition: { type: 'always' as const }
+            }
+          ];
     onChange({ ...graph, nodes, edges });
     setSelection({ type: 'node', id: node.id });
-    setNewEdgeTargetId(node.id);
+    closeNodePicker();
   }
 
   function deleteNode(nodeId: string) {
@@ -1078,10 +1230,6 @@ function WorkflowReactFlowEditor({
       edges: graph.edges.filter((edge) => edge.sourceNodeId !== nodeId && edge.targetNodeId !== nodeId)
     });
     setSelection({ type: 'node', id: graph.entryNodeId });
-  }
-
-  function addManualEdge() {
-    handleConnect({ source: newEdgeSourceId, target: newEdgeTargetId, sourceHandle: null, targetHandle: null });
   }
 
   function deleteEdge(edgeId: string) {
@@ -1172,20 +1320,34 @@ function WorkflowReactFlowEditor({
   return (
     <div className="workflow-builder-shell">
       <aside className="workflow-node-palette">
-        <div className="workflow-pane-title">节点</div>
-        <Space direction="vertical" size={8} style={{ width: '100%' }}>
-          {workflowNodeTypeOptions
-            .filter((option) => option.value !== 'start')
-            .map((option) => (
-              <Button
-                key={option.value}
-                block
-                className="workflow-palette-button"
-                onClick={() => addNode(option.value)}
-              >
-                {option.label}
-              </Button>
-            ))}
+        <div className="workflow-pane-heading">
+          <div>
+            <div className="workflow-pane-title">节点库</div>
+            <Typography.Text type="secondary" className="workflow-pane-subtitle">
+              选中节点后添加下一步
+            </Typography.Text>
+          </div>
+          <Button size="small" type="primary" icon={<AppstoreAddOutlined />} onClick={() => openNodePicker()}>
+            添加
+          </Button>
+        </div>
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          {workflowNodeCatalogGroups.map((group) => (
+            <section key={group.title} className="workflow-node-group">
+              <div className="workflow-node-group-title">{group.title}</div>
+              {group.nodes.map((node) => (
+                <Button
+                  key={`${group.title}-${node.value}`}
+                  block
+                  className="workflow-palette-button"
+                  onClick={() => addNode(node.value, { sourceNodeId: selectedNode?.id ?? graph.entryNodeId })}
+                >
+                  <span>{node.label}</span>
+                  <span className="workflow-palette-hint">{node.hint}</span>
+                </Button>
+              ))}
+            </section>
+          ))}
         </Space>
       </aside>
 
@@ -1195,15 +1357,12 @@ function WorkflowReactFlowEditor({
             <Button size="small" onClick={resetLinearEdges}>
               自动整理连线
             </Button>
-            <Button size="small" onClick={() => addNode('llm')} icon={<PlusOutlined />}>
-              LLM
-            </Button>
-            <Button size="small" onClick={() => addNode('tool')} icon={<PlusOutlined />}>
-              工具
+            <Button size="small" onClick={() => openNodePicker()} icon={<PlusOutlined />}>
+              添加节点
             </Button>
           </Space>
           <Typography.Text type="secondary">
-            拖动节点调整布局，拖出节点右侧圆点创建连线。
+            拖动节点调整布局，拖出右侧圆点创建连线，右键画布空白处也可添加节点。
           </Typography.Text>
         </div>
         <ReactFlowProvider>
@@ -1217,6 +1376,10 @@ function WorkflowReactFlowEditor({
             onConnect={handleConnect}
             onNodeClick={(_, node) => setSelection({ type: 'node', id: node.id })}
             onEdgeClick={(_, edge) => setSelection({ type: 'edge', id: edge.id })}
+            onPaneContextMenu={(event) => {
+              event.preventDefault();
+              openNodePicker();
+            }}
             fitView
             fitViewOptions={{ padding: 0.2 }}
             minZoom={0.25}
@@ -1304,32 +1467,60 @@ function WorkflowReactFlowEditor({
               placeholder="节点执行说明"
               onChange={(event) => updateNode(selectedNode.id, { instruction: event.target.value })}
             />
-            <Select
-              size="small"
-              allowClear
-              showSearch
-              value={selectedNode.modelProfileId}
-              placeholder="模型要求（PC 端安装时配置 API Key）"
-              options={modelProfileOptions}
-              optionFilterProp="label"
-              onChange={(modelProfileId) => updateNode(selectedNode.id, { modelProfileId })}
-            />
-            <Select
-              size="small"
-              allowClear
-              value={selectedNode.toolId}
-              placeholder="工具 ID"
-              options={toolOptions}
-              onChange={(toolId) => updateToolNodeToolId(selectedNode, toolId)}
-            />
-            <Select
-              size="small"
-              allowClear
-              value={selectedNode.artifactType}
-              placeholder="产物格式"
-              options={artifactTypeOptions}
-              onChange={(artifactType) => updateNode(selectedNode.id, { artifactType })}
-            />
+            {selectedNode.type === 'llm' || selectedNode.type === 'reasoning' ? (
+              <Select
+                size="small"
+                allowClear
+                showSearch
+                value={selectedNode.modelProfileId}
+                placeholder="模型要求（PC 端安装时配置 API Key）"
+                options={modelProfileOptions}
+                optionFilterProp="label"
+                onChange={(modelProfileId) => updateNode(selectedNode.id, { modelProfileId })}
+              />
+            ) : null}
+            {selectedNode.type === 'knowledge' ? (
+              <Select
+                size="small"
+                mode="tags"
+                value={
+                  Array.isArray(selectedNode.config?.sources)
+                    ? selectedNode.config.sources.filter((source): source is string => typeof source === 'string')
+                    : ['workspace_library']
+                }
+                placeholder="知识来源"
+                options={knowledgeOptions}
+                tokenSeparators={[',']}
+                onChange={(sources) =>
+                  updateNode(selectedNode.id, {
+                    config: {
+                      ...(selectedNode.config ?? {}),
+                      sources
+                    }
+                  })
+                }
+              />
+            ) : null}
+            {selectedNode.type === 'tool' || selectedNode.type === 'artifact' ? (
+              <Select
+                size="small"
+                allowClear
+                value={selectedNode.toolId}
+                placeholder="工具 ID"
+                options={toolOptions}
+                onChange={(toolId) => updateToolNodeToolId(selectedNode, toolId)}
+              />
+            ) : null}
+            {selectedNode.type === 'artifact' ? (
+              <Select
+                size="small"
+                allowClear
+                value={selectedNode.artifactType}
+                placeholder="产物格式"
+                options={artifactTypeOptions}
+                onChange={(artifactType) => updateNode(selectedNode.id, { artifactType })}
+              />
+            ) : null}
             <Select
               size="small"
               mode="tags"
@@ -1346,15 +1537,17 @@ function WorkflowReactFlowEditor({
               tokenSeparators={[',']}
               onChange={(outputVariables) => updateNode(selectedNode.id, { outputVariables })}
             />
-            <Select
-              size="small"
-              value={selectedNode.requiresApproval ? 'true' : 'false'}
-              options={[
-                { value: 'false', label: '无需人工确认' },
-                { value: 'true', label: '需要人工确认' }
-              ]}
-              onChange={(value) => updateNode(selectedNode.id, { requiresApproval: value === 'true' })}
-            />
+            {selectedNode.type === 'approval' || selectedNode.requiresApproval ? (
+              <Select
+                size="small"
+                value={selectedNode.requiresApproval ? 'true' : 'false'}
+                options={[
+                  { value: 'false', label: '无需人工确认' },
+                  { value: 'true', label: '需要人工确认' }
+                ]}
+                onChange={(value) => updateNode(selectedNode.id, { requiresApproval: value === 'true' })}
+              />
+            ) : null}
             {selectedNode.type === 'tool' ? (
               <Space direction="vertical" size={8} style={{ width: '100%' }}>
                 <Typography.Text strong>工具参数</Typography.Text>
@@ -1533,20 +1726,48 @@ function WorkflowReactFlowEditor({
             <Button danger size="small" icon={<DeleteOutlined />} onClick={() => deleteEdge(selectedEdge.id)}>
               删除连线
             </Button>
+            <Button size="small" icon={<PlusOutlined />} onClick={() => openNodePicker({ edgeId: selectedEdge.id })}>
+              在连线中插入节点
+            </Button>
           </Space>
         ) : null}
 
-        <div className="workflow-manual-edge">
-          <Space direction="vertical" size={8} style={{ width: '100%' }}>
-            <Typography.Text strong>新增连线</Typography.Text>
-            <Select size="small" value={newEdgeSourceId} options={nodeOptions} onChange={setNewEdgeSourceId} />
-            <Select size="small" value={newEdgeTargetId} options={nodeOptions} onChange={setNewEdgeTargetId} />
-            <Button size="small" type="primary" onClick={addManualEdge}>
-              添加连线
-            </Button>
-          </Space>
-        </div>
+        <Typography.Text type="secondary" className="workflow-config-note">
+          选择节点编辑参数；选择连线编辑条件或插入节点。
+        </Typography.Text>
       </aside>
+
+      <Modal
+        title="添加节点"
+        open={nodePicker.open}
+        width={720}
+        footer={null}
+        onCancel={closeNodePicker}
+      >
+        <div className="workflow-node-picker">
+          {workflowNodeCatalogGroups.map((group) => (
+            <section key={group.title} className="workflow-node-picker-group">
+              <Space direction="vertical" size={4}>
+                <Typography.Text strong>{group.title}</Typography.Text>
+                <Typography.Text type="secondary">{group.description}</Typography.Text>
+              </Space>
+              <div className="workflow-node-picker-grid">
+                {group.nodes.map((node) => (
+                  <button
+                    key={`${group.title}-${node.value}`}
+                    type="button"
+                    className="workflow-node-picker-option"
+                    onClick={() => addNode(node.value)}
+                  >
+                    <span>{node.label}</span>
+                    <small>{node.hint}</small>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -1568,9 +1789,9 @@ function buildPayload(
     description: values.description.trim(),
     recommendedPlanCode: values.recommendedPlanCode,
     businessGoal: values.businessGoal.trim(),
-    knowledgeSources: uniqueTags(values.knowledgeSources),
-    tools: uniqueTags([...uniqueTags(values.tools), ...inferredTools, ...readWorkflowGraphToolIds(workflowGraph)]),
-    skills: normalizeSkills(values.skills),
+    knowledgeSources: deriveWorkflowKnowledgeSources(workflowGraph),
+    tools: uniqueTags([...inferredTools, ...readWorkflowGraphToolIds(workflowGraph)]),
+    skills: deriveWorkflowSkills(workflowGraph),
     workflowSteps,
     workflowGraph,
     sampleInputs: uniqueTags(values.sampleInputs),
@@ -1597,9 +1818,9 @@ function buildUpdatePayload(
     description: values.description.trim(),
     recommendedPlanCode: values.recommendedPlanCode,
     businessGoal: values.businessGoal.trim(),
-    knowledgeSources: uniqueTags(values.knowledgeSources),
-    tools: uniqueTags([...uniqueTags(values.tools), ...inferredTools, ...readWorkflowGraphToolIds(workflowGraph)]),
-    skills: normalizeSkills(values.skills),
+    knowledgeSources: deriveWorkflowKnowledgeSources(workflowGraph),
+    tools: uniqueTags([...inferredTools, ...readWorkflowGraphToolIds(workflowGraph)]),
+    skills: deriveWorkflowSkills(workflowGraph),
     workflowSteps,
     workflowGraph,
     sampleInputs: uniqueTags(values.sampleInputs),
@@ -1641,20 +1862,30 @@ export function AdminCreateRoleTemplatePageClient({
   const router = useRouter();
   const [form] = Form.useForm<CreateRoleTemplateFormValues>();
   const [saving, setSaving] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const [testing, setTesting] = useState(false);
   const [savedTemplateId, setSavedTemplateId] = useState<string | undefined>(templateId);
   const [testInput, setTestInput] = useState('');
   const [testResult, setTestResult] = useState<TemplateTestResult | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(!templateId);
+  const [testOpen, setTestOpen] = useState(false);
+  const [publishOpen, setPublishOpen] = useState(false);
   const editingTemplate = useMemo(
     () => templates.find((template) => template.id === templateId),
     [templateId, templates]
   );
+  const watchedName = Form.useWatch('name', form);
+  const watchedIndustry = Form.useWatch('industry', form);
   const persistedTemplateId = savedTemplateId ?? editingTemplate?.id;
   const initialGraph = useMemo(
     () => editingTemplate?.workflowGraph ?? createWorkflowGraph(inferInitialPreset(editingTemplate)),
     [editingTemplate]
   );
   const [editableGraph, setEditableGraph] = useState<RoleWorkflowGraph>(initialGraph);
+  const capabilitySummary = useMemo(
+    () => deriveWorkflowCapabilitySummary(editableGraph),
+    [editableGraph]
+  );
 
   const activeEnterprisePlans = useMemo(
     () => plans.filter((plan) => plan.status === 'ACTIVE' && plan.billingCycle !== 'FREE'),
@@ -1739,12 +1970,20 @@ export function AdminCreateRoleTemplatePageClient({
       : apiClient.createAdminRoleTemplate(buildPayload(values, editableGraph));
   }
 
+  function readFormValues(values?: Partial<CreateRoleTemplateFormValues>): CreateRoleTemplateFormValues {
+    return {
+      ...initialValues,
+      ...form.getFieldsValue(true),
+      ...values
+    } as CreateRoleTemplateFormValues;
+  }
+
   async function handleSave(values: CreateRoleTemplateFormValues) {
     setSaving(true);
     try {
       const apiClient = createBrowserApiClient();
       const wasUpdate = Boolean(savedTemplateId ?? editingTemplate?.id);
-      const response = await persistTemplateDraft(apiClient, values);
+      const response = await persistTemplateDraft(apiClient, readFormValues(values));
       setSavedTemplateId(response.data.id);
       message.success(wasUpdate ? '工作画布已保存' : '数字员工草稿已创建');
       router.push(`/templates?${wasUpdate ? 'updated' : 'created'}=${encodeURIComponent(response.data.id)}`);
@@ -1757,7 +1996,7 @@ export function AdminCreateRoleTemplatePageClient({
   }
 
   function useFirstSampleInput() {
-    const values = form.getFieldsValue();
+    const values = readFormValues();
     const sampleInput = uniqueTags(values.sampleInputs)[0] ?? values.businessGoal?.trim();
     if (!sampleInput) {
       message.warning('请先填写测试样例或业务目标');
@@ -1767,14 +2006,16 @@ export function AdminCreateRoleTemplatePageClient({
   }
 
   async function handleSaveAndTest() {
+    setTestOpen(true);
     setTesting(true);
     setTestResult(null);
     try {
       const values = await form.validateFields();
       const apiClient = createBrowserApiClient();
-      const response = await persistTemplateDraft(apiClient, values);
+      const resolvedValues = readFormValues(values);
+      const response = await persistTemplateDraft(apiClient, resolvedValues);
       setSavedTemplateId(response.data.id);
-      const sampleInput = testInput.trim() || uniqueTags(values.sampleInputs)[0] || values.businessGoal.trim();
+      const sampleInput = testInput.trim() || uniqueTags(resolvedValues.sampleInputs)[0] || resolvedValues.businessGoal.trim();
       if (sampleInput) {
         setTestInput(sampleInput);
       }
@@ -1788,6 +2029,34 @@ export function AdminCreateRoleTemplatePageClient({
     }
   }
 
+  async function handleSaveAndPublish() {
+    setPublishing(true);
+    try {
+      const values = await form.validateFields();
+      const apiClient = createBrowserApiClient();
+      const response = await persistTemplateDraft(apiClient, readFormValues(values));
+      setSavedTemplateId(response.data.id);
+      await apiClient.publishAdminRoleTemplate(response.data.id);
+      setPublishOpen(false);
+      message.success('数字员工已保存并上架');
+      router.push(`/templates?published=${encodeURIComponent(response.data.id)}`);
+      router.refresh();
+    } catch (error) {
+      if (error instanceof Error) {
+        message.error(error.message);
+      } else {
+        message.error('发布失败，请检查基础信息和发布范围');
+      }
+    } finally {
+      setPublishing(false);
+    }
+  }
+
+  function handleFormFinishFailed() {
+    setSettingsOpen(true);
+    message.warning('请先补全员工基础信息');
+  }
+
   return (
     <AdminShell currentAccount={currentAccount}>
       <QiuPage
@@ -1798,8 +2067,14 @@ export function AdminCreateRoleTemplatePageClient({
             <Button icon={<ArrowLeftOutlined />} href="/templates">
               返回列表
             </Button>
-            <Button icon={<PlayCircleOutlined />} loading={testing} onClick={handleSaveAndTest}>
-              保存草稿并测试
+            <Button icon={<SettingOutlined />} onClick={() => setSettingsOpen(true)}>
+              员工设置
+            </Button>
+            <Button icon={<PlayCircleOutlined />} loading={testing} onClick={() => setTestOpen(true)}>
+              试运行
+            </Button>
+            <Button icon={<RocketOutlined />} loading={publishing} onClick={() => setPublishOpen(true)}>
+              发布
             </Button>
             <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => form.submit()}>
               {editingTemplate ? '保存画布' : '保存草稿'}
@@ -1807,199 +2082,218 @@ export function AdminCreateRoleTemplatePageClient({
           </Space>
         }
       >
-        <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          <Form
-            form={form}
-            layout="vertical"
-            onFinish={handleSave}
-            initialValues={initialValues}
-          >
-            <Card
-              title="工作流画布"
-              bordered={false}
-              style={{ marginBottom: 16 }}
-              extra={
-                <Space>
-                  <Typography.Text type="secondary">流程预设</Typography.Text>
-                  <Form.Item name="workflowPreset" noStyle rules={[{ required: true }]}>
-                    <Select
-                      disabled={Boolean(persistedTemplateId)}
-                      style={{ width: 180 }}
-                      options={workflowPresetOptions.map((option) => ({
-                        value: option.value,
-                        label: option.label
-                      }))}
-                      onChange={(preset) => setEditableGraph(createWorkflowGraph(preset))}
-                    />
-                  </Form.Item>
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={handleSave}
+          onFinishFailed={handleFormFinishFailed}
+          initialValues={initialValues}
+        >
+          <section className="workflow-studio-shell">
+            <div className="workflow-studio-topbar">
+              <Space direction="vertical" size={2}>
+                <Space wrap>
+                  <Typography.Text strong>{watchedName || editingTemplate?.name || '未命名数字员工'}</Typography.Text>
+                  <Tag color={editingTemplate?.status === 'PUBLISHED' ? 'green' : 'blue'}>
+                    {editingTemplate?.status ?? 'DRAFT'}
+                  </Tag>
+                  {watchedIndustry ? <Tag>{watchedIndustry}</Tag> : null}
                 </Space>
-              }
-            >
-              <WorkflowReactFlowEditor graph={editableGraph} onChange={setEditableGraph} />
-            </Card>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 360px', gap: 16 }}>
-              <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                <Card title="基础信息" bordered={false}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 160px', gap: 16 }}>
-                    <Form.Item name="id" label="员工 ID" rules={[{ required: true, message: '请输入员工 ID' }]}>
-                      <Input disabled={Boolean(persistedTemplateId)} placeholder="template_sales_assistant" />
-                    </Form.Item>
-                    <Form.Item name="version" label="版本" rules={[{ required: true, message: '请输入版本号' }]}>
-                      <Input placeholder="1.0.0" />
-                    </Form.Item>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                    <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
-                      <Input placeholder="AI 销售助理" />
-                    </Form.Item>
-                    <Form.Item name="industry" label="行业/部门" rules={[{ required: true, message: '请输入行业或部门' }]}>
-                      <Input placeholder="销售支持" />
-                    </Form.Item>
-                  </div>
-                  <Form.Item name="scenario" label="使用场景" rules={[{ required: true, message: '请输入使用场景' }]}>
-                    <Input placeholder="线索调研、客户跟进、方案草拟" />
-                  </Form.Item>
-                  <Form.Item name="description" label="说明" rules={[{ required: true, message: '请输入说明' }]}>
-                    <Input.TextArea rows={3} />
-                  </Form.Item>
-                  <Form.Item name="businessGoal" label="业务目标" rules={[{ required: true, message: '请输入业务目标' }]}>
-                    <Input.TextArea rows={2} />
-                  </Form.Item>
-                </Card>
-
-                <Card title="能力配置" bordered={false}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                    <Form.Item name="knowledgeSources" label="知识来源">
-                      <Select mode="tags" tokenSeparators={[',']} options={knowledgeOptions} />
-                    </Form.Item>
-                    <Form.Item name="tools" label="工具">
-                      <Select mode="tags" tokenSeparators={[',']} options={toolOptions} />
-                    </Form.Item>
-                  </div>
-
-                  <Form.List name="skills">
-                    {(fields, { add, remove }) => (
-                      <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                        {fields.map((field) => (
-                          <Card key={field.key} size="small" bordered>
-                            <div style={{ display: 'grid', gridTemplateColumns: '160px 180px 1fr 72px', gap: 12 }}>
-                              <Form.Item
-                                {...field}
-                                name={[field.name, 'code']}
-                                label="code"
-                                rules={[{ required: true, message: '请输入 code' }]}
-                              >
-                                <Input placeholder="lead_research" />
-                              </Form.Item>
-                              <Form.Item
-                                {...field}
-                                name={[field.name, 'name']}
-                                label="名称"
-                                rules={[{ required: true, message: '请输入名称' }]}
-                              >
-                                <Input placeholder="线索调研" />
-                              </Form.Item>
-                              <Form.Item
-                                {...field}
-                                name={[field.name, 'summary']}
-                                label="说明"
-                                rules={[{ required: true, message: '请输入说明' }]}
-                              >
-                                <Input placeholder="搜索并整理潜在线索背景。" />
-                              </Form.Item>
-                              <Button danger style={{ marginTop: 30 }} onClick={() => remove(field.name)}>
-                                删除
-                              </Button>
-                            </div>
-                          </Card>
-                        ))}
-                        <Button type="dashed" onClick={() => add({ code: '', name: '', summary: '' })} block>
-                          添加技能
-                        </Button>
-                      </Space>
-                    )}
-                  </Form.List>
-                </Card>
-
-                <Card title="发布范围" bordered={false}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                    <Form.Item
-                      name="recommendedPlanCode"
-                      label="推荐套餐"
-                      rules={[{ required: true, message: '请选择推荐套餐' }]}
-                    >
-                      <Select options={planOptions} showSearch optionFilterProp="label" />
-                    </Form.Item>
-                    <Form.Item name="allowedPlanCodes" label="允许套餐">
-                      <Select mode="multiple" options={planOptions} showSearch optionFilterProp="label" />
-                    </Form.Item>
-                  </div>
-                  <Form.Item name="visibleWorkspaceIds" label="企业白名单">
-                    <Select mode="multiple" options={workspaceOptions} showSearch optionFilterProp="label" />
-                  </Form.Item>
-                </Card>
+                <Typography.Text type="secondary">
+                  {capabilitySummary.nodeCount} 个节点 / {capabilitySummary.edgeCount} 条连线，能力从画布节点自动识别。
+                </Typography.Text>
               </Space>
-
-              <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                <Card title="测试与输出" bordered={false}>
-                  <Form.Item name="sampleInputs" label="测试样例">
-                    <Select mode="tags" tokenSeparators={[',']} placeholder="输入一个样例任务后回车" />
-                  </Form.Item>
-                  <Space direction="vertical" size={8} style={{ width: '100%', marginBottom: 16 }}>
-                    <Typography.Text strong>本次测试输入</Typography.Text>
-                    <Input.TextArea
-                      rows={4}
-                      value={testInput}
-                      placeholder="输入一条真实任务，例如：帮我根据附件生成一份客户跟进方案"
-                      onChange={(event) => setTestInput(event.target.value)}
-                    />
-                    <Space wrap>
-                      <Button size="small" onClick={useFirstSampleInput}>
-                        使用第一个样例
-                      </Button>
-                      <Button
-                        size="small"
-                        type="primary"
-                        icon={<PlayCircleOutlined />}
-                        loading={testing}
-                        onClick={handleSaveAndTest}
-                      >
-                        保存草稿并测试
-                      </Button>
-                    </Space>
-                    <Typography.Text type="secondary">
-                      测试会先保存当前画布，再调用服务端校验接口生成节点 trace。
-                    </Typography.Text>
-                  </Space>
-                  <Form.Item name="outputFormat" label="输出格式">
-                    <Input.TextArea rows={2} />
-                  </Form.Item>
-                  <Form.Item
-                    name="approvalPolicy"
-                    label="审批策略"
-                    rules={[{ required: true, message: '请输入审批策略' }]}
-                  >
-                    <Input.TextArea rows={3} />
-                  </Form.Item>
-                </Card>
-
-                <Card bordered={false}>
-                  {testResult ? (
-                    <WorkflowTestTracePanel result={testResult} />
-                  ) : (
-                    <Space direction="vertical" size={8}>
-                      <Typography.Text strong>保存后下一步</Typography.Text>
-                      <Typography.Text type="secondary">
-                        在这里测试通过后，到 <Link href="/templates">数字员工</Link> 列表中上架。
-                      </Typography.Text>
-                    </Space>
-                  )}
-                </Card>
+              <Space wrap>
+                <Typography.Text type="secondary">预设</Typography.Text>
+                <Form.Item name="workflowPreset" noStyle rules={[{ required: true }]}>
+                  <Select
+                    disabled={Boolean(persistedTemplateId)}
+                    style={{ width: 168 }}
+                    options={workflowPresetOptions.map((option) => ({
+                      value: option.value,
+                      label: option.label
+                    }))}
+                    onChange={(preset) => setEditableGraph(createWorkflowGraph(preset))}
+                  />
+                </Form.Item>
               </Space>
             </div>
-          </Form>
-        </Space>
+
+            <div className="workflow-capability-strip">
+              <Tag color="blue">模型 {capabilitySummary.modelProfileIds.length || 0}</Tag>
+              <Tag color="purple">工具 {capabilitySummary.toolIds.length || 0}</Tag>
+              <Tag color="green">知识 {capabilitySummary.knowledgeSources.length || 0}</Tag>
+              <Tag color="gold">产物 {capabilitySummary.artifactTypes.length || 0}</Tag>
+              {capabilitySummary.approvalRequired ? <Tag color="orange">需要人工确认</Tag> : null}
+              {capabilitySummary.warnings.map((warning) => (
+                <Tag key={warning} color="red">{warning}</Tag>
+              ))}
+            </div>
+
+            <WorkflowReactFlowEditor graph={editableGraph} onChange={setEditableGraph} />
+          </section>
+
+          <Drawer
+            title="员工设置"
+            placement="right"
+            width={520}
+            open={settingsOpen}
+            forceRender
+            onClose={() => setSettingsOpen(false)}
+            extra={
+              <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => form.submit()}>
+                保存
+              </Button>
+            }
+          >
+            <Space direction="vertical" size={18} style={{ width: '100%' }}>
+              <section>
+                <Typography.Title level={5}>基础信息</Typography.Title>
+                <div className="workflow-form-grid two">
+                  <Form.Item name="id" label="员工 ID" rules={[{ required: true, message: '请输入员工 ID' }]}>
+                    <Input disabled={Boolean(persistedTemplateId)} placeholder="template_sales_assistant" />
+                  </Form.Item>
+                  <Form.Item name="version" label="版本" rules={[{ required: true, message: '请输入版本号' }]}>
+                    <Input placeholder="1.0.0" />
+                  </Form.Item>
+                </div>
+                <div className="workflow-form-grid two">
+                  <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
+                    <Input placeholder="AI 销售助理" />
+                  </Form.Item>
+                  <Form.Item name="industry" label="行业/部门" rules={[{ required: true, message: '请输入行业或部门' }]}>
+                    <Input placeholder="销售支持" />
+                  </Form.Item>
+                </div>
+                <Form.Item name="scenario" label="使用场景" rules={[{ required: true, message: '请输入使用场景' }]}>
+                  <Input placeholder="线索调研、客户跟进、方案草拟" />
+                </Form.Item>
+                <Form.Item name="description" label="说明" rules={[{ required: true, message: '请输入说明' }]}>
+                  <Input.TextArea rows={3} />
+                </Form.Item>
+                <Form.Item name="businessGoal" label="业务目标" rules={[{ required: true, message: '请输入业务目标' }]}>
+                  <Input.TextArea rows={3} />
+                </Form.Item>
+              </section>
+
+              <Divider />
+
+              <section>
+                <Typography.Title level={5}>交付与边界</Typography.Title>
+                <Form.Item name="outputFormat" label="默认交付说明">
+                  <Input.TextArea rows={2} placeholder="例如：对话摘要 + 可下载 Word/PPT/Excel 产物" />
+                </Form.Item>
+                <Form.Item
+                  name="approvalPolicy"
+                  label="默认人工确认策略"
+                  rules={[{ required: true, message: '请输入审批策略' }]}
+                >
+                  <Input.TextArea rows={3} />
+                </Form.Item>
+              </section>
+            </Space>
+          </Drawer>
+
+          <Drawer
+            title="试运行"
+            placement="right"
+            width={560}
+            open={testOpen}
+            forceRender
+            onClose={() => setTestOpen(false)}
+            extra={
+              <Button type="primary" icon={<PlayCircleOutlined />} loading={testing} onClick={handleSaveAndTest}>
+                保存并运行
+              </Button>
+            }
+          >
+            <Space direction="vertical" size={16} style={{ width: '100%' }}>
+              <Alert
+                showIcon
+                type="info"
+                message="试运行会先保存当前画布，再生成节点 trace。"
+              />
+              <Form.Item name="sampleInputs" label="测试样例">
+                <Select mode="tags" tokenSeparators={[',']} placeholder="输入一个样例任务后回车" />
+              </Form.Item>
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Typography.Text strong>本次测试输入</Typography.Text>
+                <Input.TextArea
+                  rows={5}
+                  value={testInput}
+                  placeholder="输入一条真实任务，例如：帮我根据附件生成一份客户跟进方案"
+                  onChange={(event) => setTestInput(event.target.value)}
+                />
+                <Space wrap>
+                  <Button size="small" onClick={useFirstSampleInput}>
+                    使用第一个样例
+                  </Button>
+                  <Button size="small" type="primary" icon={<PlayCircleOutlined />} loading={testing} onClick={handleSaveAndTest}>
+                    运行
+                  </Button>
+                </Space>
+              </Space>
+              {testResult ? (
+                <WorkflowTestTracePanel result={testResult} />
+              ) : (
+                <Card size="small" bordered={false} className="workflow-empty-panel">
+                  <Typography.Text type="secondary">
+                    运行后这里会显示每个节点的输入、输出、警告和最终结果。
+                  </Typography.Text>
+                </Card>
+              )}
+            </Space>
+          </Drawer>
+
+          <Modal
+            title="发布数字员工"
+            open={publishOpen}
+            forceRender
+            width={640}
+            onCancel={() => setPublishOpen(false)}
+            footer={[
+              <Button key="cancel" onClick={() => setPublishOpen(false)}>
+                取消
+              </Button>,
+              <Button key="publish" type="primary" icon={<RocketOutlined />} loading={publishing} onClick={handleSaveAndPublish}>
+                保存并上架
+              </Button>
+            ]}
+          >
+            <Space direction="vertical" size={16} style={{ width: '100%' }}>
+              <Alert
+                showIcon
+                type={capabilitySummary.warnings.length ? 'warning' : 'success'}
+                message={capabilitySummary.warnings.length ? '发布前建议处理提示' : '画布基础检查通过'}
+                description={capabilitySummary.warnings.length ? capabilitySummary.warnings.join('；') : '未发现孤立节点或缺少输出节点。'}
+              />
+              <section>
+                <Typography.Text strong>自动识别能力</Typography.Text>
+                <div className="workflow-publish-summary">
+                  <div>模型：{capabilitySummary.modelProfileIds.join('、') || '无'}</div>
+                  <div>工具：{capabilitySummary.toolIds.join('、') || '无'}</div>
+                  <div>知识：{capabilitySummary.knowledgeSources.join('、') || '无'}</div>
+                  <div>产物：{capabilitySummary.artifactTypes.join('、') || '无'}</div>
+                </div>
+              </section>
+              <div className="workflow-form-grid two">
+                <Form.Item
+                  name="recommendedPlanCode"
+                  label="推荐套餐"
+                  rules={[{ required: true, message: '请选择推荐套餐' }]}
+                >
+                  <Select options={planOptions} showSearch optionFilterProp="label" />
+                </Form.Item>
+                <Form.Item name="allowedPlanCodes" label="允许套餐">
+                  <Select mode="multiple" options={planOptions} showSearch optionFilterProp="label" />
+                </Form.Item>
+              </div>
+              <Form.Item name="visibleWorkspaceIds" label="企业白名单">
+                <Select mode="multiple" options={workspaceOptions} showSearch optionFilterProp="label" />
+              </Form.Item>
+            </Space>
+          </Modal>
+        </Form>
       </QiuPage>
     </AdminShell>
   );
