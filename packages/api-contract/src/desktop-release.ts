@@ -76,6 +76,19 @@ export interface ArchiveAdminDesktopReleaseResponse {
   data: DesktopReleaseSummary;
 }
 
+export interface DesktopReleaseAssetSummary {
+  fileName: string;
+  originalFileName: string;
+  downloadUrl: string;
+  checksumSha256: string;
+  fileSizeBytes: number;
+  contentType: string;
+}
+
+export interface UploadAdminDesktopReleaseAssetResponse {
+  data: DesktopReleaseAssetSummary;
+}
+
 export interface CheckDesktopUpdateQuery {
   currentVersion?: string;
   platform?: DesktopReleasePlatform;

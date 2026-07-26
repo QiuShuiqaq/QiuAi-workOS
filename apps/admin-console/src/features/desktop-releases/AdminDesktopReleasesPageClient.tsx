@@ -5,7 +5,8 @@ import {
   CloudDownloadOutlined,
   EditOutlined,
   InboxOutlined,
-  PlusOutlined
+  PlusOutlined,
+  UploadOutlined
 } from '@ant-design/icons';
 import type {
   CreateAdminDesktopReleaseRequest,
@@ -31,7 +32,8 @@ import type { ColumnsType } from 'antd/es/table';
 import Tag from 'antd/es/tag';
 import Typography from 'antd/es/typography';
 import message from 'antd/es/message';
-import { useEffect, useMemo, useState } from 'react';
+import type { ChangeEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { createBrowserApiClient } from '../../shared/api/browser-api';
 import { AdminShell } from '../../shared/console/AdminShell';
@@ -118,7 +120,9 @@ export function AdminDesktopReleasesPageClient({
   const [editingRelease, setEditingRelease] = useState<DesktopReleaseSummary | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [actionReleaseId, setActionReleaseId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [form] = Form.useForm<DesktopReleaseFormValues>();
 
   useEffect(() => {
@@ -195,6 +199,30 @@ export function AdminDesktopReleasesPageClient({
       message.error(error instanceof Error ? error.message : '保存失败');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleInstallerFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const response = await createBrowserApiClient().uploadAdminDesktopReleaseAsset(file);
+      form.setFieldsValue({
+        downloadUrl: response.data.downloadUrl,
+        checksumSha256: response.data.checksumSha256,
+        fileSizeBytes: response.data.fileSizeBytes
+      });
+      message.success(`安装包已上传：${response.data.originalFileName}`);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '安装包上传失败');
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -322,7 +350,7 @@ export function AdminDesktopReleasesPageClient({
             showIcon
             type="info"
             message="第一版更新机制是提醒下载"
-            description="上传安装包到可公网访问的位置后，在这里填写下载地址并发布。PC 端会提示用户下载新版，安装时会保留本地数据、模型 Key 和任务历史。"
+            description="可以直接上传 Windows 安装包，系统会自动生成下载地址、文件大小和 SHA256。PC 端会提示用户下载新版，安装时会保留本地数据、模型 Key 和任务历史。"
           />
 
           <Card bordered={false}>
@@ -370,6 +398,7 @@ export function AdminDesktopReleasesPageClient({
         }}
         onOk={() => form.submit()}
         confirmLoading={saving}
+        okButtonProps={{ disabled: uploading }}
         width={760}
         okText="保存"
       >
@@ -393,6 +422,30 @@ export function AdminDesktopReleasesPageClient({
               />
             </Form.Item>
           </Space>
+
+          <Form.Item label="上传安装包">
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Space wrap>
+                <Button
+                  icon={<UploadOutlined />}
+                  loading={uploading}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  选择 .exe/.msi/.zip
+                </Button>
+                <Typography.Text type="secondary">
+                  上传成功后会自动回填下载地址、文件大小和 SHA256
+                </Typography.Text>
+              </Space>
+              <input
+                ref={fileInputRef}
+                hidden
+                type="file"
+                accept=".exe,.msi,.zip"
+                onChange={handleInstallerFileChange}
+              />
+            </Space>
+          </Form.Item>
 
           <Form.Item
             name="downloadUrl"

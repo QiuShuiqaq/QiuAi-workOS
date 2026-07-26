@@ -12,6 +12,7 @@ import {
 import type { BillingCycle, PlanCode, Prisma, WorkspaceMemberRole } from '@prisma/client';
 
 import { hashPassword } from '../../shared/auth/password-hash';
+import { saveDesktopReleaseAsset } from '../../shared/desktop-release-assets';
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
@@ -55,6 +56,7 @@ import {
   UpdateAdminDesktopReleaseResponseDto,
   UpdateAdminWorkspaceStatusRequestDto,
   UpdateAdminWorkspaceStatusResponseDto,
+  UploadAdminDesktopReleaseAssetResponseDto,
   UpdateAdminPlanRequestDto,
   UpdateAdminPlanResponseDto
 } from './dto/admin-console.dto';
@@ -662,6 +664,23 @@ export class AdminService {
 
     return {
       data: this.toDesktopReleaseSummary(archived)
+    };
+  }
+
+  async uploadDesktopReleaseAsset(input: {
+    cookieHeader?: string;
+    fileName: string;
+    contentType?: string;
+    body: Buffer;
+  }): Promise<UploadAdminDesktopReleaseAssetResponseDto> {
+    await this.requireAdminOperator(input.cookieHeader);
+
+    return {
+      data: await saveDesktopReleaseAsset({
+        fileName: input.fileName,
+        contentType: input.contentType,
+        body: input.body
+      })
     };
   }
 

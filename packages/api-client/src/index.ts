@@ -72,6 +72,7 @@ import type {
   TestAdminRoleTemplateResponse,
   UpdateAdminWorkspaceStatusRequest,
   UpdateAdminWorkspaceStatusResponse,
+  UploadAdminDesktopReleaseAssetResponse,
   UpdateAdminDesktopReleaseRequest,
   UpdateAdminDesktopReleaseResponse,
   UpdateAdminRoleTemplateRequest,
@@ -225,6 +226,28 @@ export class QiuApiClient {
 
   archiveAdminDesktopRelease(releaseId: string): Promise<ArchiveAdminDesktopReleaseResponse> {
     return this.post(`/api/v1/admin/desktop-releases/${encodeURIComponent(releaseId)}/archive`, {});
+  }
+
+  async uploadAdminDesktopReleaseAsset(file: File): Promise<UploadAdminDesktopReleaseAssetResponse> {
+    const response = await this.fetchImpl(`${this.baseUrl}/api/v1/admin/desktop-release-assets`, {
+      method: 'POST',
+      headers: this.mergeHeaders({
+        accept: 'application/json',
+        'content-type': 'application/octet-stream',
+        'x-qiuai-file-name': encodeURIComponent(file.name)
+      }),
+      body: file,
+      credentials: this.credentials,
+      cache: 'no-store'
+    });
+
+    const body = (await response.json()) as UploadAdminDesktopReleaseAssetResponse | ApiErrorResponse;
+
+    if (!response.ok) {
+      throw new QiuApiError(response.status, body as ApiErrorResponse);
+    }
+
+    return body as UploadAdminDesktopReleaseAssetResponse;
   }
 
   listAdminRoleTemplates(): Promise<ListAdminRoleTemplatesResponse> {

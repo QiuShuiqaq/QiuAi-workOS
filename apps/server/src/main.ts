@@ -5,6 +5,7 @@ import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 
 import { AppModule } from './modules/app.module';
+import { getDesktopReleaseUploadMaxBytes } from './shared/desktop-release-assets';
 import { AllExceptionsFilter } from './shared/filters/all-exceptions.filter';
 
 export async function createApplication(): Promise<NestFastifyApplication> {
@@ -18,6 +19,7 @@ export async function createApplication(): Promise<NestFastifyApplication> {
 }
 
 export function configureApplication(app: NestFastifyApplication): void {
+  configureBinaryBodyParser(app);
   app.setGlobalPrefix('api');
   app.enableVersioning({
     type: VersioningType.URI,
@@ -31,6 +33,26 @@ export function configureApplication(app: NestFastifyApplication): void {
     })
   );
   app.useGlobalFilters(new AllExceptionsFilter());
+}
+
+function configureBinaryBodyParser(app: NestFastifyApplication): void {
+  const fastify = app.getHttpAdapter().getInstance();
+  const contentType = 'application/octet-stream';
+
+  if (fastify.hasContentTypeParser(contentType)) {
+    return;
+  }
+
+  fastify.addContentTypeParser(
+    contentType,
+    {
+      parseAs: 'buffer',
+      bodyLimit: getDesktopReleaseUploadMaxBytes()
+    },
+    (_request, body, done) => {
+      done(null, body);
+    }
+  );
 }
 
 export async function bootstrap() {

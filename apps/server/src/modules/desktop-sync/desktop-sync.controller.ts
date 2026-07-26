@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, Res, StreamableFile } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
-import type { FastifyRequest } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import { DesktopSyncService } from './desktop-sync.service';
+import { openDesktopReleaseAsset } from '../../shared/desktop-release-assets';
 import {
   CheckDesktopUpdateQueryDto,
   CheckDesktopUpdateResponseDto
@@ -117,5 +118,17 @@ export class DesktopReleaseController {
   @ApiOkResponse({ type: CheckDesktopUpdateResponseDto })
   checkLatestRelease(@Query() query: CheckDesktopUpdateQueryDto): Promise<CheckDesktopUpdateResponseDto> {
     return this.desktopSyncService.checkDesktopUpdate(query);
+  }
+
+  @Get('downloads/:fileName')
+  async downloadReleaseAsset(
+    @Param('fileName') fileName: string,
+    @Res({ passthrough: true }) response: FastifyReply
+  ): Promise<StreamableFile> {
+    const asset = await openDesktopReleaseAsset(fileName);
+    response.header('content-type', asset.contentType);
+    response.header('content-length', String(asset.fileSizeBytes));
+    response.header('content-disposition', `attachment; filename="${asset.fileName}"`);
+    return new StreamableFile(asset.stream);
   }
 }

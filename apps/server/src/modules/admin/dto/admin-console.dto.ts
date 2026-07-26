@@ -293,6 +293,33 @@ export class ArchiveAdminDesktopReleaseResponseDto {
   data!: DesktopReleaseSummaryDto;
 }
 
+export class DesktopReleaseAssetSummaryDto {
+  @ApiProperty({ example: '1784708089422-a1b2c3d4-QiuAI-WorkOS-1.0.1.exe' })
+  fileName!: string;
+
+  @ApiProperty({ example: 'QiuAI-WorkOS-1.0.1.exe' })
+  originalFileName!: string;
+
+  @ApiProperty({
+    example: 'https://workos.qiuaihub.com/api/v1/desktop/releases/downloads/1784708089422-a1b2c3d4-QiuAI-WorkOS-1.0.1.exe'
+  })
+  downloadUrl!: string;
+
+  @ApiProperty({ example: 'sha256-hex' })
+  checksumSha256!: string;
+
+  @ApiProperty({ example: 104857600 })
+  fileSizeBytes!: number;
+
+  @ApiProperty({ example: 'application/vnd.microsoft.portable-executable' })
+  contentType!: string;
+}
+
+export class UploadAdminDesktopReleaseAssetResponseDto {
+  @ApiProperty({ type: DesktopReleaseAssetSummaryDto })
+  data!: DesktopReleaseAssetSummaryDto;
+}
+
 export class CheckDesktopUpdateQueryDto {
   @ApiPropertyOptional({ example: '1.0.0' })
   @IsOptional()

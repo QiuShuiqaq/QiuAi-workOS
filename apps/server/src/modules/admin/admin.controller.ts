@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
-import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import { ApiConsumes, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
 
 import { AdminService } from './admin.service';
@@ -28,6 +28,7 @@ import {
   RevokeAdminDesktopDeviceResponseDto,
   UpdateAdminDesktopReleaseRequestDto,
   UpdateAdminDesktopReleaseResponseDto,
+  UploadAdminDesktopReleaseAssetResponseDto,
   UpdateAdminPlanRequestDto,
   UpdateAdminPlanResponseDto,
   UpdateAdminWorkspaceStatusRequestDto,
@@ -102,6 +103,21 @@ export class AdminController {
     @Req() request: FastifyRequest
   ): Promise<ArchiveAdminDesktopReleaseResponseDto> {
     return this.adminService.archiveDesktopRelease(releaseId, request.headers.cookie);
+  }
+
+  @Post('desktop-release-assets')
+  @ApiConsumes('application/octet-stream')
+  @ApiOkResponse({ type: UploadAdminDesktopReleaseAssetResponseDto })
+  uploadDesktopReleaseAsset(
+    @Body() body: Buffer,
+    @Req() request: FastifyRequest
+  ): Promise<UploadAdminDesktopReleaseAssetResponseDto> {
+    return this.adminService.uploadDesktopReleaseAsset({
+      cookieHeader: request.headers.cookie,
+      fileName: readSingleHeader(request.headers['x-qiuai-file-name']) ?? 'QiuAI-WorkOS-Setup.exe',
+      contentType: readSingleHeader(request.headers['content-type']),
+      body: Buffer.isBuffer(body) ? body : Buffer.alloc(0)
+    });
   }
 
   @Get('workspaces')
@@ -199,4 +215,8 @@ export class AdminController {
   ): Promise<ListAdminActionLogsResponseDto> {
     return this.adminService.listActionLogs(query, request.headers.cookie);
   }
+}
+
+function readSingleHeader(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }

@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import type { Response as InjectResponse } from 'light-my-request';
 
@@ -476,6 +480,9 @@ test('admin role template factory governs publication and workspace visibility',
 });
 
 test('desktop release publishing drives public update checks', async () => {
+  const originalUploadDir = process.env.WORKOS_DESKTOP_RELEASE_UPLOAD_DIR;
+  const uploadDir = mkdtempSync(join(tmpdir(), 'qiuai-desktop-release-'));
+  process.env.WORKOS_DESKTOP_RELEASE_UPLOAD_DIR = uploadDir;
   const app = await createApplication();
   app.useLogger(false);
 
@@ -510,6 +517,39 @@ test('desktop release publishing drives public update checks', async () => {
       'content-type': 'application/json'
     };
     const version = `1.0.${Date.now()}`;
+    const installerPayload = Buffer.from(`qiuai desktop installer ${version}`);
+    const installerChecksum = createHash('sha256').update(installerPayload).digest('hex');
+
+    const uploadResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/desktop-release-assets',
+      headers: {
+        cookie,
+        'content-type': 'application/octet-stream',
+        'x-qiuai-file-name': encodeURIComponent(`QiuAI-WorkOS-${version}.exe`)
+      },
+      payload: installerPayload
+    });
+    assert.equal(uploadResponse.statusCode, 201);
+    const uploadedAsset = JSON.parse(uploadResponse.body).data as {
+      downloadUrl: string;
+      checksumSha256: string;
+      fileSizeBytes: number;
+    };
+    assert.equal(uploadedAsset.checksumSha256, installerChecksum);
+    assert.equal(uploadedAsset.fileSizeBytes, installerPayload.length);
+    assert.match(uploadedAsset.downloadUrl, /\/api\/v1\/desktop\/releases\/downloads\//);
+
+    const downloadPath = uploadedAsset.downloadUrl.startsWith('http')
+      ? new URL(uploadedAsset.downloadUrl).pathname
+      : uploadedAsset.downloadUrl;
+    const downloadResponse = await app.inject({
+      method: 'GET',
+      url: downloadPath
+    });
+    assert.equal(downloadResponse.statusCode, 200);
+    assert.equal(downloadResponse.headers['content-length'], String(installerPayload.length));
+    assert.equal(downloadResponse.rawPayload.toString('utf8'), installerPayload.toString('utf8'));
 
     const createResponse = await app.inject({
       method: 'POST',
@@ -517,8 +557,10 @@ test('desktop release publishing drives public update checks', async () => {
       headers,
       payload: {
         version,
-        downloadUrl: `https://workos.qiuaihub.com/downloads/QiuAI-WorkOS-${version}.exe`,
+        downloadUrl: uploadedAsset.downloadUrl,
         releaseNotes: 'Desktop release smoke test.',
+        checksumSha256: uploadedAsset.checksumSha256,
+        fileSizeBytes: uploadedAsset.fileSizeBytes,
         forceUpdate: true,
         minimumSupportedVersion: '1.0.0'
       }
@@ -570,5 +612,11 @@ test('desktop release publishing drives public update checks', async () => {
     assert.equal(JSON.parse(archivedCheckResponse.body).data.updateAvailable, false);
   } finally {
     await app.close();
+    if (originalUploadDir === undefined) {
+      delete process.env.WORKOS_DESKTOP_RELEASE_UPLOAD_DIR;
+    } else {
+      process.env.WORKOS_DESKTOP_RELEASE_UPLOAD_DIR = originalUploadDir;
+    }
+    rmSync(uploadDir, { recursive: true, force: true });
   }
 });
