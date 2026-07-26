@@ -218,6 +218,69 @@ assert.equal(workflowPromptTask.task.state, 'completed');
 assert.ok(
   workflowPromptTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_GRAPH_LOADED')
 );
+
+const missingWorkflowModelTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-model-missing-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Run workflow with a specific model',
+    input: 'Classify this customer request.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'classify',
+          type: 'llm',
+          name: 'Classify request',
+          modelProfileId: 'deepseek-v4-flash'
+        }
+      ],
+      edges: [
+        {
+          id: 'start-classify',
+          sourceNodeId: 'start',
+          targetNodeId: 'classify',
+          condition: { type: 'always' }
+        }
+      ]
+    },
+    modelProfileIds: ['qiu-general-default', 'deepseek-v4-flash']
+  },
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: [],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async () => {
+    throw new Error('Model invoker should not be called when the required workflow model is missing.');
+  },
+  completedAt: '2026-07-20T10:00:06.000Z'
+});
+
+assert.equal(missingWorkflowModelTask.task.state, 'failed');
+assert.ok(
+  missingWorkflowModelTask.task.executionLogs.some(
+    (log) =>
+      log.eventType === 'WORKFLOW_RUNTIME_NODE_FAILED' &&
+      log.message.includes('deepseek-v4-flash')
+  )
+);
+assert.ok(
+  missingWorkflowModelTask.task.executionLogs.some(
+    (log) =>
+      log.eventType === 'MODEL_PROFILE_BINDING_MISSING' &&
+      log.message.includes('deepseek-v4-flash')
+  )
+);
 assert.ok(
   workflowPromptTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_GRAPH_NODE_PLANNED')
 );

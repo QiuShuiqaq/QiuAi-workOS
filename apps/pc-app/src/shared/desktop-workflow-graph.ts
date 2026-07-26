@@ -94,6 +94,7 @@ export interface WorkflowExecutionPlan {
   logs: DesktopExecutionLogEntry[];
   promptContext: string;
   preferredModelProfileId?: string;
+  requiredModelProfileIds: string[];
   requiredToolIds: string[];
 }
 
@@ -154,9 +155,14 @@ export function augmentExecutionContextWithWorkflowPlan(
     modelProfileIds: workflowPlan.preferredModelProfileId
       ? [
           workflowPlan.preferredModelProfileId,
-          ...context.modelProfileIds.filter((profileId) => profileId !== workflowPlan.preferredModelProfileId)
+          ...workflowPlan.requiredModelProfileIds.filter((profileId) => profileId !== workflowPlan.preferredModelProfileId),
+          ...context.modelProfileIds.filter(
+            (profileId) =>
+              profileId !== workflowPlan.preferredModelProfileId &&
+              !workflowPlan.requiredModelProfileIds.includes(profileId)
+          )
         ]
-      : [...context.modelProfileIds],
+      : [...new Set([...workflowPlan.requiredModelProfileIds, ...context.modelProfileIds])],
     toolIds: [...new Set([...context.toolIds, ...workflowPlan.requiredToolIds])],
     knowledgeBindingIds: [...context.knowledgeBindingIds],
     attachmentPaths: context.attachmentPaths ? [...context.attachmentPaths] : undefined
@@ -195,6 +201,9 @@ export function buildWorkflowExecutionPlan(input: {
     task: input.task,
     createdAt: input.createdAt
   });
+  const requiredModelProfileIds = [
+    ...new Set(selection.orderedNodes.flatMap((node) => (node.modelProfileId ? [node.modelProfileId] : [])))
+  ];
   const requiredToolIds = [...new Set(graph.nodes.flatMap((node) => readWorkflowNodeToolIds(node)))];
   const orderedNodeSummaries = selection.orderedNodes.map(toWorkflowExecutionNodeSummary);
   const preferredModelProfileId = selection.orderedNodes.find((node) => node.modelProfileId)
@@ -234,6 +243,7 @@ export function buildWorkflowExecutionPlan(input: {
     ],
     promptContext,
     preferredModelProfileId,
+    requiredModelProfileIds,
     requiredToolIds
   };
 }
@@ -245,6 +255,7 @@ function createEmptyWorkflowExecutionPlan(): WorkflowExecutionPlan {
     orderedNodeSummaries: [],
     logs: [],
     promptContext: '',
+    requiredModelProfileIds: [],
     requiredToolIds: []
   };
 }
@@ -470,6 +481,9 @@ function buildWorkflowPromptContext(input: {
 
   const promptNodes = input.orderedNodes.slice(0, maxWorkflowPromptNodes);
   const requiredToolIds = [...new Set(input.orderedNodes.flatMap((node) => readWorkflowNodeToolIds(node)))];
+  const requiredModelProfileIds = [
+    ...new Set(input.orderedNodes.flatMap((node) => (node.modelProfileId ? [node.modelProfileId] : [])))
+  ];
   const artifactTypes = [
     ...new Set(input.orderedNodes.flatMap((node) => (node.artifactType ? [node.artifactType] : [])))
   ];
@@ -478,6 +492,7 @@ function buildWorkflowPromptContext(input: {
     `Graph version: ${input.graph.version}`,
     `Entry node: ${input.graph.entryNodeId}`,
     `Runtime policy: maxNodeExecutions=${input.graph.runtimePolicy?.maxNodeExecutions ?? 64}; maxLoopIterations=${input.graph.runtimePolicy?.maxLoopIterations ?? 8}; requireApprovalBeforeTools=${input.graph.runtimePolicy?.requireApprovalBeforeTools ?? false}`,
+    requiredModelProfileIds.length > 0 ? `Required workflow models: ${requiredModelProfileIds.join(', ')}` : '',
     requiredToolIds.length > 0 ? `Required workflow tools: ${requiredToolIds.join(', ')}` : '',
     artifactTypes.length > 0 ? `Expected artifact types: ${artifactTypes.join(', ')}` : '',
     input.graph.variables && input.graph.variables.length > 0

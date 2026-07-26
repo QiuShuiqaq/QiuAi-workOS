@@ -77,6 +77,13 @@ import {
   toDesktopTaskSummary
 } from '../shared/workbench-data';
 import { runDesktopTask } from '../shared/desktop-task-runner';
+import {
+  ensureModelProfilesForRolePackage,
+  findFirstUnreadyRequiredModelProfileId,
+  getRoleModelRuntimeRequirementStatuses,
+  readRequiredModelProfileIdsForRolePackage,
+  readWorkflowRequiredModelProfileIds
+} from '../shared/desktop-role-requirements';
 
 type SectionKey = 'workbench' | 'roles' | 'models' | 'tools' | 'knowledge' | 'settings';
 type DesktopThemePreference = 'light' | 'system';
@@ -432,6 +439,7 @@ function toRoleTemplateSummary(template: DesktopRoleTemplate): DesktopAuthorized
 function toDesktopRoleTemplate(summary: DesktopAuthorizedRoleTemplateSummary): DesktopRoleTemplate {
   const fallback = fallbackRoleTemplateByTemplateId.get(summary.id);
   const roleCode = fallback?.roleCode ?? createRoleCodeFromTemplateId(summary.id);
+  const workflowGraph = cloneJsonValue(summary.workflowGraph) as DesktopRoleTemplate['workflowGraph'];
 
   return {
     templateId: summary.id,
@@ -452,10 +460,10 @@ function toDesktopRoleTemplate(summary: DesktopAuthorizedRoleTemplateSummary): D
       ...step,
       toolIds: step.toolIds ? [...step.toolIds] : undefined
     })),
-    workflowGraph: cloneJsonValue(summary.workflowGraph) as DesktopRoleTemplate['workflowGraph'],
+    workflowGraph,
     sampleInputs: [...(summary.sampleInputs ?? [])],
     outputFormat: summary.outputFormat ?? '',
-    modelProfileIds: fallback?.modelProfileIds ?? ['qiu-general-default'],
+    modelProfileIds: fallback?.modelProfileIds ?? inferDesktopModelProfileIds(workflowGraph),
     toolIds: fallback?.toolIds ?? inferDesktopToolIds(summary),
     requiredKnowledgeSources:
       fallback?.requiredKnowledgeSources ?? inferRequiredKnowledgeSources(summary),
@@ -463,6 +471,11 @@ function toDesktopRoleTemplate(summary: DesktopAuthorizedRoleTemplateSummary): D
     syncPolicy: fallback?.syncPolicy ?? 'summary_only',
     installNote: fallback?.installNote ?? '由平台授权模板生成，可按企业实际情况配置模型、工具和知识来源。'
   };
+}
+
+function inferDesktopModelProfileIds(workflowGraph: DesktopRoleTemplate['workflowGraph']): string[] {
+  const workflowModelProfileIds = readWorkflowRequiredModelProfileIds(workflowGraph);
+  return workflowModelProfileIds.length > 0 ? workflowModelProfileIds : ['qiu-general-default'];
 }
 
 function createRoleCodeFromTemplateId(templateId: string): string {
@@ -1950,6 +1963,23 @@ export default function App() {
     const roleConfigRolePackage = runtimeState.rolePackages.find(
       (rolePackage) => rolePackage.roleCode === roleConfigRoleCode
     );
+    const roleConfigPreviewPackage = roleConfigTemplate
+      ? roleConfigRolePackage ?? toInstalledRolePackage(roleConfigTemplate)
+      : undefined;
+    const roleConfigModelRequirements = roleConfigPreviewPackage
+      ? getRoleModelRuntimeRequirementStatuses(
+          runtimeState.modelProfiles,
+          runtimeState.localRuntime.enabledModelProfileIds,
+          roleConfigPreviewPackage
+        )
+      : [];
+    const roleConfigModelOptions = mergeModelProfileOptions(
+      runtimeState.modelProfiles,
+      roleConfigModelRequirements.map((requirement) => requirement.profile)
+    );
+    const roleConfigHasUnreadyModel = roleConfigModelRequirements.some(
+      (requirement) => !requirement.ready
+    );
     const installedRoleCodes = new Set(runtimeState.rolePackages.map((rolePackage) => rolePackage.roleCode));
     const roleCategories = buildRoleCategoryTabs(desktopRoleTemplates);
     const filteredRoleTemplates = desktopRoleTemplates.filter(
@@ -2087,6 +2117,40 @@ export default function App() {
                 ))}
               </Space>
 
+              <Card size="small" bordered className="role-model-requirements-card">
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Flex align="center" justify="space-between" gap={12}>
+                    <Typography.Text strong>模型连接</Typography.Text>
+                    <Tag color={roleConfigHasUnreadyModel ? 'orange' : 'green'}>
+                      {roleConfigHasUnreadyModel ? '待配置' : '已就绪'}
+                    </Tag>
+                  </Flex>
+                  <Space size={[6, 6]} wrap>
+                    {roleConfigModelRequirements.map((requirement) => (
+                      <Tag
+                        key={requirement.profile.id}
+                        color={requirement.ready ? 'green' : requirement.issue === 'disabled' ? 'red' : 'orange'}
+                      >
+                        {requirement.profile.providerName} / {requirement.profile.modelName}
+                        {requirement.requiredByNodeIds.length > 0
+                          ? ` · ${requirement.requiredByNodeIds.length} 个节点`
+                          : ''}
+                        {requirement.issue === 'disabled'
+                          ? ' · 未启用'
+                          : requirement.issue === 'missing'
+                            ? ' · 待创建'
+                            : requirement.issue === 'unconfigured'
+                              ? ' · 待填 Key'
+                              : ''}
+                      </Tag>
+                    ))}
+                  </Space>
+                  <Typography.Text type="secondary">
+                    API Key 只保存在当前电脑。本员工安装后，如果模型未配置，会自动打开模型配置。
+                  </Typography.Text>
+                </Space>
+              </Card>
+
               <Form<RoleConfigFormValues>
                 form={roleConfigForm}
                 layout="vertical"
@@ -2110,7 +2174,7 @@ export default function App() {
                     allowClear
                     optionLabelProp="label"
                     placeholder="选择可使用的模型"
-                    options={runtimeState.modelProfiles.map((profile) => ({
+                    options={roleConfigModelOptions.map((profile) => ({
                       label: `${profile.providerName} / ${profile.modelName}`,
                       value: profile.id
                     }))}
@@ -2835,17 +2899,25 @@ export default function App() {
         (rolePackage) => rolePackage.roleCode === template.roleCode
       );
       const now = new Date().toISOString();
-      const installedRolePackage = {
+      const configuredRolePackage = {
         ...(existingRole ?? toInstalledRolePackage(template)),
         modelProfileIds: values?.modelProfileIds ?? template.modelProfileIds,
         toolIds: values?.toolIds ?? template.toolIds,
         requiredKnowledgeSources: values?.knowledgeSources ?? template.requiredKnowledgeSources
+      };
+      const installedRolePackage = {
+        ...configuredRolePackage,
+        modelProfileIds: readRequiredModelProfileIdsForRolePackage(configuredRolePackage)
       };
       const rolePackages = existingRole
         ? current.rolePackages.map((rolePackage) =>
             rolePackage.roleCode === template.roleCode ? installedRolePackage : rolePackage
           )
         : [installedRolePackage, ...current.rolePackages];
+      const modelProfiles = ensureModelProfilesForRolePackage(
+        current.modelProfiles,
+        installedRolePackage
+      );
       const enabledKnowledgeBindingIds = mergeUniqueStrings(
         current.localRuntime.knowledgeBindingIds,
         installedRolePackage.requiredKnowledgeSources.map((source) => getKnowledgeBindingId(source))
@@ -2867,6 +2939,7 @@ export default function App() {
       return {
         ...current,
         rolePackages,
+        modelProfiles,
         localRuntime: {
           ...current.localRuntime,
           installedRoleCodes: rolePackages.map((rolePackage) => rolePackage.roleCode),
@@ -3248,8 +3321,81 @@ export default function App() {
       return;
     }
 
+    const previewRolePackage: RolePackageManifest = {
+      ...toInstalledRolePackage(template),
+      modelProfileIds: values.modelProfileIds,
+      toolIds: values.toolIds,
+      requiredKnowledgeSources: values.knowledgeSources
+    };
+    const normalizedPreviewRolePackage: RolePackageManifest = {
+      ...previewRolePackage,
+      modelProfileIds: readRequiredModelProfileIdsForRolePackage(previewRolePackage)
+    };
+    const nextModelProfiles = ensureModelProfilesForRolePackage(
+      runtimeState.modelProfiles,
+      normalizedPreviewRolePackage
+    );
+    const nextEnabledModelProfileIds = mergeUniqueStrings(
+      runtimeState.localRuntime.enabledModelProfileIds,
+      normalizedPreviewRolePackage.modelProfileIds
+    );
+    const firstUnreadyModelProfileId = findFirstUnreadyRequiredModelProfileId(
+      nextModelProfiles,
+      nextEnabledModelProfileIds,
+      normalizedPreviewRolePackage
+    );
+
     installRole(template, values);
     closeRoleConfig();
+
+    if (firstUnreadyModelProfileId) {
+      setSelectedModelId(firstUnreadyModelProfileId);
+      setModelConfigOpen(true);
+      setModelTestNotice('请先填写 API Key 并测试连接，模型配置只保存在当前电脑。');
+      navigateToSection('models');
+    }
+  }
+
+  function prepareRoleForTaskRun(roleCode: string): DesktopRuntimeState | undefined {
+    const rolePackage = runtimeState.rolePackages.find((item) => item.roleCode === roleCode);
+    if (!rolePackage) {
+      return runtimeState;
+    }
+
+    const preparedRolePackage: RolePackageManifest = {
+      ...rolePackage,
+      modelProfileIds: readRequiredModelProfileIdsForRolePackage(rolePackage)
+    };
+    const preparedModelProfiles = ensureModelProfilesForRolePackage(
+      runtimeState.modelProfiles,
+      preparedRolePackage
+    );
+    const modelReadiness = getRoleModelRuntimeRequirementStatuses(
+      preparedModelProfiles,
+      runtimeState.localRuntime.enabledModelProfileIds,
+      preparedRolePackage
+    );
+    const firstUnreadyModel = modelReadiness.find((requirement) => !requirement.ready);
+    const preparedState = replaceRolePackageAndModelProfiles(
+      runtimeState,
+      preparedRolePackage,
+      preparedModelProfiles
+    );
+
+    if (!firstUnreadyModel) {
+      return preparedState;
+    }
+
+    setRuntimeState(preparedState);
+    setSelectedModelId(firstUnreadyModel.profile.id);
+    setModelConfigOpen(true);
+    setModelTestNotice(
+      firstUnreadyModel.issue === 'disabled'
+        ? '这个数字员工需要先启用指定模型，并确认 API Key 已填写。'
+        : '这个数字员工需要先填写指定模型的 API Key，并测试连接。'
+    );
+    navigateToSection('models');
+    return undefined;
   }
 
   function createTask(values: TaskFormValues & { attachments?: ComposerAttachment[] }) {
@@ -3259,10 +3405,15 @@ export default function App() {
     }
 
     const roleCode = values.roleCode;
-    const roleName = resolveRoleName(runtimeState.rolePackages, roleCode);
+    const preparedState = prepareRoleForTaskRun(roleCode);
+    if (!preparedState) {
+      return;
+    }
+
+    const roleName = resolveRoleName(preparedState.rolePackages, roleCode);
     const input = values.input?.trim() || `请处理任务：${title}`;
     const executionContext = buildTaskExecutionContextWithAttachments(
-      buildExecutionContextForRole(runtimeState.rolePackages, roleCode),
+      buildExecutionContextForRole(preparedState.rolePackages, roleCode),
       values.attachments ?? []
     );
     const taskDetail = createMockTaskDetail({
@@ -3277,7 +3428,7 @@ export default function App() {
     });
     const task = toDesktopTaskSummary(taskDetail);
 
-    const nextState = upsertTaskDetailInRuntimeState(runtimeState, taskDetail);
+    const nextState = upsertTaskDetailInRuntimeState(preparedState, taskDetail);
     setRuntimeState(nextState);
     setSelectedTaskId(task.taskId);
     taskForm.resetFields(['title', 'input']);
@@ -3299,18 +3450,25 @@ export default function App() {
   }
 
   async function completeTask(taskId: string) {
-    const sourceState = runtimeState;
     const startedAt = new Date().toISOString();
-    const sourceTaskDetails = getRuntimeTaskDetails(sourceState);
+    const sourceTaskDetails = getRuntimeTaskDetails(runtimeState);
     const targetTask = sourceTaskDetails.find((detail) => detail.taskId === taskId);
 
     if (!targetTask) {
       return;
     }
 
-    const runningTask = startTaskRun(targetTask, startedAt);
-    upsertTaskDetail(runningTask);
-    await runTaskDetail(sourceState, runningTask);
+    const preparedState = prepareRoleForTaskRun(targetTask.roleCode);
+    if (!preparedState) {
+      return;
+    }
+
+    const preparedTask =
+      getRuntimeTaskDetails(preparedState).find((detail) => detail.taskId === taskId) ?? targetTask;
+    const runningTask = startTaskRun(preparedTask, startedAt);
+    const nextState = upsertTaskDetailInRuntimeState(preparedState, runningTask);
+    setRuntimeState(nextState);
+    await runTaskDetail(nextState, runningTask);
   }
 
   function upsertTaskDetail(
@@ -4155,6 +4313,20 @@ function mergeUniqueStrings(left: string[], right: string[]) {
   return [...new Set([...left, ...right])];
 }
 
+function mergeModelProfileOptions(
+  currentProfiles: ModelProfile[],
+  requiredProfiles: ModelProfile[]
+): ModelProfile[] {
+  const byId = new Map(currentProfiles.map((profile) => [profile.id, profile]));
+  for (const profile of requiredProfiles) {
+    if (!byId.has(profile.id)) {
+      byId.set(profile.id, profile);
+    }
+  }
+
+  return [...byId.values()];
+}
+
 function getKnowledgeBindingId(source: KnowledgeBindingSource) {
   return knowledgeBindingCatalog.find((entry) => entry.source === source)?.bindingId ?? source;
 }
@@ -4199,6 +4371,40 @@ function pruneUnauthorizedRolePackages(
     localRuntime: {
       ...state.localRuntime,
       installedRoleCodes: rolePackages.map((rolePackage) => rolePackage.roleCode),
+      activeRoleCode
+    },
+    runtimeSnapshot: {
+      ...state.runtimeSnapshot,
+      rolePackages: rebuildRoleSummaries(
+        rolePackages,
+        state.runtimeSnapshot.tasks,
+        state.runtimeSnapshot.rolePackages,
+        activeRoleCode
+      )
+    }
+  };
+}
+
+function replaceRolePackageAndModelProfiles(
+  state: DesktopRuntimeState,
+  rolePackage: RolePackageManifest,
+  modelProfiles: ModelProfile[]
+): DesktopRuntimeState {
+  const rolePackages = state.rolePackages.map((item) =>
+    item.roleCode === rolePackage.roleCode ? rolePackage : item
+  );
+  const activeRoleCode =
+    state.localRuntime.activeRoleCode && rolePackages.some((item) => item.roleCode === state.localRuntime.activeRoleCode)
+      ? state.localRuntime.activeRoleCode
+      : rolePackages[0]?.roleCode;
+
+  return {
+    ...state,
+    rolePackages,
+    modelProfiles,
+    localRuntime: {
+      ...state.localRuntime,
+      installedRoleCodes: rolePackages.map((item) => item.roleCode),
       activeRoleCode
     },
     runtimeSnapshot: {

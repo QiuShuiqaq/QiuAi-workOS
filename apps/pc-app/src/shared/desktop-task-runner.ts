@@ -81,6 +81,7 @@ interface ResolvedRuntimeBinding {
   modelProfiles: ModelProfile[];
   availableTools: ToolManifest[];
   availableKnowledgeSources: DesktopKnowledgeSourceSummary[];
+  missingModelProfileIds: string[];
   missingToolIds: string[];
   missingKnowledgeBindingIds: string[];
   unconfiguredKnowledgeBindingIds: string[];
@@ -222,7 +223,8 @@ export async function runDesktopTask(input: RunDesktopTaskInput): Promise<RunDes
     const failedTask = failTask(
       input.task,
       completedAt,
-      'No enabled model profile is available for this task. Enable a model profile before running it.'
+      'No enabled model profile is available for this task. Enable a model profile before running it.',
+      buildWarningLogs(input.task, binding, completedAt)
     );
     await emitTaskProgress({
       onProgress: input.onProgress,
@@ -263,7 +265,10 @@ export async function runDesktopTask(input: RunDesktopTaskInput): Promise<RunDes
       input.task,
       completedAt,
       'No configured model API profile is available for this task. Add API Base URL and API Key before running it.',
-      buildModelConfigWarningLogs(input.task, binding.modelProfiles, completedAt)
+      [
+        ...buildWarningLogs(input.task, binding, completedAt),
+        ...buildModelConfigWarningLogs(input.task, binding.modelProfiles, completedAt)
+      ]
     );
     await emitTaskProgress({
       onProgress: input.onProgress,
@@ -292,7 +297,10 @@ export async function runDesktopTask(input: RunDesktopTaskInput): Promise<RunDes
   });
 
   if (!invocation.ok) {
-    const failedTask = failTask(input.task, completedAt, invocation.message, invocation.logs);
+    const failedTask = failTask(input.task, completedAt, invocation.message, [
+      ...buildWarningLogs(input.task, binding, completedAt),
+      ...invocation.logs
+    ]);
     await emitTaskProgress({
       onProgress: input.onProgress,
       task: failedTask,
@@ -353,6 +361,9 @@ function resolveRuntimeBinding(input: {
     const profile = modelProfilesById.get(profileId);
     return profile && enabledModelIds.has(profileId) ? [profile] : [];
   });
+  const missingModelProfileIds = input.context.modelProfileIds.filter(
+    (profileId) => !modelProfilesById.has(profileId) || !enabledModelIds.has(profileId)
+  );
   const availableTools = input.context.toolIds.flatMap((toolId) => {
     const tool = toolsById.get(toolId);
     return tool && enabledToolIds.has(toolId) ? [tool] : [];
@@ -373,6 +384,7 @@ function resolveRuntimeBinding(input: {
     modelProfiles,
     availableTools,
     availableKnowledgeSources,
+    missingModelProfileIds,
     missingToolIds,
     missingKnowledgeBindingIds,
     unconfiguredKnowledgeBindingIds
@@ -517,6 +529,18 @@ function buildWarningLogs(
         'warning',
         'TOOL_BINDING_SKIPPED',
         `Disabled or unavailable tools were skipped: ${binding.missingToolIds.join(', ')}.`,
+        createdAt
+      )
+    );
+  }
+
+  if (binding.missingModelProfileIds.length > 0) {
+    logs.push(
+      createLog(
+        task.taskId,
+        'warning',
+        'MODEL_PROFILE_BINDING_MISSING',
+        `Model profiles are unavailable or disabled: ${binding.missingModelProfileIds.join(', ')}.`,
         createdAt
       )
     );
@@ -2428,6 +2452,10 @@ function selectWorkflowRuntimeModelProfile(node: WorkflowGraphNode, profiles: Mo
     if (selected) {
       return selected;
     }
+
+    throw new Error(
+      `Workflow node "${node.name}" requires model profile "${node.modelProfileId}", but it is not configured or enabled on this PC.`
+    );
   }
 
   return profiles[0]!;
