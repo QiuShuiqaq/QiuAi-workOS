@@ -28,7 +28,7 @@ import Typography from 'antd/es/typography';
 import message from 'antd/es/message';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { type PointerEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 import { createBrowserApiClient } from '../../shared/api/browser-api';
 import { AdminShell } from '../../shared/console/AdminShell';
@@ -47,6 +47,7 @@ type WorkflowArtifactType = NonNullable<RoleWorkflowGraphNode['artifactType']>;
 type WorkflowEdge = RoleWorkflowGraph['edges'][number];
 type WorkflowEdgeConditionType = NonNullable<WorkflowEdge['condition']>['type'];
 type ToolConfigFieldType = 'text' | 'number' | 'textarea' | 'boolean';
+type WorkflowCanvasPosition = { x: number; y: number };
 
 type ToolConfigField = {
   key: string;
@@ -471,6 +472,43 @@ function buildToolNodeConfig(node: RoleWorkflowGraphNode, patch: Record<string, 
   };
 }
 
+function readWorkflowNodeCanvasPosition(
+  node: RoleWorkflowGraphNode,
+  fallback: WorkflowCanvasPosition
+): WorkflowCanvasPosition {
+  const value = node.config?.__canvas;
+  if (
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    typeof (value as { x?: unknown }).x === 'number' &&
+    typeof (value as { y?: unknown }).y === 'number'
+  ) {
+    return {
+      x: Math.max(0, Math.round((value as { x: number }).x)),
+      y: Math.max(0, Math.round((value as { y: number }).y))
+    };
+  }
+
+  return fallback;
+}
+
+function writeWorkflowNodeCanvasPosition(
+  node: RoleWorkflowGraphNode,
+  position: WorkflowCanvasPosition
+): RoleWorkflowGraphNode {
+  return {
+    ...node,
+    config: {
+      ...(node.config ?? {}),
+      __canvas: {
+        x: Math.max(0, Math.round(position.x)),
+        y: Math.max(0, Math.round(position.y))
+      }
+    }
+  };
+}
+
 function readWorkflowGraphToolIds(graph: RoleWorkflowGraph): string[] {
   return uniqueTags(
     graph.nodes.flatMap((node) => [
@@ -788,7 +826,14 @@ function WorkflowCanvasEditor({
     type: 'node',
     id: graph.entryNodeId
   });
-  const [draggingNodeId, setDraggingNodeId] = useState<string>();
+  const dragStateRef = useRef<{
+    nodeId: string;
+    startClientX: number;
+    startClientY: number;
+    startX: number;
+    startY: number;
+  } | null>(null);
+  const [activeDragNodeId, setActiveDragNodeId] = useState<string>();
   const [newEdgeSourceId, setNewEdgeSourceId] = useState(graph.entryNodeId);
   const [newEdgeTargetId, setNewEdgeTargetId] = useState(graph.nodes.find((node) => node.id !== graph.entryNodeId)?.id ?? graph.entryNodeId);
   const selectedNode =
@@ -802,9 +847,8 @@ function WorkflowCanvasEditor({
   const nodeWidth = 180;
   const nodeHeight = 92;
   const nodeGap = 76;
-  const canvasPadding = 28;
-  const canvasWidth = Math.max(760, graph.nodes.length * (nodeWidth + nodeGap) + canvasPadding * 2);
-  const canvasHeight = 340;
+  const canvasPadding = 36;
+  const defaultNodeTop = 92;
   const nodeOptions = graph.nodes.map((node) => ({
     value: node.id,
     label: `${node.name} / ${node.id}`
@@ -815,13 +859,21 @@ function WorkflowCanvasEditor({
       new Map(
         graph.nodes.map((node, index) => [
           node.id,
-          {
+          readWorkflowNodeCanvasPosition(node, {
             x: canvasPadding + index * (nodeWidth + nodeGap),
-            y: index % 2 === 0 ? 54 : 146
-          }
+            y: defaultNodeTop + (index % 2) * 132
+          })
         ] as const)
       ),
-    [graph.nodes, canvasPadding]
+    [graph.nodes]
+  );
+  const canvasWidth = Math.max(
+    980,
+    Math.max(0, ...Array.from(nodePositions.values()).map((position) => position.x)) + nodeWidth + canvasPadding
+  );
+  const canvasHeight = Math.max(
+    560,
+    Math.max(0, ...Array.from(nodePositions.values()).map((position) => position.y)) + nodeHeight + canvasPadding
   );
 
   useEffect(() => {
@@ -836,6 +888,15 @@ function WorkflowCanvasEditor({
     onChange({
       ...graph,
       nodes: graph.nodes.map((node) => (node.id === nodeId ? { ...node, ...patch } : node))
+    });
+  }
+
+  function updateNodePosition(nodeId: string, position: WorkflowCanvasPosition) {
+    onChange({
+      ...graph,
+      nodes: graph.nodes.map((node) =>
+        node.id === nodeId ? writeWorkflowNodeCanvasPosition(node, position) : node
+      )
     });
   }
 
@@ -903,7 +964,13 @@ function WorkflowCanvasEditor({
   }
 
   function addNode(type: WorkflowNodeType) {
-    const node = createCanvasNode(type, graph.nodes);
+    const sourcePosition = selectedNode
+      ? nodePositions.get(selectedNode.id)
+      : nodePositions.get(graph.entryNodeId);
+    const node = writeWorkflowNodeCanvasPosition(createCanvasNode(type, graph.nodes), {
+      x: Math.min(canvasWidth - nodeWidth - canvasPadding, (sourcePosition?.x ?? canvasPadding) + nodeWidth + 112),
+      y: Math.max(defaultNodeTop, sourcePosition?.y ?? defaultNodeTop)
+    });
     const selectedNodeIndex = graph.nodes.findIndex((item) => item.id === selectedNode?.id);
     const insertIndex = selectedNodeIndex >= 0 ? selectedNodeIndex + 1 : graph.nodes.length;
     const nodes = [
@@ -969,25 +1036,62 @@ function WorkflowCanvasEditor({
     setSelection({ type: 'node', id: graph.entryNodeId });
   }
 
-  function moveNode(dragNodeId: string, targetNodeId: string) {
-    if (dragNodeId === targetNodeId || dragNodeId === graph.entryNodeId || targetNodeId === graph.entryNodeId) {
+  function resetLinearEdges() {
+    const nodes = [...graph.nodes].sort((left, right) => {
+      if (left.id === graph.entryNodeId) return -1;
+      if (right.id === graph.entryNodeId) return 1;
+      const leftPosition = nodePositions.get(left.id) ?? { x: 0, y: 0 };
+      const rightPosition = nodePositions.get(right.id) ?? { x: 0, y: 0 };
+      return leftPosition.x === rightPosition.x
+        ? leftPosition.y - rightPosition.y
+        : leftPosition.x - rightPosition.x;
+    });
+    onChange(rebuildLinearEdges({ ...graph, nodes }));
+    message.success('已按画布从左到右重建连线');
+  }
+
+  function beginNodeDrag(event: PointerEvent<HTMLButtonElement>, nodeId: string) {
+    if (event.button !== 0) {
       return;
     }
 
-    const nodes = [...graph.nodes];
-    const fromIndex = nodes.findIndex((node) => node.id === dragNodeId);
-    const toIndex = nodes.findIndex((node) => node.id === targetNodeId);
-    if (fromIndex < 0 || toIndex < 0) return;
-    const [draggedNode] = nodes.splice(fromIndex, 1);
-    if (!draggedNode) return;
-    nodes.splice(toIndex, 0, draggedNode);
-    const nextGraph = { ...graph, nodes };
-    onChange(hasLinearEdgesOnly(graph) ? rebuildLinearEdges(nextGraph) : nextGraph);
+    const position = nodePositions.get(nodeId);
+    if (!position) {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setSelection({ type: 'node', id: nodeId });
+    setActiveDragNodeId(nodeId);
+    dragStateRef.current = {
+      nodeId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startX: position.x,
+      startY: position.y
+    };
   }
 
-  function resetLinearEdges() {
-    onChange(rebuildLinearEdges(graph));
-    message.success('已按当前节点顺序重建连线');
+  function moveDraggedNode(event: PointerEvent<HTMLButtonElement>) {
+    const dragState = dragStateRef.current;
+    if (!dragState) {
+      return;
+    }
+
+    event.preventDefault();
+    updateNodePosition(dragState.nodeId, {
+      x: Math.max(canvasPadding, dragState.startX + event.clientX - dragState.startClientX),
+      y: Math.max(canvasPadding, dragState.startY + event.clientY - dragState.startClientY)
+    });
+  }
+
+  function endNodeDrag(event: PointerEvent<HTMLButtonElement>) {
+    if (dragStateRef.current && event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    dragStateRef.current = null;
+    setActiveDragNodeId(undefined);
   }
 
   function updateSelectedEdgeConditionType(type: WorkflowEdgeConditionType) {
@@ -1006,7 +1110,28 @@ function WorkflowCanvasEditor({
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 16 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr) 340px', gap: 16 }}>
+      <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 12, background: '#fff' }}>
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          <Typography.Text strong>节点库</Typography.Text>
+          {workflowNodeTypeOptions
+            .filter((option) => option.value !== 'start')
+            .map((option) => (
+              <Button
+                key={option.value}
+                block
+                size="small"
+                style={{ justifyContent: 'flex-start' }}
+                onClick={() => addNode(option.value)}
+              >
+                {option.label}
+              </Button>
+            ))}
+          <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => addNode('llm')} block>
+            添加 LLM
+          </Button>
+        </Space>
+      </div>
       <div
         style={{
           minHeight: canvasHeight,
@@ -1021,21 +1146,11 @@ function WorkflowCanvasEditor({
         }}
       >
         <div style={{ position: 'sticky', left: 0, top: 0, zIndex: 5, display: 'flex', gap: 8, alignItems: 'center', padding: 10, borderBottom: '1px solid #eef2f7', background: 'rgba(255,255,255,0.92)' }}>
-          <Select
-            size="small"
-            value="llm"
-            style={{ width: 128 }}
-            options={workflowNodeTypeOptions.filter((option) => option.value !== 'start')}
-            onChange={(type) => addNode(type as WorkflowNodeType)}
-          />
-          <Button size="small" icon={<PlusOutlined />} onClick={() => addNode('llm')}>
-            添加节点
-          </Button>
           <Button size="small" onClick={resetLinearEdges}>
-            顺序重连
+            按画布顺序连线
           </Button>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            拖拽节点调整位置，运行路径以连线为准。
+            拖动节点调整布局；点击节点或连线编辑参数。
           </Typography.Text>
         </div>
         <svg
@@ -1118,13 +1233,10 @@ function WorkflowCanvasEditor({
               <button
                 key={node.id}
                 type="button"
-                draggable={node.id !== graph.entryNodeId}
-                onDragStart={() => setDraggingNodeId(node.id)}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={() => {
-                  if (draggingNodeId) moveNode(draggingNodeId, node.id);
-                  setDraggingNodeId(undefined);
-                }}
+                onPointerDown={(event) => beginNodeDrag(event, node.id)}
+                onPointerMove={moveDraggedNode}
+                onPointerUp={endNodeDrag}
+                onPointerCancel={endNodeDrag}
                 onClick={() => setSelection({ type: 'node', id: node.id })}
                 style={{
                   position: 'absolute',
@@ -1137,8 +1249,15 @@ function WorkflowCanvasEditor({
                   border: `1px solid ${active ? '#1677ff' : '#dbe2ea'}`,
                   borderRadius: 8,
                   background: active ? '#eff6ff' : '#ffffff',
-                  boxShadow: active ? '0 8px 22px rgba(22, 119, 255, 0.14)' : '0 6px 16px rgba(15, 23, 42, 0.08)',
-                  cursor: node.id === graph.entryNodeId ? 'pointer' : 'grab'
+                  boxShadow:
+                    activeDragNodeId === node.id
+                      ? '0 14px 28px rgba(15, 23, 42, 0.18)'
+                      : active
+                        ? '0 8px 22px rgba(22, 119, 255, 0.14)'
+                        : '0 6px 16px rgba(15, 23, 42, 0.08)',
+                  cursor: activeDragNodeId === node.id ? 'grabbing' : 'grab',
+                  touchAction: 'none',
+                  userSelect: 'none'
                 }}
               >
                 <Space direction="vertical" size={6} style={{ width: '100%' }}>
@@ -1563,7 +1682,6 @@ export function AdminCreateRoleTemplatePageClient({
     [templateId, templates]
   );
   const persistedTemplateId = savedTemplateId ?? editingTemplate?.id;
-  const selectedPreset = Form.useWatch('workflowPreset', form) ?? 'standard';
   const initialGraph = useMemo(
     () => editingTemplate?.workflowGraph ?? createWorkflowGraph(inferInitialPreset(editingTemplate)),
     [editingTemplate]
@@ -1722,25 +1840,23 @@ export function AdminCreateRoleTemplatePageClient({
         }
       >
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          <Alert
-            showIcon
-            type="info"
-            message={editingTemplate ? '当前正在编辑已有数字员工' : '先创建草稿，再到数字员工列表中测试和上架'}
-            description="工作画布会维护数字员工的基础信息、能力配置、工作流预览和发布范围。复杂节点、条件和工具参数后续继续强化。"
-          />
-
           <Form
             form={form}
             layout="vertical"
             onFinish={handleSave}
             initialValues={initialValues}
           >
-            <Card title="工作流画布" bordered={false} style={{ marginBottom: 16 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '280px minmax(0, 1fr)', gap: 16 }}>
-                <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                  <Form.Item name="workflowPreset" label="流程预设" rules={[{ required: true }]}>
+            <Card
+              title="工作流画布"
+              bordered={false}
+              style={{ marginBottom: 16 }}
+              extra={
+                <Space>
+                  <Typography.Text type="secondary">流程预设</Typography.Text>
+                  <Form.Item name="workflowPreset" noStyle rules={[{ required: true }]}>
                     <Select
                       disabled={Boolean(persistedTemplateId)}
+                      style={{ width: 180 }}
                       options={workflowPresetOptions.map((option) => ({
                         value: option.value,
                         label: option.label
@@ -1748,17 +1864,10 @@ export function AdminCreateRoleTemplatePageClient({
                       onChange={(preset) => setEditableGraph(createWorkflowGraph(preset))}
                     />
                   </Form.Item>
-                  {workflowPresetOptions
-                    .filter((option) => option.value === selectedPreset)
-                    .map((option) => (
-                      <Alert key={option.value} type="info" showIcon message={option.label} description={option.description} />
-                    ))}
-                  <Typography.Text type="secondary">
-                    点击节点配置执行参数，点击连线配置分支条件。拖拽节点只调整画布顺序，真实运行路径以连线为准。
-                  </Typography.Text>
                 </Space>
-                <WorkflowCanvasEditor graph={editableGraph} onChange={setEditableGraph} />
-              </div>
+              }
+            >
+              <WorkflowCanvasEditor graph={editableGraph} onChange={setEditableGraph} />
             </Card>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 360px', gap: 16 }}>

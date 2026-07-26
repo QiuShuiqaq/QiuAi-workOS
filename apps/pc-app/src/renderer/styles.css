@@ -251,6 +251,45 @@ body,
   background: #f6f8fa;
 }
 
+.account-modal-body {
+  width: 100%;
+}
+
+.account-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.account-stat-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.account-help-item,
+.account-legal-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 0;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.account-help-item:last-child,
+.account-legal-section:last-child {
+  border-bottom: 0;
+}
+
+.account-legal-section .ant-typography {
+  margin-bottom: 0;
+}
+
 .product-surface {
   grid-area: surface;
   min-width: 0;

@@ -48,12 +48,14 @@
     },
     "files": [
       "dist/**/*",
+      "resources/**/*",
       "package.json"
     ],
     "asarUnpack": [
       "node_modules/sql.js/dist/sql-wasm.wasm"
     ],
     "win": {
+      "icon": "resources/icon.ico",
       "target": [
         {
           "target": "nsis",

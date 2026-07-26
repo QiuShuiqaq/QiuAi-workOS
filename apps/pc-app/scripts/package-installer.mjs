@@ -10,6 +10,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(scriptDir, '..');
 const appPackageJsonPath = path.join(appDir, 'package.json');
 const distDir = path.join(appDir, 'dist');
+const resourcesDir = path.join(appDir, 'resources');
 const releaseDir = path.join(appDir, 'release');
 const stageDir = path.join(releaseDir, 'installer-stage');
 const outputDir = path.join(releaseDir, 'installers');
@@ -24,6 +25,8 @@ const sqlJsEntryPath = require.resolve('sql.js/dist/sql-wasm.js');
 const sqlJsPackageDir = path.dirname(path.dirname(sqlJsEntryPath));
 
 await ensureExists(distDir, 'build output directory');
+await ensureExists(path.join(resourcesDir, 'icon.png'), 'desktop window icon');
+await ensureExists(path.join(resourcesDir, 'icon.ico'), 'Windows app icon');
 await ensureExists(electronDistDir, 'Electron runtime directory');
 await ensureExists(sqlJsPackageDir, 'sql.js package directory');
 await ensureExists(electronBuilderCliPath, 'electron-builder CLI');
@@ -36,6 +39,7 @@ const electronVersion = normalizePackageVersion(
 await rm(stageDir, { recursive: true, force: true });
 await mkdir(stageNodeModulesDir, { recursive: true });
 await cp(distDir, path.join(stageDir, 'dist'), { recursive: true });
+await cp(resourcesDir, path.join(stageDir, 'resources'), { recursive: true });
 await cp(sqlJsPackageDir, path.join(stageNodeModulesDir, 'sql.js'), { recursive: true });
 
 await writeFile(
@@ -76,10 +80,12 @@ await writeFile(
     '  },',
     '  files: [',
     "    'dist/**/*',",
+    "    'resources/**/*',",
     "    'node_modules/sql.js/**/*',",
     "    'package.json'",
     '  ],',
     '  win: {',
+    "    icon: path.resolve(__dirname, 'resources', 'icon.ico'),",
     '    signAndEditExecutable: false,',
     '    target: [',
     '      {',

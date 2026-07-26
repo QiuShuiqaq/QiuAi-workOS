@@ -24,6 +24,7 @@ const channels = {
   getAppInfo: 'qiuai:desktop:get-app-info',
   getRuntimeState: 'qiuai:desktop:get-runtime-state',
   bindDesktopDevice: 'qiuai:desktop:bind-desktop-device',
+  unbindDesktopDevice: 'qiuai:desktop:unbind-desktop-device',
   checkServerConnection: 'qiuai:desktop:check-server-connection',
   checkForUpdates: 'qiuai:desktop:check-for-updates',
   listAuthorizedRoleTemplates: 'qiuai:desktop:list-authorized-role-templates',
@@ -46,6 +47,8 @@ const bridge: QiuDesktopBridge = {
   getRuntimeState: () => ipcRenderer.invoke(channels.getRuntimeState) as Promise<DesktopRuntimeState>,
   bindDesktopDevice: (bindingCode: string) =>
     ipcRenderer.invoke(channels.bindDesktopDevice, bindingCode) as Promise<DesktopRuntimeState>,
+  unbindDesktopDevice: () =>
+    ipcRenderer.invoke(channels.unbindDesktopDevice) as Promise<DesktopRuntimeState>,
   checkServerConnection: () =>
     ipcRenderer.invoke(channels.checkServerConnection) as Promise<DesktopServerConnectionStatus>,
   checkForUpdates: () =>

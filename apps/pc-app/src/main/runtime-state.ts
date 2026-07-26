@@ -152,6 +152,17 @@ export async function bindDesktopDevice(bindingCode: string): Promise<DesktopRun
   return boundState;
 }
 
+export async function unbindDesktopDevice(): Promise<DesktopRuntimeState> {
+  const appInfo = getDesktopAppInfo();
+  updateRuntimeIdentity(appInfo.userDataPath, {
+    workspaceId: 'workspace_pending_login',
+    deviceToken: undefined,
+    lastSyncedAt: undefined
+  });
+
+  return getDesktopRuntimeState();
+}
+
 export async function syncDesktopRuntimeState(state: DesktopRuntimeState) {
   const appInfo = getDesktopAppInfo();
   const identity = loadRuntimeIdentity(appInfo.userDataPath);

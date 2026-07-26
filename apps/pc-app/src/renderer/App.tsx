@@ -87,6 +87,7 @@ import {
 } from '../shared/desktop-role-requirements';
 
 type SectionKey = 'workbench' | 'roles' | 'models' | 'tools' | 'knowledge' | 'settings';
+type AccountModalKey = 'enterprise' | 'help' | 'release' | 'download' | 'logout';
 type DesktopThemePreference = 'light' | 'system';
 type DesktopDensityPreference = 'comfortable' | 'compact';
 
@@ -680,6 +681,8 @@ export default function App() {
     'enterprise'
   );
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [accountModal, setAccountModal] = useState<AccountModalKey | null>(null);
+  const [isUnbindingDevice, setIsUnbindingDevice] = useState(false);
   const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
   const [isComposerDragOver, setIsComposerDragOver] = useState(false);
   const [taskHistoryOpen, setTaskHistoryOpen] = useState(false);
@@ -1050,6 +1053,31 @@ export default function App() {
     void window.qiuDesktop?.controlWindow(action);
   }
 
+  function openAccountModal(modal: AccountModalKey) {
+    setAccountModal(modal);
+    setAccountMenuOpen(false);
+  }
+
+  async function handleUnbindDesktopDevice() {
+    if (!window.qiuDesktop) {
+      return;
+    }
+
+    setIsUnbindingDevice(true);
+    setOnboardingNotice('');
+    try {
+      const nextState = await window.qiuDesktop.unbindDesktopDevice();
+      setRuntimeState(nextState);
+      setAuthorizedRoleTemplateCatalog(initialAuthorizedRoleTemplateCatalog);
+      setAccountModal(null);
+      setOnboardingOpen(true);
+    } catch (error) {
+      setOnboardingNotice(`解绑失败：${error instanceof Error ? error.message : 'unknown error'}`);
+    } finally {
+      setIsUnbindingDevice(false);
+    }
+  }
+
   function updateClientPreferences(patch: Partial<DesktopClientPreferences>) {
     setClientPreferences((current) => {
       const next = { ...current, ...patch };
@@ -1288,6 +1316,7 @@ export default function App() {
           </Layout.Content>
         </Layout>
         {renderOnboardingModal()}
+        {renderAccountModal()}
       </AppProvider>
     </ConfigProvider>
   );
@@ -1379,23 +1408,23 @@ export default function App() {
                 </span>
               </div>
               <div className="account-popover-list">
-                <button type="button">
+                <button type="button" onClick={() => openAccountModal('enterprise')}>
                   <UserOutlined />
-                  <span>个人资料</span>
+                  <span>企业资料</span>
                 </button>
-                <button type="button">
+                <button type="button" onClick={() => openAccountModal('help')}>
                   <QuestionCircleOutlined />
                   <span>帮助中心</span>
                 </button>
-                <button type="button">
+                <button type="button" onClick={() => openAccountModal('release')}>
                   <InfoCircleOutlined />
                   <span>发行说明</span>
                 </button>
-                <button type="button">
+                <button type="button" onClick={() => openAccountModal('download')}>
                   <CloudDownloadOutlined />
                   <span>下载应用</span>
                 </button>
-                <button type="button">
+                <button type="button" onClick={() => openAccountModal('logout')}>
                   <LogoutOutlined />
                   <span>退出登录</span>
                 </button>
@@ -1446,36 +1475,174 @@ export default function App() {
         </Form>
       </Modal>
     );
+  }
+
+  function renderAccountModal() {
+    const open = Boolean(accountModal);
+    const latestRelease = updateCheckResult?.latestRelease;
+
     return (
       <Modal
-        title="企业工作区初始化"
-        open={onboardingOpen}
-        closable={!requiresOnboarding}
-        maskClosable={false}
-        okText="完成初始化"
-        cancelText="稍后"
-        cancelButtonProps={{
-          style: requiresOnboarding ? { display: 'none' } : undefined
-        }}
-        onCancel={() => setOnboardingOpen(false)}
-        onOk={() => onboardingForm.submit()}
+        title={accountModalTitle(accountModal)}
+        open={open}
+        footer={null}
+        width={accountModal === 'release' ? 720 : 640}
+        destroyOnHidden
+        onCancel={() => setAccountModal(null)}
       >
-        <Form<OnboardingFormValues>
-          form={onboardingForm}
-          layout="vertical"
-          onFinish={submitOnboarding}
-        >
-          <Form.Item
-            name="workspaceId"
-            label="Workspace ID"
-            rules={[{ required: true, message: '请输入企业工作区 ID' }]}
-          >
-            <Input placeholder="例如：从 web-console 企业工作区复制 workspaceId" />
-          </Form.Item>
-          <Typography.Text type="secondary">
-            桌面端会把任务、知识库摘要、模型配置和本地产物绑定到这个工作区；用户电脑上的资产仍保存在本机。
-          </Typography.Text>
-        </Form>
+        {accountModal === 'enterprise' ? (
+          <Space direction="vertical" size={16} className="account-modal-body">
+            <Descriptions column={1} size="small" bordered>
+              <Descriptions.Item label="企业工作区">
+                {runtimeState.localRuntime.workspaceId === pendingWorkspaceId
+                  ? '未绑定'
+                  : runtimeState.localRuntime.workspaceId}
+              </Descriptions.Item>
+              <Descriptions.Item label="设备名称">{runtimeState.app.deviceName}</Descriptions.Item>
+              <Descriptions.Item label="设备 ID">{runtimeState.localRuntime.deviceId}</Descriptions.Item>
+              <Descriptions.Item label="运行时 ID">{runtimeState.localRuntime.runtimeId}</Descriptions.Item>
+              <Descriptions.Item label="客户端版本">{runtimeState.app.appVersion}</Descriptions.Item>
+              <Descriptions.Item label="控制端">{runtimeState.app.serverBaseUrl}</Descriptions.Item>
+              <Descriptions.Item label="连接状态">
+                <Tag color={connectionTone}>{connectionLabel(runtimeState.serverConnection.state)}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="最近同步">
+                {formatDate(runtimeState.localRuntime.lastSyncedAt)}
+              </Descriptions.Item>
+            </Descriptions>
+
+            <div className="account-stat-grid">
+              <div>
+                <Typography.Text strong>{runtimeState.rolePackages.length}</Typography.Text>
+                <Typography.Text type="secondary">数字员工</Typography.Text>
+              </div>
+              <div>
+                <Typography.Text strong>{enabledModelCount}</Typography.Text>
+                <Typography.Text type="secondary">已启用模型</Typography.Text>
+              </div>
+              <div>
+                <Typography.Text strong>{enabledToolCount}</Typography.Text>
+                <Typography.Text type="secondary">已启用工具</Typography.Text>
+              </div>
+              <div>
+                <Typography.Text strong>{knowledgeBindingCount}</Typography.Text>
+                <Typography.Text type="secondary">知识来源</Typography.Text>
+              </div>
+            </div>
+          </Space>
+        ) : null}
+
+        {accountModal === 'help' ? (
+          <Space direction="vertical" size={14} className="account-modal-body">
+            {[
+              ['怎么绑定企业？', '在 web-console 生成绑定码，在本机启动后输入绑定码即可接入企业工作区。'],
+              ['模型在哪里配置？', '进入左侧“模型”，选择供应商卡片并填写 API Key。不同数字员工可要求不同模型配置。'],
+              ['文件怎么交给数字员工？', '在“对话”输入框直接拖入文档、表格、图片等文件，再输入任务要求。'],
+              ['结果文件在哪里？', '任务完成后会在聊天记录里显示可下载或可打开的本地产物。'],
+              ['怎么更新客户端？', '打开左下角 Q 菜单里的“下载应用”，检查版本并下载新版安装包。']
+            ].map(([question, answer]) => (
+              <div key={question} className="account-help-item">
+                <Typography.Text strong>{question}</Typography.Text>
+                <Typography.Text type="secondary">{answer}</Typography.Text>
+              </div>
+            ))}
+          </Space>
+        ) : null}
+
+        {accountModal === 'release' ? (
+          <Space direction="vertical" size={16} className="account-modal-body">
+            <section className="account-legal-section">
+              <Typography.Text strong>版本说明</Typography.Text>
+              <Typography.Paragraph type="secondary">
+                当前版本 {runtimeState.app.appVersion}，重点支持数字员工安装、模型配置、工具调用、本地文件处理、任务历史和本地数据备份。
+              </Typography.Paragraph>
+            </section>
+            <section className="account-legal-section">
+              <Typography.Text strong>协议声明</Typography.Text>
+              <Typography.Paragraph type="secondary">
+                使用本客户端即表示企业确认已获得处理相关业务数据、文件和账号信息的授权。企业应自行确保上传、处理、导出的资料符合内部制度和适用法律法规。
+              </Typography.Paragraph>
+            </section>
+            <section className="account-legal-section">
+              <Typography.Text strong>法律边界</Typography.Text>
+              <Typography.Paragraph type="secondary">
+                数字员工输出用于辅助办公，不构成法律、医疗、金融投资等强监管领域的最终专业意见。涉及重大决策时，应由具备资质的人员复核。
+              </Typography.Paragraph>
+            </section>
+            <section className="account-legal-section">
+              <Typography.Text strong>使用边界</Typography.Text>
+              <Typography.Paragraph type="secondary">
+                不得用于违法违规、侵犯隐私、绕过安全限制、批量骚扰、恶意爬取、生成欺诈内容或其他损害第三方权益的行为。
+              </Typography.Paragraph>
+            </section>
+          </Space>
+        ) : null}
+
+        {accountModal === 'download' ? (
+          <Space direction="vertical" size={16} className="account-modal-body">
+            <Descriptions column={1} size="small" bordered>
+              <Descriptions.Item label="当前版本">{runtimeState.app.appVersion}</Descriptions.Item>
+              <Descriptions.Item label="最新版本">
+                {latestRelease
+                  ? `${latestRelease.version} · ${
+                      updateCheckResult?.updateAvailable ? '可更新' : '已是最新'
+                    }`
+                  : updateNotice || '尚未检查'}
+              </Descriptions.Item>
+              {latestRelease?.fileSizeBytes !== undefined ? (
+                <Descriptions.Item label="安装包大小">
+                  {formatFileSize(latestRelease.fileSizeBytes)}
+                </Descriptions.Item>
+              ) : null}
+              {latestRelease?.releaseNotes ? (
+                <Descriptions.Item label="更新说明">{latestRelease.releaseNotes}</Descriptions.Item>
+              ) : null}
+              <Descriptions.Item label="更新策略">
+                {updateCheckResult?.forceUpdate ? <Tag color="red">强制更新</Tag> : <Tag>常规更新</Tag>}
+              </Descriptions.Item>
+            </Descriptions>
+            {updateNotice ? <Typography.Text type="secondary">{updateNotice}</Typography.Text> : null}
+            <Space wrap>
+              <Button
+                icon={<CloudDownloadOutlined />}
+                loading={isCheckingForUpdates}
+                onClick={() => void checkForUpdates()}
+              >
+                检查更新
+              </Button>
+              <Button
+                type="primary"
+                disabled={!updateCheckResult?.updateAvailable || !latestRelease}
+                onClick={() => void openUpdateDownload()}
+              >
+                下载新版
+              </Button>
+            </Space>
+          </Space>
+        ) : null}
+
+        {accountModal === 'logout' ? (
+          <Space direction="vertical" size={16} className="account-modal-body">
+            <Typography.Paragraph>
+              退出登录会解绑当前设备。解绑后，本机需要重新输入企业绑定码才能同步企业数字员工和授权。
+            </Typography.Paragraph>
+            <Typography.Text type="secondary">
+              本地任务记录、模型配置和产物文件不会在此操作中主动删除。
+            </Typography.Text>
+            {onboardingNotice ? <Typography.Text type="danger">{onboardingNotice}</Typography.Text> : null}
+            <Space wrap>
+              <Button onClick={() => setAccountModal(null)}>取消</Button>
+              <Button
+                danger
+                type="primary"
+                loading={isUnbindingDevice}
+                onClick={() => void handleUnbindDesktopDevice()}
+              >
+                解绑当前设备
+              </Button>
+            </Space>
+          </Space>
+        ) : null}
       </Modal>
     );
   }
@@ -2841,59 +3008,6 @@ export default function App() {
         </section>
 
         <section className="settings-list-section">
-          <Typography.Text strong className="settings-list-title">软件更新</Typography.Text>
-          <div className="settings-list-row">
-            <div className="client-setting-copy">
-              <Typography.Text strong>当前版本</Typography.Text>
-              <Typography.Text type="secondary">{runtimeState.app.appVersion}</Typography.Text>
-            </div>
-            <Button
-              size="small"
-              icon={<CloudDownloadOutlined />}
-              loading={isCheckingForUpdates}
-              onClick={() => void checkForUpdates()}
-            >
-              检查更新
-            </Button>
-          </div>
-
-          <div className="settings-list-row">
-            <div className="client-setting-copy">
-              <Typography.Text strong>最新版本</Typography.Text>
-              <Typography.Text type="secondary">
-                {updateCheckResult?.latestRelease
-                  ? `${updateCheckResult.latestRelease.version} · ${
-                      updateCheckResult.updateAvailable ? '可更新' : '已是最新'
-                    }`
-                  : updateNotice || '尚未检查'}
-              </Typography.Text>
-              {updateCheckResult?.latestRelease?.fileSizeBytes !== undefined ? (
-                <Typography.Text type="secondary">
-                  安装包大小：{formatFileSize(updateCheckResult.latestRelease.fileSizeBytes)}
-                </Typography.Text>
-              ) : null}
-              {updateCheckResult?.latestRelease?.releaseNotes ? (
-                <Typography.Text type="secondary">
-                  {updateCheckResult.latestRelease.releaseNotes}
-                </Typography.Text>
-              ) : null}
-              {updateNotice ? <Typography.Text type="secondary">{updateNotice}</Typography.Text> : null}
-            </div>
-            <Space wrap>
-              {updateCheckResult?.forceUpdate ? <Tag color="red">强制</Tag> : null}
-              <Button
-                size="small"
-                type="primary"
-                disabled={!updateCheckResult?.updateAvailable || !updateCheckResult.latestRelease}
-                onClick={() => void openUpdateDownload()}
-              >
-                下载新版
-              </Button>
-            </Space>
-          </div>
-        </section>
-
-        <section className="settings-list-section">
           <Typography.Text strong className="settings-list-title">连接</Typography.Text>
           <div className="settings-list-row">
             <div className="client-setting-copy">
@@ -3892,6 +4006,18 @@ function sectionMeta(section: SectionKey) {
   };
 
   return meta[section];
+}
+
+function accountModalTitle(modal: AccountModalKey | null) {
+  const titles: Record<AccountModalKey, string> = {
+    enterprise: '企业资料',
+    help: '帮助中心',
+    release: '发行说明',
+    download: '下载应用',
+    logout: '退出登录'
+  };
+
+  return modal ? titles[modal] : '';
 }
 
 function connectionLabel(state: DesktopRuntimeState['serverConnection']['state']) {

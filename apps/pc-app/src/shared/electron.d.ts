@@ -6,6 +6,7 @@ declare module 'electron' {
     whenReady(): Promise<void>;
     on(event: 'activate' | 'window-all-closed', listener: (...args: any[]) => void): void;
     quit(): void;
+    setAppUserModelId(id: string): void;
     setPath(name: 'userData', value: string): void;
     getPath(name: 'userData'): string;
   };
@@ -21,6 +22,7 @@ declare module 'electron' {
       titleBarStyle?: 'default' | 'hidden' | 'hiddenInset' | 'customButtonsOnHover';
       autoHideMenuBar?: boolean;
       backgroundColor?: string;
+      icon?: string;
       webPreferences?: {
         preload?: string;
         contextIsolation?: boolean;

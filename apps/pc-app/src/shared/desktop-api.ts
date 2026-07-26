@@ -212,6 +212,7 @@ export interface QiuDesktopBridge {
   getAppInfo(): Promise<DesktopAppInfo>;
   getRuntimeState(): Promise<DesktopRuntimeState>;
   bindDesktopDevice(bindingCode: string): Promise<DesktopRuntimeState>;
+  unbindDesktopDevice(): Promise<DesktopRuntimeState>;
   checkServerConnection(): Promise<DesktopServerConnectionStatus>;
   checkForUpdates(): Promise<DesktopUpdateCheckResult>;
   listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRoleTemplateCatalog>;

@@ -6,7 +6,8 @@ import {
   getDesktopAppInfo,
   getDesktopRuntimeState,
   listAuthorizedRoleTemplates,
-  syncDesktopRuntimeState
+  syncDesktopRuntimeState,
+  unbindDesktopDevice
 } from './runtime-state.js';
 import { saveDesktopRuntimeState } from './runtime-store.js';
 import { invokeOpenAiCompatibleModelChat } from './model-chat.js';
@@ -26,6 +27,7 @@ const channels = {
   getAppInfo: 'qiuai:desktop:get-app-info',
   getRuntimeState: 'qiuai:desktop:get-runtime-state',
   bindDesktopDevice: 'qiuai:desktop:bind-desktop-device',
+  unbindDesktopDevice: 'qiuai:desktop:unbind-desktop-device',
   checkServerConnection: 'qiuai:desktop:check-server-connection',
   checkForUpdates: 'qiuai:desktop:check-for-updates',
   listAuthorizedRoleTemplates: 'qiuai:desktop:list-authorized-role-templates',
@@ -49,6 +51,7 @@ export function registerDesktopIpc() {
   ipcMain.handle(channels.bindDesktopDevice, async (_, bindingCode: string) => {
     return bindDesktopDevice(bindingCode);
   });
+  ipcMain.handle(channels.unbindDesktopDevice, () => unbindDesktopDevice());
   ipcMain.handle(channels.checkServerConnection, () => checkServerConnection());
   ipcMain.handle(channels.checkForUpdates, () => checkForDesktopUpdates());
   ipcMain.handle(channels.listAuthorizedRoleTemplates, () => listAuthorizedRoleTemplates());

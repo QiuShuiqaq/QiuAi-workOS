@@ -17,8 +17,14 @@ if (shouldDisableHardwareAcceleration) {
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const isDev = Boolean(process.env.QIUAI_PC_DEV_SERVER_URL);
+const appId = 'com.qiuai.workos.pc';
+const appIconPath = path.resolve(currentDir, '..', '..', 'resources', 'icon.png');
 
 configureUserDataPath();
+
+if (process.platform === 'win32') {
+  app.setAppUserModelId(appId);
+}
 
 async function createMainWindow() {
   const mainWindow = new BrowserWindow({
@@ -31,6 +37,7 @@ async function createMainWindow() {
     titleBarStyle: 'hidden',
     autoHideMenuBar: true,
     backgroundColor: '#f6f8fa',
+    icon: appIconPath,
     webPreferences: {
       preload: path.join(currentDir, '../preload/preload.cjs'),
       contextIsolation: true,
