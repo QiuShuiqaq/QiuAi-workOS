@@ -144,8 +144,7 @@ function cloneSkills(skills: ServerRoleSkill[]) {
 const personalFreeEntitlements = [
   { featureKey: 'maxRoleInstances', enabled: true, limitValue: 3, limitUnit: 'count' },
   { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100, limitUnit: 'count' },
-  { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 1, limitUnit: 'count' },
-  { featureKey: 'maxStorageGB', enabled: true, limitValue: 5, limitUnit: 'GB' },
+  { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 1, limitUnit: 'count' },
   { featureKey: 'maxMembers', enabled: true, limitValue: 1, limitUnit: 'count' },
   { featureKey: 'canCreateDepartment', enabled: false },
   { featureKey: 'canInviteMember', enabled: false },
@@ -158,25 +157,23 @@ const personalFreeEntitlements = [
 
 const enterpriseBasicEntitlements = [
   { featureKey: 'maxRoleInstances', enabled: true, limitValue: 10, limitUnit: 'count' },
-  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 2000, limitUnit: 'count' },
-  { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 3, limitUnit: 'count' },
-  { featureKey: 'maxStorageGB', enabled: true, limitValue: 50, limitUnit: 'GB' },
-  { featureKey: 'maxMembers', enabled: true, limitValue: 10, limitUnit: 'count' },
+  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100000, limitUnit: 'count' },
+  { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 3, limitUnit: 'count' },
+  { featureKey: 'maxMembers', enabled: true, limitValue: 5, limitUnit: 'count' },
   { featureKey: 'canCreateDepartment', enabled: true },
   { featureKey: 'canInviteMember', enabled: true },
   { featureKey: 'canUseApprovalPolicy', enabled: true },
   { featureKey: 'canUseAuditLog', enabled: true },
-  { featureKey: 'canUseAdvancedToolConnector', enabled: false },
+  { featureKey: 'canUseAdvancedToolConnector', enabled: true },
   { featureKey: 'canUseCostBudget', enabled: true },
-  { featureKey: 'canUseEnterpriseKPIDashboard', enabled: false }
+  { featureKey: 'canUseEnterpriseKPIDashboard', enabled: true }
 ];
 
 const enterpriseStandardEntitlements = [
   { featureKey: 'maxRoleInstances', enabled: true, limitValue: 30, limitUnit: 'count' },
-  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 10000, limitUnit: 'count' },
-  { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 10, limitUnit: 'count' },
-  { featureKey: 'maxStorageGB', enabled: true, limitValue: 200, limitUnit: 'GB' },
-  { featureKey: 'maxMembers', enabled: true, limitValue: 50, limitUnit: 'count' },
+  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100000, limitUnit: 'count' },
+  { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 10, limitUnit: 'count' },
+  { featureKey: 'maxMembers', enabled: true, limitValue: 20, limitUnit: 'count' },
   { featureKey: 'canCreateDepartment', enabled: true },
   { featureKey: 'canInviteMember', enabled: true },
   { featureKey: 'canUseApprovalPolicy', enabled: true },
@@ -187,11 +184,10 @@ const enterpriseStandardEntitlements = [
 ];
 
 const enterpriseProEntitlements = [
-  { featureKey: 'maxRoleInstances', enabled: true, limitValue: 80, limitUnit: 'count' },
-  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 50000, limitUnit: 'count' },
-  { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 50, limitUnit: 'count' },
-  { featureKey: 'maxStorageGB', enabled: true, limitValue: 1000, limitUnit: 'GB' },
-  { featureKey: 'maxMembers', enabled: true, limitValue: 120, limitUnit: 'count' },
+  { featureKey: 'maxRoleInstances', enabled: true, limitValue: 100, limitUnit: 'count' },
+  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100000, limitUnit: 'count' },
+  { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 50, limitUnit: 'count' },
+  { featureKey: 'maxMembers', enabled: true, limitValue: 100, limitUnit: 'count' },
   { featureKey: 'canCreateDepartment', enabled: true },
   { featureKey: 'canInviteMember', enabled: true },
   { featureKey: 'canUseApprovalPolicy', enabled: true },
@@ -204,8 +200,7 @@ const enterpriseProEntitlements = [
 const enterpriseCustomEntitlements = [
   { featureKey: 'maxRoleInstances', enabled: true },
   { featureKey: 'maxTasksPerMonth', enabled: true },
-  { featureKey: 'maxKnowledgeBases', enabled: true },
-  { featureKey: 'maxStorageGB', enabled: true },
+  { featureKey: 'maxDesktopDevices', enabled: true },
   { featureKey: 'maxMembers', enabled: true },
   { featureKey: 'canCreateDepartment', enabled: true },
   { featureKey: 'canInviteMember', enabled: true },
@@ -255,56 +250,56 @@ export const demoPlans: MockPlanDetail[] = [
   },
   {
     code: 'ENTERPRISE_BASIC_MONTHLY',
-    name: 'Enterprise Basic Monthly',
+    name: '企业基础版（月付）',
     billingCycle: 'MONTHLY',
-    priceCents: 29900,
+    priceCents: 58800,
     currency: 'CNY',
-    description: 'Basic enterprise workspace for small teams.',
+    description: '适合小团队试点，按设备和数字员工容量授权。',
     entitlements: enterpriseBasicEntitlements
   },
   {
     code: 'ENTERPRISE_BASIC_ANNUAL',
-    name: 'Enterprise Basic Annual',
+    name: '企业基础版（年付）',
     billingCycle: 'ANNUAL',
-    priceCents: 299000,
+    priceCents: 588000,
     currency: 'CNY',
-    description: 'Annual basic enterprise workspace.',
+    description: '企业基础版年付，按 10 个月计费，相当于买 10 个月送 2 个月。',
     entitlements: enterpriseBasicEntitlements
   },
   {
     code: 'ENTERPRISE_STANDARD_MONTHLY',
-    name: 'Enterprise Standard Monthly',
+    name: '企业标准版（月付）',
     billingCycle: 'MONTHLY',
-    priceCents: 59900,
+    priceCents: 108800,
     currency: 'CNY',
-    description: 'Standard enterprise workspace with advanced connectors and KPI dashboard.',
+    description: '适合正常企业团队使用，按设备和数字员工容量授权。',
     entitlements: enterpriseStandardEntitlements
   },
   {
     code: 'ENTERPRISE_STANDARD_ANNUAL',
-    name: 'Enterprise Standard Annual',
+    name: '企业标准版（年付）',
     billingCycle: 'ANNUAL',
-    priceCents: 599000,
+    priceCents: 1088000,
     currency: 'CNY',
-    description: 'Annual standard enterprise workspace.',
+    description: '企业标准版年付，按 10 个月计费，相当于买 10 个月送 2 个月。',
     entitlements: enterpriseStandardEntitlements
   },
   {
     code: 'ENTERPRISE_PRO_MONTHLY',
-    name: 'Enterprise Professional Monthly',
+    name: '企业专业版（月付）',
     billingCycle: 'MONTHLY',
-    priceCents: 98000,
+    priceCents: 288800,
     currency: 'CNY',
-    description: 'Professional enterprise workspace for higher volume operations.',
+    description: '适合多团队或高频数字员工使用，按设备和数字员工容量授权。',
     entitlements: enterpriseProEntitlements
   },
   {
     code: 'ENTERPRISE_PRO_ANNUAL',
-    name: 'Enterprise Professional Annual',
+    name: '企业专业版（年付）',
     billingCycle: 'ANNUAL',
-    priceCents: 980000,
+    priceCents: 2888000,
     currency: 'CNY',
-    description: 'Annual professional enterprise workspace.',
+    description: '企业专业版年付，按 10 个月计费，相当于买 10 个月送 2 个月。',
     entitlements: enterpriseProEntitlements
   },
   {

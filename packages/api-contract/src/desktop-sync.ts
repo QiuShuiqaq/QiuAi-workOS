@@ -91,13 +91,15 @@ export interface DesktopDeviceSummary {
 export interface DesktopBindingCodeSummary {
   id: string;
   workspaceId: string;
+  label?: string;
   status: DesktopBindingCodeStatus;
-  expiresAt: string;
+  expiresAt?: string;
   createdAt: string;
   redeemedAt?: string;
 }
 
 export interface CreateDesktopBindingCodeRequest {
+  label?: string;
   expiresInMinutes?: number;
 }
 
@@ -109,6 +111,22 @@ export interface CreateDesktopBindingCodeResponse {
 
 export interface ListDesktopDevicesResponse {
   data: DesktopDeviceSummary[];
+}
+
+export interface ListDesktopBindingCodesResponse {
+  data: DesktopBindingCodeSummary[];
+}
+
+export interface UpdateDesktopBindingCodeRequest {
+  label?: string;
+}
+
+export interface UpdateDesktopBindingCodeResponse {
+  data: DesktopBindingCodeSummary;
+}
+
+export interface CancelDesktopBindingCodeResponse {
+  data: DesktopBindingCodeSummary;
 }
 
 export interface RedeemDesktopBindingCodeRequest {

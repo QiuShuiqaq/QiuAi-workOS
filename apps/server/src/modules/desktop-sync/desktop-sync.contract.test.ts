@@ -85,6 +85,10 @@ describe('desktop runtime sync contract', () => {
     assert.deepEqual(parseCreateDesktopBindingCodeRequest({ expiresInMinutes: 10 }), {
       expiresInMinutes: 10
     });
+    assert.deepEqual(parseCreateDesktopBindingCodeRequest({ label: '财务电脑', expiresInMinutes: 1440 }), {
+      label: '财务电脑',
+      expiresInMinutes: 1440
+    });
   });
 
   test('parses desktop binding redeem requests', () => {

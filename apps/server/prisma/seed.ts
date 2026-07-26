@@ -58,8 +58,7 @@ const ids = {
 const personalFreeEntitlements = [
   { featureKey: 'maxRoleInstances', enabled: true, limitValue: 3, limitUnit: 'count' },
   { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100, limitUnit: 'count' },
-  { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 1, limitUnit: 'count' },
-  { featureKey: 'maxStorageGB', enabled: true, limitValue: 5, limitUnit: 'GB' },
+  { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 1, limitUnit: 'count' },
   { featureKey: 'maxMembers', enabled: true, limitValue: 1, limitUnit: 'count' },
   { featureKey: 'canCreateDepartment', enabled: false },
   { featureKey: 'canInviteMember', enabled: false },
@@ -72,25 +71,23 @@ const personalFreeEntitlements = [
 
 const enterpriseBasicEntitlements = [
   { featureKey: 'maxRoleInstances', enabled: true, limitValue: 10, limitUnit: 'count' },
-  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 2000, limitUnit: 'count' },
-  { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 3, limitUnit: 'count' },
-  { featureKey: 'maxStorageGB', enabled: true, limitValue: 50, limitUnit: 'GB' },
-  { featureKey: 'maxMembers', enabled: true, limitValue: 10, limitUnit: 'count' },
+  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100000, limitUnit: 'count' },
+  { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 3, limitUnit: 'count' },
+  { featureKey: 'maxMembers', enabled: true, limitValue: 5, limitUnit: 'count' },
   { featureKey: 'canCreateDepartment', enabled: true },
   { featureKey: 'canInviteMember', enabled: true },
   { featureKey: 'canUseApprovalPolicy', enabled: true },
   { featureKey: 'canUseAuditLog', enabled: true },
-  { featureKey: 'canUseAdvancedToolConnector', enabled: false },
+  { featureKey: 'canUseAdvancedToolConnector', enabled: true },
   { featureKey: 'canUseCostBudget', enabled: true },
-  { featureKey: 'canUseEnterpriseKPIDashboard', enabled: false }
+  { featureKey: 'canUseEnterpriseKPIDashboard', enabled: true }
 ] as const;
 
 const enterpriseStandardEntitlements = [
   { featureKey: 'maxRoleInstances', enabled: true, limitValue: 30, limitUnit: 'count' },
-  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 10000, limitUnit: 'count' },
-  { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 10, limitUnit: 'count' },
-  { featureKey: 'maxStorageGB', enabled: true, limitValue: 200, limitUnit: 'GB' },
-  { featureKey: 'maxMembers', enabled: true, limitValue: 50, limitUnit: 'count' },
+  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100000, limitUnit: 'count' },
+  { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 10, limitUnit: 'count' },
+  { featureKey: 'maxMembers', enabled: true, limitValue: 20, limitUnit: 'count' },
   { featureKey: 'canCreateDepartment', enabled: true },
   { featureKey: 'canInviteMember', enabled: true },
   { featureKey: 'canUseApprovalPolicy', enabled: true },
@@ -101,11 +98,10 @@ const enterpriseStandardEntitlements = [
 ] as const;
 
 const enterpriseProEntitlements = [
-  { featureKey: 'maxRoleInstances', enabled: true, limitValue: 80, limitUnit: 'count' },
-  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 50000, limitUnit: 'count' },
-  { featureKey: 'maxKnowledgeBases', enabled: true, limitValue: 50, limitUnit: 'count' },
-  { featureKey: 'maxStorageGB', enabled: true, limitValue: 1000, limitUnit: 'GB' },
-  { featureKey: 'maxMembers', enabled: true, limitValue: 120, limitUnit: 'count' },
+  { featureKey: 'maxRoleInstances', enabled: true, limitValue: 100, limitUnit: 'count' },
+  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100000, limitUnit: 'count' },
+  { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 50, limitUnit: 'count' },
+  { featureKey: 'maxMembers', enabled: true, limitValue: 100, limitUnit: 'count' },
   { featureKey: 'canCreateDepartment', enabled: true },
   { featureKey: 'canInviteMember', enabled: true },
   { featureKey: 'canUseApprovalPolicy', enabled: true },
@@ -118,8 +114,7 @@ const enterpriseProEntitlements = [
 const enterpriseCustomEntitlements = [
   { featureKey: 'maxRoleInstances', enabled: true },
   { featureKey: 'maxTasksPerMonth', enabled: true },
-  { featureKey: 'maxKnowledgeBases', enabled: true },
-  { featureKey: 'maxStorageGB', enabled: true },
+  { featureKey: 'maxDesktopDevices', enabled: true },
   { featureKey: 'maxMembers', enabled: true },
   { featureKey: 'canCreateDepartment', enabled: true },
   { featureKey: 'canInviteMember', enabled: true },
@@ -145,10 +140,10 @@ const plans = [
   {
     id: ids.plans.enterpriseBasicMonthly,
     code: 'ENTERPRISE_BASIC_MONTHLY',
-    name: 'Enterprise Basic Monthly',
-    description: 'Basic enterprise workspace for small teams, departments, approvals, audit, and cost controls.',
+    name: '企业基础版（月付）',
+    description: '适合小团队试点，按设备和数字员工容量授权。',
     billingCycle: 'MONTHLY',
-    priceCents: 29900,
+    priceCents: 58800,
     currency: 'CNY',
     status: 'ACTIVE',
     entitlements: enterpriseBasicEntitlements
@@ -156,10 +151,10 @@ const plans = [
   {
     id: ids.plans.enterpriseBasicAnnual,
     code: 'ENTERPRISE_BASIC_ANNUAL',
-    name: 'Enterprise Basic Annual',
-    description: 'Annual basic enterprise workspace for small teams, priced at CNY 2,990/year.',
+    name: '企业基础版（年付）',
+    description: '企业基础版年付，按 10 个月计费，相当于买 10 个月送 2 个月。',
     billingCycle: 'ANNUAL',
-    priceCents: 299000,
+    priceCents: 588000,
     currency: 'CNY',
     status: 'ACTIVE',
     entitlements: enterpriseBasicEntitlements
@@ -167,10 +162,10 @@ const plans = [
   {
     id: ids.plans.enterpriseStandardMonthly,
     code: 'ENTERPRISE_STANDARD_MONTHLY',
-    name: 'Enterprise Standard Monthly',
-    description: 'Standard enterprise workspace for growing teams with advanced connectors and KPI dashboard.',
+    name: '企业标准版（月付）',
+    description: '适合正常企业团队使用，按设备和数字员工容量授权。',
     billingCycle: 'MONTHLY',
-    priceCents: 59900,
+    priceCents: 108800,
     currency: 'CNY',
     status: 'ACTIVE',
     entitlements: enterpriseStandardEntitlements
@@ -178,10 +173,10 @@ const plans = [
   {
     id: ids.plans.enterpriseStandardAnnual,
     code: 'ENTERPRISE_STANDARD_ANNUAL',
-    name: 'Enterprise Standard Annual',
-    description: 'Annual standard enterprise workspace, priced at CNY 5,990/year.',
+    name: '企业标准版（年付）',
+    description: '企业标准版年付，按 10 个月计费，相当于买 10 个月送 2 个月。',
     billingCycle: 'ANNUAL',
-    priceCents: 599000,
+    priceCents: 1088000,
     currency: 'CNY',
     status: 'ACTIVE',
     entitlements: enterpriseStandardEntitlements
@@ -189,10 +184,10 @@ const plans = [
   {
     id: ids.plans.enterpriseProMonthly,
     code: 'ENTERPRISE_PRO_MONTHLY',
-    name: 'Enterprise Professional Monthly',
-    description: 'Professional enterprise workspace for higher volume AI workforce operations.',
+    name: '企业专业版（月付）',
+    description: '适合多团队或高频数字员工使用，按设备和数字员工容量授权。',
     billingCycle: 'MONTHLY',
-    priceCents: 98000,
+    priceCents: 288800,
     currency: 'CNY',
     status: 'ACTIVE',
     entitlements: enterpriseProEntitlements
@@ -200,10 +195,10 @@ const plans = [
   {
     id: ids.plans.enterpriseProAnnual,
     code: 'ENTERPRISE_PRO_ANNUAL',
-    name: 'Enterprise Professional Annual',
-    description: 'Annual professional enterprise workspace, priced at CNY 9,800/year.',
+    name: '企业专业版（年付）',
+    description: '企业专业版年付，按 10 个月计费，相当于买 10 个月送 2 个月。',
     billingCycle: 'ANNUAL',
-    priceCents: 980000,
+    priceCents: 2888000,
     currency: 'CNY',
     status: 'ACTIVE',
     entitlements: enterpriseProEntitlements
@@ -368,6 +363,15 @@ async function seedPlans() {
         priceCents: plan.priceCents,
         currency: plan.currency,
         status: plan.status
+      }
+    });
+
+    await prisma.entitlement.deleteMany({
+      where: {
+        planId: plan.id,
+        featureKey: {
+          notIn: plan.entitlements.map((entitlement) => entitlement.featureKey)
+        }
       }
     });
 

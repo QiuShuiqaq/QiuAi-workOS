@@ -26,9 +26,9 @@ function buildEnterpriseOverview(workspace: WorkspaceSummary): EnterpriseWorkspa
       id: 'org_enterprise',
       tenantId: workspace.tenantId,
       workspaceId: workspace.id,
-      name: '秋壹科技',
-      industry: '内容运营与企业服务',
-      size: '50-200人',
+      name: 'QiuAI Demo Enterprise',
+      industry: '企业服务',
+      size: '试点企业',
       status: 'active',
       createdAt: '2026-07-01T00:00:00.000Z'
     },
@@ -43,99 +43,21 @@ function buildEnterpriseOverview(workspace: WorkspaceSummary): EnterpriseWorkspa
       currentPeriodEnd: '2026-08-01T00:00:00.000Z',
       cancelAtPeriodEnd: false
     },
-    departments: [
-      {
-        id: 'dept_operations',
-        organizationId: 'org_enterprise',
-        name: '运营部',
-        ownerUserId: 'member_ops_lead',
-        ownerName: '王运营',
-        memberCount: 2,
-        roleInstanceCount: 1,
-        createdAt: '2026-07-01T00:00:00.000Z'
-      },
-      {
-        id: 'dept_customer',
-        organizationId: 'org_enterprise',
-        name: '客服部',
-        ownerUserId: 'member_customer_lead',
-        ownerName: '陈客服',
-        memberCount: 1,
-        roleInstanceCount: 1,
-        createdAt: '2026-07-01T00:00:00.000Z'
-      },
-      {
-        id: 'dept_legal',
-        organizationId: 'org_enterprise',
-        name: '法务部',
-        ownerUserId: 'member_legal_lead',
-        ownerName: '刘法务',
-        memberCount: 1,
-        roleInstanceCount: 1,
-        createdAt: '2026-07-01T00:00:00.000Z'
-      }
-    ],
+    departments: [],
     members: [
       {
         id: 'member_enterprise_owner',
         accountId: 'account_demo',
-        name: '李管理员',
+        name: '企业账号',
         email: 'admin@qiuai.local',
         systemRole: 'owner',
         status: 'active',
         joinedAt: '2026-07-01T00:00:00.000Z'
-      },
-      {
-        id: 'member_ops_lead',
-        accountId: 'account_ops_lead',
-        name: '王运营',
-        email: 'ops@qiuai.local',
-        departmentId: 'dept_operations',
-        departmentName: '运营部',
-        systemRole: 'admin',
-        status: 'active',
-        joinedAt: '2026-07-02T00:00:00.000Z'
-      },
-      {
-        id: 'member_ops_specialist',
-        accountId: 'account_ops_specialist',
-        name: '周运营',
-        email: 'ops2@qiuai.local',
-        departmentId: 'dept_operations',
-        departmentName: '运营部',
-        systemRole: 'member',
-        status: 'active',
-        joinedAt: '2026-07-03T00:00:00.000Z'
-      },
-      {
-        id: 'member_customer_lead',
-        accountId: 'account_customer_lead',
-        name: '陈客服',
-        email: 'service@qiuai.local',
-        departmentId: 'dept_customer',
-        departmentName: '客服部',
-        systemRole: 'admin',
-        status: 'active',
-        joinedAt: '2026-07-02T00:00:00.000Z'
-      },
-      {
-        id: 'member_legal_lead',
-        accountId: 'account_legal_lead',
-        name: '刘法务',
-        email: 'legal@qiuai.local',
-        departmentId: 'dept_legal',
-        departmentName: '法务部',
-        systemRole: 'admin',
-        status: 'active',
-        joinedAt: '2026-07-02T00:00:00.000Z'
       }
     ],
     usage: [
-      { metricKey: 'roleInstances.count', title: '数字员工数量', usedValue: 3, limitValue: 50, limitUnit: 'count' },
-      { metricKey: 'tasks.monthlyCount', title: '月任务数', usedValue: 3, limitValue: 10000, limitUnit: 'count' },
-      { metricKey: 'departments.count', title: '部门数量', usedValue: 3 },
-      { metricKey: 'members.count', title: '成员数量', usedValue: 5 },
-      { metricKey: 'storage.usedGB', title: '存储用量', usedValue: 24.6, limitUnit: 'GB' }
+      { metricKey: 'roleInstances.count', title: '数字员工数量', usedValue: 3, limitValue: 10, limitUnit: 'count' },
+      { metricKey: 'desktopDevices.count', title: '桌面端设备数量', usedValue: 1, limitValue: 3, limitUnit: 'count' }
     ]
   };
 }
@@ -160,7 +82,7 @@ function buildPersonalOverview(workspace: WorkspaceSummary): EnterpriseWorkspace
       {
         id: 'member_personal_owner',
         accountId: 'account_demo',
-        name: '个人空间管理员',
+        name: '个人账号',
         email: 'admin@qiuai.local',
         systemRole: 'owner',
         status: 'active',
@@ -169,10 +91,7 @@ function buildPersonalOverview(workspace: WorkspaceSummary): EnterpriseWorkspace
     ],
     usage: [
       { metricKey: 'roleInstances.count', title: '数字员工数量', usedValue: 1, limitValue: 3, limitUnit: 'count' },
-      { metricKey: 'tasks.monthlyCount', title: '月任务数', usedValue: 0, limitValue: 100, limitUnit: 'count' },
-      { metricKey: 'departments.count', title: '部门数量', usedValue: 0 },
-      { metricKey: 'members.count', title: '成员数量', usedValue: 1 },
-      { metricKey: 'storage.usedGB', title: '存储用量', usedValue: 1.2, limitUnit: 'GB' }
+      { metricKey: 'desktopDevices.count', title: '桌面端设备数量', usedValue: 1, limitValue: 1, limitUnit: 'count' }
     ]
   };
 }

@@ -4,13 +4,13 @@ export class BillingPlanSummaryDto {
   @ApiProperty({ example: 'ENTERPRISE_BASIC_MONTHLY' })
   code!: string;
 
-  @ApiProperty({ example: 'Enterprise Basic Monthly' })
+  @ApiProperty({ example: '企业基础版（月付）' })
   name!: string;
 
   @ApiProperty({ example: 'MONTHLY' })
   billingCycle!: string;
 
-  @ApiProperty({ example: 29900, required: false })
+  @ApiProperty({ example: 58800, required: false })
   priceCents?: number;
 
   @ApiProperty({ example: 'CNY', required: false })
@@ -59,7 +59,7 @@ export class BillingSubscriptionSummaryDto {
   @ApiProperty({ example: 'ENTERPRISE_BASIC_MONTHLY' })
   planCode!: string;
 
-  @ApiProperty({ example: 'Enterprise Basic Monthly' })
+  @ApiProperty({ example: '企业基础版（月付）' })
   planName!: string;
 
   @ApiProperty({ example: 'ACTIVE' })
@@ -114,10 +114,10 @@ export class BillingOrderSummaryDto {
   @ApiProperty({ example: 'PENDING' })
   status!: string;
 
-  @ApiProperty({ example: 'QiuAI WorkOS Enterprise Basic Monthly' })
+  @ApiProperty({ example: 'QiuAI WorkOS 企业基础版（月付）' })
   subject!: string;
 
-  @ApiProperty({ example: 29900 })
+  @ApiProperty({ example: 58800 })
   amountCents!: number;
 
   @ApiProperty({ example: 'CNY' })
@@ -129,7 +129,7 @@ export class BillingOrderSummaryDto {
   @ApiProperty({ example: 'ENTERPRISE_BASIC_MONTHLY' })
   planCode!: string;
 
-  @ApiProperty({ example: 'Enterprise Basic Monthly' })
+  @ApiProperty({ example: '企业基础版（月付）' })
   planName!: string;
 
   @ApiProperty({ example: '2026-07-01T00:00:00.000Z', required: false })

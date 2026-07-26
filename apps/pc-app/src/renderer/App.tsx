@@ -791,6 +791,12 @@ export default function App() {
     try {
       const catalog = await window.qiuDesktop.listAuthorizedRoleTemplates();
       setAuthorizedRoleTemplateCatalog(catalog);
+      if (catalog.source === 'server') {
+        const authorizedTemplates = catalog.templates.map(toDesktopRoleTemplate);
+        setRuntimeState((current) =>
+          pruneUnauthorizedRolePackages(current, authorizedTemplates)
+        );
+      }
       setRoleTemplateNotice(
         catalog.message ??
           (catalog.source === 'server'
@@ -1126,22 +1132,28 @@ export default function App() {
 
   const desktopRoleTemplates = useMemo(() => {
     const templates = authorizedRoleTemplateCatalog.templates.map(toDesktopRoleTemplate);
+    if (authorizedRoleTemplateCatalog.source === 'server') {
+      return templates;
+    }
+
     return templates.length > 0 ? templates : fallbackDesktopRoleTemplates;
-  }, [authorizedRoleTemplateCatalog.templates]);
+  }, [authorizedRoleTemplateCatalog.source, authorizedRoleTemplateCatalog.templates]);
 
   const desktopRoleTemplateByRoleCode = useMemo(() => {
     const authorizedByRoleCode = new Map(
       desktopRoleTemplates.map((template) => [template.roleCode, template] as const)
     );
 
-    for (const template of fallbackDesktopRoleTemplates) {
-      if (!authorizedByRoleCode.has(template.roleCode)) {
-        authorizedByRoleCode.set(template.roleCode, template);
+    if (authorizedRoleTemplateCatalog.source !== 'server') {
+      for (const template of fallbackDesktopRoleTemplates) {
+        if (!authorizedByRoleCode.has(template.roleCode)) {
+          authorizedByRoleCode.set(template.roleCode, template);
+        }
       }
     }
 
     return authorizedByRoleCode;
-  }, [desktopRoleTemplates]);
+  }, [authorizedRoleTemplateCatalog.source, desktopRoleTemplates]);
 
   const enabledModelCount = runtimeState.localRuntime.enabledModelProfileIds.length;
   const enabledToolCount = runtimeState.localRuntime.enabledToolIds.length;
@@ -4157,6 +4169,47 @@ function createKnowledgeSourceFromBindingId(bindingId: string): DesktopKnowledge
     enabled: true,
     createdAt: new Date(0).toISOString(),
     summary: catalogEntry?.description
+  };
+}
+
+function pruneUnauthorizedRolePackages(
+  state: DesktopRuntimeState,
+  authorizedTemplates: DesktopRoleTemplate[]
+): DesktopRuntimeState {
+  const authorizedRoleCodes = new Set(authorizedTemplates.map((template) => template.roleCode));
+  const rolePackages = state.rolePackages.filter((rolePackage) =>
+    authorizedRoleCodes.has(rolePackage.roleCode)
+  );
+
+  if (
+    rolePackages.length === state.rolePackages.length &&
+    (!state.localRuntime.activeRoleCode || authorizedRoleCodes.has(state.localRuntime.activeRoleCode))
+  ) {
+    return state;
+  }
+
+  const activeRoleCode =
+    state.localRuntime.activeRoleCode && authorizedRoleCodes.has(state.localRuntime.activeRoleCode)
+      ? state.localRuntime.activeRoleCode
+      : rolePackages[0]?.roleCode;
+
+  return {
+    ...state,
+    rolePackages,
+    localRuntime: {
+      ...state.localRuntime,
+      installedRoleCodes: rolePackages.map((rolePackage) => rolePackage.roleCode),
+      activeRoleCode
+    },
+    runtimeSnapshot: {
+      ...state.runtimeSnapshot,
+      rolePackages: rebuildRoleSummaries(
+        rolePackages,
+        state.runtimeSnapshot.tasks,
+        state.runtimeSnapshot.rolePackages,
+        activeRoleCode
+      )
+    }
   };
 }
 

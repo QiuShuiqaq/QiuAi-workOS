@@ -7,6 +7,7 @@ import {
   DashboardOutlined,
   DollarOutlined,
   LogoutOutlined,
+  PlusCircleOutlined,
   SafetyOutlined,
   UserOutlined
 } from '@ant-design/icons';
@@ -33,6 +34,7 @@ function selectedKey(pathname: string) {
   if (pathname.startsWith('/plans')) return 'plans';
   if (pathname.startsWith('/workspaces')) return 'workspaces';
   if (pathname.startsWith('/audit')) return 'audit';
+  if (pathname.startsWith('/templates/canvas') || pathname.startsWith('/templates/new')) return 'templates-canvas';
   if (pathname.startsWith('/templates')) return 'templates';
   return 'dashboard';
 }
@@ -110,6 +112,11 @@ export function AdminShell({ currentAccount, children }: AdminShellProps) {
               key: 'templates',
               icon: <AppstoreAddOutlined />,
               label: <Link href="/templates">数字员工</Link>
+            },
+            {
+              key: 'templates-canvas',
+              icon: <PlusCircleOutlined />,
+              label: <Link href="/templates/canvas">工作画布</Link>
             },
             {
               key: 'audit',

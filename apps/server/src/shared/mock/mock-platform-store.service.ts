@@ -117,6 +117,19 @@ export class MockPlatformStore {
     return this.subscriptions.find((subscription) => subscription.workspaceId === workspaceId);
   }
 
+  updateSubscription(
+    workspaceId: string,
+    input: Partial<Pick<MockSubscriptionSummary, 'planCode' | 'status' | 'currentPeriodEnd'>>
+  ) {
+    const subscription = this.getSubscription(workspaceId);
+    if (!subscription) {
+      return undefined;
+    }
+
+    Object.assign(subscription, input);
+    return subscription;
+  }
+
   listDepartments(workspaceId: string) {
     const organization = this.getOrganization(workspaceId);
     if (!organization) {

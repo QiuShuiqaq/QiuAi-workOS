@@ -40,13 +40,13 @@ export class AdminPlanDetailDto {
   @ApiProperty({ example: 'ENTERPRISE_BASIC_MONTHLY' })
   code!: string;
 
-  @ApiProperty({ example: 'Enterprise Basic Monthly' })
+  @ApiProperty({ example: '企业基础版（月付）' })
   name!: string;
 
   @ApiProperty({ example: 'MONTHLY' })
   billingCycle!: string;
 
-  @ApiProperty({ example: 29900, required: false })
+  @ApiProperty({ example: 58800, required: false })
   priceCents?: number;
 
   @ApiProperty({ example: 'CNY', required: false })
@@ -90,7 +90,7 @@ export class AdminEntitlementInputDto {
 }
 
 export class UpdateAdminPlanRequestDto {
-  @ApiPropertyOptional({ example: 'Enterprise Basic Monthly' })
+  @ApiPropertyOptional({ example: '企业基础版（月付）' })
   @IsOptional()
   @IsString()
   name?: string;
@@ -100,7 +100,7 @@ export class UpdateAdminPlanRequestDto {
   @IsString()
   description?: string | null;
 
-  @ApiPropertyOptional({ example: 29900, nullable: true })
+  @ApiPropertyOptional({ example: 58800, nullable: true })
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -180,7 +180,7 @@ export class AdminWorkspaceSummaryDto {
   @ApiProperty({ example: 'ENTERPRISE_BASIC_MONTHLY' })
   planCode!: string;
 
-  @ApiProperty({ example: 'Enterprise Basic Monthly', required: false })
+  @ApiProperty({ example: '企业基础版（月付）', required: false })
   planName?: string;
 
   @ApiProperty({ example: 'ACTIVE', required: false })
@@ -421,11 +421,14 @@ export class AdminDesktopBindingCodeSummaryDto {
   @ApiProperty({ example: '20000000-0000-4000-8000-000000000002' })
   workspaceId!: string;
 
+  @ApiPropertyOptional({ example: '财务电脑授权' })
+  label?: string;
+
   @ApiProperty({ enum: ['PENDING', 'REDEEMED', 'EXPIRED', 'CANCELLED'] })
   status!: 'PENDING' | 'REDEEMED' | 'EXPIRED' | 'CANCELLED';
 
-  @ApiProperty({ example: '2026-07-22T00:10:00.000Z' })
-  expiresAt!: string;
+  @ApiPropertyOptional({ example: '2026-07-22T00:10:00.000Z' })
+  expiresAt?: string;
 
   @ApiProperty({ example: '2026-07-22T00:00:00.000Z' })
   createdAt!: string;
@@ -435,11 +438,16 @@ export class AdminDesktopBindingCodeSummaryDto {
 }
 
 export class CreateAdminDesktopBindingCodeRequestDto {
+  @ApiPropertyOptional({ example: '财务电脑授权' })
+  @IsOptional()
+  @IsString()
+  label?: string;
+
   @ApiPropertyOptional({ example: 10 })
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(60)
+  @Max(10080)
   @Type(() => Number)
   expiresInMinutes?: number;
 }

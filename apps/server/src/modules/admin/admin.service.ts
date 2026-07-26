@@ -15,6 +15,7 @@ import { hashPassword } from '../../shared/auth/password-hash';
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
+import { EntitlementService } from '../entitlement/entitlement.service';
 import {
   createDesktopBindingCode,
   hashDesktopToken,
@@ -188,8 +189,9 @@ type WorkspaceDetailRecord = WorkspaceSummaryRecord & {
   desktopBindingCodes: Array<{
     id: string;
     workspaceId: string;
+    label: string | null;
     status: string;
-    expiresAt: Date;
+    expiresAt: Date | null;
     createdAt: Date;
     redeemedAt: Date | null;
   }>;
@@ -201,7 +203,9 @@ export class AdminService {
     @Inject(PrismaService)
     private readonly prismaService: PrismaService,
     @Inject(AuthService)
-    private readonly authService: AuthService
+    private readonly authService: AuthService,
+    @Inject(EntitlementService)
+    private readonly entitlementService: EntitlementService
   ) {}
 
   async listPlans(cookieHeader?: string): Promise<ListAdminPlansResponseDto> {
@@ -758,13 +762,31 @@ export class AdminService {
       throw this.workspaceNotFound(workspaceId);
     }
     this.requireActiveWorkspace(workspace);
+    const activeDeviceCount = await this.prismaService.desktopDevice.count({
+      where: {
+        workspaceId,
+        status: 'ACTIVE'
+      }
+    });
+    await this.entitlementService.requireAllowed(
+      {
+        workspaceId,
+        featureKey: 'maxDesktopDevices',
+        requestedAmount: activeDeviceCount + 1
+      },
+      'Desktop device quota has been reached.'
+    );
 
     const bindingCode = createDesktopBindingCode();
-    const expiresAt = new Date(Date.now() + (input.expiresInMinutes ?? 10) * 60 * 1000);
+    const expiresAt =
+      input.expiresInMinutes === undefined
+        ? undefined
+        : new Date(Date.now() + input.expiresInMinutes * 60 * 1000);
     const created = await this.prismaService.$transaction(async (tx) => {
       const binding = await tx.desktopBindingCode.create({
         data: {
           workspaceId,
+          label: input.label,
           codeHash: hashDesktopToken(normalizeDesktopBindingCode(bindingCode)),
           status: 'PENDING',
           expiresAt,
@@ -780,7 +802,7 @@ export class AdminService {
         summary: `Created desktop binding code for ${workspace.name}`,
         metadata: {
           bindingCodeId: binding.id,
-          expiresAt: expiresAt.toISOString()
+          expiresAt: expiresAt?.toISOString()
         }
       });
 
@@ -1590,16 +1612,18 @@ export class AdminService {
   private toDesktopBindingCodeSummary(bindingCode: {
     id: string;
     workspaceId: string;
+    label: string | null;
     status: string;
-    expiresAt: Date;
+    expiresAt: Date | null;
     createdAt: Date;
     redeemedAt: Date | null;
   }) {
     return {
       id: bindingCode.id,
       workspaceId: bindingCode.workspaceId,
+      label: bindingCode.label ?? undefined,
       status: this.toDesktopBindingCodeStatus(bindingCode.status),
-      expiresAt: bindingCode.expiresAt.toISOString(),
+      expiresAt: bindingCode.expiresAt?.toISOString(),
       createdAt: bindingCode.createdAt.toISOString(),
       redeemedAt: bindingCode.redeemedAt?.toISOString()
     };

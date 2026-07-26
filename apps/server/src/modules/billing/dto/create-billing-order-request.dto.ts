@@ -11,7 +11,7 @@ export class CreateBillingOrderRequestDto {
   @IsIn(['ALIPAY'])
   provider?: 'ALIPAY';
 
-  @ApiProperty({ example: 29900, required: false })
+  @ApiProperty({ example: 58800, required: false })
   @IsOptional()
   @IsNumber()
   @Min(1)
@@ -22,7 +22,7 @@ export class CreateBillingOrderRequestDto {
   @IsString()
   currency?: string;
 
-  @ApiProperty({ example: 'QiuAI WorkOS Enterprise Basic Monthly', required: false })
+  @ApiProperty({ example: 'QiuAI WorkOS 企业基础版（月付）', required: false })
   @IsOptional()
   @IsString()
   subject?: string;

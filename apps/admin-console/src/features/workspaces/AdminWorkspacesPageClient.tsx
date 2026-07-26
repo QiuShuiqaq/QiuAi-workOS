@@ -77,7 +77,7 @@ type CreatedInvitationNotice = {
 
 type CreatedBindingCodeNotice = {
   bindingCode: string;
-  expiresAt: string;
+  expiresAt?: string;
 };
 
 function formatDate(value?: string) {
@@ -830,7 +830,7 @@ export function AdminWorkspacesPageClient({
                       绑定码：{createdBindingCodeNotice.bindingCode}
                     </Typography.Text>
                     <Typography.Text type="secondary">
-                      有效期至：{formatDateTime(createdBindingCodeNotice.expiresAt)}
+                      有效期至：{createdBindingCodeNotice.expiresAt ? formatDateTime(createdBindingCodeNotice.expiresAt) : '长期有效'}
                     </Typography.Text>
                   </Space>
                 }
@@ -940,7 +940,7 @@ export function AdminWorkspacesPageClient({
                   {
                     title: '过期时间',
                     key: 'expiresAt',
-                    render: (_value, bindingCode) => formatDateTime(bindingCode.expiresAt)
+                    render: (_value, bindingCode) => bindingCode.expiresAt ? formatDateTime(bindingCode.expiresAt) : '长期有效'
                   },
                   {
                     title: '使用时间',

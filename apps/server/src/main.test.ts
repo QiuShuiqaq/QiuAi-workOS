@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import type { Response as InjectResponse } from 'light-my-request';
 
 import { createApplication } from './main';
+import { MockPlatformStore } from './shared/mock/mock-platform-store.service';
 
 type ProtectedRequest = {
   method: 'GET' | 'POST';
@@ -121,6 +122,14 @@ test('admin role template factory governs publication and workspace visibility',
 
   await app.init();
   try {
+    const store = app.get(MockPlatformStore);
+    assert.ok(
+      store.updateSubscription('enterprise', {
+        status: 'active',
+        currentPeriodEnd: '2999-01-01T00:00:00.000Z'
+      })
+    );
+
     const loginResponse = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/login',
@@ -274,7 +283,15 @@ test('admin role template factory governs publication and workspace visibility',
       }
     });
     assert.equal(redeemResponse.statusCode, 201);
-    const deviceToken = JSON.parse(redeemResponse.body).data.deviceToken as string;
+    const redeemedBinding = JSON.parse(redeemResponse.body).data;
+    const deviceToken = redeemedBinding.deviceToken as string;
+    const redeemedDevice = redeemedBinding.device as {
+      runtimeId: string;
+      deviceId: string;
+      deviceName: string;
+      platform: 'windows';
+      appVersion: string;
+    };
 
     const proOnlyDesktopTemplatesResponse = await app.inject({
       method: 'GET',
@@ -285,10 +302,10 @@ test('admin role template factory governs publication and workspace visibility',
     });
     assert.equal(proOnlyDesktopTemplatesResponse.statusCode, 200);
     assert.equal(
-      JSON.parse(proOnlyDesktopTemplatesResponse.body).data.find(
+      JSON.parse(proOnlyDesktopTemplatesResponse.body).data.some(
         (template: { id: string }) => template.id === templateId
-      )?.workflowSteps.length,
-      2
+      ),
+      false
     );
 
     const updateResponse = await app.inject({
@@ -330,6 +347,92 @@ test('admin role template factory governs publication and workspace visibility',
         (template: { id: string }) => template.id === templateId
       )?.workflowSteps.length,
       2
+    );
+
+    assert.ok(
+      store.updateSubscription('enterprise', {
+        status: 'expired',
+        currentPeriodEnd: '2000-01-01T00:00:00.000Z'
+      })
+    );
+    const downgradedDesktopTemplatesResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/workspaces/enterprise/desktop/role-templates',
+      headers: {
+        'x-qiuai-device-token': deviceToken
+      }
+    });
+    assert.equal(downgradedDesktopTemplatesResponse.statusCode, 200);
+    const downgradedDesktopTemplates = JSON.parse(downgradedDesktopTemplatesResponse.body).data;
+    assert.equal(
+      downgradedDesktopTemplates.some((template: { id: string }) => template.id === templateId),
+      false
+    );
+    assert.equal(
+      downgradedDesktopTemplates.some(
+        (template: { recommendedPlanCode: string }) =>
+          template.recommendedPlanCode === 'PERSONAL_FREE'
+      ),
+      true
+    );
+
+    const downgradedSyncResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/workspaces/enterprise/desktop/runtimes/sync',
+      headers: {
+        'content-type': 'application/json',
+        'x-qiuai-device-token': deviceToken
+      },
+      payload: {
+        data: {
+          runtimeId: redeemedDevice.runtimeId,
+          deviceId: redeemedDevice.deviceId,
+          deviceName: redeemedDevice.deviceName,
+          platform: redeemedDevice.platform,
+          workspaceId: 'enterprise',
+          appVersion: redeemedDevice.appVersion,
+          rolePackages: [
+            {
+              roleCode: 'ai-factory-flow-tester',
+              version: '1.0.0',
+              state: 'running',
+              installedAt: '2026-07-20T00:00:00.000Z',
+              templateId,
+              templateVersion: '1.0.0'
+            }
+          ],
+          tools: [],
+          tasks: [
+            {
+              taskId: 'task-downgraded-paid-role',
+              roleCode: 'ai-factory-flow-tester',
+              title: 'Should not be persisted after downgrade',
+              state: 'completed',
+              updatedAt: '2026-07-20T01:00:00.000Z'
+            }
+          ]
+        }
+      }
+    });
+    assert.equal(downgradedSyncResponse.statusCode, 201);
+    const downgradedSync = store.getDesktopRuntimeSync(redeemedDevice.runtimeId);
+    const downgradedSnapshot = downgradedSync?.runtimeSnapshot as
+      | { rolePackages: Array<{ templateId?: string }>; tasks: Array<{ taskId: string }> }
+      | undefined;
+    assert.ok(downgradedSnapshot);
+    assert.equal(
+      downgradedSnapshot.rolePackages.some((rolePackage) => rolePackage.templateId === templateId),
+      false
+    );
+    assert.equal(
+      downgradedSnapshot.tasks.some((task) => task.taskId === 'task-downgraded-paid-role'),
+      false
+    );
+    assert.ok(
+      store.updateSubscription('enterprise', {
+        status: 'active',
+        currentPeriodEnd: '2999-01-01T00:00:00.000Z'
+      })
     );
 
     const installResponse = await app.inject({

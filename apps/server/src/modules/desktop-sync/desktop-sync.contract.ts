@@ -3,7 +3,12 @@ export interface DesktopRuntimeSyncRequest {
 }
 
 export interface CreateDesktopBindingCodeRequest {
+  label?: string;
   expiresInMinutes?: number;
+}
+
+export interface UpdateDesktopBindingCodeRequest {
+  label?: string;
 }
 
 export interface RedeemDesktopBindingCodeRequest {
@@ -33,12 +38,33 @@ export interface CreateDesktopBindingCodeResponse {
   data: {
     id: string;
     workspaceId: string;
+    label?: string;
     status: 'PENDING' | 'REDEEMED' | 'EXPIRED' | 'CANCELLED';
-    expiresAt: string;
+    expiresAt?: string;
     createdAt: string;
     redeemedAt?: string;
     bindingCode: string;
   };
+}
+
+export interface ListDesktopBindingCodesResponse {
+  data: Array<{
+    id: string;
+    workspaceId: string;
+    label?: string;
+    status: 'PENDING' | 'REDEEMED' | 'EXPIRED' | 'CANCELLED';
+    expiresAt?: string;
+    createdAt: string;
+    redeemedAt?: string;
+  }>;
+}
+
+export interface UpdateDesktopBindingCodeResponse {
+  data: ListDesktopBindingCodesResponse['data'][number];
+}
+
+export interface CancelDesktopBindingCodeResponse {
+  data: ListDesktopBindingCodesResponse['data'][number];
 }
 
 export interface ListDesktopDevicesResponse {
@@ -128,15 +154,24 @@ export function parseCreateDesktopBindingCodeRequest(input: unknown): CreateDesk
   }
 
   const record = requireRecord(input, 'desktop binding code request');
+  const label = optionalString(record.label, 'desktopBindingCode.label');
   const expiresInMinutes = optionalBoundedInteger(
     record.expiresInMinutes,
     'desktopBindingCode.expiresInMinutes',
     1,
-    60
+    10080
   );
 
   return {
+    ...(label === undefined ? {} : { label }),
     ...(expiresInMinutes === undefined ? {} : { expiresInMinutes })
+  };
+}
+
+export function parseUpdateDesktopBindingCodeRequest(input: unknown): UpdateDesktopBindingCodeRequest {
+  const record = requireRecord(input, 'desktop binding code update request');
+  return {
+    label: optionalString(record.label, 'desktopBindingCode.label')
   };
 }
 

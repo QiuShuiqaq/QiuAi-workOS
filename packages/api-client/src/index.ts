@@ -35,6 +35,7 @@ import type {
   ListAdminActionLogsResponse,
   ListAdminRoleTemplatesResponse,
   CancelWorkspaceInvitationResponse,
+  CancelDesktopBindingCodeResponse,
   CreateDesktopBindingCodeRequest,
   CreateDesktopBindingCodeResponse,
   CreateWorkspaceInvitationRequest,
@@ -42,6 +43,7 @@ import type {
   CurrentAccountResponse,
   GetAdminWorkspaceResponse,
   ListDesktopDevicesResponse,
+  ListDesktopBindingCodesResponse,
   ListAdminPlansResponse,
   ListAdminWorkspacesResponse,
   GetPublicInvitationResponse,
@@ -64,6 +66,8 @@ import type {
   UpdateAdminWorkspaceStatusResponse,
   UpdateAdminRoleTemplateRequest,
   UpdateAdminRoleTemplateResponse,
+  UpdateDesktopBindingCodeRequest,
+  UpdateDesktopBindingCodeResponse,
   UpdateAdminPlanRequest,
   UpdateAdminPlanResponse
 } from '@qiuai/api-contract';
@@ -385,11 +389,36 @@ export class QiuApiClient {
     return this.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/desktop/devices`);
   }
 
+  listDesktopBindingCodes(workspaceId: string): Promise<ListDesktopBindingCodesResponse> {
+    return this.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/desktop/binding-codes`);
+  }
+
   createDesktopBindingCode(
     workspaceId: string,
     input: CreateDesktopBindingCodeRequest
   ): Promise<CreateDesktopBindingCodeResponse> {
     return this.post(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/desktop/binding-codes`, input);
+  }
+
+  updateDesktopBindingCode(
+    workspaceId: string,
+    bindingCodeId: string,
+    input: UpdateDesktopBindingCodeRequest
+  ): Promise<UpdateDesktopBindingCodeResponse> {
+    return this.patch(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/desktop/binding-codes/${encodeURIComponent(bindingCodeId)}`,
+      input
+    );
+  }
+
+  cancelDesktopBindingCode(
+    workspaceId: string,
+    bindingCodeId: string
+  ): Promise<CancelDesktopBindingCodeResponse> {
+    return this.post(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/desktop/binding-codes/${encodeURIComponent(bindingCodeId)}/cancel`,
+      {}
+    );
   }
 
   redeemDesktopBindingCode(input: RedeemDesktopBindingCodeRequest): Promise<RedeemDesktopBindingCodeResponse> {

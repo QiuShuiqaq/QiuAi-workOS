@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
 
@@ -53,6 +53,11 @@ export class WorkspaceDesktopController {
     return this.desktopSyncService.listDevices(workspaceId, request.headers.cookie);
   }
 
+  @Get('binding-codes')
+  listBindingCodes(@Param('workspaceId') workspaceId: string, @Req() request: FastifyRequest) {
+    return this.desktopSyncService.listBindingCodes(workspaceId, request.headers.cookie);
+  }
+
   @Post('binding-codes')
   createBindingCode(
     @Param('workspaceId') workspaceId: string,
@@ -60,6 +65,25 @@ export class WorkspaceDesktopController {
     @Req() request: FastifyRequest
   ) {
     return this.desktopSyncService.createBindingCode(workspaceId, body, request.headers.cookie);
+  }
+
+  @Patch('binding-codes/:bindingCodeId')
+  updateBindingCode(
+    @Param('workspaceId') workspaceId: string,
+    @Param('bindingCodeId') bindingCodeId: string,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest
+  ) {
+    return this.desktopSyncService.updateBindingCode(workspaceId, bindingCodeId, body, request.headers.cookie);
+  }
+
+  @Post('binding-codes/:bindingCodeId/cancel')
+  cancelBindingCode(
+    @Param('workspaceId') workspaceId: string,
+    @Param('bindingCodeId') bindingCodeId: string,
+    @Req() request: FastifyRequest
+  ) {
+    return this.desktopSyncService.cancelBindingCode(workspaceId, bindingCodeId, request.headers.cookie);
   }
 }
 

@@ -1,11 +1,12 @@
 'use client';
 
-import { CreditCardOutlined, DesktopOutlined, ReloadOutlined } from '@ant-design/icons';
+import { CreditCardOutlined, DesktopOutlined, EditOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons';
 import type {
   BillingOrderSummary,
   BillingOverview,
   CurrentAccountResponse,
   CreateDesktopBindingCodeResponse,
+  DesktopBindingCodeSummary,
   DesktopDeviceSummary,
   EntitlementSummary,
   PaymentProviderConfigStatus,
@@ -17,8 +18,10 @@ import Button from 'antd/es/button';
 import Card from 'antd/es/card';
 import Col from 'antd/es/col';
 import Descriptions from 'antd/es/descriptions';
+import Input from 'antd/es/input';
 import message from 'antd/es/message';
 import Modal from 'antd/es/modal';
+import Popconfirm from 'antd/es/popconfirm';
 import Row from 'antd/es/row';
 import Space from 'antd/es/space';
 import Table from 'antd/es/table';
@@ -35,23 +38,16 @@ export interface SettingsPageClientProps {
   plans: PlanDetail[];
   billing: BillingOverview;
   desktopDevices: DesktopDeviceSummary[];
+  desktopBindingCodes: DesktopBindingCodeSummary[];
   isApiFallback: boolean;
 }
 
 const featureLabels: Record<string, string> = {
-  maxRoleInstances: 'AI \u5c97\u4f4d\u6570\u91cf',
-  maxTasksPerMonth: '\u6708\u4efb\u52a1\u989d\u5ea6',
-  maxKnowledgeBases: '\u77e5\u8bc6\u5e93\u6570\u91cf',
-  maxStorageGB: '\u5b58\u50a8\u7a7a\u95f4',
-  maxMembers: '\u6210\u5458\u6570\u91cf',
-  canCreateDepartment: '\u90e8\u95e8\u7ba1\u7406',
-  canInviteMember: '\u6210\u5458\u9080\u8bf7',
-  canUseApprovalPolicy: '\u5ba1\u6279\u7b56\u7565',
-  canUseAuditLog: '\u5ba1\u8ba1\u65e5\u5fd7',
-  canUseAdvancedToolConnector: '\u9ad8\u7ea7\u5de5\u5177\u8fde\u63a5\u5668',
-  canUseCostBudget: '\u6210\u672c\u9884\u7b97',
-  canUseEnterpriseKPIDashboard: '\u4f01\u4e1a KPI \u770b\u677f'
+  maxRoleInstances: '数字员工数量',
+  maxDesktopDevices: '桌面端设备数量'
 };
+
+const visiblePlanFeatureKeys = ['maxDesktopDevices', 'maxRoleInstances'];
 
 function billingCycleLabel(value: string) {
   return {
@@ -90,7 +86,7 @@ function formatDateTime(value?: string) {
 }
 
 function paymentProviderLabel(provider: string) {
-  return provider === 'ALIPAY' ? '\u652f\u4ed8\u5b9d' : provider;
+  return provider === 'ALIPAY' ? '支付宝' : provider;
 }
 
 function orderStatusTone(status: string): 'default' | 'success' | 'warning' | 'danger' | 'processing' {
@@ -100,9 +96,17 @@ function orderStatusTone(status: string): 'default' | 'success' | 'warning' | 'd
   return 'processing';
 }
 
+function bindingCodeStatusTone(status: DesktopBindingCodeSummary['status']) {
+  if (status === 'PENDING') return 'processing';
+  if (status === 'REDEEMED') return 'success';
+  if (status === 'EXPIRED') return 'warning';
+  if (status === 'CANCELLED') return 'danger';
+  return 'default';
+}
+
 function configStatusText(provider?: PaymentProviderConfigStatus) {
-  if (!provider) return '\u672a\u914d\u7f6e';
-  return provider.isConfigured ? '\u5df2\u914d\u7f6e' : '\u672a\u5b8c\u6210';
+  if (!provider) return '未配置';
+  return provider.isConfigured ? '已配置' : '未完成';
 }
 
 function getPlanPaymentDisabledReason(
@@ -128,6 +132,7 @@ export function SettingsPageClient({
   plans,
   billing,
   desktopDevices,
+  desktopBindingCodes,
   isApiFallback
 }: SettingsPageClientProps) {
   const router = useRouter();
@@ -159,10 +164,9 @@ export function SettingsPageClient({
         message.success('支付订单已创建');
         window.location.assign(response.data.paymentUrl);
         return;
-      } else {
-        message.warning('订单已创建，但支付链接未返回');
       }
 
+      message.warning('订单已创建，但支付链接未返回');
       router.refresh();
     } catch (error) {
       message.error(error instanceof Error ? error.message : '创建支付订单失败');
@@ -173,22 +177,68 @@ export function SettingsPageClient({
 
   async function createDesktopBindingCode() {
     if (isApiFallback) {
-      message.warning('后端 API 未连接，无法生成绑定码');
+      message.warning('后端 API 未连接，无法生成授权码');
       return;
     }
 
     setIsCreatingBindingCode(true);
     try {
       const response = await createBrowserApiClient().createDesktopBindingCode(activeWorkspace.id, {
-        expiresInMinutes: 10
+        label: `设备授权 ${new Intl.DateTimeFormat('zh-CN', {
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit'
+        }).format(new Date())}`
       });
       setLatestBindingCode(response.data);
-      message.success('绑定码已生成');
+      message.success('授权码已生成');
       router.refresh();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '生成绑定码失败');
+      message.error(error instanceof Error ? error.message : '生成授权码失败');
     } finally {
       setIsCreatingBindingCode(false);
+    }
+  }
+
+  function renameDesktopBindingCode(bindingCode: DesktopBindingCodeSummary) {
+    let nextLabel = bindingCode.label ?? '';
+
+    Modal.confirm({
+      title: '修改授权码备注',
+      content: (
+        <Input
+          defaultValue={nextLabel}
+          placeholder="例如：财务电脑、前台电脑、销售电脑"
+          onChange={(event) => {
+            nextLabel = event.target.value;
+          }}
+        />
+      ),
+      okText: '保存',
+      cancelText: '取消',
+      async onOk() {
+        try {
+          await createBrowserApiClient().updateDesktopBindingCode(activeWorkspace.id, bindingCode.id, {
+            label: nextLabel.trim() || undefined
+          });
+          message.success('备注已更新');
+          router.refresh();
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : '更新备注失败');
+          throw error;
+        }
+      }
+    });
+  }
+
+  async function cancelDesktopBindingCode(bindingCode: DesktopBindingCodeSummary) {
+    try {
+      await createBrowserApiClient().cancelDesktopBindingCode(activeWorkspace.id, bindingCode.id);
+      message.success('授权码已作废');
+      router.refresh();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '作废授权码失败');
     }
   }
 
@@ -273,42 +323,113 @@ export function SettingsPageClient({
 
   const billingOrderColumns: ColumnsType<BillingOrderSummary> = [
     {
-      title: '\u8ba2\u5355\u53f7',
+      title: '订单号',
       dataIndex: 'orderNo',
       render: (value: string) => <Typography.Text copyable>{value}</Typography.Text>
     },
     {
-      title: '\u8ba2\u5355\u5185\u5bb9',
+      title: '订单内容',
       dataIndex: 'subject',
       responsive: ['md']
     },
     {
-      title: '\u91d1\u989d',
+      title: '金额',
       key: 'amount',
       render: (_value, order) => formatCurrency(order.amountCents, order.currency)
     },
     {
-      title: '\u72b6\u6001',
+      title: '状态',
       dataIndex: 'status',
       render: (status: string) => <QiuStatusTag tone={orderStatusTone(status)}>{status}</QiuStatusTag>
     },
     {
-      title: '\u652f\u4ed8',
+      title: '支付',
       key: 'payment',
       render: (_value, order) =>
         order.paymentUrl ? (
           <Typography.Link href={order.paymentUrl} target="_blank">
-            {'\u6253\u5f00'}
+            打开
           </Typography.Link>
         ) : (
-          <Typography.Text type="secondary">{'\u672a\u751f\u6210'}</Typography.Text>
+          <Typography.Text type="secondary">未生成</Typography.Text>
         )
     },
     {
-      title: '\u521b\u5efa\u65f6\u95f4',
+      title: '创建时间',
       dataIndex: 'createdAt',
       responsive: ['lg'],
       render: (value: string) => formatDateTime(value)
+    }
+  ];
+
+  const desktopBindingCodeColumns: ColumnsType<DesktopBindingCodeSummary> = [
+    {
+      title: '备注',
+      key: 'label',
+      render: (_value, bindingCode) => (
+        <Space direction="vertical" size={2}>
+          <Typography.Text strong>{bindingCode.label ?? '未命名授权码'}</Typography.Text>
+          <Typography.Text type="secondary">{bindingCode.id}</Typography.Text>
+        </Space>
+      )
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      render: (status: DesktopBindingCodeSummary['status']) => (
+        <QiuStatusTag tone={bindingCodeStatusTone(status)}>{status}</QiuStatusTag>
+      )
+    },
+    {
+      title: '有效期',
+      dataIndex: 'expiresAt',
+      responsive: ['md'],
+      render: (value?: string) => (value ? formatDateTime(value) : '长期有效')
+    },
+    {
+      title: '创建时间',
+      dataIndex: 'createdAt',
+      responsive: ['lg'],
+      render: (value: string) => formatDateTime(value)
+    },
+    {
+      title: '使用时间',
+      dataIndex: 'redeemedAt',
+      responsive: ['lg'],
+      render: (value?: string) => formatDateTime(value)
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      render: (_value, bindingCode) => (
+        <Space>
+          <Button
+            icon={<EditOutlined />}
+            size="small"
+            disabled={bindingCode.status !== 'PENDING'}
+            onClick={() => renameDesktopBindingCode(bindingCode)}
+          >
+            备注
+          </Button>
+          <Popconfirm
+            title="确认作废这个授权码？"
+            description="作废后，桌面端不能再用这个码完成绑定。"
+            okText="作废"
+            cancelText="取消"
+            disabled={bindingCode.status !== 'PENDING'}
+            onConfirm={() => cancelDesktopBindingCode(bindingCode)}
+          >
+            <Button
+              danger
+              icon={<StopOutlined />}
+              size="small"
+              disabled={bindingCode.status !== 'PENDING'}
+            >
+              作废
+            </Button>
+          </Popconfirm>
+        </Space>
+      )
     }
   ];
 
@@ -348,142 +469,159 @@ export function SettingsPageClient({
 
   return (
     <ConsoleShell currentAccount={currentAccount}>
-      <QiuPage title="企业设置" description="管理工作空间、账户和商业版本边界。">
-        {isApiFallback ? <Alert showIcon type="warning" message="后端 API 未连接，当前显示 fallback 数据。" /> : null}
+      <QiuPage title="企业设置" description="管理套餐、支付和桌面端设备授权。">
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          {isApiFallback ? <Alert showIcon type="warning" message="后端 API 未连接，当前显示 fallback 数据。" /> : null}
 
-        <Row gutter={[16, 16]}>
-          <Col xs={24} md={8}>
-            <QiuMetricCard title="当前空间" value={activeWorkspace.name} trend={activeWorkspace.workspaceType === 'enterprise' ? '企业空间' : '个人空间'} />
-          </Col>
-          <Col xs={24} md={8}>
-            <QiuMetricCard title="当前版本" value={currentPlan.name} trend={billingCycleLabel(currentPlan.billingCycle)} />
-          </Col>
-          <Col xs={24} md={8}>
-            <QiuMetricCard title="账户" value={currentAccount.account.status} trend={currentAccount.account.primaryEmail} />
-          </Col>
-        </Row>
-
-        <Row gutter={[16, 16]}>
-          <Col xs={24} xl={10}>
-            <Card bordered={false}>
-              <Descriptions column={1} title="工作空间">
-                <Descriptions.Item label="空间 ID">{activeWorkspace.id}</Descriptions.Item>
-                <Descriptions.Item label="租户 ID">{activeWorkspace.tenantId}</Descriptions.Item>
-                <Descriptions.Item label="空间类型">{activeWorkspace.workspaceType}</Descriptions.Item>
-                <Descriptions.Item label="状态">{activeWorkspace.status}</Descriptions.Item>
-                <Descriptions.Item label="版本">{activeWorkspace.planCode}</Descriptions.Item>
-              </Descriptions>
-            </Card>
-          </Col>
-          <Col xs={24} xl={14}>
-            <Card title="当前版本权益" bordered={false}>
-              <Table
-                rowKey="featureKey"
-                columns={entitlementColumns}
-                dataSource={currentPlan.entitlements}
-                pagination={false}
-              />
-            </Card>
-          </Col>
-        </Row>
-
-        <Card title="计费与支付" bordered={false}>
           <Row gutter={[16, 16]}>
-            <Col xs={24} xl={12}>
-              <Descriptions column={1} title="订阅与付款主体">
-                <Descriptions.Item label="计费主体">
-                  {billing.billingAccount?.billingName ?? '-'}
-                </Descriptions.Item>
-                <Descriptions.Item label="联系邮箱">
-                  {billing.billingAccount?.contactEmail ?? '-'}
-                </Descriptions.Item>
-                <Descriptions.Item label="订阅状态">
-                  <QiuStatusTag tone="processing">
-                    {billing.subscription?.status ?? '-'}
-                  </QiuStatusTag>
-                </Descriptions.Item>
-                <Descriptions.Item label="当前周期">
-                  {`${formatDateTime(billing.subscription?.currentPeriodStart)} - ${formatDateTime(
-                    billing.subscription?.currentPeriodEnd
-                  )}`}
-                </Descriptions.Item>
-                <Descriptions.Item label="当前套餐">
-                  {billing.currentPlan?.name ?? currentPlan.name}
-                </Descriptions.Item>
-              </Descriptions>
+            <Col xs={24} md={8}>
+              <QiuMetricCard title="当前空间" value={activeWorkspace.name} trend={activeWorkspace.workspaceType === 'enterprise' ? '企业空间' : '个人空间'} />
             </Col>
-            <Col xs={24} xl={12}>
-              <Descriptions column={1} title="支付通道">
-                <Descriptions.Item label="默认通道">
-                  {paymentProviderLabel(alipayStatus?.provider ?? 'ALIPAY')}
-                </Descriptions.Item>
-                <Descriptions.Item label="配置状态">
-                  <QiuStatusTag tone={alipayStatus?.isConfigured ? 'success' : 'warning'}>
-                    {configStatusText(alipayStatus)}
-                  </QiuStatusTag>
-                </Descriptions.Item>
-                <Descriptions.Item label="网关地址">
-                  {alipayStatus?.gatewayUrl ?? '-'}
-                </Descriptions.Item>
-                <Descriptions.Item label="异步回调">
-                  {alipayStatus?.notifyPath ?? '-'}
-                </Descriptions.Item>
-                <Descriptions.Item label="缺失配置">
-                  <Typography.Text type="secondary" style={{ wordBreak: 'break-word' }}>
-                    {missingAlipayKeys}
-                  </Typography.Text>
-                </Descriptions.Item>
-              </Descriptions>
+            <Col xs={24} md={8}>
+              <QiuMetricCard title="当前版本" value={currentPlan.name} trend={billingCycleLabel(currentPlan.billingCycle)} />
+            </Col>
+            <Col xs={24} md={8}>
+              <QiuMetricCard title="账号" value={currentAccount.account.status} trend={currentAccount.account.primaryEmail} />
             </Col>
           </Row>
 
-          <Table
-            rowKey="id"
-            columns={billingOrderColumns}
-            dataSource={billing.recentOrders}
-            pagination={false}
-            locale={{ emptyText: '暂无订单记录' }}
-          />
-        </Card>
+          <Row gutter={[16, 16]}>
+            <Col xs={24} xl={10}>
+              <Card bordered={false}>
+                <Descriptions column={1} title="工作空间">
+                  <Descriptions.Item label="空间 ID">{activeWorkspace.id}</Descriptions.Item>
+                  <Descriptions.Item label="租户 ID">{activeWorkspace.tenantId}</Descriptions.Item>
+                  <Descriptions.Item label="空间类型">{activeWorkspace.workspaceType}</Descriptions.Item>
+                  <Descriptions.Item label="状态">{activeWorkspace.status}</Descriptions.Item>
+                  <Descriptions.Item label="版本">{activeWorkspace.planCode}</Descriptions.Item>
+                </Descriptions>
+              </Card>
+            </Col>
+            <Col xs={24} xl={14}>
+              <Card title="当前版本权益" bordered={false}>
+                <Table
+                  rowKey="featureKey"
+                  columns={entitlementColumns}
+                  dataSource={currentPlan.entitlements.filter((entitlement) =>
+                    visiblePlanFeatureKeys.includes(entitlement.featureKey)
+                  )}
+                  pagination={false}
+                />
+              </Card>
+            </Col>
+          </Row>
 
-        <Card title="商业版本" bordered={false}>
-          <Table rowKey="code" columns={planColumns} dataSource={plans} pagination={false} />
-        </Card>
-        <Card
-          title="桌面端绑定"
-          bordered={false}
-          extra={
-            <Space>
-              <Button icon={<ReloadOutlined />} onClick={() => void router.refresh()}>
-                刷新
-              </Button>
-              <Button
-                type="primary"
-                icon={<DesktopOutlined />}
-                loading={isCreatingBindingCode}
-                onClick={() => void createDesktopBindingCode()}
-              >
-                生成绑定码
-              </Button>
+          <Card title="计费与支付" bordered={false}>
+            <Row gutter={[16, 16]}>
+              <Col xs={24} xl={12}>
+                <Descriptions column={1} title="订阅与付款主体">
+                  <Descriptions.Item label="计费主体">
+                    {billing.billingAccount?.billingName ?? '-'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="联系邮箱">
+                    {billing.billingAccount?.contactEmail ?? '-'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="订阅状态">
+                    <QiuStatusTag tone="processing">
+                      {billing.subscription?.status ?? '-'}
+                    </QiuStatusTag>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="当前周期">
+                    {`${formatDateTime(billing.subscription?.currentPeriodStart)} - ${formatDateTime(
+                      billing.subscription?.currentPeriodEnd
+                    )}`}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="当前套餐">
+                    {billing.currentPlan?.name ?? currentPlan.name}
+                  </Descriptions.Item>
+                </Descriptions>
+              </Col>
+              <Col xs={24} xl={12}>
+                <Descriptions column={1} title="支付通道">
+                  <Descriptions.Item label="默认通道">
+                    {paymentProviderLabel(alipayStatus?.provider ?? 'ALIPAY')}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="配置状态">
+                    <QiuStatusTag tone={alipayStatus?.isConfigured ? 'success' : 'warning'}>
+                      {configStatusText(alipayStatus)}
+                    </QiuStatusTag>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="网关地址">
+                    {alipayStatus?.gatewayUrl ?? '-'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="异步回调">
+                    {alipayStatus?.notifyPath ?? '-'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="缺失配置">
+                    <Typography.Text type="secondary" style={{ wordBreak: 'break-word' }}>
+                      {missingAlipayKeys}
+                    </Typography.Text>
+                  </Descriptions.Item>
+                </Descriptions>
+              </Col>
+            </Row>
+
+            <Table
+              rowKey="id"
+              columns={billingOrderColumns}
+              dataSource={billing.recentOrders}
+              pagination={false}
+              locale={{ emptyText: '暂无订单记录' }}
+            />
+          </Card>
+
+          <Card title="商业版本" bordered={false}>
+            <Table rowKey="code" columns={planColumns} dataSource={plans} pagination={false} />
+          </Card>
+
+          <Card
+            title="设备授权码"
+            bordered={false}
+            extra={
+              <Space>
+                <Button icon={<ReloadOutlined />} onClick={() => void router.refresh()}>
+                  刷新
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<DesktopOutlined />}
+                  loading={isCreatingBindingCode}
+                  onClick={() => void createDesktopBindingCode()}
+                >
+                  生成授权码
+                </Button>
+              </Space>
+            }
+          >
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Alert
+                showIcon
+                type="info"
+                message="授权码长期有效，兑换后自动标记为已使用。完整授权码只在创建成功时显示一次。"
+              />
+              <Table
+                rowKey="id"
+                columns={desktopBindingCodeColumns}
+                dataSource={desktopBindingCodes}
+                pagination={false}
+                locale={{ emptyText: '当前还没有设备授权码' }}
+              />
             </Space>
-          }
-        >
-          <Alert
-            showIcon
-            type="info"
-            message="桌面端首次启动后，请在这里生成一次性绑定码，让企业 PC 自动接入当前工作区。"
-          />
-          <Table
-            rowKey="id"
-            columns={desktopDeviceColumns}
-            dataSource={desktopDevices}
-            pagination={false}
-            locale={{ emptyText: '当前还没有绑定的桌面设备' }}
-          />
-        </Card>
+          </Card>
+
+          <Card title="已绑定设备" bordered={false}>
+            <Table
+              rowKey="id"
+              columns={desktopDeviceColumns}
+              dataSource={desktopDevices}
+              pagination={false}
+              locale={{ emptyText: '当前还没有绑定的桌面设备' }}
+            />
+          </Card>
+        </Space>
 
         <Modal
-          title="桌面端绑定码"
+          title="设备授权码"
           open={Boolean(latestBindingCode)}
           onCancel={() => setLatestBindingCode(null)}
           onOk={() => setLatestBindingCode(null)}
@@ -493,15 +631,16 @@ export function SettingsPageClient({
           {latestBindingCode ? (
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
               <Typography.Paragraph>
-                将下面的绑定码输入到桌面端完成一次性绑定，10 分钟后自动失效。
+                将下面的授权码输入到桌面端完成绑定。请现在复制保存，关闭后不会再次显示完整码。
               </Typography.Paragraph>
               <Typography.Title level={3} style={{ margin: 0 }} copyable>
                 {latestBindingCode.bindingCode}
               </Typography.Title>
               <Descriptions size="small" column={1}>
+                <Descriptions.Item label="备注">{latestBindingCode.label ?? '-'}</Descriptions.Item>
                 <Descriptions.Item label="工作区">{latestBindingCode.workspaceId}</Descriptions.Item>
-                <Descriptions.Item label="过期时间">
-                  {formatDateTime(latestBindingCode.expiresAt)}
+                <Descriptions.Item label="有效期">
+                  {latestBindingCode.expiresAt ? formatDateTime(latestBindingCode.expiresAt) : '长期有效'}
                 </Descriptions.Item>
                 <Descriptions.Item label="状态">{latestBindingCode.status}</Descriptions.Item>
               </Descriptions>

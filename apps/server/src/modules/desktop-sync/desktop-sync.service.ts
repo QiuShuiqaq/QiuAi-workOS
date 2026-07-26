@@ -13,6 +13,7 @@ import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
+import { EntitlementService } from '../entitlement/entitlement.service';
 import { RoleService } from '../role/role.service';
 import {
   createDesktopBindingCode,
@@ -21,22 +22,28 @@ import {
   normalizeDesktopBindingCode
 } from './desktop-auth-token';
 import {
+  CancelDesktopBindingCodeResponse,
   CreateDesktopBindingCodeResponse,
   DesktopDeviceSummary,
+  DesktopRuntimeSnapshot,
   DesktopRuntimeSyncResponse,
+  ListDesktopBindingCodesResponse,
   ListDesktopDevicesResponse,
   RedeemDesktopBindingCodeResponse,
+  UpdateDesktopBindingCodeResponse,
   parseCreateDesktopBindingCodeRequest,
   parseDesktopRuntimeSyncRequest,
-  parseRedeemDesktopBindingCodeRequest
+  parseRedeemDesktopBindingCodeRequest,
+  parseUpdateDesktopBindingCodeRequest
 } from './desktop-sync.contract';
 
 interface MockDesktopBindingCodeRecord {
   id: string;
   workspaceId: string;
+  label?: string;
   codeHash: string;
   status: 'PENDING' | 'REDEEMED' | 'EXPIRED' | 'CANCELLED';
-  expiresAt: string;
+  expiresAt?: string;
   createdAt: string;
   redeemedAt?: string;
   redeemedDeviceId?: string;
@@ -58,6 +65,8 @@ export class DesktopSyncService {
     private readonly prismaService: PrismaService,
     @Inject(AuthService)
     private readonly authService: AuthService,
+    @Inject(EntitlementService)
+    private readonly entitlementService: EntitlementService,
     @Inject(RoleService)
     private readonly roleService: RoleService
   ) {}
@@ -65,7 +74,7 @@ export class DesktopSyncService {
   async listAuthorizedRoleTemplates(workspaceId: string, deviceToken?: string) {
     if (isDatabasePersistenceEnabled()) {
       await this.requireDatabaseDeviceTokenForWorkspace(workspaceId, deviceToken);
-      return this.roleService.listPublishedTemplatesForDesktop();
+      return this.roleService.listPublishedTemplatesForDesktop(workspaceId);
     }
 
     if (!this.store.workspaceExists(workspaceId)) {
@@ -80,7 +89,7 @@ export class DesktopSyncService {
       });
     }
     this.requireMockDeviceTokenForWorkspace(workspaceId, deviceToken, new Date());
-    return this.roleService.listPublishedTemplatesForDesktop();
+    return this.roleService.listPublishedTemplatesForDesktop(workspaceId);
   }
 
   async listDevices(workspaceId: string, cookieHeader?: string): Promise<ListDesktopDevicesResponse> {
@@ -114,14 +123,47 @@ export class DesktopSyncService {
     };
   }
 
+  async listBindingCodes(
+    workspaceId: string,
+    cookieHeader?: string
+  ): Promise<ListDesktopBindingCodesResponse> {
+    if (!isDatabasePersistenceEnabled()) {
+      this.assertMockWorkspace(workspaceId);
+      this.expireMockBindingCodes(new Date());
+      return {
+        data: this.mockBindingCodes
+          .filter((bindingCode) => bindingCode.workspaceId === workspaceId)
+          .map((bindingCode) => this.toMockBindingCodeSummary(bindingCode))
+      };
+    }
+
+    await this.requireDesktopDeviceManagementAccess(workspaceId, cookieHeader);
+    await this.expireDatabaseBindingCodes();
+
+    const bindingCodes = await this.prismaService.desktopBindingCode.findMany({
+      where: {
+        workspaceId
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    return {
+      data: bindingCodes.map((bindingCode) => this.toBindingCodeSummary(bindingCode))
+    };
+  }
+
   async createBindingCode(
     workspaceId: string,
     body: unknown,
     cookieHeader?: string
   ): Promise<CreateDesktopBindingCodeResponse> {
     const request = parseCreateDesktopBindingCodeRequest(body);
-    const expiresInMinutes = request.expiresInMinutes ?? 10;
-    const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
+    const expiresAt =
+      request.expiresInMinutes === undefined
+        ? undefined
+        : new Date(Date.now() + request.expiresInMinutes * 60 * 1000);
 
     if (!isDatabasePersistenceEnabled()) {
       this.assertMockWorkspace(workspaceId);
@@ -130,20 +172,17 @@ export class DesktopSyncService {
       const record: MockDesktopBindingCodeRecord = {
         id: `desktop_binding_${Date.now()}`,
         workspaceId,
+        label: request.label,
         codeHash: hashDesktopToken(normalizeDesktopBindingCode(bindingCode)),
         status: 'PENDING',
-        expiresAt: expiresAt.toISOString(),
+        expiresAt: expiresAt?.toISOString(),
         createdAt: now
       };
       this.mockBindingCodes.unshift(record);
 
       return {
         data: {
-          id: record.id,
-          workspaceId: record.workspaceId,
-          status: record.status,
-          expiresAt: record.expiresAt,
-          createdAt: record.createdAt,
+          ...this.toMockBindingCodeSummary(record),
           bindingCode
         }
       };
@@ -154,6 +193,7 @@ export class DesktopSyncService {
     const created = await this.prismaService.desktopBindingCode.create({
       data: {
         workspaceId,
+        label: request.label,
         codeHash: hashDesktopToken(normalizeDesktopBindingCode(bindingCode)),
         status: 'PENDING',
         expiresAt,
@@ -163,14 +203,111 @@ export class DesktopSyncService {
 
     return {
       data: {
-        id: created.id,
-        workspaceId: created.workspaceId,
-        status: created.status,
-        expiresAt: created.expiresAt.toISOString(),
-        createdAt: created.createdAt.toISOString(),
-        redeemedAt: created.redeemedAt?.toISOString(),
+        ...this.toBindingCodeSummary(created),
         bindingCode
       }
+    };
+  }
+
+  async updateBindingCode(
+    workspaceId: string,
+    bindingCodeId: string,
+    body: unknown,
+    cookieHeader?: string
+  ): Promise<UpdateDesktopBindingCodeResponse> {
+    const request = parseUpdateDesktopBindingCodeRequest(body);
+
+    if (!isDatabasePersistenceEnabled()) {
+      this.assertMockWorkspace(workspaceId);
+      const bindingCode = this.mockBindingCodes.find(
+        (item) => item.workspaceId === workspaceId && item.id === bindingCodeId
+      );
+      if (!bindingCode) {
+        throw this.bindingCodeNotFound();
+      }
+      if (bindingCode.status !== 'PENDING') {
+        throw this.bindingCodeUnavailable(bindingCode.status);
+      }
+      bindingCode.label = request.label;
+      return {
+        data: this.toMockBindingCodeSummary(bindingCode)
+      };
+    }
+
+    await this.requireDesktopDeviceManagementAccess(workspaceId, cookieHeader);
+    const existing = await this.prismaService.desktopBindingCode.findFirst({
+      where: {
+        id: bindingCodeId,
+        workspaceId
+      }
+    });
+    if (!existing) {
+      throw this.bindingCodeNotFound();
+    }
+    if (existing.status !== 'PENDING') {
+      throw this.bindingCodeUnavailable(existing.status);
+    }
+
+    const updated = await this.prismaService.desktopBindingCode.update({
+      where: {
+        id: bindingCodeId
+      },
+      data: {
+        label: request.label ?? null
+      }
+    });
+
+    return {
+      data: this.toBindingCodeSummary(updated)
+    };
+  }
+
+  async cancelBindingCode(
+    workspaceId: string,
+    bindingCodeId: string,
+    cookieHeader?: string
+  ): Promise<CancelDesktopBindingCodeResponse> {
+    if (!isDatabasePersistenceEnabled()) {
+      this.assertMockWorkspace(workspaceId);
+      const bindingCode = this.mockBindingCodes.find(
+        (item) => item.workspaceId === workspaceId && item.id === bindingCodeId
+      );
+      if (!bindingCode) {
+        throw this.bindingCodeNotFound();
+      }
+      if (bindingCode.status === 'PENDING') {
+        bindingCode.status = 'CANCELLED';
+      }
+      return {
+        data: this.toMockBindingCodeSummary(bindingCode)
+      };
+    }
+
+    await this.requireDesktopDeviceManagementAccess(workspaceId, cookieHeader);
+    const existing = await this.prismaService.desktopBindingCode.findFirst({
+      where: {
+        id: bindingCodeId,
+        workspaceId
+      }
+    });
+    if (!existing) {
+      throw this.bindingCodeNotFound();
+    }
+
+    const updated =
+      existing.status === 'PENDING'
+        ? await this.prismaService.desktopBindingCode.update({
+            where: {
+              id: bindingCodeId
+            },
+            data: {
+              status: 'CANCELLED'
+            }
+          })
+        : existing;
+
+    return {
+      data: this.toBindingCodeSummary(updated)
     };
   }
 
@@ -186,7 +323,11 @@ export class DesktopSyncService {
         throw this.bindingCodeNotFound();
       }
 
-      if (bindingCode.status === 'PENDING' && new Date(bindingCode.expiresAt).getTime() <= now.getTime()) {
+      if (
+        bindingCode.status === 'PENDING' &&
+        bindingCode.expiresAt &&
+        new Date(bindingCode.expiresAt).getTime() <= now.getTime()
+      ) {
         bindingCode.status = 'EXPIRED';
       }
 
@@ -258,7 +399,7 @@ export class DesktopSyncService {
       throw this.bindingCodeUnavailable(bindingCode.status);
     }
 
-    if (bindingCode.expiresAt.getTime() <= now.getTime()) {
+    if (bindingCode.expiresAt && bindingCode.expiresAt.getTime() <= now.getTime()) {
       await this.prismaService.desktopBindingCode.update({
         where: {
           id: bindingCode.id
@@ -284,6 +425,30 @@ export class DesktopSyncService {
 
     const deviceToken = createDesktopDeviceToken();
     const deviceTokenHash = hashDesktopToken(deviceToken);
+    const existingDevice = await this.prismaService.desktopDevice.findUnique({
+      where: {
+        workspaceId_runtimeId: {
+          workspaceId: bindingCode.workspaceId,
+          runtimeId: request.runtimeId
+        }
+      }
+    });
+    const activeDeviceCount = await this.prismaService.desktopDevice.count({
+      where: {
+        workspaceId: bindingCode.workspaceId,
+        status: 'ACTIVE'
+      }
+    });
+    const requestedDeviceCount = existingDevice?.status === 'ACTIVE' ? activeDeviceCount : activeDeviceCount + 1;
+    await this.entitlementService.requireAllowed(
+      {
+        workspaceId: bindingCode.workspaceId,
+        featureKey: 'maxDesktopDevices',
+        requestedAmount: requestedDeviceCount
+      },
+      'Desktop device quota has been reached.'
+    );
+
     const device = await this.prismaService.$transaction(async (tx) => {
       const createdDevice = await tx.desktopDevice.upsert({
         where: {
@@ -401,6 +566,7 @@ export class DesktopSyncService {
         });
       }
 
+      const persistedSnapshot = await this.restrictRuntimeSnapshotToAuthorizedTemplates(workspaceId, snapshot);
       await this.prismaService.desktopRuntimeSync.upsert({
         where: {
           runtimeId: snapshot.runtimeId
@@ -411,7 +577,7 @@ export class DesktopSyncService {
           deviceName: snapshot.deviceName,
           platform: snapshot.platform,
           appVersion: snapshot.appVersion,
-          runtimeSnapshot: snapshot as unknown as Prisma.InputJsonValue,
+          runtimeSnapshot: persistedSnapshot as unknown as Prisma.InputJsonValue,
           syncedAt
         },
         create: {
@@ -421,7 +587,7 @@ export class DesktopSyncService {
           deviceName: snapshot.deviceName,
           platform: snapshot.platform,
           appVersion: snapshot.appVersion,
-          runtimeSnapshot: snapshot as unknown as Prisma.InputJsonValue,
+          runtimeSnapshot: persistedSnapshot as unknown as Prisma.InputJsonValue,
           syncedAt
         }
       });
@@ -452,6 +618,7 @@ export class DesktopSyncService {
       }
       this.requireMockDeviceToken(workspaceId, snapshot.runtimeId, snapshot.deviceId, deviceToken, syncedAt);
 
+      const persistedSnapshot = await this.restrictRuntimeSnapshotToAuthorizedTemplates(workspaceId, snapshot);
       this.store.upsertDesktopRuntimeSync({
         workspaceId,
         runtimeId: snapshot.runtimeId,
@@ -459,7 +626,7 @@ export class DesktopSyncService {
         deviceName: snapshot.deviceName,
         platform: snapshot.platform,
         appVersion: snapshot.appVersion,
-        runtimeSnapshot: snapshot as unknown as Record<string, unknown>,
+        runtimeSnapshot: persistedSnapshot as unknown as Record<string, unknown>,
         syncedAt: syncedAt.toISOString()
       });
     }
@@ -470,6 +637,28 @@ export class DesktopSyncService {
         syncedAt: syncedAt.toISOString(),
         nextSyncAt: new Date(syncedAt.getTime() + 5 * 60 * 1000).toISOString()
       }
+    };
+  }
+
+  private async restrictRuntimeSnapshotToAuthorizedTemplates(
+    workspaceId: string,
+    snapshot: DesktopRuntimeSnapshot
+  ): Promise<DesktopRuntimeSnapshot> {
+    const authorizedTemplates = await this.roleService.listPublishedTemplatesForDesktop(workspaceId);
+    const authorizedTemplateIds = new Set(authorizedTemplates.data.map((template) => template.id));
+    const rolePackages = snapshot.rolePackages.filter(
+      (rolePackage) => rolePackage.templateId && authorizedTemplateIds.has(rolePackage.templateId)
+    );
+
+    if (rolePackages.length === snapshot.rolePackages.length) {
+      return snapshot;
+    }
+
+    const authorizedRoleCodes = new Set(rolePackages.map((rolePackage) => rolePackage.roleCode));
+    return {
+      ...snapshot,
+      rolePackages,
+      tasks: snapshot.tasks.filter((task) => authorizedRoleCodes.has(task.roleCode))
     };
   }
 
@@ -700,6 +889,7 @@ export class DesktopSyncService {
       where: {
         status: 'PENDING',
         expiresAt: {
+          not: null,
           lt: new Date()
         }
       },
@@ -707,6 +897,18 @@ export class DesktopSyncService {
         status: 'EXPIRED'
       }
     });
+  }
+
+  private expireMockBindingCodes(now: Date) {
+    for (const bindingCode of this.mockBindingCodes) {
+      if (
+        bindingCode.status === 'PENDING' &&
+        bindingCode.expiresAt &&
+        new Date(bindingCode.expiresAt).getTime() <= now.getTime()
+      ) {
+        bindingCode.status = 'EXPIRED';
+      }
+    }
   }
 
   private assertMockWorkspace(workspaceId: string) {
@@ -742,6 +944,38 @@ export class DesktopSyncService {
         }
       }
     });
+  }
+
+  private toMockBindingCodeSummary(bindingCode: MockDesktopBindingCodeRecord) {
+    return {
+      id: bindingCode.id,
+      workspaceId: bindingCode.workspaceId,
+      label: bindingCode.label,
+      status: bindingCode.status,
+      expiresAt: bindingCode.expiresAt,
+      createdAt: bindingCode.createdAt,
+      redeemedAt: bindingCode.redeemedAt
+    };
+  }
+
+  private toBindingCodeSummary(bindingCode: {
+    id: string;
+    workspaceId: string;
+    label: string | null;
+    status: 'PENDING' | 'REDEEMED' | 'EXPIRED' | 'CANCELLED';
+    expiresAt: Date | null;
+    createdAt: Date;
+    redeemedAt: Date | null;
+  }) {
+    return {
+      id: bindingCode.id,
+      workspaceId: bindingCode.workspaceId,
+      label: bindingCode.label ?? undefined,
+      status: bindingCode.status,
+      expiresAt: bindingCode.expiresAt?.toISOString(),
+      createdAt: bindingCode.createdAt.toISOString(),
+      redeemedAt: bindingCode.redeemedAt?.toISOString()
+    };
   }
 
   private toDeviceSummary(device: {

@@ -1,6 +1,7 @@
 import type {
   CurrentAccountResponse,
   GetBillingOverviewResponse,
+  ListDesktopBindingCodesResponse,
   ListDesktopDevicesResponse,
   ListPlansResponse
 } from '@qiuai/api-contract';
@@ -16,6 +17,7 @@ export interface SettingsPageData {
   plans: ListPlansResponse;
   billing: GetBillingOverviewResponse;
   desktopDevices: ListDesktopDevicesResponse;
+  desktopBindingCodes: ListDesktopBindingCodesResponse;
   isApiFallback: boolean;
 }
 
@@ -29,7 +31,10 @@ export async function loadSettingsPageData(requestedWorkspaceId?: string): Promi
       apiClient.listPlans(),
       apiClient.getBillingOverview(workspaceId)
     ]);
-    const desktopDevices = await apiClient.listDesktopDevices(workspaceId);
+    const [desktopDevices, desktopBindingCodes] = await Promise.all([
+      apiClient.listDesktopDevices(workspaceId),
+      apiClient.listDesktopBindingCodes(workspaceId)
+    ]);
     return {
       currentAccount: {
         ...currentAccount,
@@ -38,6 +43,7 @@ export async function loadSettingsPageData(requestedWorkspaceId?: string): Promi
       plans,
       billing,
       desktopDevices,
+      desktopBindingCodes,
       isApiFallback: false
     };
   } catch (error) {
@@ -51,6 +57,9 @@ export async function loadSettingsPageData(requestedWorkspaceId?: string): Promi
       plans: fallbackPlans,
       billing: createFallbackBillingOverview(workspaceId),
       desktopDevices: {
+        data: []
+      },
+      desktopBindingCodes: {
         data: []
       },
       isApiFallback: true

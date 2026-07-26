@@ -18,6 +18,9 @@ const workflowStepTypeSet = new Set<string>([
   'output'
 ]);
 
+const freePlanCode = 'PERSONAL_FREE';
+const usablePaidSubscriptionStatuses = new Set(['ACTIVE', 'TRIALING']);
+
 interface InstallRoleInput {
   templateId: string;
   name?: string;
@@ -115,12 +118,24 @@ export class RoleService {
     };
   }
 
-  async listPublishedTemplatesForDesktop() {
+  async listPublishedTemplatesForDesktop(workspaceId: string) {
+    const access = await this.resolveWorkspaceDesktopTemplateAccess(workspaceId);
+    if (!access) {
+      return {
+        data: []
+      };
+    }
+
     if (!isDatabasePersistenceEnabled()) {
       return {
         data: this.store
           .listRoleTemplates()
           .filter((template) => template.status === 'PUBLISHED')
+          .filter((template) =>
+            this.canWorkspaceUseTemplate(template, workspaceId, access.planCode, {
+              includeWorkspaceVisibility: access.includeWorkspaceVisibility
+            })
+          )
           .map((template) => this.toTemplateSummary(template))
       };
     }
@@ -140,7 +155,13 @@ export class RoleService {
     });
 
     return {
-      data: templates.map((template) => this.toTemplateSummary(template))
+      data: templates
+        .filter((template) =>
+          this.canWorkspaceUseTemplate(template, workspaceId, access.planCode, {
+            includeWorkspaceVisibility: access.includeWorkspaceVisibility
+          })
+        )
+        .map((template) => this.toTemplateSummary(template))
     };
   }
 
@@ -437,6 +458,112 @@ export class RoleService {
     return workspace?.subscriptions[0]?.plan.code ?? null;
   }
 
+  private async resolveWorkspaceDesktopTemplateAccess(
+    workspaceId: string
+  ): Promise<{ planCode: string; includeWorkspaceVisibility: boolean } | null> {
+    if (!isDatabasePersistenceEnabled()) {
+      const workspace = this.store.getWorkspace(workspaceId);
+      if (!workspace) {
+        return null;
+      }
+
+      const subscription = this.store.getSubscription(workspaceId);
+      if (!subscription) {
+        return {
+          planCode: freePlanCode,
+          includeWorkspaceVisibility: false
+        };
+      }
+
+      return this.toDesktopTemplateAccess(
+        subscription.planCode,
+        subscription.status,
+        subscription.currentPeriodEnd
+      );
+    }
+
+    const workspace = await this.prismaService.workspace.findUnique({
+      where: {
+        id: workspaceId
+      },
+      select: {
+        subscriptions: {
+          select: {
+            status: true,
+            currentPeriodEnd: true,
+            plan: {
+              select: {
+                code: true
+              }
+            }
+          },
+          orderBy: {
+            createdAt: 'desc'
+          },
+          take: 1
+        }
+      }
+    });
+
+    if (!workspace) {
+      return null;
+    }
+
+    const subscription = workspace.subscriptions[0];
+    if (!subscription) {
+      return {
+        planCode: freePlanCode,
+        includeWorkspaceVisibility: false
+      };
+    }
+
+    return this.toDesktopTemplateAccess(
+      subscription.plan.code,
+      subscription.status,
+      subscription.currentPeriodEnd
+    );
+  }
+
+  private toDesktopTemplateAccess(
+    planCode: string,
+    subscriptionStatus: string,
+    currentPeriodEnd?: string | Date | null
+  ) {
+    const normalizedStatus = subscriptionStatus.toUpperCase();
+    if (normalizedStatus === 'FREE') {
+      return {
+        planCode: freePlanCode,
+        includeWorkspaceVisibility: true
+      };
+    }
+
+    if (!usablePaidSubscriptionStatuses.has(normalizedStatus) || this.hasSubscriptionPeriodEnded(currentPeriodEnd)) {
+      return {
+        planCode: freePlanCode,
+        includeWorkspaceVisibility: false
+      };
+    }
+
+    return {
+      planCode,
+      includeWorkspaceVisibility: true
+    };
+  }
+
+  private hasSubscriptionPeriodEnded(currentPeriodEnd?: string | Date | null): boolean {
+    if (!currentPeriodEnd) {
+      return false;
+    }
+
+    const periodEnd =
+      currentPeriodEnd instanceof Date ? currentPeriodEnd.getTime() : Date.parse(currentPeriodEnd);
+    if (Number.isNaN(periodEnd)) {
+      return false;
+    }
+
+    return periodEnd <= Date.now();
+  }
+
   private canWorkspaceUseTemplate(
     template: {
       status: string;
@@ -444,14 +571,15 @@ export class RoleService {
       visibleWorkspaceIds: unknown;
     },
     workspaceId: string,
-    planCode: string
+    planCode: string,
+    options: { includeWorkspaceVisibility?: boolean } = {}
   ): boolean {
     if (template.status !== 'PUBLISHED') {
       return false;
     }
 
     const visibleWorkspaceIds = this.toStringArray(template.visibleWorkspaceIds);
-    if (visibleWorkspaceIds.includes(workspaceId)) {
+    if (options.includeWorkspaceVisibility !== false && visibleWorkspaceIds.includes(workspaceId)) {
       return true;
     }
 

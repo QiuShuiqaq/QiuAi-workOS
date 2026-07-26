@@ -66,6 +66,27 @@ function planTone(plan: AdminPlanDetail): 'default' | 'processing' | 'warning' {
   return 'processing';
 }
 
+const capacityFeatureLabels: Record<string, string> = {
+  maxDesktopDevices: '设备',
+  maxRoleInstances: '数字员工'
+};
+
+const capacityFeatureOrder = ['maxDesktopDevices', 'maxRoleInstances'];
+
+function capacityEntitlements(plan: AdminPlanDetail) {
+  return plan.entitlements
+    .filter((item) => item.enabled && capacityFeatureLabels[item.featureKey])
+    .sort((left, right) => capacityFeatureOrder.indexOf(left.featureKey) - capacityFeatureOrder.indexOf(right.featureKey));
+}
+
+function entitlementValue(value: AdminPlanDetail['entitlements'][number]) {
+  if (value.limitValue === undefined) {
+    return '不限';
+  }
+
+  return value.limitValue.toLocaleString('zh-CN');
+}
+
 export function AdminPlansPageClient({ currentAccount, plans }: AdminPlansPageClientProps) {
   const [rows, setRows] = useState(plans);
   const [editingPlan, setEditingPlan] = useState<AdminPlanDetail | null>(null);
@@ -151,9 +172,17 @@ export function AdminPlansPageClient({ currentAccount, plans }: AdminPlansPageCl
       render: (_value, plan) => <QiuStatusTag tone={planTone(plan)}>{plan.status}</QiuStatusTag>
     },
     {
-      title: '权益数',
+      title: '容量',
       key: 'entitlements',
-      render: (_value, plan) => plan.entitlements.length
+      render: (_value, plan) => (
+        <Space wrap>
+          {capacityEntitlements(plan).map((item) => (
+            <Tag key={`${plan.code}-${item.featureKey}`}>
+              {capacityFeatureLabels[item.featureKey]}：{entitlementValue(item)}
+            </Tag>
+          ))}
+        </Space>
+      )
     },
     {
       title: '操作',
@@ -200,14 +229,15 @@ export function AdminPlansPageClient({ currentAccount, plans }: AdminPlansPageCl
                   <Space direction="vertical" size={8} style={{ width: '100%' }}>
                     <Typography.Text type="secondary">{plan.description ?? '-'}</Typography.Text>
                     <Space wrap>
-                      {plan.entitlements.map((item) => (
+                      {capacityEntitlements(plan).map((item) => (
                         <Tag key={`${plan.code}-${item.featureKey}`}>
-                          {item.featureKey}
-                          {item.enabled ? ':on' : ':off'}
-                          {item.limitValue !== undefined ? `(${item.limitValue}${item.limitUnit ?? ''})` : ''}
+                          {capacityFeatureLabels[item.featureKey]}：{entitlementValue(item)}
                         </Tag>
                       ))}
                     </Space>
+                    <Typography.Text type="secondary">
+                      企业版基础能力保持一致；套餐差异只按设备和数字员工数量区分。
+                    </Typography.Text>
                   </Space>
                 )
               }}
@@ -226,6 +256,14 @@ export function AdminPlansPageClient({ currentAccount, plans }: AdminPlansPageCl
         okText="保存"
       >
         <Form layout="vertical" form={form} onFinish={handleSave}>
+          <Alert
+            showIcon
+            type="info"
+            message="公开套餐只建议调整容量权益"
+            description="当前建议只把 maxDesktopDevices、maxRoleInstances 作为套餐差异；其他 featureKey 保持企业版一致，用于系统内部兜底。"
+            style={{ marginBottom: 16 }}
+          />
+
           <Form.Item name="name" label="套餐名称" rules={[{ required: true, message: '请输入套餐名称' }]}>
             <Input />
           </Form.Item>
