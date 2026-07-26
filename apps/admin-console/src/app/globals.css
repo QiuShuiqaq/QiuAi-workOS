@@ -13,3 +13,176 @@ a {
   color: inherit;
   text-decoration: none;
 }
+
+.workflow-builder-shell {
+  display: grid;
+  grid-template-columns: 176px minmax(0, 1fr) 360px;
+  gap: 12px;
+  min-height: 680px;
+}
+
+.workflow-node-palette,
+.workflow-config-panel,
+.workflow-canvas-shell {
+  min-width: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.workflow-node-palette,
+.workflow-config-panel {
+  padding: 12px;
+}
+
+.workflow-config-panel {
+  max-height: 680px;
+  overflow: auto;
+}
+
+.workflow-pane-title {
+  margin-bottom: 10px;
+  color: #111827;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.workflow-palette-button {
+  justify-content: flex-start;
+  height: 34px;
+  border-color: #e5e7eb;
+  color: #334155;
+  box-shadow: none;
+}
+
+.workflow-canvas-shell {
+  position: relative;
+  overflow: hidden;
+}
+
+.workflow-canvas-toolbar {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  right: 10px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+}
+
+.workflow-react-flow {
+  width: 100%;
+  height: 680px;
+  background: #fbfcff;
+}
+
+.workflow-react-flow .react-flow__edge-path {
+  stroke: #94a3b8;
+  stroke-width: 2;
+}
+
+.workflow-react-flow .workflow-flow-edge.conditional .react-flow__edge-path {
+  stroke: #1677ff;
+}
+
+.workflow-react-flow .react-flow__edge-textbg {
+  fill: #fff;
+  stroke: #e5e7eb;
+}
+
+.workflow-flow-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: 196px;
+  min-height: 92px;
+  padding: 12px 14px;
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+}
+
+.workflow-flow-node.selected {
+  border-color: #1677ff;
+  box-shadow: 0 10px 28px rgba(22, 119, 255, 0.16);
+}
+
+.workflow-flow-node-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.workflow-flow-node-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #64748b;
+}
+
+.workflow-flow-node-type {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.workflow-flow-node-title,
+.workflow-flow-node-meta {
+  display: block;
+  max-width: 160px;
+}
+
+.workflow-flow-node-meta {
+  font-size: 12px;
+}
+
+.workflow-flow-node.tone-blue .workflow-flow-node-dot {
+  background: #1677ff;
+}
+
+.workflow-flow-node.tone-green .workflow-flow-node-dot {
+  background: #16a34a;
+}
+
+.workflow-flow-node.tone-purple .workflow-flow-node-dot {
+  background: #7c3aed;
+}
+
+.workflow-flow-node.tone-gold .workflow-flow-node-dot {
+  background: #d97706;
+}
+
+.workflow-flow-handle {
+  width: 10px;
+  height: 10px;
+  border: 2px solid #fff;
+  background: #1677ff;
+}
+
+.workflow-manual-edge {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #eef2f7;
+}
+
+@media (max-width: 1200px) {
+  .workflow-builder-shell {
+    grid-template-columns: 150px minmax(0, 1fr);
+  }
+
+  .workflow-config-panel {
+    grid-column: 1 / -1;
+    max-height: none;
+  }
+}
