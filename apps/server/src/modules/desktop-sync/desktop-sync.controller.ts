@@ -1,8 +1,12 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
 
 import { DesktopSyncService } from './desktop-sync.service';
+import {
+  CheckDesktopUpdateQueryDto,
+  CheckDesktopUpdateResponseDto
+} from '../admin/dto/admin-console.dto';
 
 function readDesktopDeviceToken(request: FastifyRequest): string | undefined {
   const authorization = request.headers.authorization;
@@ -98,5 +102,20 @@ export class DesktopBindingController {
   @Post('redeem')
   redeemBindingCode(@Body() body: unknown) {
     return this.desktopSyncService.redeemBindingCode(body);
+  }
+}
+
+@ApiTags('desktop')
+@Controller({
+  path: 'desktop/releases',
+  version: '1'
+})
+export class DesktopReleaseController {
+  constructor(@Inject(DesktopSyncService) private readonly desktopSyncService: DesktopSyncService) {}
+
+  @Get('latest')
+  @ApiOkResponse({ type: CheckDesktopUpdateResponseDto })
+  checkLatestRelease(@Query() query: CheckDesktopUpdateQueryDto): Promise<CheckDesktopUpdateResponseDto> {
+    return this.desktopSyncService.checkDesktopUpdate(query);
   }
 }

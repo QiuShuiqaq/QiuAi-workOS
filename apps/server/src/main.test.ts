@@ -474,3 +474,101 @@ test('admin role template factory governs publication and workspace visibility',
     await app.close();
   }
 });
+
+test('desktop release publishing drives public update checks', async () => {
+  const app = await createApplication();
+  app.useLogger(false);
+
+  await app.init();
+  try {
+    const noReleaseResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/desktop/releases/latest?currentVersion=1.0.0'
+    });
+    assert.equal(noReleaseResponse.statusCode, 200);
+    assert.equal(JSON.parse(noReleaseResponse.body).data.updateAvailable, false);
+
+    const loginResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: {
+        'content-type': 'application/json'
+      },
+      payload: {
+        email: 'admin@qiuai.local',
+        password: process.env.WORKOS_MOCK_ADMIN_PASSWORD ?? 'qiuai-demo'
+      }
+    });
+
+    assert.equal(loginResponse.statusCode, 201);
+    const setCookie = loginResponse.headers['set-cookie'];
+    const sessionCookie: string | undefined = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+    assert.ok(sessionCookie);
+    const cookie = sessionCookie.split(';')[0];
+    const headers = {
+      cookie,
+      'content-type': 'application/json'
+    };
+    const version = `1.0.${Date.now()}`;
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/desktop-releases',
+      headers,
+      payload: {
+        version,
+        downloadUrl: `https://workos.qiuaihub.com/downloads/QiuAI-WorkOS-${version}.exe`,
+        releaseNotes: 'Desktop release smoke test.',
+        forceUpdate: true,
+        minimumSupportedVersion: '1.0.0'
+      }
+    });
+    assert.equal(createResponse.statusCode, 201);
+    const release = JSON.parse(createResponse.body).data as { id: string; status: string };
+    assert.equal(release.status, 'DRAFT');
+
+    const unpublishedCheckResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/desktop/releases/latest?currentVersion=1.0.0'
+    });
+    assert.equal(unpublishedCheckResponse.statusCode, 200);
+    assert.equal(JSON.parse(unpublishedCheckResponse.body).data.updateAvailable, false);
+
+    const publishResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v1/admin/desktop-releases/${encodeURIComponent(release.id)}/publish`,
+      headers,
+      payload: {}
+    });
+    assert.equal(publishResponse.statusCode, 201);
+    assert.equal(JSON.parse(publishResponse.body).data.status, 'PUBLISHED');
+
+    const updateCheckResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/desktop/releases/latest?currentVersion=1.0.0'
+    });
+    assert.equal(updateCheckResponse.statusCode, 200);
+    const updateCheck = JSON.parse(updateCheckResponse.body).data;
+    assert.equal(updateCheck.updateAvailable, true);
+    assert.equal(updateCheck.forceUpdate, true);
+    assert.equal(updateCheck.latestRelease.version, version);
+
+    const archiveResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v1/admin/desktop-releases/${encodeURIComponent(release.id)}/archive`,
+      headers,
+      payload: {}
+    });
+    assert.equal(archiveResponse.statusCode, 201);
+    assert.equal(JSON.parse(archiveResponse.body).data.status, 'ARCHIVED');
+
+    const archivedCheckResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/desktop/releases/latest?currentVersion=1.0.0'
+    });
+    assert.equal(archivedCheckResponse.statusCode, 200);
+    assert.equal(JSON.parse(archivedCheckResponse.body).data.updateAvailable, false);
+  } finally {
+    await app.close();
+  }
+});

@@ -4,6 +4,7 @@ import {
   ApartmentOutlined,
   AuditOutlined,
   AppstoreAddOutlined,
+  CloudDownloadOutlined,
   DashboardOutlined,
   DollarOutlined,
   LogoutOutlined,
@@ -33,6 +34,7 @@ export interface AdminShellProps {
 function selectedKey(pathname: string) {
   if (pathname.startsWith('/plans')) return 'plans';
   if (pathname.startsWith('/workspaces')) return 'workspaces';
+  if (pathname.startsWith('/desktop-releases')) return 'desktop-releases';
   if (pathname.startsWith('/audit')) return 'audit';
   if (pathname.startsWith('/templates/canvas') || pathname.startsWith('/templates/new')) return 'templates-canvas';
   if (pathname.startsWith('/templates')) return 'templates';
@@ -117,6 +119,11 @@ export function AdminShell({ currentAccount, children }: AdminShellProps) {
               key: 'templates-canvas',
               icon: <PlusCircleOutlined />,
               label: <Link href="/templates/canvas">工作画布</Link>
+            },
+            {
+              key: 'desktop-releases',
+              icon: <CloudDownloadOutlined />,
+              label: <Link href="/desktop-releases">桌面版本</Link>
             },
             {
               key: 'audit',

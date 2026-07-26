@@ -1,6 +1,7 @@
 export * from './auth';
 export * from './admin';
 export * from './desktop-sync';
+export * from './desktop-release';
 export * from './billing';
 export * from './commercial';
 export * from './enterprise';

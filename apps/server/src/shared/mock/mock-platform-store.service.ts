@@ -42,6 +42,23 @@ export interface MockDesktopRuntimeSyncSummary {
   syncedAt: string;
 }
 
+export interface MockDesktopReleaseSummary {
+  id: string;
+  version: string;
+  platform: string;
+  channel: string;
+  downloadUrl: string;
+  releaseNotes?: string | null;
+  checksumSha256?: string | null;
+  fileSizeBytes?: number | null;
+  forceUpdate: boolean;
+  minimumSupportedVersion?: string | null;
+  status: string;
+  publishedAt?: string | Date | null;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+}
+
 @Injectable()
 export class MockPlatformStore {
   private readonly roleTemplates: MockRoleTemplateSummary[] = [...demoRoleTemplates];
@@ -53,6 +70,7 @@ export class MockPlatformStore {
   private readonly members: MockMemberSummary[] = demoMembers.map((item) => ({ ...item }));
   private readonly subscriptions: MockSubscriptionSummary[] = demoSubscriptions.map((item) => ({ ...item }));
   private readonly desktopRuntimeSyncs: MockDesktopRuntimeSyncSummary[] = [];
+  private readonly desktopReleases: MockDesktopReleaseSummary[] = [];
 
   listRoleTemplates(): MockRoleTemplateSummary[] {
     return this.roleTemplates;
@@ -411,5 +429,61 @@ export class MockPlatformStore {
 
   getDesktopRuntimeSync(runtimeId: string) {
     return this.desktopRuntimeSyncs.find((sync) => sync.runtimeId === runtimeId);
+  }
+
+  listDesktopReleases() {
+    return this.desktopReleases.map((release) => ({ ...release }));
+  }
+
+  getDesktopRelease(releaseId: string) {
+    const release = this.desktopReleases.find((item) => item.id === releaseId);
+    return release ? { ...release } : undefined;
+  }
+
+  createDesktopRelease(input: Omit<MockDesktopReleaseSummary, 'createdAt' | 'updatedAt'>) {
+    const existing = this.desktopReleases.find(
+      (item) =>
+        item.platform === input.platform &&
+        item.channel === input.channel &&
+        item.version === input.version
+    );
+    if (existing) {
+      return undefined;
+    }
+
+    const now = new Date().toISOString();
+    const release: MockDesktopReleaseSummary = {
+      ...input,
+      createdAt: now,
+      updatedAt: now
+    };
+    this.desktopReleases.unshift(release);
+    return { ...release };
+  }
+
+  updateDesktopRelease(releaseId: string, input: Partial<MockDesktopReleaseSummary>) {
+    const release = this.desktopReleases.find((item) => item.id === releaseId);
+    if (!release) {
+      return undefined;
+    }
+
+    const nextVersion = input.version ?? release.version;
+    const nextPlatform = input.platform ?? release.platform;
+    const nextChannel = input.channel ?? release.channel;
+    const duplicate = this.desktopReleases.find(
+      (item) =>
+        item.id !== releaseId &&
+        item.platform === nextPlatform &&
+        item.channel === nextChannel &&
+        item.version === nextVersion
+    );
+    if (duplicate) {
+      return null;
+    }
+
+    Object.assign(release, input, {
+      updatedAt: new Date().toISOString()
+    });
+    return { ...release };
   }
 }

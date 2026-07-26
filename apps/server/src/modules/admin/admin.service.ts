@@ -12,6 +12,7 @@ import {
 import type { BillingCycle, PlanCode, Prisma, WorkspaceMemberRole } from '@prisma/client';
 
 import { hashPassword } from '../../shared/auth/password-hash';
+import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
@@ -28,7 +29,10 @@ import {
   AdminWorkspaceDetailDto,
   AdminWorkspaceInvitationSummaryDto,
   AdminWorkspaceSummaryDto,
+  ArchiveAdminDesktopReleaseResponseDto,
   CancelAdminWorkspaceInvitationResponseDto,
+  CreateAdminDesktopReleaseRequestDto,
+  CreateAdminDesktopReleaseResponseDto,
   CreateAdminDesktopBindingCodeRequestDto,
   CreateAdminDesktopBindingCodeResponseDto,
   CreateAdminWorkspaceInvitationRequestDto,
@@ -40,10 +44,15 @@ import {
   GrantAdminWorkspaceAuthorizationResponseDto,
   ListAdminActionLogsQueryDto,
   ListAdminActionLogsResponseDto,
+  ListAdminDesktopReleasesQueryDto,
+  ListAdminDesktopReleasesResponseDto,
   ListAdminPlansResponseDto,
   ListAdminWorkspacesQueryDto,
   ListAdminWorkspacesResponseDto,
+  PublishAdminDesktopReleaseResponseDto,
   RevokeAdminDesktopDeviceResponseDto,
+  UpdateAdminDesktopReleaseRequestDto,
+  UpdateAdminDesktopReleaseResponseDto,
   UpdateAdminWorkspaceStatusRequestDto,
   UpdateAdminWorkspaceStatusResponseDto,
   UpdateAdminPlanRequestDto,
@@ -197,6 +206,25 @@ type WorkspaceDetailRecord = WorkspaceSummaryRecord & {
   }>;
 };
 
+type DesktopReleaseDate = Date | string;
+
+type DesktopReleaseRecord = {
+  id: string;
+  version: string;
+  platform: string;
+  channel: string;
+  downloadUrl: string;
+  releaseNotes?: string | null;
+  checksumSha256?: string | null;
+  fileSizeBytes?: number | null;
+  forceUpdate: boolean;
+  minimumSupportedVersion?: string | null;
+  status: string;
+  publishedAt?: DesktopReleaseDate | null;
+  createdAt: DesktopReleaseDate;
+  updatedAt: DesktopReleaseDate;
+};
+
 @Injectable()
 export class AdminService {
   constructor(
@@ -205,7 +233,9 @@ export class AdminService {
     @Inject(AuthService)
     private readonly authService: AuthService,
     @Inject(EntitlementService)
-    private readonly entitlementService: EntitlementService
+    private readonly entitlementService: EntitlementService,
+    @Inject(MockPlatformStore)
+    private readonly store: MockPlatformStore
   ) {}
 
   async listPlans(cookieHeader?: string): Promise<ListAdminPlansResponseDto> {
@@ -311,6 +341,327 @@ export class AdminService {
 
     return {
       data: this.toAdminPlanDetail(updated)
+    };
+  }
+
+  async listDesktopReleases(
+    query: ListAdminDesktopReleasesQueryDto,
+    cookieHeader?: string
+  ): Promise<ListAdminDesktopReleasesResponseDto> {
+    await this.requireAdminOperator(cookieHeader);
+
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+
+    if (!isDatabasePersistenceEnabled()) {
+      const filtered = this.store
+        .listDesktopReleases()
+        .filter((release) => this.matchesDesktopReleaseQuery(release, query))
+        .sort((left, right) => this.compareDesktopReleaseOrder(right, left));
+      const totalItems = filtered.length;
+
+      return {
+        data: filtered
+          .slice((page - 1) * pageSize, page * pageSize)
+          .map((release) => this.toDesktopReleaseSummary(release)),
+        pagination: {
+          page,
+          pageSize,
+          totalItems,
+          totalPages: Math.max(1, Math.ceil(totalItems / pageSize))
+        }
+      };
+    }
+
+    const where = this.buildDesktopReleaseWhere(query);
+    const [totalItems, releases] = await this.prismaService.$transaction([
+      this.prismaService.desktopRelease.count({ where }),
+      this.prismaService.desktopRelease.findMany({
+        where,
+        orderBy: [
+          {
+            publishedAt: 'desc'
+          },
+          {
+            updatedAt: 'desc'
+          }
+        ],
+        skip: (page - 1) * pageSize,
+        take: pageSize
+      })
+    ]);
+
+    return {
+      data: releases.map((release) => this.toDesktopReleaseSummary(release)),
+      pagination: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages: Math.max(1, Math.ceil(totalItems / pageSize))
+      }
+    };
+  }
+
+  async createDesktopRelease(
+    input: CreateAdminDesktopReleaseRequestDto,
+    cookieHeader?: string
+  ): Promise<CreateAdminDesktopReleaseResponseDto> {
+    const operator = await this.requireAdminOperator(cookieHeader);
+    const normalized = this.normalizeCreateDesktopReleaseInput(input);
+
+    if (!isDatabasePersistenceEnabled()) {
+      const created = this.store.createDesktopRelease({
+        id: `desktop_release_${Date.now()}`,
+        ...normalized,
+        publishedAt: normalized.status === 'PUBLISHED' ? new Date().toISOString() : undefined
+      });
+      if (!created) {
+        throw this.desktopReleaseConflict(normalized.version);
+      }
+
+      return {
+        data: this.toDesktopReleaseSummary(created)
+      };
+    }
+
+    await this.assertDesktopReleaseUnique(
+      normalized.platform,
+      normalized.channel,
+      normalized.version
+    );
+
+    const created = await this.prismaService.$transaction(async (tx) => {
+      const release = await tx.desktopRelease.create({
+        data: {
+          ...normalized,
+          publishedAt: normalized.status === 'PUBLISHED' ? new Date() : null
+        }
+      });
+
+      await this.recordAdminAction(tx, {
+        operatorAccountId: operator.account.id,
+        action: 'CREATE_DESKTOP_RELEASE',
+        targetType: 'desktop_release',
+        targetId: release.id,
+        summary: `Created desktop release ${release.version}`,
+        metadata: {
+          version: release.version,
+          platform: release.platform,
+          channel: release.channel,
+          status: release.status
+        }
+      });
+
+      return release;
+    });
+
+    return {
+      data: this.toDesktopReleaseSummary(created)
+    };
+  }
+
+  async updateDesktopRelease(
+    releaseId: string,
+    input: UpdateAdminDesktopReleaseRequestDto,
+    cookieHeader?: string
+  ): Promise<UpdateAdminDesktopReleaseResponseDto> {
+    const operator = await this.requireAdminOperator(cookieHeader);
+    const id = releaseId.trim();
+    const normalized = this.normalizeUpdateDesktopReleaseInput(input);
+
+    if (!isDatabasePersistenceEnabled()) {
+      const current = this.store.getDesktopRelease(id);
+      if (!current) {
+        throw this.desktopReleaseNotFound(id);
+      }
+
+      const next = {
+        ...normalized
+      };
+      if (normalized.status === 'PUBLISHED' && current.status !== 'PUBLISHED') {
+        next.publishedAt = new Date().toISOString();
+      }
+
+      const updated = this.store.updateDesktopRelease(id, next);
+      if (updated === undefined) {
+        throw this.desktopReleaseNotFound(id);
+      }
+      if (updated === null) {
+        throw this.desktopReleaseConflict(normalized.version ?? current.version);
+      }
+
+      return {
+        data: this.toDesktopReleaseSummary(updated)
+      };
+    }
+
+    const current = await this.prismaService.desktopRelease.findUnique({
+      where: {
+        id
+      }
+    });
+    if (!current) {
+      throw this.desktopReleaseNotFound(id);
+    }
+
+    const nextPlatform = normalized.platform ?? current.platform;
+    const nextChannel = normalized.channel ?? current.channel;
+    const nextVersion = normalized.version ?? current.version;
+    await this.assertDesktopReleaseUnique(nextPlatform, nextChannel, nextVersion, id);
+
+    const updateData = {
+      ...normalized
+    } as Prisma.DesktopReleaseUpdateInput;
+    if (normalized.status === 'PUBLISHED' && current.status !== 'PUBLISHED') {
+      updateData.publishedAt = new Date();
+    }
+
+    const updated = await this.prismaService.$transaction(async (tx) => {
+      const release = await tx.desktopRelease.update({
+        where: {
+          id
+        },
+        data: updateData
+      });
+
+      await this.recordAdminAction(tx, {
+        operatorAccountId: operator.account.id,
+        action: 'UPDATE_DESKTOP_RELEASE',
+        targetType: 'desktop_release',
+        targetId: release.id,
+        summary: `Updated desktop release ${release.version}`,
+        metadata: input
+      });
+
+      return release;
+    });
+
+    return {
+      data: this.toDesktopReleaseSummary(updated)
+    };
+  }
+
+  async publishDesktopRelease(
+    releaseId: string,
+    cookieHeader?: string
+  ): Promise<PublishAdminDesktopReleaseResponseDto> {
+    const operator = await this.requireAdminOperator(cookieHeader);
+    const id = releaseId.trim();
+    const publishedAt = new Date();
+
+    if (!isDatabasePersistenceEnabled()) {
+      const updated = this.store.updateDesktopRelease(id, {
+        status: 'PUBLISHED',
+        publishedAt: publishedAt.toISOString()
+      });
+      if (!updated) {
+        throw this.desktopReleaseNotFound(id);
+      }
+
+      return {
+        data: this.toDesktopReleaseSummary(updated)
+      };
+    }
+
+    const current = await this.prismaService.desktopRelease.findUnique({
+      where: {
+        id
+      }
+    });
+    if (!current) {
+      throw this.desktopReleaseNotFound(id);
+    }
+
+    const published = await this.prismaService.$transaction(async (tx) => {
+      const release = await tx.desktopRelease.update({
+        where: {
+          id
+        },
+        data: {
+          status: 'PUBLISHED',
+          publishedAt
+        }
+      });
+
+      await this.recordAdminAction(tx, {
+        operatorAccountId: operator.account.id,
+        action: 'PUBLISH_DESKTOP_RELEASE',
+        targetType: 'desktop_release',
+        targetId: release.id,
+        summary: `Published desktop release ${release.version}`,
+        metadata: {
+          version: release.version,
+          platform: release.platform,
+          channel: release.channel,
+          forceUpdate: release.forceUpdate
+        }
+      });
+
+      return release;
+    });
+
+    return {
+      data: this.toDesktopReleaseSummary(published)
+    };
+  }
+
+  async archiveDesktopRelease(
+    releaseId: string,
+    cookieHeader?: string
+  ): Promise<ArchiveAdminDesktopReleaseResponseDto> {
+    const operator = await this.requireAdminOperator(cookieHeader);
+    const id = releaseId.trim();
+
+    if (!isDatabasePersistenceEnabled()) {
+      const updated = this.store.updateDesktopRelease(id, {
+        status: 'ARCHIVED'
+      });
+      if (!updated) {
+        throw this.desktopReleaseNotFound(id);
+      }
+
+      return {
+        data: this.toDesktopReleaseSummary(updated)
+      };
+    }
+
+    const current = await this.prismaService.desktopRelease.findUnique({
+      where: {
+        id
+      }
+    });
+    if (!current) {
+      throw this.desktopReleaseNotFound(id);
+    }
+
+    const archived = await this.prismaService.$transaction(async (tx) => {
+      const release = await tx.desktopRelease.update({
+        where: {
+          id
+        },
+        data: {
+          status: 'ARCHIVED'
+        }
+      });
+
+      await this.recordAdminAction(tx, {
+        operatorAccountId: operator.account.id,
+        action: 'ARCHIVE_DESKTOP_RELEASE',
+        targetType: 'desktop_release',
+        targetId: release.id,
+        summary: `Archived desktop release ${release.version}`,
+        metadata: {
+          version: release.version,
+          platform: release.platform,
+          channel: release.channel
+        }
+      });
+
+      return release;
+    });
+
+    return {
+      data: this.toDesktopReleaseSummary(archived)
     };
   }
 
@@ -1232,6 +1583,144 @@ export class AdminService {
     });
   }
 
+  private buildDesktopReleaseWhere(
+    query: ListAdminDesktopReleasesQueryDto
+  ): Prisma.DesktopReleaseWhereInput {
+    const where: Prisma.DesktopReleaseWhereInput = {};
+
+    if (query.status) {
+      where.status = query.status;
+    }
+    if (query.platform) {
+      where.platform = query.platform;
+    }
+    if (query.channel) {
+      where.channel = query.channel;
+    }
+
+    return where;
+  }
+
+  private matchesDesktopReleaseQuery(
+    release: { status: string; platform: string; channel: string },
+    query: ListAdminDesktopReleasesQueryDto
+  ): boolean {
+    return (
+      (!query.status || release.status === query.status) &&
+      (!query.platform || release.platform === query.platform) &&
+      (!query.channel || release.channel === query.channel)
+    );
+  }
+
+  private normalizeCreateDesktopReleaseInput(input: CreateAdminDesktopReleaseRequestDto) {
+    const version = this.requireNonEmptyText(input.version, 'Desktop release version is required.');
+    const downloadUrl = this.requireNonEmptyText(
+      input.downloadUrl,
+      'Desktop release downloadUrl is required.'
+    );
+
+    return {
+      version,
+      platform: input.platform ?? 'windows',
+      channel: input.channel ?? 'stable',
+      downloadUrl,
+      releaseNotes: this.toNullableTrimmedText(input.releaseNotes),
+      checksumSha256: this.toNullableTrimmedText(input.checksumSha256),
+      fileSizeBytes: input.fileSizeBytes ?? null,
+      forceUpdate: input.forceUpdate ?? false,
+      minimumSupportedVersion: this.toNullableTrimmedText(input.minimumSupportedVersion),
+      status: input.status ?? 'DRAFT'
+    };
+  }
+
+  private normalizeUpdateDesktopReleaseInput(
+    input: UpdateAdminDesktopReleaseRequestDto
+  ): Partial<DesktopReleaseRecord> {
+    const update: Partial<DesktopReleaseRecord> = {};
+
+    if (input.version !== undefined) {
+      update.version = this.requireNonEmptyText(input.version, 'Desktop release version cannot be empty.');
+    }
+    if (input.platform !== undefined) {
+      update.platform = input.platform;
+    }
+    if (input.channel !== undefined) {
+      update.channel = input.channel;
+    }
+    if (input.downloadUrl !== undefined) {
+      update.downloadUrl = this.requireNonEmptyText(
+        input.downloadUrl,
+        'Desktop release downloadUrl cannot be empty.'
+      );
+    }
+    if (input.releaseNotes !== undefined) {
+      update.releaseNotes = this.toNullableTrimmedText(input.releaseNotes);
+    }
+    if (input.checksumSha256 !== undefined) {
+      update.checksumSha256 = this.toNullableTrimmedText(input.checksumSha256);
+    }
+    if (input.fileSizeBytes !== undefined) {
+      update.fileSizeBytes = input.fileSizeBytes;
+    }
+    if (input.forceUpdate !== undefined) {
+      update.forceUpdate = input.forceUpdate;
+    }
+    if (input.minimumSupportedVersion !== undefined) {
+      update.minimumSupportedVersion = this.toNullableTrimmedText(input.minimumSupportedVersion);
+    }
+    if (input.status !== undefined) {
+      update.status = input.status;
+    }
+
+    return update;
+  }
+
+  private async assertDesktopReleaseUnique(
+    platform: string,
+    channel: string,
+    version: string,
+    exceptId?: string
+  ) {
+    const existing = await this.prismaService.desktopRelease.findFirst({
+      where: {
+        platform,
+        channel,
+        version,
+        ...(exceptId
+          ? {
+              id: {
+                not: exceptId
+              }
+            }
+          : {})
+      }
+    });
+
+    if (existing) {
+      throw this.desktopReleaseConflict(version);
+    }
+  }
+
+  private toNullableTrimmedText(value: string | null | undefined): string | null {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    return value.trim() || null;
+  }
+
+  private compareDesktopReleaseOrder(left: DesktopReleaseRecord, right: DesktopReleaseRecord): number {
+    const versionOrder = this.compareDesktopVersions(left.version, right.version);
+    if (versionOrder !== 0) {
+      return versionOrder;
+    }
+
+    return (
+      this.toDateTimeMs(left.publishedAt ?? left.updatedAt) -
+      this.toDateTimeMs(right.publishedAt ?? right.updatedAt)
+    );
+  }
+
   private buildWorkspaceWhere(query?: string): Prisma.WorkspaceWhereInput {
     const value = query?.trim();
     if (!value) {
@@ -1528,6 +2017,25 @@ export class AdminService {
     };
   }
 
+  private toDesktopReleaseSummary(release: DesktopReleaseRecord) {
+    return {
+      id: release.id,
+      version: release.version,
+      platform: 'windows' as const,
+      channel: 'stable' as const,
+      downloadUrl: release.downloadUrl,
+      releaseNotes: release.releaseNotes ?? undefined,
+      checksumSha256: release.checksumSha256 ?? undefined,
+      fileSizeBytes: release.fileSizeBytes ?? undefined,
+      forceUpdate: release.forceUpdate,
+      minimumSupportedVersion: release.minimumSupportedVersion ?? undefined,
+      status: this.toDesktopReleaseStatus(release.status),
+      publishedAt: this.toIsoDateString(release.publishedAt),
+      createdAt: this.toRequiredIsoDateString(release.createdAt),
+      updatedAt: this.toRequiredIsoDateString(release.updatedAt)
+    };
+  }
+
   private toAdminWorkspaceSummary(workspace: WorkspaceSummaryRecord): AdminWorkspaceSummaryDto {
     const subscription = workspace.subscriptions[0];
 
@@ -1731,7 +2239,7 @@ export class AdminService {
       targetType: string;
       targetId: string;
       summary: string;
-      metadata?: Record<string, unknown>;
+      metadata?: unknown;
     }
   ): Promise<void> {
     await tx.adminActionLog.create({
@@ -1762,6 +2270,26 @@ export class AdminService {
         code: 'NOT_FOUND',
         message: 'Workspace was not found.',
         details: { workspaceId }
+      }
+    });
+  }
+
+  private desktopReleaseNotFound(releaseId: string) {
+    return new NotFoundException({
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Desktop release was not found.',
+        details: { releaseId }
+      }
+    });
+  }
+
+  private desktopReleaseConflict(version: string) {
+    return new ConflictException({
+      error: {
+        code: 'CONFLICT',
+        message: 'Desktop release version already exists for this platform and channel.',
+        details: { version }
       }
     });
   }
@@ -1845,6 +2373,53 @@ export class AdminService {
     }
 
     return 'PENDING';
+  }
+
+  private toDesktopReleaseStatus(value: string): 'DRAFT' | 'PUBLISHED' | 'ARCHIVED' {
+    if (value === 'PUBLISHED' || value === 'ARCHIVED') {
+      return value;
+    }
+
+    return 'DRAFT';
+  }
+
+  private compareDesktopVersions(left: string, right: string): number {
+    const leftParts = this.toVersionParts(left);
+    const rightParts = this.toVersionParts(right);
+    const length = Math.max(leftParts.length, rightParts.length);
+
+    for (let index = 0; index < length; index += 1) {
+      const diff = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+      if (diff !== 0) {
+        return diff;
+      }
+    }
+
+    return left.localeCompare(right);
+  }
+
+  private toVersionParts(value: string): number[] {
+    return value.match(/\d+/g)?.map((item) => Number(item)) ?? [0];
+  }
+
+  private toIsoDateString(value: DesktopReleaseDate | null | undefined): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    return value instanceof Date ? value.toISOString() : value;
+  }
+
+  private toRequiredIsoDateString(value: DesktopReleaseDate): string {
+    return this.toIsoDateString(value) ?? new Date(0).toISOString();
+  }
+
+  private toDateTimeMs(value: DesktopReleaseDate | null | undefined): number {
+    if (!value) {
+      return 0;
+    }
+
+    return value instanceof Date ? value.getTime() : new Date(value).getTime();
   }
 
   private toJsonValue(value: unknown): Prisma.InputJsonValue {

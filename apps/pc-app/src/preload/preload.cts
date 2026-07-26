@@ -12,6 +12,7 @@ import type {
   DesktopTaskArtifactWriteResult,
   DesktopToolInvocationRequest,
   DesktopToolInvocationResult,
+  DesktopUpdateCheckResult,
   DesktopWindowControlAction,
   QiuDesktopBridge
 } from '../shared/desktop-api.js';
@@ -24,6 +25,7 @@ const channels = {
   getRuntimeState: 'qiuai:desktop:get-runtime-state',
   bindDesktopDevice: 'qiuai:desktop:bind-desktop-device',
   checkServerConnection: 'qiuai:desktop:check-server-connection',
+  checkForUpdates: 'qiuai:desktop:check-for-updates',
   listAuthorizedRoleTemplates: 'qiuai:desktop:list-authorized-role-templates',
   syncRuntimeState: 'qiuai:desktop:sync-runtime-state',
   saveRuntimeState: 'qiuai:desktop:save-runtime-state',
@@ -35,6 +37,7 @@ const channels = {
   writeTaskArtifact: 'qiuai:desktop:write-task-artifact',
   invokeDesktopTool: 'qiuai:desktop:invoke-desktop-tool',
   openLocalPath: 'qiuai:desktop:open-local-path',
+  openExternalUrl: 'qiuai:desktop:open-external-url',
   controlWindow: 'qiuai:desktop:control-window'
 } as const;
 
@@ -45,6 +48,8 @@ const bridge: QiuDesktopBridge = {
     ipcRenderer.invoke(channels.bindDesktopDevice, bindingCode) as Promise<DesktopRuntimeState>,
   checkServerConnection: () =>
     ipcRenderer.invoke(channels.checkServerConnection) as Promise<DesktopServerConnectionStatus>,
+  checkForUpdates: () =>
+    ipcRenderer.invoke(channels.checkForUpdates) as Promise<DesktopUpdateCheckResult>,
   listAuthorizedRoleTemplates: () =>
     ipcRenderer.invoke(channels.listAuthorizedRoleTemplates) as Promise<DesktopAuthorizedRoleTemplateCatalog>,
   syncRuntimeState: (state: DesktopRuntimeState) =>
@@ -67,6 +72,8 @@ const bridge: QiuDesktopBridge = {
     ipcRenderer.invoke(channels.invokeDesktopTool, request) as Promise<DesktopToolInvocationResult>,
   openLocalPath: (path: string) =>
     ipcRenderer.invoke(channels.openLocalPath, path) as Promise<void>,
+  openExternalUrl: (url: string) =>
+    ipcRenderer.invoke(channels.openExternalUrl, url) as Promise<void>,
   controlWindow: (action: DesktopWindowControlAction) =>
     ipcRenderer.invoke(channels.controlWindow, action) as Promise<boolean>
 };

@@ -1,4 +1,7 @@
-import type { DesktopAuthorizedRoleTemplateSummary } from './desktop-api.js';
+import type {
+  DesktopAuthorizedRoleTemplateSummary,
+  DesktopUpdateCheckResult
+} from './desktop-api.js';
 import type { DesktopRuntimeSnapshot } from './desktop-contract.js';
 
 interface RedeemDesktopBindingCodeRequest {
@@ -44,6 +47,16 @@ interface SyncDesktopRuntimeResponse {
 
 interface ListAuthorizedRoleTemplatesResponse {
   data: DesktopAuthorizedRoleTemplateSummary[];
+}
+
+interface CheckDesktopUpdateInput {
+  currentVersion?: string;
+  platform?: 'windows';
+  channel?: 'stable';
+}
+
+interface CheckDesktopUpdateResponse {
+  data: DesktopUpdateCheckResult;
 }
 
 export async function syncDesktopRuntimeSnapshot(
@@ -123,6 +136,41 @@ export async function listAuthorizedRoleTemplates(
   }
 
   return body as ListAuthorizedRoleTemplatesResponse;
+}
+
+export async function checkDesktopUpdate(
+  baseUrl: string,
+  input: CheckDesktopUpdateInput
+): Promise<CheckDesktopUpdateResponse> {
+  const searchParams = new URLSearchParams();
+  if (input.currentVersion) {
+    searchParams.set('currentVersion', input.currentVersion);
+  }
+  if (input.platform) {
+    searchParams.set('platform', input.platform);
+  }
+  if (input.channel) {
+    searchParams.set('channel', input.channel);
+  }
+
+  const queryString = searchParams.toString();
+  const response = await fetch(
+    `${normalizeBaseUrl(baseUrl)}/api/v1/desktop/releases/latest${queryString ? `?${queryString}` : ''}`,
+    {
+      headers: {
+        accept: 'application/json'
+      }
+    }
+  );
+
+  const body = (await response.json()) as CheckDesktopUpdateResponse | { error?: { message?: string } };
+  if (!response.ok) {
+    const errorBody = body as { error?: { message?: string } };
+    const message = errorBody.error?.message ?? `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return body as CheckDesktopUpdateResponse;
 }
 
 function normalizeBaseUrl(baseUrl: string): string {

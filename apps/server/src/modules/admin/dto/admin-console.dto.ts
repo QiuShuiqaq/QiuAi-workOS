@@ -67,6 +67,265 @@ export class ListAdminPlansResponseDto {
   data!: AdminPlanDetailDto[];
 }
 
+export class DesktopReleaseSummaryDto {
+  @ApiProperty({ example: 'release-id' })
+  id!: string;
+
+  @ApiProperty({ example: '1.0.1' })
+  version!: string;
+
+  @ApiProperty({ enum: ['windows'], example: 'windows' })
+  platform!: 'windows';
+
+  @ApiProperty({ enum: ['stable'], example: 'stable' })
+  channel!: 'stable';
+
+  @ApiProperty({ example: 'https://workos.qiuaihub.com/downloads/QiuAI-WorkOS-1.0.1.exe' })
+  downloadUrl!: string;
+
+  @ApiPropertyOptional({ example: 'Improved workflow execution and desktop stability.' })
+  releaseNotes?: string;
+
+  @ApiPropertyOptional({ example: 'sha256-hex' })
+  checksumSha256?: string;
+
+  @ApiPropertyOptional({ example: 104857600 })
+  fileSizeBytes?: number;
+
+  @ApiProperty({ example: false })
+  forceUpdate!: boolean;
+
+  @ApiPropertyOptional({ example: '1.0.0' })
+  minimumSupportedVersion?: string;
+
+  @ApiProperty({ enum: ['DRAFT', 'PUBLISHED', 'ARCHIVED'], example: 'DRAFT' })
+  status!: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+
+  @ApiPropertyOptional({ example: '2026-07-26T00:00:00.000Z' })
+  publishedAt?: string;
+
+  @ApiProperty({ example: '2026-07-26T00:00:00.000Z' })
+  createdAt!: string;
+
+  @ApiProperty({ example: '2026-07-26T00:00:00.000Z' })
+  updatedAt!: string;
+}
+
+export class ListAdminDesktopReleasesQueryDto {
+  @ApiPropertyOptional({ example: 1 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  page?: number;
+
+  @ApiPropertyOptional({ example: 20 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  @Type(() => Number)
+  pageSize?: number;
+
+  @ApiPropertyOptional({ enum: ['DRAFT', 'PUBLISHED', 'ARCHIVED'] })
+  @IsOptional()
+  @IsIn(['DRAFT', 'PUBLISHED', 'ARCHIVED'])
+  status?: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+
+  @ApiPropertyOptional({ enum: ['windows'] })
+  @IsOptional()
+  @IsIn(['windows'])
+  platform?: 'windows';
+
+  @ApiPropertyOptional({ enum: ['stable'] })
+  @IsOptional()
+  @IsIn(['stable'])
+  channel?: 'stable';
+}
+
+export class ListAdminDesktopReleasesResponseDto {
+  @ApiProperty({ type: [DesktopReleaseSummaryDto] })
+  data!: DesktopReleaseSummaryDto[];
+
+  @ApiProperty({
+    example: {
+      page: 1,
+      pageSize: 20,
+      totalItems: 1,
+      totalPages: 1
+    }
+  })
+  pagination!: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
+}
+
+export class CreateAdminDesktopReleaseRequestDto {
+  @ApiProperty({ example: '1.0.1' })
+  @IsString()
+  @MinLength(1)
+  version!: string;
+
+  @ApiPropertyOptional({ enum: ['windows'] })
+  @IsOptional()
+  @IsIn(['windows'])
+  platform?: 'windows';
+
+  @ApiPropertyOptional({ enum: ['stable'] })
+  @IsOptional()
+  @IsIn(['stable'])
+  channel?: 'stable';
+
+  @ApiProperty({ example: 'https://workos.qiuaihub.com/downloads/QiuAI-WorkOS-1.0.1.exe' })
+  @IsString()
+  @MinLength(1)
+  downloadUrl!: string;
+
+  @ApiPropertyOptional({ example: 'Release notes shown to desktop users.' })
+  @IsOptional()
+  @IsString()
+  releaseNotes?: string;
+
+  @ApiPropertyOptional({ example: 'sha256-hex' })
+  @IsOptional()
+  @IsString()
+  checksumSha256?: string;
+
+  @ApiPropertyOptional({ example: 104857600 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Type(() => Number)
+  fileSizeBytes?: number;
+
+  @ApiPropertyOptional({ example: false })
+  @IsOptional()
+  @IsBoolean()
+  forceUpdate?: boolean;
+
+  @ApiPropertyOptional({ example: '1.0.0' })
+  @IsOptional()
+  @IsString()
+  minimumSupportedVersion?: string;
+
+  @ApiPropertyOptional({ enum: ['DRAFT', 'PUBLISHED', 'ARCHIVED'] })
+  @IsOptional()
+  @IsIn(['DRAFT', 'PUBLISHED', 'ARCHIVED'])
+  status?: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+}
+
+export class CreateAdminDesktopReleaseResponseDto {
+  @ApiProperty({ type: DesktopReleaseSummaryDto })
+  data!: DesktopReleaseSummaryDto;
+}
+
+export class UpdateAdminDesktopReleaseRequestDto {
+  @ApiPropertyOptional({ example: '1.0.1' })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  version?: string;
+
+  @ApiPropertyOptional({ enum: ['windows'] })
+  @IsOptional()
+  @IsIn(['windows'])
+  platform?: 'windows';
+
+  @ApiPropertyOptional({ enum: ['stable'] })
+  @IsOptional()
+  @IsIn(['stable'])
+  channel?: 'stable';
+
+  @ApiPropertyOptional({ example: 'https://workos.qiuaihub.com/downloads/QiuAI-WorkOS-1.0.1.exe' })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  downloadUrl?: string;
+
+  @ApiPropertyOptional({ example: 'Release notes shown to desktop users.', nullable: true })
+  @IsOptional()
+  @IsString()
+  releaseNotes?: string | null;
+
+  @ApiPropertyOptional({ example: 'sha256-hex', nullable: true })
+  @IsOptional()
+  @IsString()
+  checksumSha256?: string | null;
+
+  @ApiPropertyOptional({ example: 104857600, nullable: true })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Type(() => Number)
+  fileSizeBytes?: number | null;
+
+  @ApiPropertyOptional({ example: false })
+  @IsOptional()
+  @IsBoolean()
+  forceUpdate?: boolean;
+
+  @ApiPropertyOptional({ example: '1.0.0', nullable: true })
+  @IsOptional()
+  @IsString()
+  minimumSupportedVersion?: string | null;
+
+  @ApiPropertyOptional({ enum: ['DRAFT', 'PUBLISHED', 'ARCHIVED'] })
+  @IsOptional()
+  @IsIn(['DRAFT', 'PUBLISHED', 'ARCHIVED'])
+  status?: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+}
+
+export class UpdateAdminDesktopReleaseResponseDto {
+  @ApiProperty({ type: DesktopReleaseSummaryDto })
+  data!: DesktopReleaseSummaryDto;
+}
+
+export class PublishAdminDesktopReleaseResponseDto {
+  @ApiProperty({ type: DesktopReleaseSummaryDto })
+  data!: DesktopReleaseSummaryDto;
+}
+
+export class ArchiveAdminDesktopReleaseResponseDto {
+  @ApiProperty({ type: DesktopReleaseSummaryDto })
+  data!: DesktopReleaseSummaryDto;
+}
+
+export class CheckDesktopUpdateQueryDto {
+  @ApiPropertyOptional({ example: '1.0.0' })
+  @IsOptional()
+  @IsString()
+  currentVersion?: string;
+
+  @ApiPropertyOptional({ enum: ['windows'] })
+  @IsOptional()
+  @IsIn(['windows'])
+  platform?: 'windows';
+
+  @ApiPropertyOptional({ enum: ['stable'] })
+  @IsOptional()
+  @IsIn(['stable'])
+  channel?: 'stable';
+}
+
+export class CheckDesktopUpdateResponseDto {
+  @ApiProperty({
+    example: {
+      currentVersion: '1.0.0',
+      updateAvailable: true,
+      forceUpdate: false
+    }
+  })
+  data!: {
+    currentVersion?: string;
+    updateAvailable: boolean;
+    forceUpdate: boolean;
+    latestRelease?: DesktopReleaseSummaryDto;
+  };
+}
+
 export class AdminEntitlementInputDto {
   @ApiProperty({ example: 'maxRoleInstances' })
   @IsString()

@@ -12,6 +12,11 @@ import type {
   CreateDepartmentRequest,
   CreateDepartmentResponse,
   CancelAdminWorkspaceInvitationResponse,
+  CheckDesktopUpdateQuery,
+  ArchiveAdminDesktopReleaseResponse,
+  CheckDesktopUpdateResponse,
+  CreateAdminDesktopReleaseRequest,
+  CreateAdminDesktopReleaseResponse,
   CreateAdminDesktopBindingCodeRequest,
   CreateAdminDesktopBindingCodeResponse,
   EntitlementCheckRequest,
@@ -33,6 +38,8 @@ import type {
   CreateAdminRoleTemplateResponse,
   GetAdminRoleTemplateResponse,
   ListAdminActionLogsResponse,
+  ListAdminDesktopReleasesQuery,
+  ListAdminDesktopReleasesResponse,
   ListAdminRoleTemplatesResponse,
   CancelWorkspaceInvitationResponse,
   CancelDesktopBindingCodeResponse,
@@ -59,11 +66,14 @@ import type {
   RedeemDesktopBindingCodeResponse,
   PlatformOverviewResponse,
   PublishAdminRoleTemplateResponse,
+  PublishAdminDesktopReleaseResponse,
   RevokeAdminDesktopDeviceResponse,
   TestAdminRoleTemplateRequest,
   TestAdminRoleTemplateResponse,
   UpdateAdminWorkspaceStatusRequest,
   UpdateAdminWorkspaceStatusResponse,
+  UpdateAdminDesktopReleaseRequest,
+  UpdateAdminDesktopReleaseResponse,
   UpdateAdminRoleTemplateRequest,
   UpdateAdminRoleTemplateResponse,
   UpdateDesktopBindingCodeRequest,
@@ -170,6 +180,51 @@ export class QiuApiClient {
 
   updateAdminPlan(planCode: string, input: UpdateAdminPlanRequest): Promise<UpdateAdminPlanResponse> {
     return this.patch(`/api/v1/admin/plans/${encodeURIComponent(planCode)}`, input);
+  }
+
+  listAdminDesktopReleases(
+    params?: ListAdminDesktopReleasesQuery
+  ): Promise<ListAdminDesktopReleasesResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.page !== undefined) {
+      searchParams.set('page', String(params.page));
+    }
+    if (params?.pageSize !== undefined) {
+      searchParams.set('pageSize', String(params.pageSize));
+    }
+    if (params?.status) {
+      searchParams.set('status', params.status);
+    }
+    if (params?.platform) {
+      searchParams.set('platform', params.platform);
+    }
+    if (params?.channel) {
+      searchParams.set('channel', params.channel);
+    }
+
+    const queryString = searchParams.toString();
+    return this.get(`/api/v1/admin/desktop-releases${queryString ? `?${queryString}` : ''}`);
+  }
+
+  createAdminDesktopRelease(
+    input: CreateAdminDesktopReleaseRequest
+  ): Promise<CreateAdminDesktopReleaseResponse> {
+    return this.post('/api/v1/admin/desktop-releases', input);
+  }
+
+  updateAdminDesktopRelease(
+    releaseId: string,
+    input: UpdateAdminDesktopReleaseRequest
+  ): Promise<UpdateAdminDesktopReleaseResponse> {
+    return this.patch(`/api/v1/admin/desktop-releases/${encodeURIComponent(releaseId)}`, input);
+  }
+
+  publishAdminDesktopRelease(releaseId: string): Promise<PublishAdminDesktopReleaseResponse> {
+    return this.post(`/api/v1/admin/desktop-releases/${encodeURIComponent(releaseId)}/publish`, {});
+  }
+
+  archiveAdminDesktopRelease(releaseId: string): Promise<ArchiveAdminDesktopReleaseResponse> {
+    return this.post(`/api/v1/admin/desktop-releases/${encodeURIComponent(releaseId)}/archive`, {});
   }
 
   listAdminRoleTemplates(): Promise<ListAdminRoleTemplatesResponse> {
@@ -423,6 +478,22 @@ export class QiuApiClient {
 
   redeemDesktopBindingCode(input: RedeemDesktopBindingCodeRequest): Promise<RedeemDesktopBindingCodeResponse> {
     return this.post('/api/v1/desktop/bindings/redeem', input);
+  }
+
+  checkDesktopUpdate(params?: CheckDesktopUpdateQuery): Promise<CheckDesktopUpdateResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.currentVersion) {
+      searchParams.set('currentVersion', params.currentVersion);
+    }
+    if (params?.platform) {
+      searchParams.set('platform', params.platform);
+    }
+    if (params?.channel) {
+      searchParams.set('channel', params.channel);
+    }
+
+    const queryString = searchParams.toString();
+    return this.get(`/api/v1/desktop/releases/latest${queryString ? `?${queryString}` : ''}`);
   }
 
   private async get<TResponse>(path: string): Promise<TResponse> {

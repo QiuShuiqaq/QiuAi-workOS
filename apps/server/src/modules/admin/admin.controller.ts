@@ -4,7 +4,10 @@ import type { FastifyRequest } from 'fastify';
 
 import { AdminService } from './admin.service';
 import {
+  ArchiveAdminDesktopReleaseResponseDto,
   CancelAdminWorkspaceInvitationResponseDto,
+  CreateAdminDesktopReleaseRequestDto,
+  CreateAdminDesktopReleaseResponseDto,
   CreateAdminDesktopBindingCodeRequestDto,
   CreateAdminDesktopBindingCodeResponseDto,
   CreateAdminWorkspaceInvitationRequestDto,
@@ -16,10 +19,15 @@ import {
   GrantAdminWorkspaceAuthorizationResponseDto,
   ListAdminActionLogsQueryDto,
   ListAdminActionLogsResponseDto,
+  ListAdminDesktopReleasesQueryDto,
+  ListAdminDesktopReleasesResponseDto,
   ListAdminPlansResponseDto,
   ListAdminWorkspacesQueryDto,
   ListAdminWorkspacesResponseDto,
+  PublishAdminDesktopReleaseResponseDto,
   RevokeAdminDesktopDeviceResponseDto,
+  UpdateAdminDesktopReleaseRequestDto,
+  UpdateAdminDesktopReleaseResponseDto,
   UpdateAdminPlanRequestDto,
   UpdateAdminPlanResponseDto,
   UpdateAdminWorkspaceStatusRequestDto,
@@ -48,6 +56,52 @@ export class AdminController {
     @Req() request: FastifyRequest
   ): Promise<UpdateAdminPlanResponseDto> {
     return this.adminService.updatePlan(planCode, body, request.headers.cookie);
+  }
+
+  @Get('desktop-releases')
+  @ApiOkResponse({ type: ListAdminDesktopReleasesResponseDto })
+  listDesktopReleases(
+    @Query() query: ListAdminDesktopReleasesQueryDto,
+    @Req() request: FastifyRequest
+  ): Promise<ListAdminDesktopReleasesResponseDto> {
+    return this.adminService.listDesktopReleases(query, request.headers.cookie);
+  }
+
+  @Post('desktop-releases')
+  @ApiOkResponse({ type: CreateAdminDesktopReleaseResponseDto })
+  createDesktopRelease(
+    @Body() body: CreateAdminDesktopReleaseRequestDto,
+    @Req() request: FastifyRequest
+  ): Promise<CreateAdminDesktopReleaseResponseDto> {
+    return this.adminService.createDesktopRelease(body, request.headers.cookie);
+  }
+
+  @Patch('desktop-releases/:releaseId')
+  @ApiOkResponse({ type: UpdateAdminDesktopReleaseResponseDto })
+  updateDesktopRelease(
+    @Param('releaseId') releaseId: string,
+    @Body() body: UpdateAdminDesktopReleaseRequestDto,
+    @Req() request: FastifyRequest
+  ): Promise<UpdateAdminDesktopReleaseResponseDto> {
+    return this.adminService.updateDesktopRelease(releaseId, body, request.headers.cookie);
+  }
+
+  @Post('desktop-releases/:releaseId/publish')
+  @ApiOkResponse({ type: PublishAdminDesktopReleaseResponseDto })
+  publishDesktopRelease(
+    @Param('releaseId') releaseId: string,
+    @Req() request: FastifyRequest
+  ): Promise<PublishAdminDesktopReleaseResponseDto> {
+    return this.adminService.publishDesktopRelease(releaseId, request.headers.cookie);
+  }
+
+  @Post('desktop-releases/:releaseId/archive')
+  @ApiOkResponse({ type: ArchiveAdminDesktopReleaseResponseDto })
+  archiveDesktopRelease(
+    @Param('releaseId') releaseId: string,
+    @Req() request: FastifyRequest
+  ): Promise<ArchiveAdminDesktopReleaseResponseDto> {
+    return this.adminService.archiveDesktopRelease(releaseId, request.headers.cookie);
   }
 
   @Get('workspaces')

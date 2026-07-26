@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createInitialDesktopRuntimeState } from '../shared/desktop-state.js';
 import {
+  checkDesktopUpdate as fetchDesktopUpdate,
   listAuthorizedRoleTemplates as fetchAuthorizedRoleTemplates,
   redeemDesktopBindingCode,
   syncDesktopRuntimeSnapshot
@@ -12,7 +13,8 @@ import type {
   DesktopAppInfo,
   DesktopAuthorizedRoleTemplateCatalog,
   DesktopRuntimeState,
-  DesktopServerConnectionStatus
+  DesktopServerConnectionStatus,
+  DesktopUpdateCheckResult
 } from '../shared/desktop-api.js';
 import {
   loadDesktopRuntimeState,
@@ -210,6 +212,17 @@ export async function listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRo
       message: error instanceof Error ? error.message : '授权模板目录加载失败。'
     };
   }
+}
+
+export async function checkForDesktopUpdates(): Promise<DesktopUpdateCheckResult> {
+  const appInfo = getDesktopAppInfo();
+  const response = await fetchDesktopUpdate(appInfo.serverBaseUrl, {
+    currentVersion: appInfo.appVersion,
+    platform: 'windows',
+    channel: 'stable'
+  });
+
+  return response.data;
 }
 
 export async function checkServerConnection(): Promise<DesktopServerConnectionStatus> {

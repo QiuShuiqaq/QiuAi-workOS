@@ -16,6 +16,10 @@ import { AuthService } from '../auth/auth.service';
 import { EntitlementService } from '../entitlement/entitlement.service';
 import { RoleService } from '../role/role.service';
 import {
+  CheckDesktopUpdateQueryDto,
+  CheckDesktopUpdateResponseDto
+} from '../admin/dto/admin-console.dto';
+import {
   createDesktopBindingCode,
   createDesktopDeviceToken,
   hashDesktopToken,
@@ -52,6 +56,25 @@ interface MockDesktopBindingCodeRecord {
 interface MockDesktopDeviceRecord extends DesktopDeviceSummary {
   tokenHash: string;
 }
+
+type DesktopReleaseDate = Date | string;
+
+type DesktopReleaseRecord = {
+  id: string;
+  version: string;
+  platform: string;
+  channel: string;
+  downloadUrl: string;
+  releaseNotes?: string | null;
+  checksumSha256?: string | null;
+  fileSizeBytes?: number | null;
+  forceUpdate: boolean;
+  minimumSupportedVersion?: string | null;
+  status: string;
+  publishedAt?: DesktopReleaseDate | null;
+  createdAt: DesktopReleaseDate;
+  updatedAt: DesktopReleaseDate;
+};
 
 @Injectable()
 export class DesktopSyncService {
@@ -90,6 +113,59 @@ export class DesktopSyncService {
     }
     this.requireMockDeviceTokenForWorkspace(workspaceId, deviceToken, new Date());
     return this.roleService.listPublishedTemplatesForDesktop(workspaceId);
+  }
+
+  async checkDesktopUpdate(
+    query: CheckDesktopUpdateQueryDto
+  ): Promise<CheckDesktopUpdateResponseDto> {
+    const platform = query.platform ?? 'windows';
+    const channel = query.channel ?? 'stable';
+    const currentVersion = query.currentVersion?.trim() || undefined;
+    const releases = isDatabasePersistenceEnabled()
+      ? await this.prismaService.desktopRelease.findMany({
+          where: {
+            platform,
+            channel,
+            status: 'PUBLISHED'
+          }
+        })
+      : this.store
+          .listDesktopReleases()
+          .filter(
+            (release) =>
+              release.platform === platform &&
+              release.channel === channel &&
+              release.status === 'PUBLISHED'
+          );
+
+    const latestRelease = releases
+      .sort((left, right) => this.compareDesktopReleaseOrder(right, left))[0];
+
+    if (!latestRelease) {
+      return {
+        data: {
+          currentVersion,
+          updateAvailable: false,
+          forceUpdate: false
+        }
+      };
+    }
+
+    const updateAvailable = currentVersion
+      ? this.compareDesktopVersions(latestRelease.version, currentVersion) > 0
+      : false;
+    const belowMinimumSupported =
+      Boolean(currentVersion && latestRelease.minimumSupportedVersion) &&
+      this.compareDesktopVersions(currentVersion!, latestRelease.minimumSupportedVersion!) < 0;
+
+    return {
+      data: {
+        currentVersion,
+        updateAvailable,
+        forceUpdate: belowMinimumSupported || (updateAvailable && latestRelease.forceUpdate),
+        latestRelease: this.toDesktopReleaseSummary(latestRelease)
+      }
+    };
   }
 
   async listDevices(workspaceId: string, cookieHeader?: string): Promise<ListDesktopDevicesResponse> {
@@ -909,6 +985,84 @@ export class DesktopSyncService {
         bindingCode.status = 'EXPIRED';
       }
     }
+  }
+
+  private compareDesktopReleaseOrder(left: DesktopReleaseRecord, right: DesktopReleaseRecord): number {
+    const versionOrder = this.compareDesktopVersions(left.version, right.version);
+    if (versionOrder !== 0) {
+      return versionOrder;
+    }
+
+    return (
+      this.toDateTimeMs(left.publishedAt ?? left.updatedAt) -
+      this.toDateTimeMs(right.publishedAt ?? right.updatedAt)
+    );
+  }
+
+  private compareDesktopVersions(left: string, right: string): number {
+    const leftParts = this.toVersionParts(left);
+    const rightParts = this.toVersionParts(right);
+    const length = Math.max(leftParts.length, rightParts.length);
+
+    for (let index = 0; index < length; index += 1) {
+      const diff = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+      if (diff !== 0) {
+        return diff;
+      }
+    }
+
+    return left.localeCompare(right);
+  }
+
+  private toVersionParts(value: string): number[] {
+    return value.match(/\d+/g)?.map((item) => Number(item)) ?? [0];
+  }
+
+  private toDateTimeMs(value: DesktopReleaseDate | null | undefined): number {
+    if (!value) {
+      return 0;
+    }
+
+    return value instanceof Date ? value.getTime() : new Date(value).getTime();
+  }
+
+  private toIsoDateString(value: DesktopReleaseDate | null | undefined): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    return value instanceof Date ? value.toISOString() : value;
+  }
+
+  private toRequiredIsoDateString(value: DesktopReleaseDate): string {
+    return this.toIsoDateString(value) ?? new Date(0).toISOString();
+  }
+
+  private toDesktopReleaseSummary(release: DesktopReleaseRecord) {
+    return {
+      id: release.id,
+      version: release.version,
+      platform: 'windows' as const,
+      channel: 'stable' as const,
+      downloadUrl: release.downloadUrl,
+      releaseNotes: release.releaseNotes ?? undefined,
+      checksumSha256: release.checksumSha256 ?? undefined,
+      fileSizeBytes: release.fileSizeBytes ?? undefined,
+      forceUpdate: release.forceUpdate,
+      minimumSupportedVersion: release.minimumSupportedVersion ?? undefined,
+      status: this.toDesktopReleaseStatus(release.status),
+      publishedAt: this.toIsoDateString(release.publishedAt),
+      createdAt: this.toRequiredIsoDateString(release.createdAt),
+      updatedAt: this.toRequiredIsoDateString(release.updatedAt)
+    };
+  }
+
+  private toDesktopReleaseStatus(value: string): 'DRAFT' | 'PUBLISHED' | 'ARCHIVED' {
+    if (value === 'PUBLISHED' || value === 'ARCHIVED') {
+      return value;
+    }
+
+    return 'DRAFT';
   }
 
   private assertMockWorkspace(workspaceId: string) {

@@ -56,6 +56,7 @@ import type {
   DesktopAuthorizedRoleTemplateSummary,
   DesktopBackupSummary,
   DesktopRuntimeState,
+  DesktopUpdateCheckResult,
   DesktopWindowControlAction
 } from '../shared/desktop-api';
 import type {
@@ -641,9 +642,12 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isBindingDevice, setIsBindingDevice] = useState(false);
   const [isBackupBusy, setIsBackupBusy] = useState(false);
+  const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false);
   const [syncNotice, setSyncNotice] = useState('');
   const [onboardingNotice, setOnboardingNotice] = useState('');
   const [backupNotice, setBackupNotice] = useState('');
+  const [updateNotice, setUpdateNotice] = useState('');
+  const [updateCheckResult, setUpdateCheckResult] = useState<DesktopUpdateCheckResult | null>(null);
   const [modelTestNotice, setModelTestNotice] = useState('');
   const [isTestingModel, setIsTestingModel] = useState(false);
   const [localActionNotice, setLocalActionNotice] = useState('');
@@ -919,6 +923,42 @@ export default function App() {
       await window.qiuDesktop.openLocalPath(targetPath);
     } catch (error) {
       setLocalActionNotice(`打开本地路径失败：${error instanceof Error ? error.message : 'unknown error'}`);
+    }
+  }
+
+  async function checkForUpdates() {
+    if (!window.qiuDesktop) {
+      return;
+    }
+
+    setIsCheckingForUpdates(true);
+    setUpdateNotice('');
+    try {
+      const result = await window.qiuDesktop.checkForUpdates();
+      setUpdateCheckResult(result);
+      if (result.updateAvailable && result.latestRelease) {
+        setUpdateNotice(`发现新版本 ${result.latestRelease.version}`);
+      } else {
+        setUpdateNotice('当前已经是最新版本');
+      }
+    } catch (error) {
+      setUpdateNotice(`检查更新失败：${error instanceof Error ? error.message : 'unknown error'}`);
+    } finally {
+      setIsCheckingForUpdates(false);
+    }
+  }
+
+  async function openUpdateDownload() {
+    const downloadUrl = updateCheckResult?.latestRelease?.downloadUrl;
+    if (!downloadUrl || !window.qiuDesktop) {
+      return;
+    }
+
+    setUpdateNotice('');
+    try {
+      await window.qiuDesktop.openExternalUrl(downloadUrl);
+    } catch (error) {
+      setUpdateNotice(`打开下载地址失败：${error instanceof Error ? error.message : 'unknown error'}`);
     }
   }
 
@@ -2797,6 +2837,59 @@ export default function App() {
               style={{ width: 160 }}
               onChange={(startupSection) => updateClientPreferences({ startupSection })}
             />
+          </div>
+        </section>
+
+        <section className="settings-list-section">
+          <Typography.Text strong className="settings-list-title">软件更新</Typography.Text>
+          <div className="settings-list-row">
+            <div className="client-setting-copy">
+              <Typography.Text strong>当前版本</Typography.Text>
+              <Typography.Text type="secondary">{runtimeState.app.appVersion}</Typography.Text>
+            </div>
+            <Button
+              size="small"
+              icon={<CloudDownloadOutlined />}
+              loading={isCheckingForUpdates}
+              onClick={() => void checkForUpdates()}
+            >
+              检查更新
+            </Button>
+          </div>
+
+          <div className="settings-list-row">
+            <div className="client-setting-copy">
+              <Typography.Text strong>最新版本</Typography.Text>
+              <Typography.Text type="secondary">
+                {updateCheckResult?.latestRelease
+                  ? `${updateCheckResult.latestRelease.version} · ${
+                      updateCheckResult.updateAvailable ? '可更新' : '已是最新'
+                    }`
+                  : updateNotice || '尚未检查'}
+              </Typography.Text>
+              {updateCheckResult?.latestRelease?.fileSizeBytes !== undefined ? (
+                <Typography.Text type="secondary">
+                  安装包大小：{formatFileSize(updateCheckResult.latestRelease.fileSizeBytes)}
+                </Typography.Text>
+              ) : null}
+              {updateCheckResult?.latestRelease?.releaseNotes ? (
+                <Typography.Text type="secondary">
+                  {updateCheckResult.latestRelease.releaseNotes}
+                </Typography.Text>
+              ) : null}
+              {updateNotice ? <Typography.Text type="secondary">{updateNotice}</Typography.Text> : null}
+            </div>
+            <Space wrap>
+              {updateCheckResult?.forceUpdate ? <Tag color="red">强制</Tag> : null}
+              <Button
+                size="small"
+                type="primary"
+                disabled={!updateCheckResult?.updateAvailable || !updateCheckResult.latestRelease}
+                onClick={() => void openUpdateDownload()}
+              >
+                下载新版
+              </Button>
+            </Space>
           </div>
         </section>
 

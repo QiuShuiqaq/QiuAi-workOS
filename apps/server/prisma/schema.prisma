@@ -170,6 +170,12 @@ enum DesktopDeviceStatus {
   REVOKED
 }
 
+enum DesktopReleaseStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
 model Account {
   id           String        @id @default(uuid()) @db.Uuid
   primaryEmail String        @unique @map("primary_email")
@@ -734,6 +740,28 @@ model DesktopRuntimeSync {
   @@index([workspaceId])
   @@index([syncedAt])
   @@map("desktop_runtime_syncs")
+}
+
+model DesktopRelease {
+  id                      String               @id @default(uuid()) @db.Uuid
+  version                 String
+  platform                String               @default("windows")
+  channel                 String               @default("stable")
+  downloadUrl             String               @map("download_url")
+  releaseNotes            String?              @map("release_notes")
+  checksumSha256          String?              @map("checksum_sha256")
+  fileSizeBytes           Int?                 @map("file_size_bytes")
+  forceUpdate             Boolean              @default(false) @map("force_update")
+  minimumSupportedVersion String?              @map("minimum_supported_version")
+  status                  DesktopReleaseStatus @default(DRAFT)
+  publishedAt             DateTime?            @map("published_at")
+  createdAt               DateTime             @default(now()) @map("created_at")
+  updatedAt               DateTime             @updatedAt @map("updated_at")
+
+  @@unique([platform, channel, version])
+  @@index([platform, channel, status, publishedAt])
+  @@index([status])
+  @@map("desktop_releases")
 }
 
 model AdminActionLog {

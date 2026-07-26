@@ -1,6 +1,7 @@
 import * as electron from 'electron';
 import {
   bindDesktopDevice,
+  checkForDesktopUpdates,
   checkServerConnection,
   getDesktopAppInfo,
   getDesktopRuntimeState,
@@ -26,6 +27,7 @@ const channels = {
   getRuntimeState: 'qiuai:desktop:get-runtime-state',
   bindDesktopDevice: 'qiuai:desktop:bind-desktop-device',
   checkServerConnection: 'qiuai:desktop:check-server-connection',
+  checkForUpdates: 'qiuai:desktop:check-for-updates',
   listAuthorizedRoleTemplates: 'qiuai:desktop:list-authorized-role-templates',
   syncRuntimeState: 'qiuai:desktop:sync-runtime-state',
   saveRuntimeState: 'qiuai:desktop:save-runtime-state',
@@ -37,6 +39,7 @@ const channels = {
   writeTaskArtifact: 'qiuai:desktop:write-task-artifact',
   invokeDesktopTool: 'qiuai:desktop:invoke-desktop-tool',
   openLocalPath: 'qiuai:desktop:open-local-path',
+  openExternalUrl: 'qiuai:desktop:open-external-url',
   controlWindow: 'qiuai:desktop:control-window'
 } as const;
 
@@ -47,6 +50,7 @@ export function registerDesktopIpc() {
     return bindDesktopDevice(bindingCode);
   });
   ipcMain.handle(channels.checkServerConnection, () => checkServerConnection());
+  ipcMain.handle(channels.checkForUpdates, () => checkForDesktopUpdates());
   ipcMain.handle(channels.listAuthorizedRoleTemplates, () => listAuthorizedRoleTemplates());
   ipcMain.handle(channels.syncRuntimeState, async (_, state) => {
     return syncDesktopRuntimeState(state);
@@ -90,6 +94,19 @@ export function registerDesktopIpc() {
     if (errorMessage) {
       throw new Error(errorMessage);
     }
+  });
+  ipcMain.handle(channels.openExternalUrl, async (_, targetUrl: string) => {
+    const normalizedUrl = typeof targetUrl === 'string' ? targetUrl.trim() : '';
+    if (!normalizedUrl) {
+      throw new Error('URL is required.');
+    }
+
+    const url = new URL(normalizedUrl);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+      throw new Error('Only HTTP and HTTPS URLs can be opened.');
+    }
+
+    await shell.openExternal(url.toString());
   });
   ipcMain.handle(channels.controlWindow, (event, action: string) => {
     const currentWindow = BrowserWindow.fromWebContents(event.sender);

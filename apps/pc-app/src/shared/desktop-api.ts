@@ -32,6 +32,30 @@ export interface DesktopServerConnectionStatus {
   message?: string;
 }
 
+export interface DesktopUpdateReleaseSummary {
+  id: string;
+  version: string;
+  platform: 'windows';
+  channel: 'stable';
+  downloadUrl: string;
+  releaseNotes?: string;
+  checksumSha256?: string;
+  fileSizeBytes?: number;
+  forceUpdate: boolean;
+  minimumSupportedVersion?: string;
+  status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+  publishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DesktopUpdateCheckResult {
+  currentVersion?: string;
+  updateAvailable: boolean;
+  forceUpdate: boolean;
+  latestRelease?: DesktopUpdateReleaseSummary;
+}
+
 export interface DesktopRuntimeSyncResponse {
   data: {
     accepted: true;
@@ -189,6 +213,7 @@ export interface QiuDesktopBridge {
   getRuntimeState(): Promise<DesktopRuntimeState>;
   bindDesktopDevice(bindingCode: string): Promise<DesktopRuntimeState>;
   checkServerConnection(): Promise<DesktopServerConnectionStatus>;
+  checkForUpdates(): Promise<DesktopUpdateCheckResult>;
   listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRoleTemplateCatalog>;
   syncRuntimeState(state: DesktopRuntimeState): Promise<DesktopRuntimeSyncResponse>;
   saveRuntimeState(state: DesktopRuntimeState): Promise<void>;
@@ -200,6 +225,7 @@ export interface QiuDesktopBridge {
   writeTaskArtifact(request: DesktopTaskArtifactWriteRequest): Promise<DesktopTaskArtifactWriteResult>;
   invokeDesktopTool(request: DesktopToolInvocationRequest): Promise<DesktopToolInvocationResult>;
   openLocalPath(path: string): Promise<void>;
+  openExternalUrl(url: string): Promise<void>;
   controlWindow(action: DesktopWindowControlAction): Promise<boolean>;
 }
 
