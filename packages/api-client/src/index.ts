@@ -36,6 +36,7 @@ import type {
   ArchiveAdminRoleTemplateResponse,
   CreateAdminRoleTemplateRequest,
   CreateAdminRoleTemplateResponse,
+  DeleteAdminRoleTemplateResponse,
   GetAdminRoleTemplateResponse,
   ListAdminActionLogsResponse,
   ListAdminDesktopReleasesQuery,
@@ -284,6 +285,10 @@ export class QiuApiClient {
 
   archiveAdminRoleTemplate(templateId: string): Promise<ArchiveAdminRoleTemplateResponse> {
     return this.post(`/api/v1/admin/role-templates/${encodeURIComponent(templateId)}/archive`, {});
+  }
+
+  deleteAdminRoleTemplate(templateId: string): Promise<DeleteAdminRoleTemplateResponse> {
+    return this.delete(`/api/v1/admin/role-templates/${encodeURIComponent(templateId)}`);
   }
 
   listAdminWorkspaces(params?: {
@@ -567,6 +572,25 @@ export class QiuApiClient {
         'content-type': 'application/json'
       }),
       body: JSON.stringify(payload),
+      credentials: this.credentials,
+      cache: 'no-store'
+    });
+
+    const body = (await response.json()) as TResponse | ApiErrorResponse;
+
+    if (!response.ok) {
+      throw new QiuApiError(response.status, body as ApiErrorResponse);
+    }
+
+    return body as TResponse;
+  }
+
+  private async delete<TResponse>(path: string): Promise<TResponse> {
+    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      method: 'DELETE',
+      headers: this.mergeHeaders({
+        accept: 'application/json'
+      }),
       credentials: this.credentials,
       cache: 'no-store'
     });

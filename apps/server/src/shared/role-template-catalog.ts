@@ -358,6 +358,173 @@ function buildRunnableWorkflowGraphForTemplate(
   };
 }
 
+type OfficeProductionWorkflowArtifactType = Extract<
+  NonNullable<ServerRoleWorkflowGraph['nodes'][number]['artifactType']>,
+  'docx' | 'xlsx' | 'pptx' | 'pdf' | 'markdown'
+>;
+
+function graphEdge(sourceNodeId: string, targetNodeId: string): ServerRoleWorkflowGraph['edges'][number] {
+  return {
+    id: `${sourceNodeId}__${targetNodeId}`,
+    sourceNodeId,
+    targetNodeId,
+    condition: {
+      type: 'always'
+    }
+  };
+}
+
+function buildOfficeProductionWorkflowGraph(input: {
+  artifactType: OfficeProductionWorkflowArtifactType;
+  parameterSchema: Record<string, unknown>;
+  analysisInstruction: string;
+  draftInstruction: string;
+  qualityInstruction: string;
+  finalInstruction: string;
+  includeWebSearch?: boolean;
+}): ServerRoleWorkflowGraph {
+  const nodes: ServerRoleWorkflowGraph['nodes'] = [
+    {
+      id: 'start',
+      type: 'start',
+      name: '开始'
+    },
+    {
+      id: 'receive_input',
+      type: 'input',
+      name: '接收任务',
+      instruction: '读取用户输入、拖入的附件、本次目标、限制条件和期望交付物。',
+      inputVariables: ['start.text', 'start.files'],
+      outputVariables: ['task_brief']
+    },
+    {
+      id: 'extract_parameters',
+      type: 'parameter_extractor',
+      name: '提取任务参数',
+      instruction: '把用户任务整理成结构化参数，字段缺失时返回 null，不要编造附件或外部信息。',
+      modelProfileId: 'qiu-general-default',
+      inputVariables: ['start.text', 'start.files'],
+      outputVariables: ['task_parameters'],
+      config: {
+        schema: input.parameterSchema
+      }
+    },
+    {
+      id: 'gather_context',
+      type: 'knowledge',
+      name: '读取知识',
+      instruction: '优先读取企业知识、本地知识和已配置资料，只提取与本次任务直接相关的内容。',
+      inputVariables: ['start.text', 'extract_parameters.text'],
+      outputVariables: ['knowledge_context']
+    },
+    {
+      id: 'read_attachments',
+      type: 'tool',
+      name: '读取附件',
+      instruction: '如果用户拖入了 Word、PDF、PPT、表格或文本附件，提取可读文本；没有附件时跳过。',
+      toolId: 'office-document',
+      inputVariables: ['start.files'],
+      outputVariables: ['attachment_text'],
+      config: {
+        maxChars: 40000
+      }
+    },
+    ...(input.includeWebSearch
+      ? [
+          {
+            id: 'web_research',
+            type: 'tool' as const,
+            name: '联网检索',
+            instruction: '根据任务参数检索公开资料，输出来源标题、链接和摘要。需要 PC 端已配置网页搜索服务。',
+            toolId: 'web-search',
+            inputVariables: ['start.text', 'extract_parameters.text'],
+            outputVariables: ['web_context'],
+            config: {
+              action: 'web.search',
+              input: {
+                query: '{{start.text}}',
+                maxResults: 5
+              }
+            }
+          }
+        ]
+      : []),
+    {
+      id: 'analyze_work',
+      type: 'llm',
+      name: '分析与规划',
+      instruction: input.analysisInstruction,
+      modelProfileId: 'qiu-reasoning-default',
+      inputVariables: [
+        'start.text',
+        'extract_parameters.text',
+        'gather_context.text',
+        'read_attachments.text',
+        input.includeWebSearch ? 'web_research.text' : undefined
+      ].filter((value): value is string => Boolean(value)),
+      outputVariables: ['analysis_result']
+    },
+    {
+      id: 'draft_deliverable',
+      type: 'llm',
+      name: '生成交付内容',
+      instruction: input.draftInstruction,
+      modelProfileId: 'qiu-general-default',
+      inputVariables: ['analysis_result', 'knowledge_context', 'attachment_text'],
+      outputVariables: ['deliverable_content']
+    },
+    {
+      id: 'quality_check',
+      type: 'llm',
+      name: '自检修订',
+      instruction: input.qualityInstruction,
+      modelProfileId: 'qiu-general-default',
+      inputVariables: ['deliverable_content', 'task_parameters'],
+      outputVariables: ['quality_review']
+    },
+    {
+      id: 'write_artifact',
+      type: 'artifact',
+      name: '生成文件',
+      instruction: `把最终内容写成本地 ${input.artifactType} 文件，文件名使用任务标题。`,
+      toolId: 'office-document',
+      artifactType: input.artifactType,
+      inputVariables: ['deliverable_content', 'quality_review'],
+      outputVariables: ['deliverable_file']
+    },
+    {
+      id: 'final_output',
+      type: 'output',
+      name: '返回结果',
+      instruction: input.finalInstruction,
+      modelProfileId: 'qiu-general-default',
+      inputVariables: ['deliverable_content', 'quality_review', 'write_artifact.file'],
+      outputVariables: ['final_answer']
+    }
+  ];
+
+  return {
+    version: '1.0.0',
+    nodes,
+    edges: nodes.slice(1).map((node, index) => graphEdge(nodes[index]!.id, node.id)),
+    entryNodeId: 'start',
+    variables: [
+      { name: 'task_brief', type: 'text', description: '用户任务摘要', required: true },
+      { name: 'task_parameters', type: 'json', description: '结构化任务参数', required: true },
+      { name: 'knowledge_context', type: 'text', description: '企业和本地知识上下文' },
+      { name: 'attachment_text', type: 'text', description: '附件提取文本' },
+      { name: 'analysis_result', type: 'text', description: '分析和处理计划' },
+      { name: 'deliverable_content', type: 'text', description: '最终交付内容' },
+      { name: 'deliverable_file', type: 'artifact', description: '生成的本地文件' }
+    ],
+    runtimePolicy: {
+      maxNodeExecutions: 32,
+      maxLoopIterations: 4,
+      requireApprovalBeforeTools: false
+    }
+  };
+}
+
 function buildVideoContentWorkflowGraph(): ServerRoleWorkflowGraph {
   return {
     version: '1.0.0',
@@ -777,6 +944,24 @@ const baseServerRoleTemplateCatalog: BaseServerRoleTemplateCatalogEntry[] = [
       '请从这份会议材料中提取决策、待办、负责人和截止时间。'
     ],
     outputFormat: '文档索引表、结构化摘要、缺失材料清单、归档路径建议。',
+    workflowGraph: buildOfficeProductionWorkflowGraph({
+      artifactType: 'xlsx',
+      parameterSchema: {
+        documentScope: '需要整理的文件、文件夹或附件范围',
+        classifyBy: '分类规则或业务维度',
+        requiredFields: '需要提取的字段',
+        missingMaterialRules: '缺失材料判断规则',
+        archiveTarget: '建议归档目录，缺失时为 null'
+      },
+      analysisInstruction:
+        '根据附件文本、企业归档规则和用户目标，判断文档类型、所属业务、关键字段、缺失材料、归档建议和待办事项。',
+      draftInstruction:
+        '生成适合 Excel 的结构化内容。第一部分是文档索引表，字段包含文件/主题、类型、摘要、关键字段、责任人、建议归档路径、风险；第二部分是缺失材料清单；第三部分是待办清单。',
+      qualityInstruction:
+        '检查分类是否清晰、字段是否可落表、是否包含移动/删除原文件等高风险动作；高风险动作必须标记为“需人工确认”。',
+      finalInstruction:
+        '返回 Excel 文件位置、整理了哪些内容、缺失材料数量、需要人工确认的归档动作和下一步建议。'
+    }),
     approvalPolicy: '移动、删除或覆盖企业原始文件前必须人工确认。'
   },
   {
@@ -800,6 +985,25 @@ const baseServerRoleTemplateCatalog: BaseServerRoleTemplateCatalogEntry[] = [
       '请把这些产品资料整理成面向制造业客户的售前方案。'
     ],
     outputFormat: '方案目录、客户痛点、解决路径、交付范围、里程碑、风险和验收标准。',
+    workflowGraph: buildOfficeProductionWorkflowGraph({
+      artifactType: 'pptx',
+      parameterSchema: {
+        customerProfile: '客户行业、规模、角色和当前背景',
+        painPoints: '客户痛点列表',
+        productScope: '可用产品、服务或数字员工范围',
+        proposalGoal: '本次方案要达成的目标',
+        deliveryDeadline: '交付时间或演示时间，缺失时为 null'
+      },
+      analysisInstruction:
+        '基于客户需求、附件资料和企业知识，拆解客户目标、关键痛点、决策人关注点、方案边界、交付风险和验收口径。输出结构化分析，不要直接写 PPT。',
+      draftInstruction:
+        '生成可直接写入 PPT 的方案内容。必须包含：封面标题、客户背景、痛点、解决方案架构、数字员工/功能模块、实施里程碑、交付物、风险与保障、下一步建议。每页用“Slide: 标题 + bullets”组织。',
+      qualityInstruction:
+        '检查方案是否存在过度承诺、报价/工期不确定、客户行业不匹配、缺少验收标准的问题，并给出修订后的最终要点。',
+      finalInstruction:
+        '用中文返回方案已生成、PPT 文件位置、核心卖点、需要人工确认的报价/工期/承诺事项和下一步沟通建议。',
+      includeWebSearch: true
+    }),
     approvalPolicy: '正式对外发送方案、报价、工期和承诺前必须由负责人确认。'
   },
   {
@@ -846,6 +1050,25 @@ const baseServerRoleTemplateCatalog: BaseServerRoleTemplateCatalogEntry[] = [
       '请做一份行业简报，包含趋势、机会、风险、竞品和可引用来源。'
     ],
     outputFormat: '调研简报、来源列表、竞品矩阵、风险提示和下一步行动建议。',
+    workflowGraph: buildOfficeProductionWorkflowGraph({
+      artifactType: 'docx',
+      parameterSchema: {
+        researchTarget: '公司、行业、产品或竞品名称',
+        researchQuestions: '需要回答的问题列表',
+        geography: '地区范围，缺失时为 null',
+        timeRange: '时间范围或最新资料要求',
+        outputAudience: '报告读者或使用场景'
+      },
+      analysisInstruction:
+        '结合企业知识、附件和联网检索资料，提炼可信事实、来源线索、矛盾信息、竞品维度、机会点、风险点和待验证问题。',
+      draftInstruction:
+        '生成一份可交付的调研 Word 报告。必须包含：执行摘要、目标概况、关键事实、来源列表、竞品对比矩阵、机会与风险、适合销售/战略/运营使用的下一步动作。',
+      qualityInstruction:
+        '检查每个外部事实是否有来源提示；把不确定内容标记为“待验证”；删除无法支持的重要结论或改写成假设。',
+      finalInstruction:
+        '返回 Word 文件位置、最重要的 3 条结论、待验证问题和下一步行动建议。',
+      includeWebSearch: true
+    }),
     approvalPolicy: '对外引用、投资判断和战略结论必须由负责人复核。'
   },
   {
@@ -869,6 +1092,24 @@ const baseServerRoleTemplateCatalog: BaseServerRoleTemplateCatalogEntry[] = [
       '请根据这 20 条高频问题，生成客服回复模板和需要补充到知识库的条目。'
     ],
     outputFormat: '问题分流表、客户情绪风险、建议回复、升级条件、知识库补全清单。',
+    workflowGraph: buildOfficeProductionWorkflowGraph({
+      artifactType: 'docx',
+      parameterSchema: {
+        sourceType: '聊天记录、工单、FAQ 或投诉材料',
+        issueCategories: '用户指定的问题分类',
+        riskSignals: '退款、投诉、情绪、舆情、合规等风险信号',
+        replyTone: '回复语气要求',
+        escalationPolicy: '升级规则，缺失时为 null'
+      },
+      analysisInstruction:
+        '读取客服记录和政策知识，识别客户意图、问题分类、情绪风险、责任边界、是否需要升级和缺失的知识库条目。',
+      draftInstruction:
+        '生成客服处理文档。必须包含：问题分流表、优先级、建议回复、需要补问的信息、升级条件、禁止承诺事项、知识库补全清单。',
+      qualityInstruction:
+        '检查回复是否越权承诺退款/赔偿/结果，是否包含敏感或不确定表述；把需要人工确认的内容单独列出。',
+      finalInstruction:
+        '返回 Word 文件位置、分流结果摘要、高风险客户/问题、需要人工确认的回复和知识库补全建议。'
+    }),
     approvalPolicy: '涉及退款、赔偿、承诺、投诉升级和敏感客户时必须人工确认。'
   },
   {
@@ -1122,6 +1363,24 @@ const baseServerRoleTemplateCatalog: BaseServerRoleTemplateCatalogEntry[] = [
       '请检查这份 CSV 的缺失值、重复值和字段不一致问题，并给出清洗计划。'
     ],
     outputFormat: '指标摘要、异常值、趋势解释、数据质量问题、清洗计划和业务动作建议。',
+    workflowGraph: buildOfficeProductionWorkflowGraph({
+      artifactType: 'xlsx',
+      parameterSchema: {
+        datasetName: '数据集名称或业务主题',
+        metricFields: '需要关注的指标字段',
+        dimensionFields: '分组维度字段',
+        anomalyRules: '异常判断规则',
+        businessQuestion: '用户最想回答的业务问题'
+      },
+      analysisInstruction:
+        '读取表格文本和指标口径，识别字段、核心指标、维度、趋势、异常值、缺失/重复/口径不一致问题和可执行业务问题。',
+      draftInstruction:
+        '生成适合 Excel 的分析结果。必须包含：指标摘要表、异常明细表、趋势解释、数据质量问题、清洗计划、业务动作建议。内容要尽量结构化，便于写入 xlsx。',
+      qualityInstruction:
+        '检查是否把推测当事实；缺少原始字段或无法计算的指标要标记“无法确认”；经营建议必须说明依据。',
+      finalInstruction:
+        '返回 Excel 文件位置、主要指标结论、异常数量、数据质量问题和下一步业务动作。'
+    }),
     approvalPolicy: '涉及经营决策、财务口径和对外披露数据时必须由负责人确认。'
   },
   {

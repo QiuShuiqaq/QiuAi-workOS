@@ -24,6 +24,7 @@ import {
   AdminRoleTemplateDetailDto,
   CreateAdminRoleTemplateRequestDto,
   CreateAdminRoleTemplateResponseDto,
+  DeleteAdminRoleTemplateResponseDto,
   GetAdminRoleTemplateResponseDto,
   ListAdminRoleTemplatesResponseDto,
   PublishAdminRoleTemplateResponseDto,
@@ -446,6 +447,79 @@ export class RoleTemplateFactoryService {
 
     return {
       data: this.toAdminTemplateDetail(archived)
+    };
+  }
+
+  async deleteTemplate(
+    templateId: string,
+    cookieHeader?: string
+  ): Promise<DeleteAdminRoleTemplateResponseDto> {
+    const operator = await this.requireAdminOperator(cookieHeader);
+    const id = templateId.trim();
+
+    if (!isDatabasePersistenceEnabled()) {
+      const template = this.store.getRoleTemplate(id);
+      if (!template) {
+        throw this.templateNotFound(id);
+      }
+
+      const roleInstanceCount = this.store.countRoleInstancesByTemplateId(id);
+      if (roleInstanceCount > 0) {
+        throw this.templateInUse(id, roleInstanceCount);
+      }
+
+      this.store.deleteRoleTemplate(id);
+      return {
+        data: {
+          id
+        }
+      };
+    }
+
+    const deletedId = await this.prismaService.$transaction(async (tx) => {
+      const template = await tx.roleTemplate.findUnique({
+        where: {
+          id
+        }
+      });
+      if (!template) {
+        throw this.templateNotFound(id);
+      }
+
+      const roleInstanceCount = await tx.roleInstance.count({
+        where: {
+          templateId: id
+        }
+      });
+      if (roleInstanceCount > 0) {
+        throw this.templateInUse(id, roleInstanceCount);
+      }
+
+      await tx.roleTemplate.delete({
+        where: {
+          id
+        }
+      });
+
+      await this.recordAdminAction(tx, {
+        operatorAccountId: operator.account.id,
+        action: 'DELETE_ROLE_TEMPLATE',
+        targetType: 'role_template',
+        targetId: template.id,
+        summary: `Deleted role template ${template.name}`,
+        metadata: {
+          version: template.version,
+          status: template.status
+        }
+      });
+
+      return template.id;
+    });
+
+    return {
+      data: {
+        id: deletedId
+      }
     };
   }
 
@@ -1248,6 +1322,19 @@ export class RoleTemplateFactoryService {
         message: 'Role template already exists.',
         details: {
           templateId
+        }
+      }
+    });
+  }
+
+  private templateInUse(templateId: string, roleInstanceCount: number) {
+    return new ConflictException({
+      error: {
+        code: 'TEMPLATE_IN_USE',
+        message: 'Role template is already installed and cannot be deleted.',
+        details: {
+          templateId,
+          roleInstanceCount
         }
       }
     });

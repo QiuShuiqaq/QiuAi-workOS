@@ -8,6 +8,34 @@ test('server role template catalog is rich and publishable', () => {
 
   const ids = new Set(serverRoleTemplateCatalog.map((template) => template.templateId));
   assert.equal(ids.size, serverRoleTemplateCatalog.length);
+  const templateById = new Map(serverRoleTemplateCatalog.map((template) => [template.templateId, template] as const));
+  const productionTemplateExpectations = [
+    ['template_customer_support_agent', 'docx'],
+    ['template_proposal_specialist', 'pptx'],
+    ['template_enterprise_researcher', 'docx'],
+    ['template_spreadsheet_analyst', 'xlsx'],
+    ['template_document_organizer', 'xlsx'],
+    ['template_video_quality_editor', 'mp4']
+  ] as const;
+
+  for (const [templateId, artifactType] of productionTemplateExpectations) {
+    const template = templateById.get(templateId);
+    assert.ok(template, `${templateId} must exist`);
+    assert.equal(
+      template.workflowGraph.nodes.find((node) => node.type === 'artifact')?.artifactType,
+      artifactType,
+      `${templateId} must generate the intended artifact type`
+    );
+    assert.ok(
+      template.workflowGraph.nodes.some((node) => node.type === 'parameter_extractor') ||
+        template.workflowGraph.nodes.some((node) => node.type === 'list'),
+      `${templateId} must do structured input preparation before drafting`
+    );
+    assert.ok(
+      template.workflowGraph.nodes.filter((node) => node.type === 'llm').length >= 1,
+      `${templateId} must include at least one LLM work node`
+    );
+  }
 
   for (const template of serverRoleTemplateCatalog) {
     assert.ok(template.name.trim(), `${template.templateId} must have a name`);

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
 
@@ -6,6 +6,7 @@ import {
   ArchiveAdminRoleTemplateResponseDto,
   CreateAdminRoleTemplateRequestDto,
   CreateAdminRoleTemplateResponseDto,
+  DeleteAdminRoleTemplateResponseDto,
   GetAdminRoleTemplateResponseDto,
   ListAdminRoleTemplatesResponseDto,
   PublishAdminRoleTemplateResponseDto,
@@ -87,5 +88,14 @@ export class RoleTemplateFactoryController {
     @Req() request: FastifyRequest
   ): Promise<ArchiveAdminRoleTemplateResponseDto> {
     return this.templateFactoryService.archiveTemplate(templateId, request.headers.cookie);
+  }
+
+  @Delete(':templateId')
+  @ApiOkResponse({ type: DeleteAdminRoleTemplateResponseDto })
+  deleteTemplate(
+    @Param('templateId') templateId: string,
+    @Req() request: FastifyRequest
+  ): Promise<DeleteAdminRoleTemplateResponseDto> {
+    return this.templateFactoryService.deleteTemplate(templateId, request.headers.cookie);
   }
 }

@@ -414,6 +414,17 @@ export class ArchiveAdminRoleTemplateResponseDto {
   data!: AdminRoleTemplateDetailDto;
 }
 
+export class DeleteAdminRoleTemplateResponseDto {
+  @ApiProperty({
+    example: {
+      id: 'template_sales_assist'
+    }
+  })
+  data!: {
+    id: string;
+  };
+}
+
 export class TestAdminRoleTemplateRequestDto {
   @ApiPropertyOptional({ example: '请帮我研究这个客户并输出跟进话术。' })
   @IsOptional()

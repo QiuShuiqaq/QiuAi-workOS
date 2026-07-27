@@ -2,6 +2,7 @@
 
 import {
   CheckCircleOutlined,
+  DeleteOutlined,
   EditOutlined,
   InboxOutlined,
   PlayCircleOutlined,
@@ -193,6 +194,19 @@ export function AdminRoleTemplatesPageClient({
     }
   }
 
+  async function handleDelete(template: AdminRoleTemplateDetail) {
+    setActionTemplateId(template.id);
+    try {
+      const response = await createBrowserApiClient().deleteAdminRoleTemplate(template.id);
+      setRows((current) => current.filter((item) => item.id !== response.data.id));
+      message.success('已删除');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '删除失败');
+    } finally {
+      setActionTemplateId(null);
+    }
+  }
+
   function openPermissionModal(template: AdminRoleTemplateDetail) {
     setPermissionTemplate(template);
     permissionForm.setFieldsValue({
@@ -318,7 +332,7 @@ export function AdminRoleTemplatesPageClient({
     {
       title: '操作',
       key: 'actions',
-      width: 380,
+      width: 460,
       render: (_value, template) => (
         <Space wrap>
           <Button icon={<EditOutlined />} href={`/templates/canvas?templateId=${encodeURIComponent(template.id)}`}>
@@ -355,6 +369,18 @@ export function AdminRoleTemplatesPageClient({
               上架
             </Button>
           )}
+          <Popconfirm
+            title="确认删除这个数字员工？"
+            description="删除后 PC 端将无法再安装该模板；已安装过的模板会被系统阻止删除。"
+            okText="删除"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
+            onConfirm={() => handleDelete(template)}
+          >
+            <Button danger icon={<DeleteOutlined />} loading={actionTemplateId === template.id}>
+              删除
+            </Button>
+          </Popconfirm>
         </Space>
       )
     }

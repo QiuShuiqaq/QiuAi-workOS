@@ -115,6 +115,20 @@ export class MockPlatformStore {
     return template;
   }
 
+  countRoleInstancesByTemplateId(templateId: string): number {
+    return this.roles.filter((role) => role.templateId === templateId).length;
+  }
+
+  deleteRoleTemplate(templateId: string) {
+    const index = this.roleTemplates.findIndex((template) => template.id === templateId);
+    if (index < 0) {
+      return undefined;
+    }
+
+    const [deleted] = this.roleTemplates.splice(index, 1);
+    return deleted;
+  }
+
   getWorkspace(workspaceId: string) {
     return demoWorkspaces.find((workspace) => workspace.id === workspaceId);
   }

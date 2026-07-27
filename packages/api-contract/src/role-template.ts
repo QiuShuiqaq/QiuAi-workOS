@@ -125,6 +125,12 @@ export interface ArchiveAdminRoleTemplateResponse {
   data: AdminRoleTemplateDetail;
 }
 
+export interface DeleteAdminRoleTemplateResponse {
+  data: {
+    id: string;
+  };
+}
+
 export interface CreateAdminRoleTemplateResponse {
   data: AdminRoleTemplateDetail;
 }

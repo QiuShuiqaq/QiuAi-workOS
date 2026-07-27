@@ -208,6 +208,73 @@ test('admin role template factory governs publication and workspace visibility',
     assert.equal(createdTemplate.status, 'DRAFT');
     assert.equal(createdTemplate.workflowSteps.length, 2);
 
+    const deletableTemplateId = `${templateId}_delete`;
+    const createDeletableResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/role-templates',
+      headers,
+      payload: {
+        id: deletableTemplateId,
+        version: '1.0.0',
+        name: 'AI Deletable Flow Tester',
+        industry: 'Operations',
+        scenario: 'Template deletion smoke test',
+        description: 'Verifies unused templates can be removed from the platform catalog.',
+        recommendedPlanCode: 'PERSONAL_FREE',
+        businessGoal: 'Verify role template deletion before catalog cleanup.',
+        knowledgeSources: [],
+        tools: [],
+        skills: [
+          {
+            code: 'deletable_flow_check',
+            name: 'Deletable Flow Check',
+            summary: 'Checks unused template deletion behavior.'
+          }
+        ],
+        workflowSteps: [
+          {
+            id: 'receive_input',
+            order: 1,
+            type: 'input',
+            name: 'Receive Input',
+            instruction: 'Confirm the deletion smoke test scope.'
+          },
+          {
+            id: 'deliver_output',
+            order: 2,
+            type: 'output',
+            name: 'Deliver Output',
+            instruction: 'Return a concise deletion validation result.'
+          }
+        ],
+        sampleInputs: ['Please verify unused template deletion.'],
+        outputFormat: 'Markdown checklist with deletion validation result.',
+        approvalPolicy: 'Manual review is required before customer-facing output.',
+        allowedPlanCodes: ['PERSONAL_FREE'],
+        visibleWorkspaceIds: []
+      }
+    });
+    assert.equal(createDeletableResponse.statusCode, 201);
+
+    const deleteDeletableResponse = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/admin/role-templates/${encodeURIComponent(deletableTemplateId)}`,
+      headers: {
+        cookie
+      }
+    });
+    assert.equal(deleteDeletableResponse.statusCode, 200);
+    assert.equal(JSON.parse(deleteDeletableResponse.body).data.id, deletableTemplateId);
+
+    const deletedTemplateResponse = await app.inject({
+      method: 'GET',
+      url: `/api/v1/admin/role-templates/${encodeURIComponent(deletableTemplateId)}`,
+      headers: {
+        cookie
+      }
+    });
+    assert.equal(deletedTemplateResponse.statusCode, 404);
+
     const testResponse = await app.inject({
       method: 'POST',
       url: `/api/v1/admin/role-templates/${encodeURIComponent(templateId)}/test`,
@@ -532,6 +599,16 @@ test('admin role template factory governs publication and workspace visibility',
       ),
       false
     );
+
+    const deleteInstalledTemplateResponse = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/admin/role-templates/${encodeURIComponent(templateId)}`,
+      headers: {
+        cookie
+      }
+    });
+    assert.equal(deleteInstalledTemplateResponse.statusCode, 409);
+    assert.equal(JSON.parse(deleteInstalledTemplateResponse.body).error.code, 'TEMPLATE_IN_USE');
   } finally {
     await app.close();
   }
