@@ -2187,6 +2187,41 @@ export function AdminCreateRoleTemplatePageClient({
               <Divider />
 
               <section>
+                <Typography.Title level={5}>发布与权限</Typography.Title>
+                <Alert
+                  showIcon
+                  type="info"
+                  message="PC 端只会看到已上架且符合套餐或企业白名单的数字员工。"
+                />
+                <div className="workflow-form-grid two" style={{ marginTop: 12 }}>
+                  <Form.Item
+                    name="recommendedPlanCode"
+                    label="推荐套餐"
+                    rules={[{ required: true, message: '请选择推荐套餐' }]}
+                    tooltip="用于运营推荐和列表标识，不等于唯一可见范围。"
+                  >
+                    <Select options={planOptions} showSearch optionFilterProp="label" />
+                  </Form.Item>
+                  <Form.Item
+                    name="allowedPlanCodes"
+                    label="允许套餐"
+                    tooltip="企业套餐命中这里时，PC 端可拉取和安装该员工。"
+                  >
+                    <Select mode="multiple" options={planOptions} showSearch optionFilterProp="label" />
+                  </Form.Item>
+                </div>
+                <Form.Item
+                  name="visibleWorkspaceIds"
+                  label="企业白名单"
+                  tooltip="为空表示所有符合套餐的企业可见；选择企业后只对白名单企业可见。"
+                >
+                  <Select mode="multiple" options={workspaceOptions} showSearch optionFilterProp="label" />
+                </Form.Item>
+              </section>
+
+              <Divider />
+
+              <section>
                 <Typography.Title level={5}>交付与边界</Typography.Title>
                 <Form.Item name="outputFormat" label="默认交付说明">
                   <Input.TextArea rows={2} placeholder="例如：对话摘要 + 可下载 Word/PPT/Excel 产物" />

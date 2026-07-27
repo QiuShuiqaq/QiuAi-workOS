@@ -4,7 +4,8 @@ import {
   CheckCircleOutlined,
   EditOutlined,
   InboxOutlined,
-  PlayCircleOutlined
+  PlayCircleOutlined,
+  SettingOutlined
 } from '@ant-design/icons';
 import type {
   AdminPlanDetail,
@@ -17,7 +18,10 @@ import { QiuPage, QiuStatusTag } from '@qiuai/ui';
 import Alert from 'antd/es/alert';
 import Button from 'antd/es/button';
 import Card from 'antd/es/card';
+import Form from 'antd/es/form';
+import Modal from 'antd/es/modal';
 import Popconfirm from 'antd/es/popconfirm';
+import Select from 'antd/es/select';
 import Space from 'antd/es/space';
 import Table from 'antd/es/table';
 import type { ColumnsType } from 'antd/es/table';
@@ -44,6 +48,12 @@ type TemplateTestNotice = {
   warnings: string[];
   sampleInput?: string;
   graphTrace?: AdminRoleTemplateTestGraphTrace;
+};
+
+type TemplatePermissionFormValues = {
+  recommendedPlanCode: string;
+  allowedPlanCodes?: string[];
+  visibleWorkspaceIds?: string[];
 };
 
 function formatDateTime(value?: string) {
@@ -73,9 +83,12 @@ export function AdminRoleTemplatesPageClient({
   plans,
   workspaces
 }: AdminRoleTemplatesPageClientProps) {
+  const [permissionForm] = Form.useForm<TemplatePermissionFormValues>();
   const [rows, setRows] = useState(templates);
   const [testingTemplateId, setTestingTemplateId] = useState<string | null>(null);
   const [actionTemplateId, setActionTemplateId] = useState<string | null>(null);
+  const [permissionTemplate, setPermissionTemplate] = useState<AdminRoleTemplateDetail | null>(null);
+  const [permissionSaving, setPermissionSaving] = useState(false);
   const [testNotice, setTestNotice] = useState<TemplateTestNotice | null>(null);
 
   useEffect(() => {
@@ -89,6 +102,20 @@ export function AdminRoleTemplatesPageClient({
 
   const workspaceNameById = useMemo(
     () => new Map(workspaces.map((workspace) => [workspace.id, workspace.name] as const)),
+    [workspaces]
+  );
+
+  const planOptions = useMemo(
+    () => plans.map((plan) => ({ value: plan.code, label: `${plan.name} / ${plan.code}` })),
+    [plans]
+  );
+
+  const workspaceOptions = useMemo(
+    () =>
+      workspaces.map((workspace) => ({
+        value: workspace.id,
+        label: `${workspace.name} / ${workspace.ownerEmail}`
+      })),
     [workspaces]
   );
 
@@ -151,6 +178,38 @@ export function AdminRoleTemplatesPageClient({
       message.error(error instanceof Error ? error.message : '下架失败');
     } finally {
       setActionTemplateId(null);
+    }
+  }
+
+  function openPermissionModal(template: AdminRoleTemplateDetail) {
+    setPermissionTemplate(template);
+    permissionForm.setFieldsValue({
+      recommendedPlanCode: template.recommendedPlanCode,
+      allowedPlanCodes: template.allowedPlanCodes,
+      visibleWorkspaceIds: template.visibleWorkspaceIds
+    });
+  }
+
+  async function handleSavePermissions() {
+    if (!permissionTemplate) {
+      return;
+    }
+
+    setPermissionSaving(true);
+    try {
+      const values = await permissionForm.validateFields();
+      const response = await createBrowserApiClient().updateAdminRoleTemplate(permissionTemplate.id, {
+        recommendedPlanCode: values.recommendedPlanCode,
+        allowedPlanCodes: values.allowedPlanCodes ?? [],
+        visibleWorkspaceIds: values.visibleWorkspaceIds ?? []
+      });
+      replaceRow(response.data);
+      setPermissionTemplate(null);
+      message.success('发布权限已保存');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '保存权限失败');
+    } finally {
+      setPermissionSaving(false);
     }
   }
 
@@ -243,11 +302,14 @@ export function AdminRoleTemplatesPageClient({
     {
       title: '操作',
       key: 'actions',
-      width: 310,
+      width: 380,
       render: (_value, template) => (
         <Space wrap>
           <Button icon={<EditOutlined />} href={`/templates/canvas?templateId=${encodeURIComponent(template.id)}`}>
             编辑
+          </Button>
+          <Button icon={<SettingOutlined />} onClick={() => openPermissionModal(template)}>
+            权限
           </Button>
           <Button
             icon={<PlayCircleOutlined />}
@@ -380,6 +442,46 @@ export function AdminRoleTemplatesPageClient({
               }}
             />
           </Card>
+
+          <Modal
+            title={permissionTemplate ? `发布权限：${permissionTemplate.name}` : '发布权限'}
+            open={Boolean(permissionTemplate)}
+            destroyOnHidden
+            width={640}
+            onCancel={() => setPermissionTemplate(null)}
+            onOk={handleSavePermissions}
+            confirmLoading={permissionSaving}
+            okText="保存"
+            cancelText="取消"
+          >
+            <Form form={permissionForm} layout="vertical">
+              <Alert
+                showIcon
+                type="info"
+                message="推荐套餐用于运营标识；允许套餐和企业白名单决定 PC 端能否看到和安装。"
+              />
+              <div style={{ height: 16 }} />
+              <div className="workflow-form-grid two">
+                <Form.Item
+                  name="recommendedPlanCode"
+                  label="推荐套餐"
+                  rules={[{ required: true, message: '请选择推荐套餐' }]}
+                >
+                  <Select options={planOptions} showSearch optionFilterProp="label" />
+                </Form.Item>
+                <Form.Item name="allowedPlanCodes" label="允许套餐">
+                  <Select mode="multiple" options={planOptions} showSearch optionFilterProp="label" />
+                </Form.Item>
+              </div>
+              <Form.Item
+                name="visibleWorkspaceIds"
+                label="企业白名单"
+                tooltip="为空表示所有符合套餐的企业可见；选择企业后只对白名单企业可见。"
+              >
+                <Select mode="multiple" options={workspaceOptions} showSearch optionFilterProp="label" />
+              </Form.Item>
+            </Form>
+          </Modal>
         </Space>
       </QiuPage>
     </AdminShell>
