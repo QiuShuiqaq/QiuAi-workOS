@@ -108,6 +108,20 @@ export class DesktopBindingController {
 
 @ApiTags('desktop')
 @Controller({
+  path: 'desktop/role-templates',
+  version: '1'
+})
+export class DesktopRoleTemplateController {
+  constructor(@Inject(DesktopSyncService) private readonly desktopSyncService: DesktopSyncService) {}
+
+  @Get('free')
+  listPublicFreeRoleTemplates() {
+    return this.desktopSyncService.listPublicFreeRoleTemplates();
+  }
+}
+
+@ApiTags('desktop')
+@Controller({
   path: 'desktop/releases',
   version: '1'
 })

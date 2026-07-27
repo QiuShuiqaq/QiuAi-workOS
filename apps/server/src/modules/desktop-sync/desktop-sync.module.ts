@@ -6,6 +6,7 @@ import { RoleModule } from '../role/role.module';
 import {
   DesktopBindingController,
   DesktopReleaseController,
+  DesktopRoleTemplateController,
   DesktopSyncController,
   WorkspaceDesktopController
 } from './desktop-sync.controller';
@@ -16,6 +17,7 @@ import { DesktopSyncService } from './desktop-sync.service';
   controllers: [
     DesktopBindingController,
     DesktopReleaseController,
+    DesktopRoleTemplateController,
     DesktopSyncController,
     WorkspaceDesktopController
   ],

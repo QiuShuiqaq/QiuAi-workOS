@@ -138,6 +138,25 @@ export async function listAuthorizedRoleTemplates(
   return body as ListAuthorizedRoleTemplatesResponse;
 }
 
+export async function listPublicFreeRoleTemplates(
+  baseUrl: string
+): Promise<ListAuthorizedRoleTemplatesResponse> {
+  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/api/v1/desktop/role-templates/free`, {
+    headers: {
+      accept: 'application/json'
+    }
+  });
+
+  const body = (await response.json()) as ListAuthorizedRoleTemplatesResponse | { error?: { message?: string } };
+  if (!response.ok) {
+    const errorBody = body as { error?: { message?: string } };
+    const message = errorBody.error?.message ?? `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return body as ListAuthorizedRoleTemplatesResponse;
+}
+
 export async function checkDesktopUpdate(
   baseUrl: string,
   input: CheckDesktopUpdateInput

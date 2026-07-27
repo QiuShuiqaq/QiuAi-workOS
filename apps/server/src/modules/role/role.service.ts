@@ -165,6 +165,37 @@ export class RoleService {
     };
   }
 
+  async listPublicFreeTemplatesForDesktop() {
+    if (!isDatabasePersistenceEnabled()) {
+      return {
+        data: this.store
+          .listRoleTemplates()
+          .filter((template) => this.isPublicFreeDesktopTemplate(template))
+          .map((template) => this.toTemplateSummary(template))
+      };
+    }
+
+    const templates = await this.prismaService.roleTemplate.findMany({
+      where: {
+        status: 'PUBLISHED'
+      },
+      orderBy: [
+        {
+          publishedAt: 'desc'
+        },
+        {
+          createdAt: 'asc'
+        }
+      ]
+    });
+
+    return {
+      data: templates
+        .filter((template) => this.isPublicFreeDesktopTemplate(template))
+        .map((template) => this.toTemplateSummary(template))
+    };
+  }
+
   async listRoles(workspaceId: string) {
     if (!isDatabasePersistenceEnabled()) {
       return {
@@ -584,6 +615,18 @@ export class RoleService {
     }
 
     return this.toStringArray(template.allowedPlanCodes).includes(planCode);
+  }
+
+  private isPublicFreeDesktopTemplate(template: {
+    status: string;
+    allowedPlanCodes: unknown;
+    visibleWorkspaceIds: unknown;
+  }): boolean {
+    return (
+      template.status === 'PUBLISHED' &&
+      this.toStringArray(template.allowedPlanCodes).includes(freePlanCode) &&
+      this.toStringArray(template.visibleWorkspaceIds).length === 0
+    );
   }
 
   private toRoleSummary(role: DatabaseRoleInstance) {

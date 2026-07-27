@@ -115,6 +115,10 @@ export class DesktopSyncService {
     return this.roleService.listPublishedTemplatesForDesktop(workspaceId);
   }
 
+  async listPublicFreeRoleTemplates() {
+    return this.roleService.listPublicFreeTemplatesForDesktop();
+  }
+
   async checkDesktopUpdate(
     query: CheckDesktopUpdateQueryDto
   ): Promise<CheckDesktopUpdateResponseDto> {

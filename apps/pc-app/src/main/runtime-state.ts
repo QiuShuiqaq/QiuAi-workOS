@@ -5,6 +5,7 @@ import { createInitialDesktopRuntimeState } from '../shared/desktop-state.js';
 import {
   checkDesktopUpdate as fetchDesktopUpdate,
   listAuthorizedRoleTemplates as fetchAuthorizedRoleTemplates,
+  listPublicFreeRoleTemplates as fetchPublicFreeRoleTemplates,
   redeemDesktopBindingCode,
   syncDesktopRuntimeSnapshot
 } from '../shared/desktop-sync-client.js';
@@ -196,13 +197,26 @@ export async function listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRo
   const workspaceId = identity.deviceToken ? identity.workspaceId : 'workspace_pending_login';
 
   if (!identity.deviceToken) {
-    return {
-      source: 'local_fallback',
-      workspaceId,
-      loadedAt: new Date().toISOString(),
-      templates: toFallbackRoleTemplates(),
-      message: '桌面端尚未绑定企业工作区。'
-    };
+    try {
+      const response = await fetchPublicFreeRoleTemplates(appInfo.serverBaseUrl);
+      return {
+        source: 'server',
+        workspaceId,
+        loadedAt: new Date().toISOString(),
+        templates: response.data,
+        message: `已同步 ${response.data.length} 个免费数字员工。`
+      };
+    } catch (error) {
+      return {
+        source: 'local_fallback',
+        workspaceId,
+        loadedAt: new Date().toISOString(),
+        templates: [],
+        message: error instanceof Error
+          ? `免费数字员工目录加载失败：${error.message}`
+          : '免费数字员工目录加载失败。'
+      };
+    }
   }
 
   try {
@@ -223,7 +237,7 @@ export async function listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRo
       source: 'local_fallback',
       workspaceId,
       loadedAt: new Date().toISOString(),
-      templates: toFallbackRoleTemplates(),
+      templates: [],
       message: error instanceof Error ? error.message : '授权模板目录加载失败。'
     };
   }
@@ -319,8 +333,4 @@ function mapPlatform(platform: NodeJS.Platform): DesktopRuntimeState['runtimeSna
   if (platform === 'darwin') return 'macos';
   if (platform === 'win32') return 'windows';
   return 'linux';
-}
-
-function toFallbackRoleTemplates(): DesktopAuthorizedRoleTemplateCatalog['templates'] {
-  return [];
 }

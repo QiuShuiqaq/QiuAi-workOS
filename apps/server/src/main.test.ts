@@ -312,6 +312,64 @@ test('admin role template factory governs publication and workspace visibility',
       false
     );
 
+    const proOnlyPublicFreeTemplatesResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/desktop/role-templates/free'
+    });
+    assert.equal(proOnlyPublicFreeTemplatesResponse.statusCode, 200);
+    assert.equal(
+      JSON.parse(proOnlyPublicFreeTemplatesResponse.body).data.some(
+        (template: { id: string }) => template.id === templateId
+      ),
+      false
+    );
+
+    const privateFreeUpdateResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/admin/role-templates/${encodeURIComponent(templateId)}`,
+      headers,
+      payload: {
+        recommendedPlanCode: 'PERSONAL_FREE',
+        allowedPlanCodes: ['PERSONAL_FREE'],
+        visibleWorkspaceIds: ['enterprise']
+      }
+    });
+    assert.equal(privateFreeUpdateResponse.statusCode, 200);
+
+    const privateFreeTemplatesResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/desktop/role-templates/free'
+    });
+    assert.equal(privateFreeTemplatesResponse.statusCode, 200);
+    assert.equal(
+      JSON.parse(privateFreeTemplatesResponse.body).data.some(
+        (template: { id: string }) => template.id === templateId
+      ),
+      false
+    );
+
+    const publicFreeUpdateResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/admin/role-templates/${encodeURIComponent(templateId)}`,
+      headers,
+      payload: {
+        visibleWorkspaceIds: []
+      }
+    });
+    assert.equal(publicFreeUpdateResponse.statusCode, 200);
+
+    const publicFreeTemplatesResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/desktop/role-templates/free'
+    });
+    assert.equal(publicFreeTemplatesResponse.statusCode, 200);
+    assert.equal(
+      JSON.parse(publicFreeTemplatesResponse.body).data.some(
+        (template: { id: string }) => template.id === templateId
+      ),
+      true
+    );
+
     const updateResponse = await app.inject({
       method: 'PATCH',
       url: `/api/v1/admin/role-templates/${encodeURIComponent(templateId)}`,

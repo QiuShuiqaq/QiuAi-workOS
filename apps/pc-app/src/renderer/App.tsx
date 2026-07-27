@@ -74,7 +74,7 @@ import type {
   RolePackageManifest,
   ToolManifest
 } from '../shared/desktop-contract';
-import { defaultRoleTemplateCatalog, type RoleTemplateCatalogEntry } from '@qiuai/domain';
+import type { RoleTemplateCatalogEntry } from '@qiuai/domain';
 import { createDesktopRuntimePreviewState } from '../shared/desktop-state';
 import {
   createMockTaskDetail,
@@ -221,11 +221,6 @@ const desktopDensityOptions: Array<{ value: DesktopDensityPreference; label: str
   { value: 'comfortable', label: '标准' },
   { value: 'compact', label: '紧凑' }
 ];
-
-const fallbackDesktopRoleTemplates: DesktopRoleTemplate[] = defaultRoleTemplateCatalog;
-const fallbackRoleTemplateByTemplateId = new Map(
-  fallbackDesktopRoleTemplates.map((template) => [template.templateId, template] as const)
-);
 
 const knowledgeBindingCatalog: KnowledgeBindingCatalogEntry[] = [
   {
@@ -668,40 +663,15 @@ const initialAuthorizedRoleTemplateCatalog: DesktopAuthorizedRoleTemplateCatalog
   source: 'local_fallback',
   workspaceId: pendingWorkspaceId,
   loadedAt: new Date(0).toISOString(),
-  templates: fallbackDesktopRoleTemplates.map(toRoleTemplateSummary)
+  templates: []
 };
 
 function cloneJsonValue<T>(value: T | undefined): T | undefined {
   return value === undefined ? undefined : (JSON.parse(JSON.stringify(value)) as T);
 }
 
-function toRoleTemplateSummary(template: DesktopRoleTemplate): DesktopAuthorizedRoleTemplateSummary {
-  return {
-    id: template.templateId,
-    version: template.version,
-    name: template.name,
-    industry: template.industry,
-    scenario: template.scenario,
-    description: template.description,
-    recommendedPlanCode: template.recommendedPlanCode,
-    businessGoal: template.businessGoal,
-    knowledgeSources: [...template.knowledgeSources],
-    tools: [...template.tools],
-    skills: template.skills.map((skill) => ({ ...skill })),
-    workflowSteps: (template.workflowSteps ?? []).map((step) => ({
-      ...step,
-      toolIds: step.toolIds ? [...step.toolIds] : undefined
-    })),
-    workflowGraph: cloneJsonValue(template.workflowGraph),
-    sampleInputs: [...(template.sampleInputs ?? [])],
-    outputFormat: template.outputFormat ?? '',
-    approvalPolicy: template.approvalPolicy
-  };
-}
-
 function toDesktopRoleTemplate(summary: DesktopAuthorizedRoleTemplateSummary): DesktopRoleTemplate {
-  const fallback = fallbackRoleTemplateByTemplateId.get(summary.id);
-  const roleCode = fallback?.roleCode ?? createRoleCodeFromTemplateId(summary.id);
+  const roleCode = createRoleCodeFromTemplateId(summary.id);
   const workflowGraph = cloneJsonValue(summary.workflowGraph) as DesktopRoleTemplate['workflowGraph'];
 
   return {
@@ -709,7 +679,7 @@ function toDesktopRoleTemplate(summary: DesktopAuthorizedRoleTemplateSummary): D
     roleCode,
     name: summary.name,
     version: summary.version,
-    summary: fallback?.summary ?? summary.description,
+    summary: summary.description,
     industry: summary.industry,
     scenario: summary.scenario,
     description: summary.description,
@@ -726,13 +696,12 @@ function toDesktopRoleTemplate(summary: DesktopAuthorizedRoleTemplateSummary): D
     workflowGraph,
     sampleInputs: [...(summary.sampleInputs ?? [])],
     outputFormat: summary.outputFormat ?? '',
-    modelProfileIds: fallback?.modelProfileIds ?? inferDesktopModelProfileIds(workflowGraph),
-    toolIds: fallback?.toolIds ?? inferDesktopToolIds(summary),
-    requiredKnowledgeSources:
-      fallback?.requiredKnowledgeSources ?? inferRequiredKnowledgeSources(summary),
-    defaultTaskTypes: fallback?.defaultTaskTypes ?? inferDefaultTaskTypes(summary),
-    syncPolicy: fallback?.syncPolicy ?? 'summary_only',
-    installNote: fallback?.installNote ?? '由平台授权模板生成，可按企业实际情况配置模型、工具和知识来源。'
+    modelProfileIds: inferDesktopModelProfileIds(workflowGraph),
+    toolIds: inferDesktopToolIds(summary),
+    requiredKnowledgeSources: inferRequiredKnowledgeSources(summary),
+    defaultTaskTypes: inferDefaultTaskTypes(summary),
+    syncPolicy: 'summary_only',
+    installNote: '由平台授权模板生成，可按企业实际情况配置模型、工具和知识来源。'
   };
 }
 
@@ -1070,12 +1039,12 @@ export default function App() {
         catalog.message ??
           (catalog.source === 'server'
             ? `已同步 ${catalog.templates.length} 个数字员工`
-            : `使用内置数字员工：${catalog.templates.length} 个`)
+            : '暂未同步到数字员工，请检查网络或服务端配置。')
       );
     } catch (error) {
       setAuthorizedRoleTemplateCatalog(initialAuthorizedRoleTemplateCatalog);
       setRoleTemplateNotice(
-        `数字员工同步失败，已使用内置列表：${error instanceof Error ? error.message : 'unknown error'}`
+        `数字员工同步失败：${error instanceof Error ? error.message : 'unknown error'}`
       );
     } finally {
       setIsLoadingRoleTemplates(false);
@@ -1479,26 +1448,13 @@ export default function App() {
   }, [runtimeState.runtimeSnapshot.rolePackages]);
 
   const desktopRoleTemplates = useMemo(() => {
-    const templates = authorizedRoleTemplateCatalog.templates.map(toDesktopRoleTemplate);
-    if (authorizedRoleTemplateCatalog.source === 'server') {
-      return templates;
-    }
-
-    return templates.length > 0 ? templates : fallbackDesktopRoleTemplates;
+    return authorizedRoleTemplateCatalog.templates.map(toDesktopRoleTemplate);
   }, [authorizedRoleTemplateCatalog.source, authorizedRoleTemplateCatalog.templates]);
 
   const desktopRoleTemplateByRoleCode = useMemo(() => {
     const authorizedByRoleCode = new Map(
       desktopRoleTemplates.map((template) => [template.roleCode, template] as const)
     );
-
-    if (authorizedRoleTemplateCatalog.source !== 'server') {
-      for (const template of fallbackDesktopRoleTemplates) {
-        if (!authorizedByRoleCode.has(template.roleCode)) {
-          authorizedByRoleCode.set(template.roleCode, template);
-        }
-      }
-    }
 
     return authorizedByRoleCode;
   }, [authorizedRoleTemplateCatalog.source, desktopRoleTemplates]);
