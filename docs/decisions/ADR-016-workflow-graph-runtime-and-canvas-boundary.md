@@ -21,6 +21,8 @@ Use QiuAI's simplified Dify-style `workflowGraph` as the single workflow contrac
 The current supported node types are:
 - `start`
 - `input`
+- `parameter_extractor`
+- `list`
 - `knowledge`
 - `reasoning`
 - `llm`
@@ -28,6 +30,9 @@ The current supported node types are:
 - `template`
 - `tool`
 - `condition`
+- `iteration`
+- `loop`
+- `aggregator`
 - `artifact`
 - `approval`
 - `output`
@@ -38,6 +43,7 @@ The current supported tool-node integrations are:
 - `local-filesystem`: scoped local file read/write/list.
 - `http-request`: controlled HTTP requests.
 - `mcp`: JSON-RPC `tools/call` against an explicit MCP gateway endpoint.
+- `video-processing`: local video probe, frame extraction, and MP4 export through FFmpeg.
 
 The future workflow canvas, when added, must edit the same `workflowGraph` shape. It must not introduce a second workflow model. The first canvas version should be a visual editor over the existing graph fields:
 - nodes

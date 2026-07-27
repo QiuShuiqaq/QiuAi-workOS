@@ -6,7 +6,9 @@ import {
   statSync,
   writeFileSync
 } from 'node:fs';
+import { execFile } from 'node:child_process';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import JSZip from 'jszip';
 
 import type {
@@ -25,11 +27,13 @@ const webSearchToolId = 'web-search';
 const officeDocumentToolId = 'office-document';
 const httpRequestToolId = 'http-request';
 const mcpToolId = 'mcp';
+const videoProcessingToolId = 'video-processing';
 const maxReadBytes = 64 * 1024;
 const maxDirectoryEntries = 100;
 const maxWebTextChars = 24_000;
 const maxExtractedDocumentChars = 30_000;
 const webFetchTimeoutMs = 15_000;
+const execFileAsync = promisify(execFile);
 
 export async function invokeDesktopTool(
   userDataPath: string,
@@ -57,6 +61,10 @@ export async function invokeDesktopTool(
 
     if (request.toolId === mcpToolId) {
       return await invokeMcpTool(request);
+    }
+
+    if (request.toolId === videoProcessingToolId) {
+      return await invokeVideoProcessingTool(userDataPath, request);
     }
 
     return fail(request, `Unsupported desktop tool: ${request.toolId}`);
@@ -222,6 +230,224 @@ async function invokeMcpTool(
     },
     message: errorMessage ?? (response.ok ? undefined : `MCP gateway returned HTTP ${response.status}.`)
   };
+}
+
+async function invokeVideoProcessingTool(
+  userDataPath: string,
+  request: DesktopToolInvocationRequest
+): Promise<DesktopToolInvocationResult> {
+  switch (request.action) {
+    case 'video.probe':
+      return probeVideo(request);
+    case 'video.compose_clips':
+    case 'video.export_mp4':
+      return await composeVideoClips(userDataPath, request);
+    case 'video.extract_frames':
+      return await extractVideoFrames(userDataPath, request);
+    default:
+      return fail(request, `Unsupported video processing action: ${request.action}`);
+  }
+}
+
+function probeVideo(request: DesktopToolInvocationRequest): DesktopToolInvocationResult {
+  const videoPath = readVideoInputPath(request);
+  assertReadPathAllowed(request, videoPath);
+  const stats = statSync(videoPath);
+
+  if (!stats.isFile()) {
+    return fail(request, `Path is not a file: ${videoPath}`);
+  }
+
+  const extension = path.extname(videoPath).toLowerCase();
+  if (!isVideoFileExtension(extension)) {
+    return fail(request, `Unsupported video extension: ${extension || 'unknown'}.`);
+  }
+
+  return {
+    toolId: request.toolId,
+    action: request.action,
+    ok: true,
+    output: {
+      localPath: videoPath,
+      fileName: path.basename(videoPath),
+      extension,
+      sizeBytes: stats.size,
+      modifiedAt: stats.mtime.toISOString()
+    }
+  };
+}
+
+async function composeVideoClips(
+  userDataPath: string,
+  request: DesktopToolInvocationRequest
+): Promise<DesktopToolInvocationResult> {
+  const videoPath = readVideoInputPath(request);
+  assertReadPathAllowed(request, videoPath);
+  if (!existsSync(videoPath) || !statSync(videoPath).isFile()) {
+    return fail(request, `Video file does not exist: ${videoPath}`);
+  }
+
+  const segments = readVideoCutPlan(request.input.cutPlan ?? request.input.segments);
+  if (segments.length === 0) {
+    return fail(request, 'Video cut plan must contain at least one segment with start and end seconds.');
+  }
+
+  const ffmpegPath = readString(request.input.ffmpegPath, process.env.QIUAI_FFMPEG_PATH?.trim() || 'ffmpeg');
+  const layout = getDesktopStorageLayout(userDataPath, request.workspaceId);
+  ensureDesktopStorageLayout(layout);
+  const folder = readString(request.input.folder, 'videos');
+  const fileName = normalizePathSegment(readString(request.input.fileName, `${path.basename(videoPath, path.extname(videoPath))}-edited`));
+  const outputFolderPath = path.join(layout.assetsPath, 'tools', normalizePathSegment(folder));
+  const workingFolderPath = path.join(outputFolderPath, `.qiuai-video-${Date.now()}`);
+  mkdirSync(workingFolderPath, { recursive: true });
+
+  const clipPaths: string[] = [];
+  try {
+    for (const [index, segment] of segments.entries()) {
+      const clipPath = path.join(workingFolderPath, `clip-${index + 1}.mp4`);
+      await execFileAsync(
+        ffmpegPath,
+        [
+          '-y',
+          '-ss',
+          String(segment.start),
+          '-to',
+          String(segment.end),
+          '-i',
+          videoPath,
+          '-c:v',
+          'libx264',
+          '-c:a',
+          'aac',
+          '-movflags',
+          '+faststart',
+          clipPath
+        ],
+        { windowsHide: true, timeout: readOptionalPositiveInteger(request.input.timeoutMs, 180_000) }
+      );
+      clipPaths.push(clipPath);
+    }
+
+    const concatListPath = path.join(workingFolderPath, 'concat.txt');
+    writeFileSync(
+      concatListPath,
+      clipPaths.map((clipPath) => `file '${clipPath.replace(/'/g, "'\\''")}'`).join('\n'),
+      'utf8'
+    );
+
+    const outputPath = path.join(outputFolderPath, `${fileName}.mp4`);
+    await execFileAsync(
+      ffmpegPath,
+      ['-y', '-f', 'concat', '-safe', '0', '-i', concatListPath, '-c', 'copy', outputPath],
+      { windowsHide: true, timeout: readOptionalPositiveInteger(request.input.timeoutMs, 180_000) }
+    );
+
+    const outputStats = statSync(outputPath);
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: outputPath,
+        fileName: path.basename(outputPath),
+        sizeBytes: outputStats.size,
+        segments
+      }
+    };
+  } catch (error) {
+    return fail(
+      request,
+      [
+        'Video export failed. Install FFmpeg or set QIUAI_FFMPEG_PATH to ffmpeg.exe, then retry.',
+        error instanceof Error ? error.message : ''
+      ]
+        .filter(Boolean)
+        .join(' ')
+    );
+  }
+}
+
+async function extractVideoFrames(
+  userDataPath: string,
+  request: DesktopToolInvocationRequest
+): Promise<DesktopToolInvocationResult> {
+  const videoPath = readVideoInputPath(request);
+  assertReadPathAllowed(request, videoPath);
+  if (!existsSync(videoPath) || !statSync(videoPath).isFile()) {
+    return fail(request, `Video file does not exist: ${videoPath}`);
+  }
+
+  const extension = path.extname(videoPath).toLowerCase();
+  if (!isVideoFileExtension(extension)) {
+    return fail(request, `Unsupported video extension: ${extension || 'unknown'}.`);
+  }
+
+  const ffmpegPath = readString(request.input.ffmpegPath, process.env.QIUAI_FFMPEG_PATH?.trim() || 'ffmpeg');
+  const frameIntervalSeconds = readOptionalPositiveNumber(request.input.frameIntervalSeconds, 5);
+  const maxFrames = Math.min(readOptionalPositiveInteger(request.input.maxFrames, 12), 60);
+  const layout = getDesktopStorageLayout(userDataPath, request.workspaceId);
+  ensureDesktopStorageLayout(layout);
+  const folder = readString(request.input.folder, 'frames');
+  const fileName = normalizePathSegment(
+    readString(request.input.fileName, `${path.basename(videoPath, path.extname(videoPath))}-frames`)
+  );
+  const outputFolderPath = path.join(layout.assetsPath, 'tools', normalizePathSegment(folder), fileName);
+  const framePattern = path.join(outputFolderPath, 'frame-%03d.jpg');
+
+  mkdirSync(outputFolderPath, { recursive: true });
+
+  try {
+    await execFileAsync(
+      ffmpegPath,
+      [
+        '-y',
+        '-i',
+        videoPath,
+        '-vf',
+        `fps=1/${frameIntervalSeconds}`,
+        '-frames:v',
+        String(maxFrames),
+        '-q:v',
+        '2',
+        framePattern
+      ],
+      { windowsHide: true, timeout: readOptionalPositiveInteger(request.input.timeoutMs, 180_000) }
+    );
+
+    const framePaths = readdirSync(outputFolderPath)
+      .filter((entry) => /^frame-\d+\.jpg$/i.test(entry))
+      .sort((left, right) => left.localeCompare(right))
+      .map((entry) => path.join(outputFolderPath, entry));
+
+    if (framePaths.length === 0) {
+      return fail(request, 'Video frame extraction completed but no frame files were generated.');
+    }
+
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: outputFolderPath,
+        directoryPath: outputFolderPath,
+        framePaths,
+        frameCount: framePaths.length,
+        sourceVideoPath: videoPath,
+        frameIntervalSeconds,
+        maxFrames
+      }
+    };
+  } catch (error) {
+    return fail(
+      request,
+      [
+        'Video frame extraction failed. Install FFmpeg or set QIUAI_FFMPEG_PATH to ffmpeg.exe, then retry.',
+        error instanceof Error ? error.message : ''
+      ]
+        .filter(Boolean)
+        .join(' ')
+    );
+  }
 }
 
 async function extractDocumentText(request: DesktopToolInvocationRequest): Promise<DesktopToolInvocationResult> {
@@ -1250,6 +1476,40 @@ function readRequiredString(value: unknown, fieldName: string): string {
   return text;
 }
 
+function readVideoInputPath(request: DesktopToolInvocationRequest): string {
+  return readRequiredString(request.input.videoPath ?? request.input.path ?? request.input.localPath, 'videoPath');
+}
+
+function readVideoCutPlan(value: unknown): Array<{ start: number; end: number }> {
+  const rawPlan = typeof value === 'string' ? parseJson(value) : value;
+  if (!Array.isArray(rawPlan)) {
+    return [];
+  }
+
+  return rawPlan.flatMap((item) => {
+    if (!isRecord(item)) {
+      return [];
+    }
+
+    const start = readSeconds(item.start);
+    const end = readSeconds(item.end);
+    if (start === undefined || end === undefined || end <= start) {
+      return [];
+    }
+
+    return [{ start, end }];
+  });
+}
+
+function readSeconds(value: unknown): number | undefined {
+  const numberValue = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  return Number.isFinite(numberValue) && numberValue >= 0 ? Math.round(numberValue * 1000) / 1000 : undefined;
+}
+
+function isVideoFileExtension(extension: string): boolean {
+  return ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v'].includes(extension.toLowerCase());
+}
+
 function readOptionalPositiveInteger(value: unknown, fallback: number): number {
   if (value === undefined || value === null || value === '') {
     return fallback;
@@ -1260,6 +1520,18 @@ function readOptionalPositiveInteger(value: unknown, fallback: number): number {
   }
 
   return value;
+}
+
+function readOptionalPositiveNumber(value: unknown, fallback: number): number {
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    throw new Error('Tool input must be a positive number.');
+  }
+
+  return Math.round(value * 1000) / 1000;
 }
 
 function readHttpMethod(value: unknown): string {

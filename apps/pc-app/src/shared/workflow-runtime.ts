@@ -10,6 +10,8 @@ export type WorkflowRuntimePrimitive = string | number | boolean | null;
 export type WorkflowFileKind =
   | 'document'
   | 'image'
+  | 'video'
+  | 'audio'
   | 'spreadsheet'
   | 'presentation'
   | 'pdf'
@@ -20,6 +22,7 @@ export interface WorkflowFileValue {
   id: string;
   name: string;
   kind: WorkflowFileKind;
+  uri?: string;
   mimeType?: string;
   localPath: string;
   sizeBytes?: number;
@@ -132,6 +135,8 @@ export function createWorkflowVariablePoolFromTask(task: DesktopTaskDetail): Wor
     'start.title': task.title,
     'start.files': files,
     'start.images': files.filter((file) => file.kind === 'image'),
+    'start.videos': files.filter((file) => file.kind === 'video'),
+    'start.audio': files.filter((file) => file.kind === 'audio'),
     'start.documents': files.filter((file) => ['document', 'pdf', 'text'].includes(file.kind)),
     'start.spreadsheets': files.filter((file) => file.kind === 'spreadsheet'),
     'start.presentations': files.filter((file) => file.kind === 'presentation')
@@ -157,6 +162,7 @@ export function normalizeWorkflowAttachmentPaths(paths: string[]): WorkflowFileV
         id: `start-file-${index + 1}`,
         name,
         kind: inferWorkflowFileKind(name),
+        uri: `local://${localPath}`,
         mimeType: inferWorkflowMimeType(name),
         localPath
       };
@@ -394,6 +400,7 @@ function renderWorkflowFileValue(file: WorkflowFileValue): string {
   return [
     `File: ${file.name}`,
     `Kind: ${file.kind}`,
+    file.uri ? `URI: ${file.uri}` : '',
     `Path: ${file.localPath}`,
     file.mimeType ? `MIME: ${file.mimeType}` : '',
     file.extractedText ? `Extracted text:\n${file.extractedText}` : ''
@@ -407,6 +414,14 @@ function inferWorkflowFileKind(fileName: string): WorkflowFileKind {
 
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(extension)) {
     return 'image';
+  }
+
+  if (['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v'].includes(extension)) {
+    return 'video';
+  }
+
+  if (['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg'].includes(extension)) {
+    return 'audio';
   }
 
   if (['doc', 'docx'].includes(extension)) {
@@ -441,6 +456,9 @@ function inferWorkflowMimeType(fileName: string): string | undefined {
     jpeg: 'image/jpeg',
     json: 'application/json',
     md: 'text/markdown',
+    m4a: 'audio/mp4',
+    mp3: 'audio/mpeg',
+    mp4: 'video/mp4',
     pdf: 'application/pdf',
     png: 'image/png',
     pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',

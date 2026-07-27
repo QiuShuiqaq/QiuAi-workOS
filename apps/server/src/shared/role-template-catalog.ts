@@ -220,6 +220,10 @@ function inferWorkflowArtifactType(
     return 'pptx';
   }
 
+  if (/\b(video|mp4|clip|trim|ffmpeg|cut_plan)\b/.test(text)) {
+    return 'mp4';
+  }
+
   if (
     /\b(xlsx?|spreadsheet|csv|excel|finance|invoice|reimbursement|inventory|metrics?|dashboard|quote|reconciliation)\b/.test(
       text
@@ -312,7 +316,7 @@ function buildRunnableWorkflowGraphForTemplate(
       type: 'artifact',
       name: 'Write deliverable',
       instruction: `Write the final deliverable as ${artifactType}.`,
-      toolId: 'office-document',
+      toolId: artifactType === 'mp4' ? 'video-processing' : 'office-document',
       artifactType,
       inputVariables: ['draft_result.text'],
       outputVariables: ['deliverable_file']
@@ -349,6 +353,142 @@ function buildRunnableWorkflowGraphForTemplate(
     runtimePolicy: {
       maxNodeExecutions: 64,
       maxLoopIterations: 8,
+      requireApprovalBeforeTools: false
+    }
+  };
+}
+
+function buildVideoContentWorkflowGraph(): ServerRoleWorkflowGraph {
+  return {
+    version: '1.0.0',
+    entryNodeId: 'start',
+    nodes: [
+      {
+        id: 'start',
+        type: 'start',
+        name: 'Start'
+      },
+      {
+        id: 'receive_input',
+        type: 'input',
+        name: '接收任务',
+        instruction: '读取用户上传的视频、本次剪辑目标、评分标准和输出要求。',
+        inputVariables: ['start.text', 'start.files'],
+        outputVariables: ['task_brief']
+      },
+      {
+        id: 'collect_videos',
+        type: 'list',
+        name: '筛选视频',
+        instruction: '从用户上传的附件里筛选视频文件，只传递本地路径，不上传视频本体。',
+        inputVariables: ['start.files'],
+        outputVariables: ['video_files'],
+        config: {
+          sourceRef: 'start.files',
+          kind: 'video',
+          limit: 10
+        }
+      },
+      {
+        id: 'current_video',
+        type: 'iteration',
+        name: '读取当前视频',
+        instruction: '取出待处理的视频文件，后续节点通过 runtime.current_item.localPath 读取本地路径。',
+        inputVariables: ['collect_videos.items'],
+        outputVariables: ['current_video'],
+        config: {
+          sourceRef: 'collect_videos.items'
+        }
+      },
+      {
+        id: 'probe_video',
+        type: 'tool',
+        name: '读取视频信息',
+        instruction: '调用本地视频工具读取文件名、大小和基础元信息。',
+        toolId: 'video-processing',
+        inputVariables: ['runtime.current_item'],
+        outputVariables: ['video_metadata'],
+        config: {
+          action: 'video.probe',
+          input: {
+            videoPath: '$runtime.current_item.localPath'
+          }
+        }
+      },
+      {
+        id: 'extract_frames',
+        type: 'tool',
+        name: '抽取关键帧',
+        instruction: '调用本地 FFmpeg 抽取关键帧，输出图片路径数组，供多模态模型理解视频内容。',
+        toolId: 'video-processing',
+        inputVariables: ['runtime.current_item'],
+        outputVariables: ['video_frames'],
+        config: {
+          action: 'video.extract_frames',
+          input: {
+            videoPath: '$runtime.current_item.localPath',
+            frameIntervalSeconds: 5,
+            maxFrames: 12,
+            folder: 'frames',
+            fileName: '{{task.title}}'
+          }
+        }
+      },
+      {
+        id: 'analyze_video',
+        type: 'llm',
+        name: '视频理解与评分',
+        instruction: [
+          '根据任务要求、视频信息和关键帧路径分析视频内容。',
+          '必须返回 JSON，不要使用 markdown 代码块。',
+          '字段：summary、score、qualityIssues、cutPlan、editNotes、finalRecommendation。',
+          'cutPlan 必须是数组，每项包含 start、end、reason，默认总时长控制在 15 秒左右。'
+        ].join('\n'),
+        modelProfileId: 'qiu-vision-default',
+        inputVariables: ['start.text', 'probe_video.result', 'extract_frames.result', 'runtime.current_item'],
+        outputVariables: ['video_analysis']
+      },
+      {
+        id: 'export_video',
+        type: 'artifact',
+        name: '导出剪辑视频',
+        instruction: '根据 analyze_video.json.cutPlan 调用本地 FFmpeg 生成 MP4 成品。',
+        toolId: 'video-processing',
+        artifactType: 'mp4',
+        inputVariables: ['runtime.current_item', 'analyze_video.json'],
+        outputVariables: ['final_video'],
+        config: {
+          action: 'video.compose_clips',
+          input: {
+            videoPath: '$runtime.current_item.localPath',
+            cutPlan: '$analyze_video.json.cutPlan',
+            folder: 'videos',
+            fileName: '{{task.title}}-15s'
+          }
+        }
+      },
+      {
+        id: 'final_output',
+        type: 'output',
+        name: '返回结果',
+        instruction: '用中文总结视频评分、剪辑理由、风险提醒和生成文件路径。',
+        inputVariables: ['analyze_video.text', 'export_video.file'],
+        outputVariables: ['final_answer']
+      }
+    ],
+    edges: [
+      { id: 'start__receive_input', sourceNodeId: 'start', targetNodeId: 'receive_input', condition: { type: 'always' } },
+      { id: 'receive_input__collect_videos', sourceNodeId: 'receive_input', targetNodeId: 'collect_videos', condition: { type: 'always' } },
+      { id: 'collect_videos__current_video', sourceNodeId: 'collect_videos', targetNodeId: 'current_video', condition: { type: 'always' } },
+      { id: 'current_video__probe_video', sourceNodeId: 'current_video', targetNodeId: 'probe_video', condition: { type: 'always' } },
+      { id: 'probe_video__extract_frames', sourceNodeId: 'probe_video', targetNodeId: 'extract_frames', condition: { type: 'always' } },
+      { id: 'extract_frames__analyze_video', sourceNodeId: 'extract_frames', targetNodeId: 'analyze_video', condition: { type: 'always' } },
+      { id: 'analyze_video__export_video', sourceNodeId: 'analyze_video', targetNodeId: 'export_video', condition: { type: 'exists', variable: 'analyze_video.json.cutPlan' } },
+      { id: 'export_video__final_output', sourceNodeId: 'export_video', targetNodeId: 'final_output', condition: { type: 'always' } }
+    ],
+    runtimePolicy: {
+      maxNodeExecutions: 24,
+      maxLoopIterations: 10,
       requireApprovalBeforeTools: false
     }
   };
@@ -1052,6 +1192,78 @@ const baseServerRoleTemplateCatalog: BaseServerRoleTemplateCatalogEntry[] = [
     ],
     outputFormat: '门店日报、客诉分流、物料提醒、排班风险、整改动作和负责人清单。',
     approvalPolicy: '涉及赔付、人员处罚、价格承诺和对外回复时必须由门店负责人确认。'
+  },
+  {
+    templateId: 'template_video_quality_editor',
+    version: '1.0.0',
+    name: 'AI 视频质检剪辑专员',
+    industry: '内容运营与视频生产',
+    scenario: '视频内容理解、质量评分、关键帧分析和 15 秒短视频剪辑',
+    description: '读取用户本地视频路径，抽取关键帧，调用多模态模型输出评分和剪辑方案，再用本地 FFmpeg 导出成品 MP4。',
+    recommendedPlanCode: 'ENTERPRISE_PRO_MONTHLY',
+    businessGoal: '让企业能批量评估短视频素材质量，并把 50-70 秒视频快速剪成可复核的 15 秒成片。',
+    knowledgeSources: ['视频质检标准', '品牌内容规范', '平台发布规则', '历史高质量视频案例'],
+    tools: ['video-processing', 'office-document', 'local-filesystem'],
+    skills: [
+      skill('video_content_understanding', '视频内容理解', '识别视频主题、人物、场景、卖点和潜在风险。'),
+      skill('video_quality_scoring', '视频质量评分', '按画面、节奏、信息密度、品牌表达和发布风险进行评分。'),
+      skill('short_clip_planning', '短视频剪辑规划', '生成可执行的 cutPlan、剪辑理由和成品交付说明。')
+    ],
+    workflowSteps: [
+      {
+        id: 'receive_input',
+        order: 1,
+        type: 'input',
+        name: '接收视频任务',
+        instruction: '读取用户拖入的视频文件、本次目标、评分标准和输出要求。'
+      },
+      {
+        id: 'collect_videos',
+        order: 2,
+        type: 'tool',
+        name: '筛选视频文件',
+        instruction: '从附件中筛选视频文件，只传递本地路径。',
+        toolIds: ['local-filesystem']
+      },
+      {
+        id: 'probe_and_frames',
+        order: 3,
+        type: 'tool',
+        name: '读取信息并抽关键帧',
+        instruction: '调用视频处理工具读取元信息，并用 FFmpeg 抽取关键帧。',
+        toolIds: ['video-processing']
+      },
+      {
+        id: 'analyze_video',
+        order: 4,
+        type: 'reasoning',
+        name: '视频理解与评分',
+        instruction: '调用多模态模型输出 summary、score、qualityIssues、cutPlan、editNotes 和 finalRecommendation。'
+      },
+      {
+        id: 'export_video',
+        order: 5,
+        type: 'tool',
+        name: '导出成品视频',
+        instruction: '根据 cutPlan 调用本地 FFmpeg 导出 MP4 成品。',
+        toolIds: ['video-processing'],
+        requiresApproval: true
+      },
+      {
+        id: 'deliver_output',
+        order: 6,
+        type: 'output',
+        name: '返回交付结果',
+        instruction: '返回视频评分、剪辑说明、风险提醒和本地成品文件路径。'
+      }
+    ],
+    workflowGraph: buildVideoContentWorkflowGraph(),
+    sampleInputs: [
+      '请分析我拖入的这段 60 秒视频，按内容质量打分，并剪成 15 秒以内的高质量短视频。',
+      '请帮我评估这条产品视频是否适合发布，输出评分、问题清单、剪辑方案和成品 MP4。'
+    ],
+    outputFormat: '视频评分 JSON、剪辑动作记录、风险提醒、本地关键帧路径和 MP4 成品路径。',
+    approvalPolicy: '导出成品视频前需要用户确认剪辑方案；涉及品牌、医疗、金融、法律等敏感内容时必须人工复核。'
   },
   {
     templateId: 'template_data_research',

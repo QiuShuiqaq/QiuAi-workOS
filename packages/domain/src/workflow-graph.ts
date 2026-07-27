@@ -1,6 +1,8 @@
 export type RoleWorkflowGraphNodeType =
   | 'start'
   | 'input'
+  | 'parameter_extractor'
+  | 'list'
   | 'knowledge'
   | 'reasoning'
   | 'llm'
@@ -8,6 +10,9 @@ export type RoleWorkflowGraphNodeType =
   | 'template'
   | 'tool'
   | 'condition'
+  | 'iteration'
+  | 'loop'
+  | 'aggregator'
   | 'artifact'
   | 'approval'
   | 'output';
@@ -20,8 +25,19 @@ export type RoleWorkflowGraphArtifactType =
   | 'pdf'
   | 'png'
   | 'jpg'
+  | 'mp4'
   | 'csv'
   | 'zip';
+
+export type RoleWorkflowGraphVariableType =
+  | 'text'
+  | 'number'
+  | 'boolean'
+  | 'json'
+  | 'asset'
+  | 'asset[]'
+  | 'table'
+  | 'artifact';
 
 export type RoleWorkflowGraphEdgeConditionType =
   | 'always'
@@ -61,6 +77,7 @@ export interface RoleWorkflowGraphEdge {
 
 export interface RoleWorkflowGraphVariable {
   name: string;
+  type?: RoleWorkflowGraphVariableType;
   description?: string;
   required?: boolean;
   defaultValue?: unknown;

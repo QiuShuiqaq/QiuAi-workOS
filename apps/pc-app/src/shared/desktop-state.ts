@@ -116,6 +116,37 @@ const initialTools: ToolManifest[] = [
     entryPoint: 'mcp',
     capabilities: ['mcp'],
     requiresApproval: true
+  },
+  {
+    id: 'video-processing',
+    name: 'Video Processing',
+    version: '0.1.0',
+    scope: 'desktop',
+    entryPoint: 'native',
+    capabilities: ['video_processing'],
+    requiresApproval: true,
+    actions: [
+      {
+        action: 'video.probe',
+        name: '读取视频信息',
+        description: '读取本地视频路径、文件大小和基础元信息。'
+      },
+      {
+        action: 'video.extract_frames',
+        name: '抽取关键帧',
+        description: '调用本地 FFmpeg 从视频中按间隔抽取图片帧，输出本地图片路径。'
+      },
+      {
+        action: 'video.compose_clips',
+        name: '按剪辑方案导出 MP4',
+        description: '根据 cutPlan 调用本地 FFmpeg 生成成品视频。'
+      },
+      {
+        action: 'video.export_mp4',
+        name: '导出 MP4',
+        description: '根据输入视频和剪辑片段导出 MP4 文件。'
+      }
+    ]
   }
 ];
 

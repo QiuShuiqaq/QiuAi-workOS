@@ -1,6 +1,8 @@
 export type ServerRoleWorkflowGraphNodeType =
   | 'start'
   | 'input'
+  | 'parameter_extractor'
+  | 'list'
   | 'knowledge'
   | 'reasoning'
   | 'llm'
@@ -8,6 +10,9 @@ export type ServerRoleWorkflowGraphNodeType =
   | 'template'
   | 'tool'
   | 'condition'
+  | 'iteration'
+  | 'loop'
+  | 'aggregator'
   | 'artifact'
   | 'approval'
   | 'output';
@@ -20,8 +25,19 @@ export type ServerRoleWorkflowGraphArtifactType =
   | 'pdf'
   | 'png'
   | 'jpg'
+  | 'mp4'
   | 'csv'
   | 'zip';
+
+export type ServerRoleWorkflowGraphVariableType =
+  | 'text'
+  | 'number'
+  | 'boolean'
+  | 'json'
+  | 'asset'
+  | 'asset[]'
+  | 'table'
+  | 'artifact';
 
 export type ServerRoleWorkflowGraphEdgeConditionType =
   | 'always'
@@ -61,6 +77,7 @@ export interface ServerRoleWorkflowGraphEdge {
 
 export interface ServerRoleWorkflowGraphVariable {
   name: string;
+  type?: ServerRoleWorkflowGraphVariableType;
   description?: string;
   required?: boolean;
   defaultValue?: unknown;
@@ -94,6 +111,8 @@ export interface WorkflowStepLike {
 const nodeTypes = new Set<string>([
   'start',
   'input',
+  'parameter_extractor',
+  'list',
   'knowledge',
   'reasoning',
   'llm',
@@ -101,6 +120,9 @@ const nodeTypes = new Set<string>([
   'template',
   'tool',
   'condition',
+  'iteration',
+  'loop',
+  'aggregator',
   'artifact',
   'approval',
   'output'
@@ -114,8 +136,20 @@ const artifactTypes = new Set<string>([
   'pdf',
   'png',
   'jpg',
+  'mp4',
   'csv',
   'zip'
+]);
+
+const variableTypes = new Set<string>([
+  'text',
+  'number',
+  'boolean',
+  'json',
+  'asset',
+  'asset[]',
+  'table',
+  'artifact'
 ]);
 
 const conditionTypes = new Set<string>([
@@ -204,7 +238,7 @@ export function buildWorkflowGraphFromSteps(steps: WorkflowStepLike[]): ServerRo
       type: 'artifact',
       name: 'Write deliverable',
       instruction: `Write the final deliverable as ${artifactType}.`,
-      toolId: 'office-document',
+      toolId: artifactType === 'mp4' ? 'video-processing' : 'office-document',
       artifactType,
       inputVariables: ['draft_result.text'],
       outputVariables: ['deliverable_file']
@@ -252,6 +286,10 @@ function inferArtifactTypeFromSteps(
 
   if (/\b(ppt|pptx|slides?|presentation)\b/.test(text)) {
     return 'pptx';
+  }
+
+  if (/\b(video|mp4|clip|trim|ffmpeg|cut_plan)\b/.test(text)) {
+    return 'mp4';
   }
 
   if (/\b(xlsx?|spreadsheet|csv|excel|finance|invoice|reimbursement|inventory|metrics?|dashboard|quote)\b/.test(text)) {
@@ -424,11 +462,25 @@ function normalizeVariables(value: unknown): ServerRoleWorkflowGraphVariable[] |
 
     return {
       name: requireText(item.name, 'Workflow graph variable name cannot be empty.'),
+      type: normalizeVariableType(item.type),
       description: optionalText(item.description),
       required: optionalBoolean(item.required),
       defaultValue: item.defaultValue
     };
   });
+}
+
+function normalizeVariableType(value: unknown): ServerRoleWorkflowGraphVariableType | undefined {
+  const type = optionalText(value);
+  if (!type) {
+    return undefined;
+  }
+
+  if (!variableTypes.has(type)) {
+    throw new Error(`Workflow graph variable type is invalid: ${type}.`);
+  }
+
+  return type as ServerRoleWorkflowGraphVariableType;
 }
 
 function normalizeRuntimePolicy(value: unknown): ServerRoleWorkflowGraphRuntimePolicy {

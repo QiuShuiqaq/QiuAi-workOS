@@ -1,5 +1,16 @@
 import type { RoleWorkflowGraph } from './workflow-graph';
 
+const workflowGraphVariableTypes = [
+  'text',
+  'number',
+  'boolean',
+  'json',
+  'asset',
+  'asset[]',
+  'table',
+  'artifact'
+] as const;
+
 export type KnowledgeBindingSource =
   | 'local_folder'
   | 'local_file'
@@ -18,6 +29,9 @@ export type ToolCapability =
   | 'document_edit'
   | 'presentation_edit'
   | 'spreadsheet_edit'
+  | 'video_processing'
+  | 'image_processing'
+  | 'audio_processing'
   | 'filesystem'
   | 'browser_automation'
   | 'custom_api'
@@ -57,6 +71,14 @@ export interface ToolManifest {
   entryPoint: ToolEntryPoint;
   capabilities: ToolCapability[];
   requiresApproval: boolean;
+  actions?: Array<{
+    action: string;
+    name: string;
+    description?: string;
+    inputSchema?: Record<string, unknown>;
+    outputSchema?: Record<string, unknown>;
+    requiresApproval?: boolean;
+  }>;
 }
 
 export type RoleWorkflowStepType =
@@ -159,9 +181,33 @@ export function validateToolManifest(input: unknown): ToolManifest {
     capabilities: requireStringEnumArray(
       record.capabilities,
       'toolManifest.capabilities',
-      ['web_search', 'document_extract', 'document_edit', 'presentation_edit', 'spreadsheet_edit', 'filesystem', 'browser_automation', 'custom_api', 'mcp']
+      ['web_search', 'document_extract', 'document_edit', 'presentation_edit', 'spreadsheet_edit', 'video_processing', 'image_processing', 'audio_processing', 'filesystem', 'browser_automation', 'custom_api', 'mcp']
     ),
-    requiresApproval: optionalBoolean(record.requiresApproval, 'toolManifest.requiresApproval')
+    requiresApproval: optionalBoolean(record.requiresApproval, 'toolManifest.requiresApproval'),
+    actions: Array.isArray(record.actions)
+      ? record.actions.map((action, index) =>
+          validateToolManifestAction(action, `toolManifest.actions[${index}]`)
+        )
+      : undefined
+  };
+}
+
+function validateToolManifestAction(
+  input: unknown,
+  fieldName: string
+): NonNullable<ToolManifest['actions']>[number] {
+  const record = requireRecord(input, fieldName);
+
+  return {
+    action: requireString(record.action, `${fieldName}.action`),
+    name: requireString(record.name, `${fieldName}.name`),
+    description: optionalString(record.description, `${fieldName}.description`),
+    inputSchema: optionalRecord(record.inputSchema, `${fieldName}.inputSchema`),
+    outputSchema: optionalRecord(record.outputSchema, `${fieldName}.outputSchema`),
+    requiresApproval:
+      record.requiresApproval === undefined
+        ? undefined
+        : optionalBoolean(record.requiresApproval, `${fieldName}.requiresApproval`)
   };
 }
 
@@ -300,6 +346,7 @@ function requireWorkflowGraphNodes(value: unknown, fieldName: string): RoleWorkf
             'pdf',
             'png',
             'jpg',
+            'mp4',
             'csv',
             'zip'
           ]) as RoleWorkflowGraph['nodes'][number]['artifactType'];
@@ -313,11 +360,18 @@ function requireWorkflowGraphNodes(value: unknown, fieldName: string): RoleWorkf
       type: requireEnum(record.type, `${fieldName}[${index}].type`, [
         'start',
         'input',
+        'parameter_extractor',
+        'list',
         'knowledge',
         'reasoning',
         'llm',
+        'assign',
+        'template',
         'tool',
         'condition',
+        'iteration',
+        'loop',
+        'aggregator',
         'artifact',
         'approval',
         'output'
@@ -397,6 +451,10 @@ function validateWorkflowGraphVariable(
 
   return {
     name: requireString(record.name, `${fieldName}.name`),
+    type:
+      record.type === undefined || record.type === null
+        ? undefined
+        : requireEnum(record.type, `${fieldName}.type`, workflowGraphVariableTypes),
     description: optionalString(record.description, `${fieldName}.description`),
     required: optionalBoolean(record.required, `${fieldName}.required`),
     defaultValue: record.defaultValue

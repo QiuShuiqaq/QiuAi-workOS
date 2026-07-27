@@ -16,6 +16,9 @@ export type ToolCapability =
   | 'document_edit'
   | 'presentation_edit'
   | 'spreadsheet_edit'
+  | 'video_processing'
+  | 'image_processing'
+  | 'audio_processing'
   | 'filesystem'
   | 'browser_automation'
   | 'custom_api'
@@ -129,6 +132,16 @@ export interface ToolManifest {
   entryPoint: ToolEntryPoint;
   capabilities: ToolCapability[];
   requiresApproval: boolean;
+  actions?: ToolManifestAction[];
+}
+
+export interface ToolManifestAction {
+  action: string;
+  name: string;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  requiresApproval?: boolean;
 }
 
 export interface DesktopRoleSkillSummary {

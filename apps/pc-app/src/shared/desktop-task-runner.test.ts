@@ -61,6 +61,15 @@ const tools: ToolManifest[] = [
     entryPoint: 'mcp',
     capabilities: ['mcp'],
     requiresApproval: true
+  },
+  {
+    id: 'video-processing',
+    name: 'Video Processing',
+    version: '1.0.0',
+    scope: 'desktop',
+    entryPoint: 'native',
+    capabilities: ['video_processing'],
+    requiresApproval: true
   }
 ];
 
@@ -780,8 +789,18 @@ const workflowVariableArtifactTask = await runDesktopTask({
           type: 'artifact',
           name: 'Write proposal document',
           instruction: 'Write the proposal body into a Word document.',
+          toolId: 'office-document',
           artifactType: 'docx',
-          inputVariables: ['llm_1.text']
+          inputVariables: ['llm_1.text'],
+          config: {
+            action: 'office.write_docx_document',
+            input: {
+              title: 'Renewal Proposal',
+              folder: 'custom-documents',
+              fileName: 'renewal-proposal-custom',
+              content: '{{llm_1.text}}'
+            }
+          }
         }
       ],
       edges: [
@@ -810,6 +829,8 @@ const workflowVariableArtifactTask = await runDesktopTask({
     workflowVariableArtifactToolCallCount += 1;
     assert.equal(request.toolId, 'office-document');
     assert.equal(request.action, 'office.write_docx_document');
+    assert.equal(request.input.folder, 'custom-documents');
+    assert.equal(request.input.fileName, 'renewal-proposal-custom');
     assert.match(String(request.input.content), /LLM proposal body ready/);
     assert.doesNotMatch(String(request.input.content), /Variable: llm_1\.text/);
     return {
@@ -1257,6 +1278,138 @@ assert.doesNotMatch(
   runtimeJsonBranchTask.task.artifacts.find((artifact) => artifact.type === 'report')?.content ?? '',
   /Fallback answer/
 );
+
+let workflowStructureModelInvocationCount = 0;
+const workflowStructureTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-structure-001',
+    roleCode: 'ai-video-reviewer',
+    roleName: 'AI Video Reviewer',
+    title: 'Review uploaded videos',
+    input: 'Cut uploaded videos to 15 seconds and keep product highlights.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0,
+    executionContext: {
+      modelProfileIds: ['qiu-general-default'],
+      toolIds: [],
+      knowledgeBindingIds: [],
+      attachmentPaths: ['C:\\QiuAI\\input\\demo.mp4', 'C:\\QiuAI\\input\\cover.png']
+    }
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    modelProfileIds: ['qiu-general-default'],
+    toolIds: [],
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'extract_params',
+          type: 'parameter_extractor',
+          name: 'Extract video task parameters',
+          instruction: 'Extract targetDuration and priority fields.',
+          modelProfileId: 'qiu-general-default',
+          outputVariables: ['video_params']
+        },
+        {
+          id: 'video_list',
+          type: 'list',
+          name: 'Collect video files',
+          inputVariables: ['start.files'],
+          outputVariables: ['video_files'],
+          config: {
+            sourceRef: 'start.files',
+            kind: 'video',
+            limit: 10
+          }
+        },
+        {
+          id: 'next_video',
+          type: 'iteration',
+          name: 'Prepare current video',
+          inputVariables: ['video_list.items'],
+          outputVariables: ['current_video'],
+          config: {
+            sourceRef: 'video_list.items'
+          }
+        },
+        {
+          id: 'merge_context',
+          type: 'aggregator',
+          name: 'Merge video context',
+          inputVariables: ['extract_params.json', 'next_video.current'],
+          outputVariables: ['video_context'],
+          config: {
+            mode: 'object'
+          }
+        },
+        {
+          id: 'final_output',
+          type: 'output',
+          name: 'Return workflow result',
+          instruction: 'Summarize the prepared video context.',
+          inputVariables: ['merge_context.json']
+        }
+      ],
+      edges: [
+        { id: 'start-params', sourceNodeId: 'start', targetNodeId: 'extract_params', condition: { type: 'always' } },
+        { id: 'params-list', sourceNodeId: 'extract_params', targetNodeId: 'video_list', condition: { type: 'always' } },
+        { id: 'list-iterate', sourceNodeId: 'video_list', targetNodeId: 'next_video', condition: { type: 'always' } },
+        { id: 'iterate-merge', sourceNodeId: 'next_video', targetNodeId: 'merge_context', condition: { type: 'always' } },
+        { id: 'merge-output', sourceNodeId: 'merge_context', targetNodeId: 'final_output', condition: { type: 'always' } }
+      ],
+      runtimePolicy: {
+        maxNodeExecutions: 12,
+        maxLoopIterations: 4,
+        requireApprovalBeforeTools: false
+      }
+    }
+  },
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: [],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    workflowStructureModelInvocationCount += 1;
+    const prompt = request.messages.map((message) => message.content).join('\n');
+
+    if (workflowStructureModelInvocationCount === 1) {
+      assert.match(prompt, /Extract video task parameters/);
+      return {
+        provider: request.profile.providerName,
+        modelName: request.profile.modelName,
+        content: '{"targetDuration":15,"priority":["product highlights"]}'
+      };
+    }
+
+    assert.match(prompt, /demo.mp4/);
+    assert.match(prompt, /targetDuration/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: 'Video context prepared for demo.mp4.'
+    };
+  },
+  completedAt: '2026-07-20T10:00:06.750Z'
+});
+
+assert.equal(workflowStructureModelInvocationCount, 2);
+assert.equal(workflowStructureTask.task.state, 'completed');
+assert.ok(
+  workflowStructureTask.task.executionLogs.some(
+    (log) => log.eventType === 'WORKFLOW_RUNTIME_NODE_COMPLETED' && /Collect video files/.test(log.message)
+  )
+);
+assert.ok(
+  workflowStructureTask.task.executionLogs.some(
+    (log) => log.eventType === 'WORKFLOW_RUNTIME_NODE_COMPLETED' && /Prepare current video/.test(log.message)
+  )
+);
+assert.match(workflowStructureTask.task.artifacts.find((artifact) => artifact.type === 'text')?.content ?? '', /demo\.mp4/);
 
 const malformedWorkflowTask = await runDesktopTask({
   task: createMockTaskDetail({

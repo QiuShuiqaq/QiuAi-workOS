@@ -39,7 +39,7 @@ import Tag from 'antd/es/tag';
 import Typography from 'antd/es/typography';
 import message from 'antd/es/message';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Background,
   Controls,
@@ -80,6 +80,7 @@ type WorkflowFlowNodeData = {
   nodeType: WorkflowNodeType;
   title: string;
   meta: string;
+  details: string[];
   tone: string;
 } & Record<string, unknown>;
 type WorkflowFlowNode = FlowNode<WorkflowFlowNodeData, 'workflowNode'>;
@@ -154,13 +155,14 @@ const knowledgeOptions = [
 ].map((value) => ({ value, label: value }));
 
 const toolOptions = [
-  'web-search',
-  'office-document',
-  'local-filesystem',
-  'browser-automation',
-  'http-request',
-  'mcp'
-].map((value) => ({ value, label: value }));
+  { value: 'web-search', label: '网页搜索 / web-search' },
+  { value: 'office-document', label: 'Office 文档 / office-document' },
+  { value: 'local-filesystem', label: '本地文件 / local-filesystem' },
+  { value: 'video-processing', label: '视频处理 / video-processing' },
+  { value: 'browser-automation', label: '浏览器自动化 / browser-automation' },
+  { value: 'http-request', label: 'HTTP 接口 / http-request' },
+  { value: 'mcp', label: 'MCP 工具 / mcp' }
+];
 
 const toolActionTemplatesByToolId: Record<string, ToolActionTemplate[]> = {
   'web-search': [
@@ -228,6 +230,20 @@ const toolActionTemplatesByToolId: Record<string, ToolActionTemplate[]> = {
     {
       value: 'spreadsheet.write_xlsx',
       label: '生成 Excel',
+      defaults: {
+        folder: 'spreadsheets',
+        fileName: '{{task.title}}',
+        rows: [['项目', '内容'], ['结果', '{{runtime.previous_text}}']]
+      },
+      fields: [
+        { key: 'folder', label: '目录' },
+        { key: 'fileName', label: '文件名' },
+        { key: 'rows', label: '行数据 JSON', type: 'textarea', format: 'json', placeholder: '[["项目","内容"],["结果","{{runtime.previous_text}}"]]' }
+      ]
+    },
+    {
+      value: 'spreadsheet.write_csv',
+      label: '生成 CSV',
       defaults: {
         folder: 'spreadsheets',
         fileName: '{{task.title}}',
@@ -320,12 +336,56 @@ const toolActionTemplatesByToolId: Record<string, ToolActionTemplate[]> = {
         allowPrivateNetwork: true
       },
       fields: [
-        { key: 'endpoint', label: 'Endpoint' },
+        { key: 'endpoint', label: '服务地址' },
         { key: 'toolName', label: '工具名' },
         { key: 'arguments', label: '参数 JSON', type: 'textarea', format: 'json', placeholder: '{"query":"{{start.text}}"}' },
         { key: 'headers', label: '请求头 JSON', type: 'textarea', format: 'json' },
         { key: 'timeoutMs', label: '超时毫秒', type: 'number' },
         { key: 'allowPrivateNetwork', label: '允许内网', type: 'boolean' }
+      ]
+    }
+  ],
+  'video-processing': [
+    {
+      value: 'video.probe',
+      label: '读取视频信息',
+      defaults: { videoPath: '$runtime.current_item.localPath' },
+      fields: [
+        { key: 'videoPath', label: '视频路径', placeholder: '$runtime.current_item.localPath' }
+      ]
+    },
+    {
+      value: 'video.extract_frames',
+      label: '抽取关键帧',
+      defaults: {
+        videoPath: '$runtime.current_item.localPath',
+        frameIntervalSeconds: 5,
+        maxFrames: 12,
+        folder: 'frames',
+        fileName: '{{task.title}}'
+      },
+      fields: [
+        { key: 'videoPath', label: '视频路径', placeholder: '$runtime.current_item.localPath' },
+        { key: 'frameIntervalSeconds', label: '抽帧间隔秒', type: 'number' },
+        { key: 'maxFrames', label: '最多帧数', type: 'number' },
+        { key: 'folder', label: '保存目录' },
+        { key: 'fileName', label: '文件名' }
+      ]
+    },
+    {
+      value: 'video.compose_clips',
+      label: '导出剪辑视频',
+      defaults: {
+        videoPath: '$runtime.current_item.localPath',
+        cutPlan: [{ start: 0, end: 15 }],
+        folder: 'videos',
+        fileName: '{{task.title}}'
+      },
+      fields: [
+        { key: 'videoPath', label: '视频路径', placeholder: '$runtime.current_item.localPath' },
+        { key: 'cutPlan', label: '剪辑方案 JSON', type: 'textarea', format: 'json', placeholder: '[{"start":0,"end":15}]' },
+        { key: 'folder', label: '保存目录' },
+        { key: 'fileName', label: '文件名' }
       ]
     }
   ]
@@ -351,10 +411,17 @@ const workflowPresetOptions: Array<{ value: WorkflowPreset; label: string; descr
 
 const workflowNodeTypeOptions: Array<{ value: WorkflowNodeType; label: string }> = [
   { value: 'input', label: '输入' },
+  { value: 'parameter_extractor', label: '参数提取' },
+  { value: 'list', label: '列表处理' },
   { value: 'knowledge', label: '知识库' },
   { value: 'llm', label: 'LLM' },
   { value: 'tool', label: '工具' },
   { value: 'condition', label: '条件' },
+  { value: 'iteration', label: '迭代' },
+  { value: 'loop', label: '循环' },
+  { value: 'aggregator', label: '变量聚合' },
+  { value: 'template', label: '模板' },
+  { value: 'assign', label: '变量赋值' },
   { value: 'artifact', label: '产物' },
   { value: 'approval', label: '审批' },
   { value: 'output', label: '输出' }
@@ -369,6 +436,7 @@ const workflowNodeCatalogGroups: Array<{
     title: 'AI',
     description: '模型生成、分析、任务拆解',
     nodes: [
+      { value: 'parameter_extractor', label: '参数提取', hint: '从自然语言中提取结构化参数' },
       { value: 'llm', label: 'LLM', hint: '调用模型生成、总结或分析' },
       { value: 'condition', label: '条件判断', hint: '根据变量结果进入不同分支' }
     ]
@@ -378,6 +446,11 @@ const workflowNodeCatalogGroups: Array<{
     description: '接收输入、读取知识',
     nodes: [
       { value: 'input', label: '输入', hint: '声明用户任务和附件输入' },
+      { value: 'list', label: '列表处理', hint: '筛选、排序和整理文件或数组' },
+      { value: 'iteration', label: '迭代', hint: '逐个处理数组里的每一项' },
+      { value: 'aggregator', label: '变量聚合', hint: '合并多个分支或变量结果' },
+      { value: 'template', label: '内容模板', hint: '把变量拼成稳定格式' },
+      { value: 'assign', label: '变量赋值', hint: '设置固定值或复制变量' },
       { value: 'knowledge', label: '知识库', hint: '读取企业或本地知识' }
     ]
   },
@@ -386,7 +459,7 @@ const workflowNodeCatalogGroups: Array<{
     description: '执行外部动作',
     nodes: [
       { value: 'tool', label: '工具调用', hint: '网页搜索、Office、MCP、HTTP 等' },
-      { value: 'artifact', label: '生成产物', hint: '生成 Word、表格、PPT、PDF 等文件' }
+      { value: 'artifact', label: '生成产物', hint: '生成 Word、表格、PPT、PDF、MP4 等文件' }
     ]
   },
   {
@@ -427,6 +500,7 @@ const artifactTypeOptions: Array<{ value: WorkflowArtifactType; label: string }>
   'pdf',
   'png',
   'jpg',
+  'mp4',
   'markdown',
   'csv',
   'zip'
@@ -440,9 +514,22 @@ const conditionTypeOptions: Array<{ value: WorkflowEdgeConditionType; label: str
   { value: 'expression', label: '表达式' }
 ];
 
+const workflowVariableReferenceTags = [
+  { value: 'start.text', label: '用户任务' },
+  { value: 'start.files', label: '拖入附件列表' },
+  { value: 'start.videos', label: '视频附件' },
+  { value: 'runtime.previous_text', label: '上一步文本' },
+  { value: 'runtime.current_item', label: '当前迭代项' },
+  { value: 'node_id.text', label: '节点文本' },
+  { value: 'node_id.json', label: '节点 JSON' },
+  { value: 'node_id.file', label: '节点文件' }
+];
+
 const defaultNodeNames: Record<WorkflowNodeType, string> = {
   start: 'Start',
   input: '接收输入',
+  parameter_extractor: '提取参数',
+  list: '整理列表',
   knowledge: '读取知识',
   reasoning: '分析推理',
   llm: 'LLM 生成',
@@ -450,6 +537,9 @@ const defaultNodeNames: Record<WorkflowNodeType, string> = {
   template: '套用模板',
   tool: '调用工具',
   condition: '条件判断',
+  iteration: '逐项处理',
+  loop: '循环优化',
+  aggregator: '聚合结果',
   artifact: '生成产物',
   approval: '人工确认',
   output: '返回结果'
@@ -489,8 +579,42 @@ function createWorkflowEdgeId(sourceNodeId: string, targetNodeId: string, edges:
 
 function createCanvasNode(type: WorkflowNodeType, nodes: RoleWorkflowGraphNode[]): RoleWorkflowGraphNode {
   const id = createWorkflowNodeId(type, nodes);
-  const toolId = type === 'tool' || type === 'artifact' ? 'office-document' : undefined;
-  const toolActionTemplate = toolId ? getDefaultToolActionTemplate(toolId) : undefined;
+  const artifactType = type === 'artifact' ? 'docx' : undefined;
+  const toolId = type === 'tool'
+    ? 'office-document'
+    : type === 'artifact'
+      ? 'office-document'
+      : undefined;
+  const toolActionTemplate = type === 'artifact'
+    ? getDefaultArtifactActionTemplate(artifactType)
+    : toolId
+      ? getDefaultToolActionTemplate(toolId)
+      : undefined;
+  const defaultConfig =
+    type === 'parameter_extractor'
+      ? {
+          schema: {
+            targetDuration: 'number',
+            outputFormat: 'string',
+            priority: 'string[]'
+          }
+        }
+      : type === 'list'
+        ? { sourceRef: 'start.files', kind: '', limit: 50 }
+        : type === 'iteration'
+          ? { sourceRef: 'list.items' }
+          : type === 'loop'
+            ? { maxIterations: 3 }
+            : type === 'aggregator'
+              ? { mode: 'object' }
+              : type === 'template'
+                ? { template: '{{runtime.previous_text}}' }
+                : (type === 'tool' || type === 'artifact') && toolActionTemplate
+                  ? {
+                      action: toolActionTemplate.value,
+                      input: toolActionTemplate.defaults
+                    }
+                  : undefined;
 
   return {
     id,
@@ -499,24 +623,42 @@ function createCanvasNode(type: WorkflowNodeType, nodes: RoleWorkflowGraphNode[]
     instruction:
       type === 'condition'
         ? '根据输入变量或上一个节点输出选择下一条连线。'
+        : type === 'parameter_extractor'
+          ? '把用户任务或上游文本提取为结构化参数。'
+          : type === 'list'
+            ? '从文件或数组变量中筛选出后续要处理的列表。'
+            : type === 'iteration'
+              ? '从数组中取出当前项，供后续节点逐个处理。'
+              : type === 'aggregator'
+                ? '把多个变量或分支结果合并成一个结果。'
+                : type === 'loop'
+                  ? '控制循环次数和继续条件。'
         : type === 'tool'
           ? '调用指定工具完成当前步骤。'
           : type === 'artifact'
             ? '把最终内容生成可下载产物。'
             : '按节点目标处理任务，并把结果写入输出变量。',
     toolId,
-    modelProfileId: type === 'llm' || type === 'reasoning' ? 'qiu-general-default' : undefined,
-    artifactType: type === 'artifact' ? 'docx' : undefined,
-    inputVariables: type === 'input' ? ['start.text', 'start.files'] : ['start.text'],
-    outputVariables: [`${id}.text`],
+    modelProfileId: type === 'llm' || type === 'reasoning' || type === 'parameter_extractor' ? 'qiu-general-default' : undefined,
+    artifactType,
+    inputVariables:
+      type === 'input'
+        ? ['start.text', 'start.files']
+        : type === 'list'
+          ? ['start.files']
+          : type === 'iteration'
+            ? ['list.items']
+            : ['start.text'],
+    outputVariables:
+      type === 'list'
+        ? [`${id}.items`]
+        : type === 'iteration'
+          ? [`${id}.current`]
+          : type === 'parameter_extractor'
+            ? [`${id}.json`]
+            : [`${id}.text`],
     requiresApproval: type === 'approval',
-    config:
-      type === 'tool' && toolActionTemplate
-        ? {
-            action: toolActionTemplate.value,
-            input: toolActionTemplate.defaults
-          }
-        : undefined
+    config: defaultConfig
   };
 }
 
@@ -524,11 +666,42 @@ function getDefaultToolActionTemplate(toolId: string): ToolActionTemplate | unde
   return toolActionTemplatesByToolId[toolId]?.[0];
 }
 
+function getDefaultArtifactActionTemplate(artifactType: WorkflowArtifactType | undefined): ToolActionTemplate | undefined {
+  if (artifactType === 'mp4') {
+    return toolActionTemplatesByToolId['video-processing']?.find((template) => template.value === 'video.compose_clips');
+  }
+
+  const officeTemplates = toolActionTemplatesByToolId['office-document'] ?? [];
+  if (artifactType === 'pptx') {
+    return officeTemplates.find((template) => template.value === 'presentation.write_pptx');
+  }
+  if (artifactType === 'xlsx') {
+    return officeTemplates.find((template) => template.value === 'spreadsheet.write_xlsx');
+  }
+  if (artifactType === 'csv') {
+    return officeTemplates.find((template) => template.value === 'spreadsheet.write_csv');
+  }
+  if (artifactType === 'markdown' || artifactType === 'pdf') {
+    return officeTemplates.find((template) => template.value === 'office.write_markdown_document');
+  }
+
+  return officeTemplates.find((template) => template.value === 'office.write_docx_document');
+}
+
 function getSelectedToolActionTemplate(toolId: string | undefined, action: string | undefined): ToolActionTemplate | undefined {
   if (!toolId) return undefined;
   const templates = toolActionTemplatesByToolId[toolId] ?? [];
   if (!action) return templates[0];
   return templates.find((template) => template.value === action) ?? templates[0];
+}
+
+function getSelectedWorkflowNodeToolActionTemplate(node: RoleWorkflowGraphNode): ToolActionTemplate | undefined {
+  const action = typeof node.config?.action === 'string' ? node.config.action : undefined;
+  if (!action && node.type === 'artifact') {
+    return getDefaultArtifactActionTemplate(node.artifactType);
+  }
+
+  return getSelectedToolActionTemplate(node.toolId, action);
 }
 
 function parseJsonConfigValue(value: string, fallback: unknown) {
@@ -617,7 +790,7 @@ function deriveWorkflowKnowledgeSources(graph: RoleWorkflowGraph): string[] {
 function deriveWorkflowModelProfileIds(graph: RoleWorkflowGraph): string[] {
   return uniqueTags(
     graph.nodes
-      .filter((node) => node.type === 'llm' || node.type === 'reasoning')
+      .filter((node) => node.type === 'llm' || node.type === 'reasoning' || node.type === 'parameter_extractor')
       .map((node) => node.modelProfileId ?? 'qiu-general-default')
   );
 }
@@ -634,6 +807,10 @@ function deriveWorkflowSkills(graph: RoleWorkflowGraph): Array<{ code: string; n
   const skillNodes = graph.nodes.filter((node) =>
     node.type === 'llm' ||
     node.type === 'reasoning' ||
+    node.type === 'parameter_extractor' ||
+    node.type === 'list' ||
+    node.type === 'iteration' ||
+    node.type === 'aggregator' ||
     node.type === 'tool' ||
     node.type === 'knowledge' ||
     node.type === 'artifact'
@@ -673,10 +850,11 @@ function deriveWorkflowCapabilitySummary(graph: RoleWorkflowGraph): WorkflowCapa
 }
 
 function formatConditionLabel(condition: WorkflowEdge['condition']) {
-  if (!condition || condition.type === 'always') return 'always';
-  if (condition.type === 'expression') return `expr: ${condition.expression ?? '-'}`;
-  if (condition.type === 'exists') return `exists ${condition.variable ?? 'input'}`;
-  return `${condition.type} ${condition.variable ?? 'input'} ${String(condition.value ?? '')}`;
+  if (!condition || condition.type === 'always') return '总是';
+  if (condition.type === 'expression') return `表达式：${condition.expression ?? '-'}`;
+  if (condition.type === 'exists') return `存在：${condition.variable ?? 'input'}`;
+  if (condition.type === 'equals') return `${condition.variable ?? 'input'} 等于 ${String(condition.value ?? '')}`;
+  return `${condition.variable ?? 'input'} 包含 ${String(condition.value ?? '')}`;
 }
 
 function normalizeConditionValue(value: unknown) {
@@ -712,6 +890,8 @@ function deriveWorkflowStepsFromGraph(graph: RoleWorkflowGraph): RoleWorkflowGra
     const mappedType =
       node.type === 'llm'
         ? 'reasoning'
+        : node.type === 'parameter_extractor'
+          ? 'reasoning'
         : node.type === 'artifact'
           ? 'tool'
           : node.type === 'approval' ||
@@ -895,11 +1075,15 @@ function createWorkflowGraph(preset: WorkflowPreset): RoleWorkflowGraph {
 }
 
 function nodeTone(type: RoleWorkflowGraphNode['type']) {
-  if (type === 'llm' || type === 'reasoning') return 'blue';
+  if (type === 'llm' || type === 'reasoning' || type === 'parameter_extractor') return 'blue';
   if (type === 'tool' || type === 'artifact') return 'purple';
-  if (type === 'knowledge') return 'green';
+  if (type === 'knowledge' || type === 'list' || type === 'iteration' || type === 'aggregator') return 'green';
   if (type === 'output') return 'gold';
   return 'default';
+}
+
+function workflowNodeTypeLabel(type: RoleWorkflowGraphNode['type']) {
+  return workflowNodeTypeOptions.find((option) => option.value === type)?.label ?? type;
 }
 
 function traceStatusTone(status: 'passed' | 'warning' | 'failed') {
@@ -910,6 +1094,15 @@ function traceStatusTone(status: 'passed' | 'warning' | 'failed') {
 
 function workflowNodeMeta(node: RoleWorkflowGraphNode) {
   return node.toolId ?? node.artifactType ?? node.modelProfileId ?? node.id;
+}
+
+function workflowNodeDetails(node: RoleWorkflowGraphNode) {
+  const details: string[] = [];
+  if (node.inputVariables?.length) details.push(`入 ${node.inputVariables.length}`);
+  if (node.outputVariables?.length) details.push(`出 ${node.outputVariables.length}`);
+  if (typeof node.config?.action === 'string') details.push(node.config.action);
+  if (node.requiresApproval) details.push('需确认');
+  return details.slice(0, 3);
 }
 
 function toWorkflowFlowNodes(graph: RoleWorkflowGraph): WorkflowFlowNode[] {
@@ -926,6 +1119,7 @@ function toWorkflowFlowNodes(graph: RoleWorkflowGraph): WorkflowFlowNode[] {
       nodeType: node.type,
       title: node.name,
       meta: workflowNodeMeta(node),
+      details: workflowNodeDetails(node),
       tone: nodeTone(node.type)
     }
   }));
@@ -957,7 +1151,7 @@ function WorkflowFlowNodeCard({ data, selected }: NodeProps<WorkflowFlowNode>) {
       <Handle type="target" position={Position.Left} className="workflow-flow-handle" />
       <div className="workflow-flow-node-header">
         <span className="workflow-flow-node-dot" />
-        <span className="workflow-flow-node-type">{data.nodeType}</span>
+        <span className="workflow-flow-node-type">{workflowNodeTypeLabel(data.nodeType)}</span>
       </div>
       <Typography.Text strong ellipsis className="workflow-flow-node-title">
         {data.title}
@@ -965,6 +1159,13 @@ function WorkflowFlowNodeCard({ data, selected }: NodeProps<WorkflowFlowNode>) {
       <Typography.Text type="secondary" ellipsis className="workflow-flow-node-meta">
         {data.meta}
       </Typography.Text>
+      {data.details.length ? (
+        <div className="workflow-flow-node-tags">
+          {data.details.map((detail) => (
+            <span key={detail}>{detail}</span>
+          ))}
+        </div>
+      ) : null}
       <Handle type="source" position={Position.Right} className="workflow-flow-handle" />
     </div>
   );
@@ -1018,6 +1219,60 @@ function WorkflowTestTracePanel({ result }: { result: TemplateTestResult }) {
       ) : null}
     </Space>
   );
+}
+
+function WorkflowConfigSection({
+  title,
+  description,
+  children
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="workflow-config-section">
+      <Space direction="vertical" size={6} style={{ width: '100%' }}>
+        <Space direction="vertical" size={1} style={{ width: '100%' }}>
+          <Typography.Text strong>{title}</Typography.Text>
+          {description ? (
+            <Typography.Text type="secondary" className="workflow-config-section-desc">
+              {description}
+            </Typography.Text>
+          ) : null}
+        </Space>
+        {children}
+      </Space>
+    </section>
+  );
+}
+
+function WorkflowVariableReferencePanel() {
+  return (
+    <div className="workflow-variable-reference">
+      <Typography.Text strong>常用变量</Typography.Text>
+      <div className="workflow-variable-tags">
+        {workflowVariableReferenceTags.map((item) => (
+          <Tag key={item.value}>{item.value} · {item.label}</Tag>
+        ))}
+      </div>
+      <Typography.Text type="secondary" className="workflow-config-section-desc">
+        视频、图片、文档等大文件在节点之间传本地路径或文件引用，节点执行时再读取，不把大文件上传到服务端。
+      </Typography.Text>
+    </div>
+  );
+}
+
+function workflowNodeConfigDescription(node: RoleWorkflowGraphNode) {
+  if (node.type === 'parameter_extractor') return '把自然语言任务变成 JSON 参数，适合提取时长、格式、评分标准、输出要求。';
+  if (node.type === 'list') return '从附件或上游数组里筛选一批对象，例如只取视频、图片或表格。';
+  if (node.type === 'iteration') return '取列表中的当前项，适合一条条处理多个文件。';
+  if (node.type === 'aggregator') return '把多个节点输出合并成一个对象或数组，供后续节点统一使用。';
+  if (node.type === 'tool') return '调用本地或网络工具。工具参数支持 {{变量}} 模板和 $变量 引用。';
+  if (node.type === 'artifact') return '生成真实可下载产物。这里的写入动作和参数会被 PC 端执行。';
+  if (node.type === 'output') return '整理最终回复，通常放在流程最后，用于告诉用户结果和下载位置。';
+  if (node.type === 'condition') return '配置分支条件；复杂判断可先用 LLM/参数提取节点生成分类结果，再在连线上判断。';
+  return '配置节点名称、执行说明、输入变量和输出变量。';
 }
 
 function WorkflowReactFlowEditor({
@@ -1271,9 +1526,20 @@ function WorkflowReactFlowEditor({
       return;
     }
 
-    const template = getDefaultToolActionTemplate(toolId);
+    const nextArtifactType =
+      node.type === 'artifact'
+        ? toolId === 'video-processing'
+          ? 'mp4'
+          : node.artifactType === 'mp4'
+            ? 'docx'
+            : node.artifactType
+        : node.artifactType;
+    const template = node.type === 'artifact'
+      ? getDefaultArtifactActionTemplate(nextArtifactType)
+      : getDefaultToolActionTemplate(toolId);
     updateNode(node.id, {
       toolId,
+      artifactType: nextArtifactType,
       config: template
         ? buildToolNodeConfig(node, {
             action: template.value,
@@ -1307,6 +1573,15 @@ function WorkflowReactFlowEditor({
           [key]: value
         }
       })
+    });
+  }
+
+  function updateNodeConfigField(node: RoleWorkflowGraphNode, key: string, value: unknown) {
+    updateNode(node.id, {
+      config: {
+        ...(node.config ?? {}),
+        [key]: value
+      }
     });
   }
 
@@ -1420,155 +1695,324 @@ function WorkflowReactFlowEditor({
         {selectedNode ? (
           <Space direction="vertical" size={10} style={{ width: '100%' }}>
             <Space wrap>
-              <Tag color={nodeTone(selectedNode.type)}>{selectedNode.type}</Tag>
-              {selectedNode.requiresApproval ? <Tag color="orange">approval</Tag> : null}
+              <Tag color={nodeTone(selectedNode.type)}>{workflowNodeTypeLabel(selectedNode.type)}</Tag>
+              {selectedNode.requiresApproval ? <Tag color="orange">需要确认</Tag> : null}
             </Space>
-            <Typography.Text strong>节点配置</Typography.Text>
-            <Input size="small" value={selectedNode.id} disabled addonBefore="ID" />
-            <Input
-              size="small"
-              value={selectedNode.name}
-              addonBefore="名称"
-              onChange={(event) => updateNode(selectedNode.id, { name: event.target.value })}
-            />
-            <Select
-              size="small"
-              value={selectedNode.type}
-              disabled={selectedNode.id === graph.entryNodeId}
-              options={workflowNodeTypeOptions}
-              onChange={(type) =>
-                updateNode(selectedNode.id, {
-                  type,
-                  toolId:
-                    type === 'tool'
-                      ? selectedNode.toolId ?? 'office-document'
-                      : type === 'artifact'
-                        ? selectedNode.toolId ?? 'office-document'
-                        : selectedNode.toolId,
-                  modelProfileId:
-                    type === 'llm' || type === 'reasoning'
-                      ? selectedNode.modelProfileId ?? 'qiu-general-default'
-                      : selectedNode.modelProfileId,
-                  artifactType: type === 'artifact' ? selectedNode.artifactType ?? 'docx' : selectedNode.artifactType,
-                  requiresApproval: type === 'approval' ? true : selectedNode.requiresApproval,
-                  config:
-                    type === 'tool'
-                      ? buildToolNodeConfig(selectedNode, {
-                          action:
-                            getSelectedToolActionTemplate(
-                              selectedNode.toolId ?? 'office-document',
-                              String(selectedNode.config?.action ?? '')
-                            )?.value ?? getDefaultToolActionTemplate(selectedNode.toolId ?? 'office-document')?.value,
-                          input:
-                            getSelectedToolActionTemplate(
-                              selectedNode.toolId ?? 'office-document',
-                              String(selectedNode.config?.action ?? '')
-                            )?.defaults ?? selectedNode.config?.input ?? {}
-                        })
-                      : selectedNode.config
-                })
-              }
-            />
-            <Input.TextArea
-              rows={4}
-              value={selectedNode.instruction ?? ''}
-              placeholder="节点执行说明"
-              onChange={(event) => updateNode(selectedNode.id, { instruction: event.target.value })}
-            />
-            {selectedNode.type === 'llm' || selectedNode.type === 'reasoning' ? (
-              <Select
-                size="small"
-                allowClear
-                showSearch
-                value={selectedNode.modelProfileId}
-                placeholder="选择具体模型（PC 端安装时配置 API Key）"
-                options={modelProfileOptions}
-                optionFilterProp="label"
-                onChange={(modelProfileId) => updateNode(selectedNode.id, { modelProfileId })}
-              />
-            ) : null}
-            {selectedNode.type === 'knowledge' ? (
-              <Select
-                size="small"
-                mode="tags"
-                value={
-                  Array.isArray(selectedNode.config?.sources)
-                    ? selectedNode.config.sources.filter((source): source is string => typeof source === 'string')
-                    : ['workspace_library']
-                }
-                placeholder="知识来源"
-                options={knowledgeOptions}
-                tokenSeparators={[',']}
-                onChange={(sources) =>
-                  updateNode(selectedNode.id, {
-                    config: {
-                      ...(selectedNode.config ?? {}),
-                      sources
-                    }
-                  })
-                }
-              />
-            ) : null}
-            {selectedNode.type === 'tool' || selectedNode.type === 'artifact' ? (
-              <Select
-                size="small"
-                allowClear
-                value={selectedNode.toolId}
-                placeholder="工具 ID"
-                options={toolOptions}
-                onChange={(toolId) => updateToolNodeToolId(selectedNode, toolId)}
-              />
-            ) : null}
-            {selectedNode.type === 'artifact' ? (
-              <Select
-                size="small"
-                allowClear
-                value={selectedNode.artifactType}
-                placeholder="产物格式"
-                options={artifactTypeOptions}
-                onChange={(artifactType) => updateNode(selectedNode.id, { artifactType })}
-              />
-            ) : null}
-            <Select
-              size="small"
-              mode="tags"
-              value={selectedNode.inputVariables ?? []}
-              placeholder="输入变量"
-              tokenSeparators={[',']}
-              onChange={(inputVariables) => updateNode(selectedNode.id, { inputVariables })}
-            />
-            <Select
-              size="small"
-              mode="tags"
-              value={selectedNode.outputVariables ?? []}
-              placeholder="输出变量"
-              tokenSeparators={[',']}
-              onChange={(outputVariables) => updateNode(selectedNode.id, { outputVariables })}
-            />
-            {selectedNode.type === 'approval' || selectedNode.requiresApproval ? (
-              <Select
-                size="small"
-                value={selectedNode.requiresApproval ? 'true' : 'false'}
-                options={[
-                  { value: 'false', label: '无需人工确认' },
-                  { value: 'true', label: '需要人工确认' }
-                ]}
-                onChange={(value) => updateNode(selectedNode.id, { requiresApproval: value === 'true' })}
-              />
-            ) : null}
-            {selectedNode.type === 'tool' ? (
+            <Space direction="vertical" size={2} style={{ width: '100%' }}>
+              <Typography.Text strong>节点配置</Typography.Text>
+              <Typography.Text type="secondary">优先配置业务字段；变量名和原始 JSON 放在高级设置里。</Typography.Text>
+            </Space>
+            <WorkflowConfigSection title="基础" description={workflowNodeConfigDescription(selectedNode)}>
               <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                <Typography.Text strong>工具参数</Typography.Text>
+                <Input
+                  size="small"
+                  value={selectedNode.name}
+                  addonBefore="名称"
+                  onChange={(event) => updateNode(selectedNode.id, { name: event.target.value })}
+                />
                 <Select
                   size="small"
-                  value={String(selectedNode.config?.action ?? getDefaultToolActionTemplate(selectedNode.toolId ?? '')?.value ?? '')}
+                  value={selectedNode.type}
+                  disabled={selectedNode.id === graph.entryNodeId}
+                  options={workflowNodeTypeOptions}
+                  onChange={(type) => {
+                    const nextArtifactType = type === 'artifact' ? selectedNode.artifactType ?? 'docx' : selectedNode.artifactType;
+                    const nextToolId =
+                      type === 'tool'
+                        ? selectedNode.toolId ?? 'office-document'
+                        : type === 'artifact'
+                          ? nextArtifactType === 'mp4' ? 'video-processing' : 'office-document'
+                          : selectedNode.toolId;
+                    const nextToolTemplate =
+                      type === 'artifact'
+                        ? getDefaultArtifactActionTemplate(nextArtifactType)
+                        : getSelectedToolActionTemplate(
+                            nextToolId ?? 'office-document',
+                            String(selectedNode.config?.action ?? '')
+                          );
+
+                    updateNode(selectedNode.id, {
+                      type,
+                      toolId: nextToolId,
+                      modelProfileId:
+                        type === 'llm' || type === 'reasoning' || type === 'parameter_extractor'
+                          ? selectedNode.modelProfileId ?? 'qiu-general-default'
+                          : selectedNode.modelProfileId,
+                      artifactType: nextArtifactType,
+                      requiresApproval: type === 'approval' ? true : selectedNode.requiresApproval,
+                      config:
+                        type === 'tool' || type === 'artifact'
+                          ? buildToolNodeConfig(selectedNode, {
+                              action: nextToolTemplate?.value,
+                              input: nextToolTemplate?.defaults ?? selectedNode.config?.input ?? {}
+                            })
+                          : selectedNode.config
+                    });
+                  }}
+                />
+                <Input.TextArea
+                  rows={4}
+                  value={selectedNode.instruction ?? ''}
+                  placeholder="节点执行说明"
+                  onChange={(event) => updateNode(selectedNode.id, { instruction: event.target.value })}
+                />
+              </Space>
+            </WorkflowConfigSection>
+            <WorkflowVariableReferencePanel />
+            {selectedNode.type === 'parameter_extractor' ? (
+              <WorkflowConfigSection
+                title="提取规则"
+                description="写清楚要从用户任务里提取哪些字段，输出会成为后续节点可引用的 JSON。"
+              >
+                <Input.TextArea
+                  rows={5}
+                  value={stringifyJsonConfigValue(selectedNode.config?.schema ?? {})}
+                  placeholder='{"targetDuration":"number","outputFormat":"string"}'
+                  onChange={(event) =>
+                    updateNodeConfigField(
+                      selectedNode,
+                      'schema',
+                      parseJsonConfigValue(event.target.value, selectedNode.config?.schema ?? {})
+                    )
+                  }
+                />
+              </WorkflowConfigSection>
+            ) : null}
+            {selectedNode.type === 'list' ? (
+              <WorkflowConfigSection
+                title="列表筛选"
+                description="从附件或上游变量中筛出一组文件/对象，例如只保留视频文件。"
+              >
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Input
+                  size="small"
+                  addonBefore="来源变量"
+                  value={typeof selectedNode.config?.sourceRef === 'string' ? selectedNode.config.sourceRef : 'start.files'}
+                  onChange={(event) => updateNodeConfigField(selectedNode, 'sourceRef', event.target.value)}
+                />
+                <Select
+                  size="small"
+                  allowClear
+                  placeholder="文件类型筛选"
+                  value={typeof selectedNode.config?.kind === 'string' && selectedNode.config.kind ? selectedNode.config.kind : undefined}
+                  options={[
+                    { value: 'video', label: '视频' },
+                    { value: 'image', label: '图片' },
+                    { value: 'document', label: '文档' },
+                    { value: 'spreadsheet', label: '表格' },
+                    { value: 'presentation', label: '演示稿' },
+                    { value: 'audio', label: '音频' }
+                  ]}
+                  onChange={(kind) => updateNodeConfigField(selectedNode, 'kind', kind ?? '')}
+                />
+                <InputNumber
+                  style={{ width: '100%' }}
+                  addonBefore="最多保留"
+                  value={typeof selectedNode.config?.limit === 'number' ? selectedNode.config.limit : 50}
+                  onChange={(limit) => updateNodeConfigField(selectedNode, 'limit', limit ?? 50)}
+                />
+                </Space>
+              </WorkflowConfigSection>
+            ) : null}
+            {selectedNode.type === 'iteration' ? (
+              <WorkflowConfigSection
+                title="逐项处理"
+                description="把列表里的当前项写入 runtime.current_item，后续工具节点通常读取这个变量。"
+              >
+                <Input
+                  size="small"
+                  addonBefore="遍历列表"
+                  value={typeof selectedNode.config?.sourceRef === 'string' ? selectedNode.config.sourceRef : 'start.files'}
+                  onChange={(event) => updateNodeConfigField(selectedNode, 'sourceRef', event.target.value)}
+                />
+              </WorkflowConfigSection>
+            ) : null}
+            {selectedNode.type === 'loop' ? (
+              <WorkflowConfigSection
+                title="循环限制"
+                description="限制最多执行次数，避免复杂任务失控或无限循环。"
+              >
+                <InputNumber
+                  style={{ width: '100%' }}
+                  addonBefore="最大循环"
+                  value={typeof selectedNode.config?.maxIterations === 'number' ? selectedNode.config.maxIterations : 3}
+                  onChange={(maxIterations) => updateNodeConfigField(selectedNode, 'maxIterations', maxIterations ?? 3)}
+                />
+              </WorkflowConfigSection>
+            ) : null}
+            {selectedNode.type === 'aggregator' ? (
+              <WorkflowConfigSection
+                title="聚合方式"
+                description="把多个输入变量合并后输出，常用于分支归并或多步骤结果汇总。"
+              >
+                <Select
+                  size="small"
+                  value={typeof selectedNode.config?.mode === 'string' ? selectedNode.config.mode : 'object'}
+                  options={[
+                    { value: 'object', label: '按变量名合并' },
+                    { value: 'array', label: '按数组合并' }
+                  ]}
+                  onChange={(mode) => updateNodeConfigField(selectedNode, 'mode', mode)}
+                />
+              </WorkflowConfigSection>
+            ) : null}
+            {selectedNode.type === 'template' ? (
+              <WorkflowConfigSection
+                title="模板内容"
+                description="用 {{变量}} 拼接文本，适合固定格式报告、提示词片段或工具入参。"
+              >
+                <Input.TextArea
+                  rows={5}
+                  value={typeof selectedNode.config?.template === 'string' ? selectedNode.config.template : '{{runtime.previous_text}}'}
+                  placeholder="例如：视频评分：{{analyze.json.score}}"
+                  onChange={(event) => updateNodeConfigField(selectedNode, 'template', event.target.value)}
+                />
+              </WorkflowConfigSection>
+            ) : null}
+            {selectedNode.type === 'llm' || selectedNode.type === 'reasoning' || selectedNode.type === 'parameter_extractor' ? (
+              <WorkflowConfigSection
+                title="模型"
+                description="模板里指定模型；PC 端安装员工时再配置对应 API Key。"
+              >
+                <Select
+                  size="small"
+                  allowClear
+                  showSearch
+                  value={selectedNode.modelProfileId}
+                  placeholder="选择具体模型（PC 端安装时配置 API Key）"
+                  options={modelProfileOptions}
+                  optionFilterProp="label"
+                  onChange={(modelProfileId) => updateNode(selectedNode.id, { modelProfileId })}
+                />
+              </WorkflowConfigSection>
+            ) : null}
+            {selectedNode.type === 'knowledge' ? (
+              <WorkflowConfigSection
+                title="知识来源"
+                description="选择这个节点要读取的企业知识库、本地知识或服务端摘要。"
+              >
+                <Select
+                  size="small"
+                  mode="tags"
+                  value={
+                    Array.isArray(selectedNode.config?.sources)
+                      ? selectedNode.config.sources.filter((source): source is string => typeof source === 'string')
+                      : ['workspace_library']
+                  }
+                  placeholder="知识来源"
+                  options={knowledgeOptions}
+                  tokenSeparators={[',']}
+                  onChange={(sources) =>
+                    updateNode(selectedNode.id, {
+                      config: {
+                        ...(selectedNode.config ?? {}),
+                        sources
+                      }
+                    })
+                  }
+                />
+              </WorkflowConfigSection>
+            ) : null}
+            {selectedNode.type === 'tool' || selectedNode.type === 'artifact' ? (
+              <WorkflowConfigSection
+                title={selectedNode.type === 'artifact' ? '写入工具' : '调用工具'}
+                description="选择这个节点实际调用的工具，例如文档、表格、网页搜索、视频处理或 MCP。"
+              >
+                <Select
+                  size="small"
+                  allowClear
+                  value={selectedNode.toolId}
+                  placeholder="工具 ID"
+                  options={toolOptions}
+                  onChange={(toolId) => updateToolNodeToolId(selectedNode, toolId)}
+                />
+              </WorkflowConfigSection>
+            ) : null}
+            {selectedNode.type === 'artifact' ? (
+              <WorkflowConfigSection
+                title="产物格式"
+                description="选择最终交付物格式；切到 MP4 会自动使用视频处理工具。"
+              >
+                <Select
+                  size="small"
+                  allowClear
+                  value={selectedNode.artifactType}
+                  placeholder="产物格式"
+                  options={artifactTypeOptions}
+                  onChange={(artifactType) => {
+                    const nextToolId = artifactType === 'mp4' ? 'video-processing' : 'office-document';
+                    const nextToolTemplate = getDefaultArtifactActionTemplate(artifactType);
+                    updateNode(selectedNode.id, {
+                      artifactType,
+                      toolId: nextToolId,
+                      config: buildToolNodeConfig(selectedNode, {
+                        action: nextToolTemplate?.value,
+                        input: nextToolTemplate?.defaults ?? {}
+                      })
+                    });
+                  }}
+                />
+              </WorkflowConfigSection>
+            ) : null}
+            <WorkflowConfigSection
+              title="输入输出"
+              description="输入变量决定节点能读什么；输出变量决定后续节点怎么引用结果。"
+            >
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Select
+                  size="small"
+                  mode="tags"
+                  value={selectedNode.inputVariables ?? []}
+                  placeholder="输入变量，例如 start.text / start.files / 上一步输出"
+                  tokenSeparators={[',']}
+                  onChange={(inputVariables) => updateNode(selectedNode.id, { inputVariables })}
+                />
+                <Select
+                  size="small"
+                  mode="tags"
+                  value={selectedNode.outputVariables ?? []}
+                  placeholder="输出变量，例如 analyze.json / final_video"
+                  tokenSeparators={[',']}
+                  onChange={(outputVariables) => updateNode(selectedNode.id, { outputVariables })}
+                />
+              </Space>
+            </WorkflowConfigSection>
+            {selectedNode.type === 'approval' || selectedNode.requiresApproval ? (
+              <WorkflowConfigSection
+                title="人工确认"
+                description="高风险工具、写文件、发请求等节点可以要求用户确认后再执行。"
+              >
+                <Select
+                  size="small"
+                  value={selectedNode.requiresApproval ? 'true' : 'false'}
+                  options={[
+                    { value: 'false', label: '无需人工确认' },
+                    { value: 'true', label: '需要人工确认' }
+                  ]}
+                  onChange={(value) => updateNode(selectedNode.id, { requiresApproval: value === 'true' })}
+                />
+              </WorkflowConfigSection>
+            ) : null}
+            {selectedNode.type === 'tool' || selectedNode.type === 'artifact' ? (
+              <WorkflowConfigSection
+                title={selectedNode.type === 'artifact' ? '产物写入参数' : '工具参数'}
+                description="这里决定工具实际收到什么参数。支持 $变量 和 {{变量}} 引用上游输出。"
+              >
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Select
+                  size="small"
+                  value={String(
+                    selectedNode.config?.action ??
+                    getSelectedWorkflowNodeToolActionTemplate(selectedNode)?.value ??
+                    ''
+                  )}
                   options={(toolActionTemplatesByToolId[selectedNode.toolId ?? ''] ?? []).map((template) => ({
                     value: template.value,
                     label: template.label
                   }))}
                   onChange={(action) => updateToolNodeAction(selectedNode, action)}
                 />
-                {(getSelectedToolActionTemplate(selectedNode.toolId, String(selectedNode.config?.action ?? ''))?.fields ?? []).map((field) => {
+                {(getSelectedWorkflowNodeToolActionTemplate(selectedNode)?.fields ?? []).map((field) => {
                   const inputConfig =
                     selectedNode.config?.input && typeof selectedNode.config.input === 'object' && !Array.isArray(selectedNode.config.input)
                       ? (selectedNode.config.input as Record<string, unknown>)
@@ -1642,7 +2086,8 @@ function WorkflowReactFlowEditor({
                     />
                   );
                 })}
-              </Space>
+                </Space>
+              </WorkflowConfigSection>
             ) : null}
             <Button
               danger
@@ -1662,75 +2107,88 @@ function WorkflowReactFlowEditor({
               <Tag color="cyan">edge</Tag>
               <Tag>{formatConditionLabel(selectedEdge.condition)}</Tag>
             </Space>
-            <Typography.Text strong>连线配置</Typography.Text>
-            <Select
-              size="small"
-              value={selectedEdge.sourceNodeId}
-              options={nodeOptions}
-              onChange={(sourceNodeId) => updateEdge(selectedEdge.id, { sourceNodeId })}
-            />
-            <Select
-              size="small"
-              value={selectedEdge.targetNodeId}
-              options={nodeOptions}
-              onChange={(targetNodeId) => updateEdge(selectedEdge.id, { targetNodeId })}
-            />
-            <Select
-              size="small"
-              value={selectedEdge.condition?.type ?? 'always'}
-              options={conditionTypeOptions}
-              onChange={updateSelectedEdgeConditionType}
-            />
-            {selectedEdge.condition?.type && selectedEdge.condition.type !== 'always' && selectedEdge.condition.type !== 'expression' ? (
-              <>
-                <Input
+            <WorkflowConfigSection
+              title="连接关系"
+              description="修改这条线从哪个节点出发、进入哪个节点。"
+            >
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Select
                   size="small"
-                  value={selectedEdge.condition.variable ?? ''}
-                  addonBefore="变量"
-                  placeholder="start.text / draft_result.text"
-                  onChange={(event) =>
-                    updateEdge(selectedEdge.id, {
-                      condition: {
-                        ...selectedEdge.condition,
-                        type: selectedEdge.condition?.type ?? 'exists',
-                        variable: event.target.value
-                      }
-                    })
-                  }
+                  value={selectedEdge.sourceNodeId}
+                  options={nodeOptions}
+                  onChange={(sourceNodeId) => updateEdge(selectedEdge.id, { sourceNodeId })}
                 />
-                {selectedEdge.condition.type !== 'exists' ? (
-                  <Input
-                    size="small"
-                    value={normalizeConditionValue(selectedEdge.condition.value)}
-                    addonBefore="值"
+                <Select
+                  size="small"
+                  value={selectedEdge.targetNodeId}
+                  options={nodeOptions}
+                  onChange={(targetNodeId) => updateEdge(selectedEdge.id, { targetNodeId })}
+                />
+              </Space>
+            </WorkflowConfigSection>
+            <WorkflowConfigSection
+              title="通过条件"
+              description="默认始终通过；需要分支时选择变量存在、等于、包含或表达式。"
+            >
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Select
+                  size="small"
+                  value={selectedEdge.condition?.type ?? 'always'}
+                  options={conditionTypeOptions}
+                  onChange={updateSelectedEdgeConditionType}
+                />
+                {selectedEdge.condition?.type && selectedEdge.condition.type !== 'always' && selectedEdge.condition.type !== 'expression' ? (
+                  <>
+                    <Input
+                      size="small"
+                      value={selectedEdge.condition.variable ?? ''}
+                      addonBefore="变量"
+                      placeholder="start.text / draft_result.text"
+                      onChange={(event) =>
+                        updateEdge(selectedEdge.id, {
+                          condition: {
+                            ...selectedEdge.condition,
+                            type: selectedEdge.condition?.type ?? 'exists',
+                            variable: event.target.value
+                          }
+                        })
+                      }
+                    />
+                    {selectedEdge.condition.type !== 'exists' ? (
+                      <Input
+                        size="small"
+                        value={normalizeConditionValue(selectedEdge.condition.value)}
+                        addonBefore="值"
+                        onChange={(event) =>
+                          updateEdge(selectedEdge.id, {
+                            condition: {
+                              ...selectedEdge.condition,
+                              type: selectedEdge.condition?.type ?? 'equals',
+                              value: event.target.value
+                            }
+                          })
+                        }
+                      />
+                    ) : null}
+                  </>
+                ) : null}
+                {selectedEdge.condition?.type === 'expression' ? (
+                  <Input.TextArea
+                    rows={3}
+                    value={selectedEdge.condition.expression ?? ''}
+                    placeholder="例如：让模型判断是否需要进入合同审查分支"
                     onChange={(event) =>
                       updateEdge(selectedEdge.id, {
                         condition: {
-                          ...selectedEdge.condition,
-                          type: selectedEdge.condition?.type ?? 'equals',
-                          value: event.target.value
+                          type: 'expression',
+                          expression: event.target.value
                         }
                       })
                     }
                   />
                 ) : null}
-              </>
-            ) : null}
-            {selectedEdge.condition?.type === 'expression' ? (
-              <Input.TextArea
-                rows={3}
-                value={selectedEdge.condition.expression ?? ''}
-                placeholder="例如：让模型判断是否需要进入合同审查分支"
-                onChange={(event) =>
-                  updateEdge(selectedEdge.id, {
-                    condition: {
-                      type: 'expression',
-                      expression: event.target.value
-                    }
-                  })
-                }
-              />
-            ) : null}
+              </Space>
+            </WorkflowConfigSection>
             <Button danger size="small" icon={<DeleteOutlined />} onClick={() => deleteEdge(selectedEdge.id)}>
               删除连线
             </Button>

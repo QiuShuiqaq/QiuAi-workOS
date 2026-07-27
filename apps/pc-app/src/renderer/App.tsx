@@ -4386,6 +4386,7 @@ function buildRoleCategoryTabs(templates: DesktopRoleTemplate[]): string[] {
 
 function toolCategory(tool: ToolManifest): string {
   const text = [tool.id, tool.name, tool.scope, tool.entryPoint, ...tool.capabilities].join(' ');
+  if (includesAny(text, ['video', 'mp4', 'ffmpeg', 'clip', 'trim', 'video_processing'])) return '视频';
   if (includesAny(text, ['document', 'office', 'word', 'ppt', 'spreadsheet', '文档', '表格', '演示'])) return '文档';
   if (includesAny(text, ['web', 'search', 'fetch', 'url', '网页', '搜索'])) return '网页';
   if (includesAny(text, ['file', 'filesystem', 'folder', 'local', '文件', '目录'])) return '文件';
@@ -4396,7 +4397,7 @@ function toolCategory(tool: ToolManifest): string {
 }
 
 function buildToolCategoryTabs(tools: ToolManifest[]): string[] {
-  const fixedCategories = ['全部', '文档', '网页', '文件', '接口', '本地', '安全', '通用'];
+  const fixedCategories = ['全部', '文档', '网页', '视频', '文件', '接口', '本地', '安全', '通用'];
   const availableCategories = new Set(tools.map(toolCategory));
   return fixedCategories.filter((category) => category === '全部' || availableCategories.has(category));
 }
@@ -4405,6 +4406,7 @@ function toolCategoryIcon(tool: ToolManifest): ReactNode {
   const category = toolCategory(tool);
   if (category === '文档') return <FileTextOutlined />;
   if (category === '网页') return <GlobalOutlined />;
+  if (category === '视频') return <PlayCircleOutlined />;
   if (category === '文件') return <FolderOpenOutlined />;
   if (category === '接口') return <ApiOutlined />;
   if (category === '安全') return <SafetyCertificateOutlined />;

@@ -37,7 +37,7 @@ export function readWorkflowRequiredModelProfileIds(workflowGraph: unknown): str
   return [
     ...new Set(
       graph.nodes
-        .filter((node) => ['llm', 'reasoning', 'artifact'].includes(node.type))
+        .filter((node) => ['llm', 'reasoning', 'parameter_extractor', 'artifact'].includes(node.type))
         .map((node) => node.modelProfileId?.trim())
         .filter((modelProfileId): modelProfileId is string => Boolean(modelProfileId))
     )
@@ -171,7 +171,7 @@ function readWorkflowModelNodeIdsByModelProfileId(workflowGraph: unknown): Map<s
   }
 
   for (const node of graph.nodes) {
-    if (!['llm', 'reasoning', 'artifact'].includes(node.type) || !node.modelProfileId?.trim()) {
+    if (!['llm', 'reasoning', 'parameter_extractor', 'artifact'].includes(node.type) || !node.modelProfileId?.trim()) {
       continue;
     }
 

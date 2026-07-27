@@ -1,6 +1,8 @@
 export type RoleWorkflowGraphNodeType =
   | 'start'
   | 'input'
+  | 'parameter_extractor'
+  | 'list'
   | 'knowledge'
   | 'reasoning'
   | 'llm'
@@ -8,6 +10,9 @@ export type RoleWorkflowGraphNodeType =
   | 'template'
   | 'tool'
   | 'condition'
+  | 'iteration'
+  | 'loop'
+  | 'aggregator'
   | 'artifact'
   | 'approval'
   | 'output';
@@ -20,8 +25,19 @@ export type RoleWorkflowGraphArtifactType =
   | 'pdf'
   | 'png'
   | 'jpg'
+  | 'mp4'
   | 'csv'
   | 'zip';
+
+export type RoleWorkflowGraphVariableType =
+  | 'text'
+  | 'number'
+  | 'boolean'
+  | 'json'
+  | 'asset'
+  | 'asset[]'
+  | 'table'
+  | 'artifact';
 
 export type RoleWorkflowGraphEdgeConditionType =
   | 'always'
@@ -61,6 +77,7 @@ export interface RoleWorkflowGraphEdge {
 
 export interface RoleWorkflowGraphVariable {
   name: string;
+  type?: RoleWorkflowGraphVariableType;
   description?: string;
   required?: boolean;
   defaultValue?: unknown;
@@ -176,7 +193,7 @@ export function buildRoleWorkflowGraphFromSteps(
       type: 'artifact',
       name: 'Write deliverable',
       instruction: `Write the final deliverable as ${artifactType}.`,
-      toolId: 'office-document',
+      toolId: artifactType === 'mp4' ? 'video-processing' : 'office-document',
       artifactType,
       inputVariables: ['draft_result.text'],
       outputVariables: ['deliverable_file']
@@ -229,6 +246,10 @@ function inferRoleWorkflowGraphArtifactTypeFromSteps(
 
   if (/\b(ppt|pptx|slides?|presentation)\b/.test(text)) {
     return 'pptx';
+  }
+
+  if (/\b(video|mp4|clip|trim|ffmpeg|cut_plan)\b/.test(text)) {
+    return 'mp4';
   }
 
   if (/\b(xlsx?|spreadsheet|csv|excel|finance|invoice|reimbursement|inventory|metrics?|dashboard|quote)\b/.test(text)) {

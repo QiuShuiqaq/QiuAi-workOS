@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   DesktopArtifactSummary,
   DesktopExecutionLogEntry,
   DesktopKnowledgeSourceSummary,
@@ -144,7 +144,11 @@ const supportedToolActions: DesktopToolInvocationAction[] = [
   'spreadsheet.write_csv',
   'spreadsheet.write_xlsx',
   'presentation.write_pptx',
-  'presentation.write_outline_markdown'
+  'presentation.write_outline_markdown',
+  'video.probe',
+  'video.extract_frames',
+  'video.compose_clips',
+  'video.export_mp4'
 ];
 
 async function emitTaskProgress(input: {
@@ -1296,6 +1300,8 @@ async function prepareWorkflowRuntimeFileContext(input: {
   ];
   input.pool.set('start.files', mergedFiles);
   input.pool.set('start.images', mergedFiles.filter((file) => file.kind === 'image'));
+  input.pool.set('start.videos', mergedFiles.filter((file) => file.kind === 'video'));
+  input.pool.set('start.audio', mergedFiles.filter((file) => file.kind === 'audio'));
   input.pool.set('start.documents', mergedFiles.filter((file) => ['document', 'pdf', 'text'].includes(file.kind)));
   input.pool.set('start.spreadsheets', mergedFiles.filter((file) => file.kind === 'spreadsheet'));
   input.pool.set('start.presentations', mergedFiles.filter((file) => file.kind === 'presentation'));
@@ -1340,12 +1346,22 @@ async function executeWorkflowRuntimeNode(input: {
     case 'start':
     case 'input':
       return completeWorkflowRuntimeInputNode(input);
+    case 'parameter_extractor':
+      return invokeWorkflowRuntimeParameterExtractorNode(input);
+    case 'list':
+      return completeWorkflowRuntimeListNode(input);
     case 'knowledge':
       return completeWorkflowRuntimeKnowledgeNode(input);
     case 'assign':
       return completeWorkflowRuntimeAssignNode(input);
     case 'template':
       return completeWorkflowRuntimeTemplateNode(input);
+    case 'iteration':
+      return completeWorkflowRuntimeIterationNode(input);
+    case 'loop':
+      return completeWorkflowRuntimeLoopNode(input);
+    case 'aggregator':
+      return completeWorkflowRuntimeAggregatorNode(input);
     case 'reasoning':
     case 'llm':
     case 'output':
@@ -1403,6 +1419,148 @@ function completeWorkflowRuntimeInputNode(input: {
     inputVariables: ['start.text'],
     outputVariables,
     message: 'Task input initialized.'
+  });
+}
+
+async function invokeWorkflowRuntimeParameterExtractorNode(input: {
+  task: DesktopTaskDetail;
+  node: WorkflowGraphNode;
+  pool: WorkflowVariablePool;
+  binding: ResolvedRuntimeBinding;
+  profiles: ModelProfile[];
+  modelInvoker: DesktopModelInvoker;
+  createdAt: string;
+  currentResponse: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+}): Promise<{
+  response: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  logs: DesktopExecutionLogEntry[];
+  usedToolIds: string[];
+  generatedArtifacts: DesktopArtifactSummary[];
+  inputVariables: string[];
+  outputVariables: string[];
+  message: string;
+}> {
+  const profile = selectWorkflowRuntimeModelProfile(input.node, input.profiles);
+  const variables = resolveWorkflowVariableRefs(input.pool, input.node.inputVariables, getWorkflowRuntimeFallbackInputRefs(input.pool));
+  const schema = input.node.config?.schema ?? input.node.config?.parameters ?? {};
+  const response = await input.modelInvoker({
+    profile,
+    messages: [
+      {
+        role: 'system',
+        content: [
+          'You are a QiuAI WorkOS parameter extraction node.',
+          'Return JSON only. Do not add markdown fences or explanations.',
+          'If a value is missing, return null for that field.'
+        ].join('\n')
+      },
+      {
+        role: 'user',
+        content: [
+          `Task: ${input.task.input}`,
+          `Node: ${input.node.name} (${input.node.type})`,
+          `Node instruction: ${input.node.instruction ?? 'Extract structured parameters from the task and variables.'}`,
+          `Expected schema or fields:\n${JSON.stringify(schema, null, 2)}`,
+          `Input variables:\n${renderWorkflowVariableRefsForPrompt(variables)}`
+        ].join('\n\n')
+      }
+    ],
+    timeoutMs: 45_000
+  });
+  const parsedJson = parseWorkflowRuntimeJson(response.content) ?? {};
+  const outputVariables = writeWorkflowNodeOutputs({
+    pool: input.pool,
+    node: input.node,
+    text: response.content,
+    json: parsedJson,
+    result: parsedJson as WorkflowRuntimeValue
+  });
+  input.pool.set('runtime.previous_text', response.content);
+
+  return {
+    response: mergeWorkflowRuntimeResponses(input.currentResponse, response),
+    primaryProfile: profile,
+    logs: [
+      createLog(
+        input.task.taskId,
+        'info',
+        'WORKFLOW_RUNTIME_PARAMETERS_EXTRACTED',
+        `Workflow parameter extractor invoked: ${input.node.name}.`,
+        input.createdAt,
+        sanitizeLogSuffix(input.node.id)
+      )
+    ],
+    usedToolIds: [],
+    generatedArtifacts: [],
+    inputVariables: variables.map((variable) => variable.ref),
+    outputVariables,
+    message: 'Structured parameters extracted.'
+  };
+}
+
+function completeWorkflowRuntimeListNode(input: {
+  node: WorkflowGraphNode;
+  pool: WorkflowVariablePool;
+  currentResponse: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+}): Promise<{
+  response: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  logs: DesktopExecutionLogEntry[];
+  usedToolIds: string[];
+  generatedArtifacts: DesktopArtifactSummary[];
+  inputVariables: string[];
+  outputVariables: string[];
+  message: string;
+}> {
+  const sourceRef = readWorkflowRuntimeString(input.node.config?.sourceRef);
+  const inputVariables = sourceRef ? [sourceRef] : input.node.inputVariables ?? ['start.files'];
+  const values = resolveWorkflowVariableRefs(input.pool, inputVariables, ['start.files']);
+  const items = values.flatMap((variable) => toWorkflowRuntimeArray(variable.value));
+  const kind = readWorkflowRuntimeString(input.node.config?.kind);
+  const contains = readWorkflowRuntimeString(input.node.config?.contains)?.toLowerCase();
+  const limit = readWorkflowRuntimeNumber(input.node.config?.limit, items.length || 100);
+  const filteredItems = items
+    .filter((item) => {
+      if (!kind) {
+        return true;
+      }
+
+      return isWorkflowFileValue(item) ? item.kind === kind : getWorkflowRuntimeValueType(item as WorkflowRuntimeValue) === kind;
+    })
+    .filter((item) => {
+      if (!contains) {
+        return true;
+      }
+
+      return previewWorkflowRuntimeValue(item as WorkflowRuntimeValue, 2_000).toLowerCase().includes(contains);
+    })
+    .slice(0, Math.max(0, limit));
+  const text = `List prepared: ${filteredItems.length}/${items.length} item(s).`;
+  const outputVariables = writeWorkflowNodeOutputs({
+    pool: input.pool,
+    node: input.node,
+    text,
+    result: filteredItems as WorkflowRuntimeValue
+  });
+  input.pool.set(`${input.node.id}.items`, filteredItems as WorkflowRuntimeValue);
+  input.pool.set(`${input.node.id}.count`, filteredItems.length);
+  input.pool.set('runtime.previous_text', text);
+
+  return Promise.resolve({
+    response: {
+      ...input.currentResponse,
+      content: input.currentResponse.content || text
+    },
+    primaryProfile: input.primaryProfile,
+    logs: [],
+    usedToolIds: [],
+    generatedArtifacts: [],
+    inputVariables: values.map((variable) => variable.ref),
+    outputVariables: [...new Set([...outputVariables, `${input.node.id}.items`, `${input.node.id}.count`])],
+    message: text
   });
 }
 
@@ -1802,6 +1960,176 @@ function completeWorkflowRuntimeTemplateNode(input: {
   });
 }
 
+function completeWorkflowRuntimeIterationNode(input: {
+  node: WorkflowGraphNode;
+  pool: WorkflowVariablePool;
+  currentResponse: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+}): Promise<{
+  response: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  logs: DesktopExecutionLogEntry[];
+  usedToolIds: string[];
+  generatedArtifacts: DesktopArtifactSummary[];
+  inputVariables: string[];
+  outputVariables: string[];
+  message: string;
+}> {
+  const sourceRef = readWorkflowRuntimeString(input.node.config?.sourceRef);
+  const inputVariables = sourceRef ? [sourceRef] : input.node.inputVariables ?? ['start.files'];
+  const variables = resolveWorkflowVariableRefs(input.pool, inputVariables, ['start.files']);
+  const items = variables.flatMap((variable) => toWorkflowRuntimeArray(variable.value));
+  const indexRef = `${input.node.id}.index`;
+  const previousIndex = typeof input.pool.get(indexRef) === 'number' ? Number(input.pool.get(indexRef)) : -1;
+  const nextIndex = previousIndex + 1;
+  const currentItem = items[nextIndex];
+  const hasCurrent = currentItem !== undefined;
+  const hasNext = nextIndex + 1 < items.length;
+  const result = {
+    index: nextIndex,
+    count: items.length,
+    hasCurrent,
+    hasNext,
+    current: currentItem ?? null
+  };
+  input.pool.set(indexRef, nextIndex);
+  input.pool.set(`${input.node.id}.count`, items.length);
+  input.pool.set(`${input.node.id}.hasCurrent`, hasCurrent);
+  input.pool.set(`${input.node.id}.hasNext`, hasNext);
+  if (hasCurrent) {
+    input.pool.set(`${input.node.id}.current`, currentItem as WorkflowRuntimeValue);
+    input.pool.set('runtime.current_item', currentItem as WorkflowRuntimeValue);
+  }
+
+  const text = hasCurrent
+    ? `Iteration item ${nextIndex + 1}/${items.length} prepared.`
+    : `Iteration finished: ${items.length} item(s).`;
+  const outputVariables = writeWorkflowNodeOutputs({
+    pool: input.pool,
+    node: input.node,
+    text,
+    json: result,
+    result: result as WorkflowRuntimeValue
+  });
+  input.pool.set('runtime.previous_text', text);
+
+  return Promise.resolve({
+    response: {
+      ...input.currentResponse,
+      content: input.currentResponse.content || text
+    },
+    primaryProfile: input.primaryProfile,
+    logs: [],
+    usedToolIds: [],
+    generatedArtifacts: [],
+    inputVariables: variables.map((variable) => variable.ref),
+    outputVariables: [
+      ...new Set([
+        ...outputVariables,
+        indexRef,
+        `${input.node.id}.count`,
+        `${input.node.id}.hasCurrent`,
+        `${input.node.id}.hasNext`,
+        hasCurrent ? `${input.node.id}.current` : ''
+      ].filter(Boolean))
+    ],
+    message: text
+  });
+}
+
+function completeWorkflowRuntimeLoopNode(input: {
+  node: WorkflowGraphNode;
+  pool: WorkflowVariablePool;
+  currentResponse: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+}): Promise<{
+  response: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  logs: DesktopExecutionLogEntry[];
+  usedToolIds: string[];
+  generatedArtifacts: DesktopArtifactSummary[];
+  inputVariables: string[];
+  outputVariables: string[];
+  message: string;
+}> {
+  const countRef = `${input.node.id}.count`;
+  const previousCount = typeof input.pool.get(countRef) === 'number' ? Number(input.pool.get(countRef)) : 0;
+  const count = previousCount + 1;
+  const max = readWorkflowRuntimeNumber(input.node.config?.maxIterations, 3);
+  const shouldContinue = count < max;
+  const result = { count, max, shouldContinue };
+  input.pool.set(countRef, count);
+  input.pool.set(`${input.node.id}.shouldContinue`, shouldContinue);
+  const text = `Loop checkpoint ${count}/${max}.`;
+  const outputVariables = writeWorkflowNodeOutputs({
+    pool: input.pool,
+    node: input.node,
+    text,
+    json: result,
+    result: result as WorkflowRuntimeValue
+  });
+  input.pool.set('runtime.previous_text', text);
+
+  return Promise.resolve({
+    response: {
+      ...input.currentResponse,
+      content: input.currentResponse.content || text
+    },
+    primaryProfile: input.primaryProfile,
+    logs: [],
+    usedToolIds: [],
+    generatedArtifacts: [],
+    inputVariables: input.node.inputVariables ?? [],
+    outputVariables: [...new Set([...outputVariables, countRef, `${input.node.id}.shouldContinue`])],
+    message: text
+  });
+}
+
+function completeWorkflowRuntimeAggregatorNode(input: {
+  node: WorkflowGraphNode;
+  pool: WorkflowVariablePool;
+  currentResponse: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+}): Promise<{
+  response: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  logs: DesktopExecutionLogEntry[];
+  usedToolIds: string[];
+  generatedArtifacts: DesktopArtifactSummary[];
+  inputVariables: string[];
+  outputVariables: string[];
+  message: string;
+}> {
+  const variables = resolveWorkflowVariableRefs(input.pool, input.node.inputVariables, getWorkflowRuntimeFallbackInputRefs(input.pool));
+  const mode = readWorkflowRuntimeString(input.node.config?.mode) ?? 'object';
+  const result = mode === 'array'
+    ? variables.map((variable) => variable.value)
+    : Object.fromEntries(variables.map((variable) => [variable.ref, variable.value]));
+  const text = renderWorkflowVariableRefsForPrompt(variables, 40_000);
+  const outputVariables = writeWorkflowNodeOutputs({
+    pool: input.pool,
+    node: input.node,
+    text,
+    json: result,
+    result: result as WorkflowRuntimeValue
+  });
+  input.pool.set('runtime.previous_text', text);
+
+  return Promise.resolve({
+    response: {
+      ...input.currentResponse,
+      content: text || input.currentResponse.content
+    },
+    primaryProfile: input.primaryProfile,
+    logs: [],
+    usedToolIds: [],
+    generatedArtifacts: [],
+    inputVariables: variables.map((variable) => variable.ref),
+    outputVariables,
+    message: `Aggregated ${variables.length} variable(s).`
+  });
+}
+
 function readWorkflowRuntimeAssignments(
   node: WorkflowGraphNode,
   pool: WorkflowVariablePool
@@ -2107,6 +2435,7 @@ async function invokeWorkflowRuntimeArtifactNode(input: {
     ? createWorkflowRuntimeArtifactContentResult(input, artifactInputVariables)
     : await invokeWorkflowRuntimeModelNode(input);
   const availableToolIds = new Set(input.binding.availableTools.map((tool) => tool.id));
+  const configuredToolRequest = buildWorkflowRuntimeToolRequest(input.node, input.pool);
   const artifactNode: WorkflowExecutionNodeSummary = {
     id: input.node.id,
     type: input.node.type,
@@ -2116,12 +2445,14 @@ async function invokeWorkflowRuntimeArtifactNode(input: {
     artifactType: input.node.artifactType,
     requiresApproval: input.node.requiresApproval
   };
-  const toolRequest = buildWorkflowFallbackArtifactToolRequest({
-    task: input.task,
-    artifactNode,
-    content: modelResult.response.content,
-    availableToolIds
-  });
+  const toolRequest = configuredToolRequest && availableToolIds.has(configuredToolRequest.toolId)
+    ? configuredToolRequest
+    : buildWorkflowFallbackArtifactToolRequest({
+        task: input.task,
+        artifactNode,
+        content: modelResult.response.content,
+        availableToolIds
+      });
 
   if (!toolRequest || !input.desktopToolInvoker || !input.workspaceId) {
     return {
@@ -2460,6 +2791,27 @@ function buildWorkflowRuntimeToolRequest(
     };
   }
 
+  if (toolId === 'video-processing') {
+    const file = findFirstWorkflowRuntimeFile(variables) ?? findFirstWorkflowRuntimeFile([
+      { ref: 'start.files', value: pool.get('start.files') ?? [] }
+    ]);
+    const videoPath =
+      typeof config.videoPath === 'string'
+        ? String(resolveWorkflowRuntimeConfigValue(config.videoPath, pool))
+        : file?.localPath;
+    if (!videoPath) {
+      return undefined;
+    }
+
+    return {
+      toolId,
+      action: 'video.probe',
+      input: {
+        videoPath
+      }
+    };
+  }
+
   return undefined;
 }
 
@@ -2646,6 +2998,8 @@ function inferWorkflowRuntimeFileKind(localPath: string): WorkflowFileValue['kin
   if (['png', 'jpg', 'jpeg', 'webp'].includes(extension ?? '')) return 'image';
   if (['xls', 'xlsx', 'csv'].includes(extension ?? '')) return 'spreadsheet';
   if (['ppt', 'pptx'].includes(extension ?? '')) return 'presentation';
+  if (['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v'].includes(extension ?? '')) return 'video';
+  if (['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg'].includes(extension ?? '')) return 'audio';
   if (extension === 'pdf') return 'pdf';
   if (['txt', 'md', 'json'].includes(extension ?? '')) return 'text';
   return 'other';
@@ -2735,6 +3089,18 @@ function extractFirstJsonValue(value: string): string | undefined {
 
 function readWorkflowRuntimeNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function readWorkflowRuntimeString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function toWorkflowRuntimeArray(value: WorkflowRuntimeValue | undefined): WorkflowRuntimeValue[] {
+  if (value === undefined) {
+    return [];
+  }
+
+  return Array.isArray(value) ? (value as WorkflowRuntimeValue[]) : [value];
 }
 
 function clampWorkflowRuntimeLimit(
@@ -3493,7 +3859,7 @@ function buildWorkflowFallbackArtifactToolRequest(input: {
       input: {
         folder: 'spreadsheets',
         fileName,
-        rows: [['Title', 'Content'], [input.task.title, content]]
+        rows: [['标题', '内容'], [input.task.title, content]]
       }
     };
   }
@@ -3539,7 +3905,64 @@ function buildWorkflowFallbackArtifactToolRequest(input: {
     };
   }
 
+  if (input.artifactNode.artifactType === 'mp4' && input.availableToolIds.has('video-processing')) {
+    const videoPath = findFirstVideoAttachmentPath(input.task.executionContext?.attachmentPaths ?? []);
+    const cutPlan = readWorkflowArtifactCutPlan(content);
+    if (!videoPath || cutPlan.length === 0) {
+      return undefined;
+    }
+
+    return {
+      toolId: 'video-processing',
+      action: 'video.compose_clips',
+      input: {
+        videoPath,
+        cutPlan,
+        folder: 'videos',
+        fileName
+      }
+    };
+  }
+
   return undefined;
+}
+
+function findFirstVideoAttachmentPath(paths: string[]): string | undefined {
+  return paths.find((attachmentPath) => {
+    const extension = attachmentPath.split('.').at(-1)?.trim().toLowerCase();
+    return ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v'].includes(extension ?? '');
+  });
+}
+
+function readWorkflowArtifactCutPlan(content: string): Array<{ start: number; end: number }> {
+  const parsed = parseWorkflowRuntimeJson(content);
+  const candidate = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === 'object'
+      ? (parsed as Record<string, unknown>).cut_plan ??
+        (parsed as Record<string, unknown>).cutPlan ??
+        (parsed as Record<string, unknown>).segments
+      : undefined;
+
+  if (!Array.isArray(candidate)) {
+    return [];
+  }
+
+  return candidate.flatMap((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return [];
+    }
+
+    const record = item as Record<string, unknown>;
+    const start = readWorkflowRuntimeSeconds(record.start);
+    const end = readWorkflowRuntimeSeconds(record.end);
+    return start !== undefined && end !== undefined && end > start ? [{ start, end }] : [];
+  });
+}
+
+function readWorkflowRuntimeSeconds(value: unknown): number | undefined {
+  const numberValue = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  return Number.isFinite(numberValue) && numberValue >= 0 ? Math.round(numberValue * 1000) / 1000 : undefined;
 }
 
 function buildWorkflowArtifactFileName(taskTitle: string, nodeName: string): string {
@@ -3590,10 +4013,11 @@ function buildGeneratedArtifactFromToolResult(input: {
   }
 
   const fileName = getPathFileName(localPath) ?? `${input.toolId}-output`;
+  const artifactType = inferGeneratedArtifactType(localPath);
 
   return {
     id: `${input.taskId}-tool-artifact-${input.sequence}-${Date.parse(input.createdAt) || Date.now()}`,
-    type: 'file',
+    type: artifactType,
     title: fileName,
     content: [
       `工具：${input.toolId}`,
@@ -3603,6 +4027,19 @@ function buildGeneratedArtifactFromToolResult(input: {
     localPath,
     createdAt: input.createdAt
   };
+}
+
+function inferGeneratedArtifactType(localPath: string): DesktopArtifactSummary['type'] {
+  const extension = localPath.split('.').at(-1)?.trim().toLowerCase();
+  if (['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v'].includes(extension ?? '')) {
+    return 'video';
+  }
+
+  if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'].includes(extension ?? '')) {
+    return 'image';
+  }
+
+  return 'file';
 }
 
 function buildFinalAnswerArtifact(
@@ -3756,6 +4193,10 @@ function buildArtifactToolActionHint(
     return 'local-filesystem/filesystem.write_text_file';
   }
 
+  if (artifactType === 'mp4' && availableToolIds.has('video-processing')) {
+    return 'video-processing/video.compose_clips';
+  }
+
   return undefined;
 }
 
@@ -3786,6 +4227,14 @@ function buildToolInstructions(tools: ToolManifest[]): string {
       if (tool.id === 'mcp') {
         return [
           '- mcp/mcp.call input: {"endpoint":"http://127.0.0.1:3001/mcp","toolName":"tool_name","arguments":{},"allowPrivateNetwork":true}'
+        ];
+      }
+
+      if (tool.id === 'video-processing') {
+        return [
+          '- video-processing/video.probe input: {"videoPath":"absolute allowed local video path"}',
+          '- video-processing/video.extract_frames input: {"videoPath":"absolute allowed local video path","frameIntervalSeconds":5,"maxFrames":12,"folder":"frames","fileName":"video-frames"}',
+          '- video-processing/video.compose_clips input: {"videoPath":"absolute allowed local video path","cutPlan":[{"start":0,"end":15}],"folder":"videos","fileName":"edited-video"}'
         ];
       }
 

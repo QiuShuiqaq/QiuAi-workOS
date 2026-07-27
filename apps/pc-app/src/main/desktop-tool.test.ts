@@ -11,9 +11,11 @@ const workspaceId = 'workspace-tool-test';
 const sourceFilePath = path.join(tempDir, 'source.txt');
 const allowedRootPath = path.join(tempDir, 'allowed-root');
 const allowedFilePath = path.join(allowedRootPath, 'allowed.txt');
+const allowedVideoPath = path.join(allowedRootPath, 'demo.mp4');
 mkdirSync(allowedRootPath, { recursive: true });
 writeFileSync(sourceFilePath, 'local source text', { encoding: 'utf8' });
 writeFileSync(allowedFilePath, 'allowed local source text', { encoding: 'utf8' });
+writeFileSync(allowedVideoPath, Buffer.from('fake-mp4'));
 
 const server = createServer((request, response) => {
   const chunks: Buffer[] = [];
@@ -327,6 +329,50 @@ const mcpResult = await invokeDesktopTool(tempDir, {
 
 assert.equal(mcpResult.ok, true);
 assert.equal(mcpResult.output?.text, 'MCP echo: hello');
+
+const videoProbeResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'video-processing',
+  action: 'video.probe',
+  input: {
+    videoPath: allowedVideoPath
+  },
+  allowedRootPaths: [allowedRootPath]
+});
+
+assert.equal(videoProbeResult.ok, true);
+assert.equal(videoProbeResult.output?.localPath, allowedVideoPath);
+
+const videoComposeWithoutFfmpegResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'video-processing',
+  action: 'video.compose_clips',
+  input: {
+    videoPath: allowedVideoPath,
+    cutPlan: [{ start: 0, end: 15 }],
+    ffmpegPath: '__qiuai_missing_ffmpeg__'
+  },
+  allowedRootPaths: [allowedRootPath]
+});
+
+assert.equal(videoComposeWithoutFfmpegResult.ok, false);
+assert.match(videoComposeWithoutFfmpegResult.message ?? '', /FFmpeg/);
+
+const videoFramesWithoutFfmpegResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'video-processing',
+  action: 'video.extract_frames',
+  input: {
+    videoPath: allowedVideoPath,
+    frameIntervalSeconds: 5,
+    maxFrames: 3,
+    ffmpegPath: '__qiuai_missing_ffmpeg__'
+  },
+  allowedRootPaths: [allowedRootPath]
+});
+
+assert.equal(videoFramesWithoutFfmpegResult.ok, false);
+assert.match(videoFramesWithoutFfmpegResult.message ?? '', /FFmpeg/);
 
 const unsupported = await invokeDesktopTool(tempDir, {
   workspaceId,

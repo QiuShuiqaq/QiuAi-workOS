@@ -7,6 +7,8 @@ import type {
 export type WorkflowGraphNodeType =
   | 'start'
   | 'input'
+  | 'parameter_extractor'
+  | 'list'
   | 'knowledge'
   | 'reasoning'
   | 'llm'
@@ -14,6 +16,9 @@ export type WorkflowGraphNodeType =
   | 'template'
   | 'tool'
   | 'condition'
+  | 'iteration'
+  | 'loop'
+  | 'aggregator'
   | 'artifact'
   | 'approval'
   | 'output';
@@ -26,8 +31,19 @@ export type WorkflowGraphArtifactType =
   | 'pdf'
   | 'png'
   | 'jpg'
+  | 'mp4'
   | 'csv'
   | 'zip';
+
+export type WorkflowGraphVariableType =
+  | 'text'
+  | 'number'
+  | 'boolean'
+  | 'json'
+  | 'asset'
+  | 'asset[]'
+  | 'table'
+  | 'artifact';
 
 export type WorkflowGraphEdgeConditionType =
   | 'always'
@@ -67,6 +83,7 @@ export interface WorkflowGraphEdge {
 
 export interface WorkflowGraphVariable {
   name: string;
+  type?: WorkflowGraphVariableType;
   description?: string;
   required?: boolean;
   defaultValue?: unknown;
@@ -112,6 +129,8 @@ const maxWorkflowPromptNodes = 24;
 const workflowGraphNodeTypes: WorkflowGraphNodeType[] = [
   'start',
   'input',
+  'parameter_extractor',
+  'list',
   'knowledge',
   'reasoning',
   'llm',
@@ -119,6 +138,9 @@ const workflowGraphNodeTypes: WorkflowGraphNodeType[] = [
   'template',
   'tool',
   'condition',
+  'iteration',
+  'loop',
+  'aggregator',
   'artifact',
   'approval',
   'output'
@@ -131,8 +153,19 @@ const workflowGraphArtifactTypes: WorkflowGraphArtifactType[] = [
   'pdf',
   'png',
   'jpg',
+  'mp4',
   'csv',
   'zip'
+];
+const workflowGraphVariableTypes: WorkflowGraphVariableType[] = [
+  'text',
+  'number',
+  'boolean',
+  'json',
+  'asset',
+  'asset[]',
+  'table',
+  'artifact'
 ];
 const workflowGraphEdgeConditionTypes: WorkflowGraphEdgeConditionType[] = [
   'always',
@@ -707,6 +740,7 @@ function parseWorkflowGraphVariable(value: unknown): WorkflowGraphVariable | und
 
   return {
     name,
+    type: readWorkflowGraphVariableType(record.type),
     description: readTrimmedString(record.description),
     required: typeof record.required === 'boolean' ? record.required : undefined,
     defaultValue: record.defaultValue
@@ -751,6 +785,12 @@ function readWorkflowGraphNodeType(value: unknown): WorkflowGraphNodeType | unde
 function readWorkflowGraphArtifactType(value: unknown): WorkflowGraphArtifactType | undefined {
   return typeof value === 'string' && workflowGraphArtifactTypes.includes(value as WorkflowGraphArtifactType)
     ? (value as WorkflowGraphArtifactType)
+    : undefined;
+}
+
+function readWorkflowGraphVariableType(value: unknown): WorkflowGraphVariableType | undefined {
+  return typeof value === 'string' && workflowGraphVariableTypes.includes(value as WorkflowGraphVariableType)
+    ? (value as WorkflowGraphVariableType)
     : undefined;
 }
 

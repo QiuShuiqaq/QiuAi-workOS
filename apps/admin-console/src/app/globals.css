@@ -212,6 +212,26 @@ a {
   font-size: 12px;
 }
 
+.workflow-flow-node-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.workflow-flow-node-tags span {
+  max-width: 100%;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 11px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .workflow-flow-node.tone-blue .workflow-flow-node-dot {
   background: #1677ff;
 }
@@ -240,6 +260,27 @@ a {
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid #eef2f7;
+}
+
+.workflow-config-section,
+.workflow-variable-reference {
+  padding: 10px;
+  border: 1px solid #edf1f7;
+  border-radius: 8px;
+  background: #fbfcff;
+}
+
+.workflow-config-section-desc {
+  display: block;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workflow-variable-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
 }
 
 .workflow-node-picker {

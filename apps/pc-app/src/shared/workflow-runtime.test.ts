@@ -13,12 +13,16 @@ import { createMockTaskDetail } from './workbench-data.js';
 const attachments = normalizeWorkflowAttachmentPaths([
   'C:\\QiuAI\\input\\brief.docx',
   'C:\\QiuAI\\input\\chart.png',
-  'C:\\QiuAI\\input\\finance.xlsx'
+  'C:\\QiuAI\\input\\finance.xlsx',
+  'C:\\QiuAI\\input\\demo.mp4'
 ]);
 
 assert.equal(attachments[0]?.kind, 'document');
 assert.equal(attachments[1]?.kind, 'image');
 assert.equal(attachments[2]?.kind, 'spreadsheet');
+assert.equal(attachments[3]?.kind, 'video');
+assert.equal(attachments[3]?.mimeType, 'video/mp4');
+assert.equal(attachments[3]?.uri, 'local://C:\\QiuAI\\input\\demo.mp4');
 
 const task = createMockTaskDetail({
   taskId: 'workflow-runtime-001',
@@ -73,6 +77,7 @@ writeWorkflowNodeOutputs({
 assert.equal(pool.get('classify_1.json.intent'), 'ppt');
 assert.equal(pool.get('classify_1.json.route.target'), 'presentation');
 assert.equal(pool.get('classify_1.json.items.0.name'), 'first');
+assert.deepEqual(pool.get('classify_1.json.items'), [{ name: 'first' }]);
 
 const report = formatWorkflowTraceForReport([
   createWorkflowNodeTrace({

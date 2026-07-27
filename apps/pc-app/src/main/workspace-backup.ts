@@ -751,14 +751,46 @@ function validateToolManifest(value: unknown): ToolManifest {
         'document_edit',
         'presentation_edit',
         'spreadsheet_edit',
+        'video_processing',
+        'image_processing',
+        'audio_processing',
         'filesystem',
         'browser_automation',
         'custom_api',
         'mcp'
       ]
     ),
-    requiresApproval: optionalBoolean(record.requiresApproval, 'toolManifest.requiresApproval')
+    requiresApproval: optionalBoolean(record.requiresApproval, 'toolManifest.requiresApproval'),
+    actions: validateToolManifestActions(record.actions)
   };
+}
+
+function validateToolManifestActions(value: unknown): ToolManifest['actions'] {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error('toolManifest.actions must be an array.');
+  }
+
+  return value.map((item, index) => {
+    const record = requireRecord(item, `toolManifest.actions[${index}]`);
+    return {
+      action: requireString(record.action, `toolManifest.actions[${index}].action`),
+      name: requireString(record.name, `toolManifest.actions[${index}].name`),
+      description: optionalString(record.description, `toolManifest.actions[${index}].description`),
+      inputSchema: record.inputSchema && typeof record.inputSchema === 'object' && !Array.isArray(record.inputSchema)
+        ? (record.inputSchema as Record<string, unknown>)
+        : undefined,
+      outputSchema: record.outputSchema && typeof record.outputSchema === 'object' && !Array.isArray(record.outputSchema)
+        ? (record.outputSchema as Record<string, unknown>)
+        : undefined,
+      requiresApproval: record.requiresApproval === undefined
+        ? undefined
+        : optionalBoolean(record.requiresApproval, `toolManifest.actions[${index}].requiresApproval`)
+    };
+  });
 }
 
 function validateRolePackageManifest(value: unknown): RolePackageManifest {

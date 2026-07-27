@@ -23,15 +23,17 @@ test('server role template catalog is rich and publishable', () => {
       template.workflowGraph.nodes.some((node) => node.type === 'llm'),
       `${template.templateId} must define an LLM workflow node`
     );
+    const artifactNode = template.workflowGraph.nodes.find((node) => node.type === 'artifact');
+    assert.ok(artifactNode, `${template.templateId} must define an artifact node`);
+    assert.ok(artifactNode.artifactType, `${template.templateId} artifact node must define artifact type`);
+    assert.equal(
+      artifactNode.toolId,
+      artifactNode.artifactType === 'mp4' ? 'video-processing' : 'office-document',
+      `${template.templateId} artifact node must use the matching writer tool`
+    );
     assert.ok(
-      template.workflowGraph.nodes.some(
-        (node) =>
-          node.type === 'artifact' &&
-          Boolean(node.artifactType) &&
-          node.toolId === 'office-document' &&
-          node.inputVariables?.includes('draft_result.text')
-      ),
-      `${template.templateId} must define an artifact node wired to draft_result.text`
+      artifactNode.inputVariables?.length,
+      `${template.templateId} artifact node must define input variables`
     );
     assert.ok(template.sampleInputs.length >= 1, `${template.templateId} must define sample inputs`);
     assert.ok(template.outputFormat.trim(), `${template.templateId} must define an output format`);

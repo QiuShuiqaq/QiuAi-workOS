@@ -192,7 +192,11 @@ export type DesktopToolInvocationAction =
   | 'spreadsheet.write_csv'
   | 'spreadsheet.write_xlsx'
   | 'presentation.write_pptx'
-  | 'presentation.write_outline_markdown';
+  | 'presentation.write_outline_markdown'
+  | 'video.probe'
+  | 'video.extract_frames'
+  | 'video.compose_clips'
+  | 'video.export_mp4';
 
 export interface DesktopToolInvocationRequest {
   workspaceId: string;
