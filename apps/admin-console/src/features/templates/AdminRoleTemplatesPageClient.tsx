@@ -105,10 +105,22 @@ export function AdminRoleTemplatesPageClient({
     [workspaces]
   );
 
-  const planOptions = useMemo(
-    () => plans.map((plan) => ({ value: plan.code, label: `${plan.name} / ${plan.code}` })),
+  const activePlans = useMemo(
+    () => plans.filter((plan) => plan.status === 'ACTIVE'),
     [plans]
   );
+
+  const activePlanCodes = useMemo(
+    () => new Set(activePlans.map((plan) => plan.code)),
+    [activePlans]
+  );
+
+  const planOptions = useMemo(
+    () => activePlans.map((plan) => ({ value: plan.code, label: `${plan.name} / ${plan.code}` })),
+    [activePlans]
+  );
+
+  const defaultPlanCode = planOptions[0]?.value ?? '';
 
   const workspaceOptions = useMemo(
     () =>
@@ -184,8 +196,10 @@ export function AdminRoleTemplatesPageClient({
   function openPermissionModal(template: AdminRoleTemplateDetail) {
     setPermissionTemplate(template);
     permissionForm.setFieldsValue({
-      recommendedPlanCode: template.recommendedPlanCode,
-      allowedPlanCodes: template.allowedPlanCodes,
+      recommendedPlanCode: activePlanCodes.has(template.recommendedPlanCode)
+        ? template.recommendedPlanCode
+        : defaultPlanCode,
+      allowedPlanCodes: template.allowedPlanCodes.filter((code) => activePlanCodes.has(code)),
       visibleWorkspaceIds: template.visibleWorkspaceIds
     });
   }
@@ -199,8 +213,10 @@ export function AdminRoleTemplatesPageClient({
     try {
       const values = await permissionForm.validateFields();
       const response = await createBrowserApiClient().updateAdminRoleTemplate(permissionTemplate.id, {
-        recommendedPlanCode: values.recommendedPlanCode,
-        allowedPlanCodes: values.allowedPlanCodes ?? [],
+        recommendedPlanCode: activePlanCodes.has(values.recommendedPlanCode)
+          ? values.recommendedPlanCode
+          : defaultPlanCode,
+        allowedPlanCodes: (values.allowedPlanCodes ?? []).filter((code) => activePlanCodes.has(code)),
         visibleWorkspaceIds: values.visibleWorkspaceIds ?? []
       });
       replaceRow(response.data);

@@ -1895,15 +1895,25 @@ export function AdminCreateRoleTemplatePageClient({
     [editableGraph]
   );
 
-  const activeEnterprisePlans = useMemo(
-    () => plans.filter((plan) => plan.status === 'ACTIVE' && plan.billingCycle !== 'FREE'),
+  const activePlans = useMemo(
+    () => plans.filter((plan) => plan.status === 'ACTIVE'),
     [plans]
   );
-  const defaultPlanCode = activeEnterprisePlans[0]?.code ?? plans[0]?.code ?? '';
+
+  const activeEnterprisePlans = useMemo(
+    () => activePlans.filter((plan) => plan.billingCycle !== 'FREE'),
+    [activePlans]
+  );
+  const defaultPlanCode = activeEnterprisePlans[0]?.code ?? activePlans[0]?.code ?? '';
+
+  const activePlanCodes = useMemo(
+    () => new Set(activePlans.map((plan) => plan.code)),
+    [activePlans]
+  );
 
   const planOptions = useMemo(
-    () => plans.map((plan) => ({ value: plan.code, label: `${plan.name} / ${plan.code}` })),
-    [plans]
+    () => activePlans.map((plan) => ({ value: plan.code, label: `${plan.name} / ${plan.code}` })),
+    [activePlans]
   );
 
   const workspaceOptions = useMemo(
@@ -1925,7 +1935,9 @@ export function AdminCreateRoleTemplatePageClient({
         scenario: editingTemplate.scenario,
         description: editingTemplate.description,
         businessGoal: editingTemplate.businessGoal,
-        recommendedPlanCode: editingTemplate.recommendedPlanCode,
+        recommendedPlanCode: activePlanCodes.has(editingTemplate.recommendedPlanCode)
+          ? editingTemplate.recommendedPlanCode
+          : defaultPlanCode,
         approvalPolicy: editingTemplate.approvalPolicy,
         outputFormat: editingTemplate.outputFormat,
         workflowPreset: inferInitialPreset(editingTemplate),
@@ -1933,7 +1945,7 @@ export function AdminCreateRoleTemplatePageClient({
         tools: editingTemplate.tools,
         skills: editingTemplate.skills,
         sampleInputs: editingTemplate.sampleInputs,
-        allowedPlanCodes: editingTemplate.allowedPlanCodes,
+        allowedPlanCodes: editingTemplate.allowedPlanCodes.filter((code) => activePlanCodes.has(code)),
         visibleWorkspaceIds: editingTemplate.visibleWorkspaceIds
       };
     }
@@ -1953,7 +1965,7 @@ export function AdminCreateRoleTemplatePageClient({
       outputFormat: '对话摘要 + 可下载的业务文档/表格/演示稿。',
       approvalPolicy: '涉及对外发布、合同、财务、医疗、法律或重大经营决策时必须人工确认。'
     } as CreateRoleTemplateFormValues;
-  }, [activeEnterprisePlans, defaultPlanCode, editingTemplate]);
+  }, [activeEnterprisePlans, activePlanCodes, defaultPlanCode, editingTemplate]);
 
   useEffect(() => {
     setEditableGraph(initialGraph);
@@ -1979,11 +1991,19 @@ export function AdminCreateRoleTemplatePageClient({
   }
 
   function readFormValues(values?: Partial<CreateRoleTemplateFormValues>): CreateRoleTemplateFormValues {
-    return {
+    const resolvedValues = {
       ...initialValues,
       ...form.getFieldsValue(true),
       ...values
     } as CreateRoleTemplateFormValues;
+
+    return {
+      ...resolvedValues,
+      recommendedPlanCode: activePlanCodes.has(resolvedValues.recommendedPlanCode)
+        ? resolvedValues.recommendedPlanCode
+        : defaultPlanCode,
+      allowedPlanCodes: uniqueTags(resolvedValues.allowedPlanCodes).filter((code) => activePlanCodes.has(code))
+    };
   }
 
   async function handleSave(values: CreateRoleTemplateFormValues) {
