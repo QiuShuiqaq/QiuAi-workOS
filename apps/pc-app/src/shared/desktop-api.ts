@@ -4,7 +4,9 @@ import type {
   DesktopKnowledgeSourceSummary,
   KnowledgeBindingSource,
   LocalRuntimeContract,
+  ModelCredential,
   ModelProfile,
+  RoleModelCredentialBinding,
   RolePackageManifest,
   ToolManifest,
   DesktopTaskDetail
@@ -70,6 +72,8 @@ export interface DesktopRuntimeState {
   runtimeSnapshot: DesktopRuntimeSnapshot;
   rolePackages: RolePackageManifest[];
   modelProfiles: ModelProfile[];
+  modelCredentials: ModelCredential[];
+  roleModelCredentialBindings: RoleModelCredentialBinding[];
   tools: ToolManifest[];
   knowledgeSources: DesktopKnowledgeSourceSummary[];
   taskDetails?: DesktopTaskDetail[];

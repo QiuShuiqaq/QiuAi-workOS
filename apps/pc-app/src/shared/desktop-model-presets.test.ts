@@ -86,4 +86,26 @@ assert.equal(
   'deepseek-key'
 );
 
+const credentialManagedDeepSeekProfiles = firstSelection.modelProfiles.map((profile) =>
+  profile.id === 'qiu-general-default' ? { ...profile, apiKey: undefined } : profile
+);
+
+const differentProviderWithCredentialStoreSelection = selectModelProfileForPreset(
+  credentialManagedDeepSeekProfiles,
+  openAiPreset,
+  openAiPreset.models[0]
+);
+
+assert.ok(differentProviderWithCredentialStoreSelection);
+assert.notEqual(
+  differentProviderWithCredentialStoreSelection.profile.id,
+  'qiu-general-default'
+);
+assert.equal(
+  differentProviderWithCredentialStoreSelection.modelProfiles.find(
+    (profile) => profile.id === 'qiu-general-default'
+  )?.providerId,
+  'deepseek'
+);
+
 console.log('Desktop model preset selection passed.');

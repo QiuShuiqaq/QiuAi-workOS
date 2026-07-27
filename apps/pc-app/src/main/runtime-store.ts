@@ -6,7 +6,9 @@ import type { DesktopRuntimeState } from '../shared/desktop-api.js';
 import type {
   DesktopKnowledgeSourceSummary,
   DesktopRuntimeSnapshot,
+  ModelCredential,
   ModelProfile,
+  RoleModelCredentialBinding,
   RolePackageManifest,
   ToolManifest
 } from '../shared/desktop-contract.js';
@@ -48,6 +50,8 @@ interface StoredDesktopWorkspaceCatalog {
   savedAt: string;
   rolePackages: RolePackageManifest[];
   modelProfiles: ModelProfile[];
+  modelCredentials: ModelCredential[];
+  roleModelCredentialBindings: RoleModelCredentialBinding[];
   tools: ToolManifest[];
 }
 
@@ -133,7 +137,9 @@ export async function loadDesktopRuntimeState(
 
   const normalizedLegacyState = {
     ...legacyState,
-    knowledgeSources: legacyState.knowledgeSources ?? []
+    knowledgeSources: legacyState.knowledgeSources ?? [],
+    modelCredentials: legacyState.modelCredentials ?? [],
+    roleModelCredentialBindings: legacyState.roleModelCredentialBindings ?? []
   };
 
   await saveDesktopRuntimeState(userDataPath, normalizedLegacyState);
@@ -223,6 +229,8 @@ function readSplitDesktopRuntimeState(
     runtimeSnapshot: runtime.runtimeSnapshot,
     rolePackages: catalog.rolePackages,
     modelProfiles: catalog.modelProfiles,
+    modelCredentials: catalog.modelCredentials,
+    roleModelCredentialBindings: catalog.roleModelCredentialBindings,
     tools: catalog.tools,
     knowledgeSources: runtime.knowledgeSources,
     taskDetails: runtime.taskDetails,
@@ -249,6 +257,8 @@ function readPersistedDesktopRuntimeState(snapshot: {
     runtimeSnapshot: runtime.runtimeSnapshot,
     rolePackages: catalog.rolePackages,
     modelProfiles: catalog.modelProfiles,
+    modelCredentials: catalog.modelCredentials,
+    roleModelCredentialBindings: catalog.roleModelCredentialBindings,
     tools: catalog.tools,
     knowledgeSources: runtime.knowledgeSources,
     taskDetails: runtime.taskDetails,
@@ -310,6 +320,9 @@ function readWorkspaceCatalogRecord(
   if (
     !Array.isArray(record.rolePackages) ||
     !Array.isArray(record.modelProfiles) ||
+    (record.modelCredentials !== undefined && !Array.isArray(record.modelCredentials)) ||
+    (record.roleModelCredentialBindings !== undefined &&
+      !Array.isArray(record.roleModelCredentialBindings)) ||
     !Array.isArray(record.tools)
   ) {
     return undefined;
@@ -328,6 +341,8 @@ function readWorkspaceCatalogRecord(
     savedAt: record.savedAt,
     rolePackages: record.rolePackages,
     modelProfiles: record.modelProfiles,
+    modelCredentials: readModelCredentialsRecord(record.modelCredentials),
+    roleModelCredentialBindings: readRoleModelCredentialBindingsRecord(record.roleModelCredentialBindings),
     tools: record.tools
   };
 }
@@ -385,7 +400,11 @@ function readDesktopRuntimeState(filePath: string): DesktopRuntimeState | undefi
       return undefined;
     }
 
-    return parsed.state;
+    return {
+      ...parsed.state,
+      modelCredentials: parsed.state.modelCredentials ?? [],
+      roleModelCredentialBindings: parsed.state.roleModelCredentialBindings ?? []
+    };
   } catch {
     return undefined;
   }
@@ -575,6 +594,60 @@ function isModelProfile(value: unknown): value is ModelProfile {
   );
 }
 
+function readModelCredentialsRecord(value: unknown): ModelCredential[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isModelCredential);
+}
+
+function isModelCredential(value: unknown): value is ModelCredential {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === 'string' &&
+    typeof record.providerId === 'string' &&
+    typeof record.providerName === 'string' &&
+    typeof record.label === 'string' &&
+    (record.apiBaseUrl === undefined || typeof record.apiBaseUrl === 'string') &&
+    typeof record.apiKey === 'string' &&
+    typeof record.isDefault === 'boolean' &&
+    typeof record.createdAt === 'string' &&
+    typeof record.updatedAt === 'string'
+  );
+}
+
+function readRoleModelCredentialBindingsRecord(value: unknown): RoleModelCredentialBinding[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isRoleModelCredentialBinding);
+}
+
+function isRoleModelCredentialBinding(value: unknown): value is RoleModelCredentialBinding {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.roleCode === 'string' &&
+    typeof record.modelProfileId === 'string' &&
+    (record.mode === 'provider_default' ||
+      record.mode === 'credential_ref' ||
+      record.mode === 'inline') &&
+    (record.credentialId === undefined || typeof record.credentialId === 'string') &&
+    (record.apiBaseUrl === undefined || typeof record.apiBaseUrl === 'string') &&
+    (record.apiKey === undefined || typeof record.apiKey === 'string') &&
+    typeof record.updatedAt === 'string'
+  );
+}
+
 function isToolManifest(value: unknown): value is ToolManifest {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return false;
@@ -631,6 +704,9 @@ function isDesktopRuntimeState(value: unknown): value is DesktopRuntimeState {
     record.runtimeSnapshot !== null &&
     Array.isArray(record.rolePackages) &&
     Array.isArray(record.modelProfiles) &&
+    (record.modelCredentials === undefined || Array.isArray(record.modelCredentials)) &&
+    (record.roleModelCredentialBindings === undefined ||
+      Array.isArray(record.roleModelCredentialBindings)) &&
     Array.isArray(record.tools) &&
     (record.knowledgeSources === undefined || Array.isArray(record.knowledgeSources)) &&
     (record.taskDetails === undefined || Array.isArray(record.taskDetails)) &&

@@ -3,10 +3,13 @@ import type {
   DesktopExecutionLogEntry,
   DesktopKnowledgeSourceSummary,
   DesktopTaskDetail,
+  ModelCredential,
   ModelProfile,
+  RoleModelCredentialBinding,
   RolePackageManifest,
   ToolManifest
 } from './desktop-contract.js';
+import { resolveModelProfileCredential } from './desktop-model-credentials.js';
 import type {
   DesktopModelChatMessage,
   DesktopModelChatRequest,
@@ -61,6 +64,8 @@ export interface RunDesktopTaskInput {
   workspaceId?: string;
   rolePackage?: RolePackageManifest;
   modelProfiles: ModelProfile[];
+  modelCredentials?: ModelCredential[];
+  roleModelCredentialBindings?: RoleModelCredentialBinding[];
   tools: ToolManifest[];
   knowledgeSources?: DesktopKnowledgeSourceSummary[];
   enabledModelProfileIds: string[];
@@ -218,13 +223,25 @@ export async function runDesktopTask(input: RunDesktopTaskInput): Promise<RunDes
     enabledToolIds: input.enabledToolIds,
     enabledKnowledgeBindingIds: input.enabledKnowledgeBindingIds
   });
+  const credentialedBinding: ResolvedRuntimeBinding = {
+    ...binding,
+    modelProfiles: binding.modelProfiles.map(
+      (profile) =>
+        resolveModelProfileCredential({
+          profile,
+          roleCode: input.task.roleCode,
+          credentials: input.modelCredentials,
+          roleBindings: input.roleModelCredentialBindings
+        }).profile
+    )
+  };
 
-  if (binding.modelProfiles.length === 0) {
+  if (credentialedBinding.modelProfiles.length === 0) {
     const failedTask = failTask(
       input.task,
       completedAt,
       'No enabled model profile is available for this task. Enable a model profile before running it.',
-      buildWarningLogs(input.task, binding, completedAt)
+      buildWarningLogs(input.task, credentialedBinding, completedAt)
     );
     await emitTaskProgress({
       onProgress: input.onProgress,
@@ -258,7 +275,7 @@ export async function runDesktopTask(input: RunDesktopTaskInput): Promise<RunDes
     };
   }
 
-  const configuredModelProfiles = binding.modelProfiles.filter(isModelApiConfigured);
+  const configuredModelProfiles = credentialedBinding.modelProfiles.filter(isModelApiConfigured);
 
   if (configuredModelProfiles.length === 0) {
     const failedTask = failTask(
@@ -266,8 +283,8 @@ export async function runDesktopTask(input: RunDesktopTaskInput): Promise<RunDes
       completedAt,
       'No configured model API profile is available for this task. Add API Base URL and API Key before running it.',
       [
-        ...buildWarningLogs(input.task, binding, completedAt),
-        ...buildModelConfigWarningLogs(input.task, binding.modelProfiles, completedAt)
+        ...buildWarningLogs(input.task, credentialedBinding, completedAt),
+        ...buildModelConfigWarningLogs(input.task, credentialedBinding.modelProfiles, completedAt)
       ]
     );
     await emitTaskProgress({
@@ -285,7 +302,7 @@ export async function runDesktopTask(input: RunDesktopTaskInput): Promise<RunDes
 
   const invocation = await invokeConfiguredModel({
     task: input.task,
-    binding,
+    binding: credentialedBinding,
     workflowPlan,
     rolePackage: input.rolePackage,
     profiles: configuredModelProfiles,
@@ -298,7 +315,7 @@ export async function runDesktopTask(input: RunDesktopTaskInput): Promise<RunDes
 
   if (!invocation.ok) {
     const failedTask = failTask(input.task, completedAt, invocation.message, [
-      ...buildWarningLogs(input.task, binding, completedAt),
+      ...buildWarningLogs(input.task, credentialedBinding, completedAt),
       ...invocation.logs
     ]);
     await emitTaskProgress({
@@ -314,7 +331,7 @@ export async function runDesktopTask(input: RunDesktopTaskInput): Promise<RunDes
     };
   }
 
-  const completedTask = completeTask(input.task, completedAt, binding, invocation, workflowPlan);
+  const completedTask = completeTask(input.task, completedAt, credentialedBinding, invocation, workflowPlan);
   await emitTaskProgress({
     onProgress: input.onProgress,
     task: completedTask,

@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
-import { rmSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 const require = createRequire(import.meta.url);
@@ -98,6 +98,17 @@ if (port !== preferredPort) {
 if (process.env.QIUAI_PC_DEV_DRY_RUN === '1') {
   console.log(`QIUAI_PC_DEV_SERVER_URL=${devServerUrl}`);
   process.exit(0);
+}
+
+if (process.env.QIUAI_PC_RESET_USER_DATA === '1') {
+  const localDir = join(process.cwd(), '.local');
+  const userDataDir = join(localDir, 'user-data');
+  if (existsSync(userDataDir)) {
+    mkdirSync(localDir, { recursive: true });
+    const backupDir = join(localDir, `user-data.bak-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+    renameSync(userDataDir, backupDir);
+    console.log(`Moved stale Electron user data to ${backupDir}`);
+  }
 }
 
 rmSync('dist', { recursive: true, force: true });

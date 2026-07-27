@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 
 import {
+  createPlaceholderModelProfile,
   ensureModelProfilesForRolePackage,
   findFirstUnconfiguredRequiredModelProfileId,
   findFirstUnreadyRequiredModelProfileId,
@@ -77,6 +78,11 @@ assert.deepEqual(readRequiredModelProfileIdsForRolePackage(rolePackage), [
   'openai-gpt-5.6-terra'
 ]);
 
+const moonshotProfile = createPlaceholderModelProfile('moonshot-v1-32k');
+assert.equal(moonshotProfile.providerId, 'moonshot');
+assert.equal(moonshotProfile.modelName, 'moonshot-v1-32k');
+assert.equal(moonshotProfile.purpose, 'document');
+
 const ensuredProfiles = ensureModelProfilesForRolePackage(existingProfiles, rolePackage);
 assert.ok(ensuredProfiles.some((profile) => profile.id === 'deepseek-v4-flash'));
 assert.ok(ensuredProfiles.some((profile) => profile.id === 'openai-gpt-5.6-terra'));
@@ -101,6 +107,49 @@ const configuredProfiles = ensuredProfiles.map((profile) =>
 const statuses = getRoleModelRequirementStatuses(configuredProfiles, rolePackage);
 assert.equal(statuses.every((status) => status.configured), true);
 assert.equal(findFirstUnconfiguredRequiredModelProfileId(configuredProfiles, rolePackage), undefined);
+
+const credentialManagedProfiles = configuredProfiles.map((profile) => ({
+  ...profile,
+  apiKey: undefined
+}));
+const credentialManagedStatuses = getRoleModelRequirementStatuses(
+  credentialManagedProfiles,
+  rolePackage,
+  {
+    credentials: [
+      {
+        id: 'credential-default-deepseek',
+        providerId: 'deepseek',
+        providerName: 'DeepSeek',
+        label: 'DeepSeek default',
+        apiBaseUrl: 'https://api.deepseek.com',
+        apiKey: 'deepseek-key',
+        isDefault: true,
+        createdAt: '2026-07-27T00:00:00.000Z',
+        updatedAt: '2026-07-27T00:00:00.000Z'
+      },
+      {
+        id: 'credential-default-openai',
+        providerId: 'openai',
+        providerName: 'OpenAI',
+        label: 'OpenAI default',
+        apiBaseUrl: 'https://api.openai.com/v1',
+        apiKey: 'openai-key',
+        isDefault: true,
+        createdAt: '2026-07-27T00:00:00.000Z',
+        updatedAt: '2026-07-27T00:00:00.000Z'
+      }
+    ]
+  }
+);
+assert.equal(
+  credentialManagedStatuses.find((status) => status.profile.id === 'deepseek-v4-flash')?.configured,
+  true
+);
+assert.equal(
+  credentialManagedStatuses.find((status) => status.profile.id === 'openai-gpt-5.6-terra')?.configured,
+  true
+);
 
 const runtimeStatuses = getRoleModelRuntimeRequirementStatuses(configuredProfiles, [
   'qiu-general-default',

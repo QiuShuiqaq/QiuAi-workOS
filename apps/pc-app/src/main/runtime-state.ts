@@ -9,6 +9,10 @@ import {
   syncDesktopRuntimeSnapshot
 } from '../shared/desktop-sync-client.js';
 import { createTaskDetailFromSummary } from '../shared/workbench-data.js';
+import {
+  migrateLegacyModelProfileCredentials,
+  normalizeRoleModelCredentialBindings
+} from '../shared/desktop-model-credentials.js';
 import type {
   DesktopAppInfo,
   DesktopAuthorizedRoleTemplateCatalog,
@@ -276,9 +280,21 @@ export async function checkServerConnection(): Promise<DesktopServerConnectionSt
 }
 
 function hydratePersistedRuntimeState(state: DesktopRuntimeState): DesktopRuntimeState {
+  const modelCredentials = migrateLegacyModelProfileCredentials({
+    modelProfiles: state.modelProfiles,
+    credentials: state.modelCredentials
+  });
+  const validRoleCodes = new Set(state.rolePackages.map((rolePackage) => rolePackage.roleCode));
+  const validModelProfileIds = new Set(state.modelProfiles.map((profile) => profile.id));
   const normalizedState = {
     ...state,
-    knowledgeSources: state.knowledgeSources ?? []
+    knowledgeSources: state.knowledgeSources ?? [],
+    modelCredentials,
+    roleModelCredentialBindings: normalizeRoleModelCredentialBindings(
+      state.roleModelCredentialBindings,
+      validRoleCodes,
+      validModelProfileIds
+    )
   };
 
   if (normalizedState.taskDetails && normalizedState.taskDetails.length > 0) {

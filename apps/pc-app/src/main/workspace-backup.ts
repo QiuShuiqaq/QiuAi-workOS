@@ -23,7 +23,9 @@ import type {
   DesktopTaskSummary,
   DesktopToolSummary,
   LocalRuntimeContract,
+  ModelCredential,
   ModelProfile,
+  RoleModelCredentialBinding,
   DesktopRoleSkillSummary,
   DesktopRoleWorkflowStep,
   RolePackageManifest,
@@ -343,6 +345,12 @@ function validateDesktopRuntimeState(input: unknown): DesktopRuntimeState {
     modelProfiles: requireArray(record.modelProfiles, 'desktopRuntimeState.modelProfiles').map(
       validateModelProfile
     ),
+    modelCredentials: Array.isArray(record.modelCredentials)
+      ? record.modelCredentials.map(validateModelCredential)
+      : [],
+    roleModelCredentialBindings: Array.isArray(record.roleModelCredentialBindings)
+      ? record.roleModelCredentialBindings.map(validateRoleModelCredentialBinding)
+      : [],
     tools: requireArray(record.tools, 'desktopRuntimeState.tools').map(validateToolManifest),
     serverConnection: validateDesktopServerConnectionStatus(record.serverConnection)
   };
@@ -683,6 +691,41 @@ function validateModelProfile(value: unknown): ModelProfile {
       record.monthlyBudgetCents,
       'modelProfile.monthlyBudgetCents'
     )
+  };
+}
+
+function validateModelCredential(value: unknown): ModelCredential {
+  const record = requireRecord(value, 'model credential');
+  return {
+    id: requireString(record.id, 'modelCredential.id'),
+    providerId: requireString(record.providerId, 'modelCredential.providerId'),
+    providerName: requireString(record.providerName, 'modelCredential.providerName'),
+    label: requireString(record.label, 'modelCredential.label'),
+    apiBaseUrl: optionalString(record.apiBaseUrl, 'modelCredential.apiBaseUrl'),
+    apiKey: requireString(record.apiKey, 'modelCredential.apiKey'),
+    isDefault: requireBoolean(record.isDefault, 'modelCredential.isDefault'),
+    createdAt: requireString(record.createdAt, 'modelCredential.createdAt'),
+    updatedAt: requireString(record.updatedAt, 'modelCredential.updatedAt')
+  };
+}
+
+function validateRoleModelCredentialBinding(value: unknown): RoleModelCredentialBinding {
+  const record = requireRecord(value, 'role model credential binding');
+  return {
+    roleCode: requireString(record.roleCode, 'roleModelCredentialBinding.roleCode'),
+    modelProfileId: requireString(
+      record.modelProfileId,
+      'roleModelCredentialBinding.modelProfileId'
+    ),
+    mode: requireEnum(record.mode, 'roleModelCredentialBinding.mode', [
+      'provider_default',
+      'credential_ref',
+      'inline'
+    ]),
+    credentialId: optionalString(record.credentialId, 'roleModelCredentialBinding.credentialId'),
+    apiBaseUrl: optionalString(record.apiBaseUrl, 'roleModelCredentialBinding.apiBaseUrl'),
+    apiKey: optionalString(record.apiKey, 'roleModelCredentialBinding.apiKey'),
+    updatedAt: requireString(record.updatedAt, 'roleModelCredentialBinding.updatedAt')
   };
 }
 

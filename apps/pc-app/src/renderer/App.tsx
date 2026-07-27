@@ -43,6 +43,7 @@ import Layout from 'antd/es/layout';
 import List from 'antd/es/list';
 import Modal from 'antd/es/modal';
 import Popover from 'antd/es/popover';
+import Radio from 'antd/es/radio';
 import Select from 'antd/es/select';
 import Space from 'antd/es/space';
 import Switch from 'antd/es/switch';
@@ -66,7 +67,10 @@ import type {
   DesktopTaskSummary,
   DesktopKnowledgeSourceSummary,
   KnowledgeBindingSource,
+  ModelCredential,
+  ModelCredentialBindingMode,
   ModelProfile,
+  RoleModelCredentialBinding,
   RolePackageManifest,
   ToolManifest
 } from '../shared/desktop-contract';
@@ -91,6 +95,13 @@ import {
   type ModelProviderPreset,
   type ModelProviderPresetModel
 } from '../shared/desktop-model-presets';
+import {
+  createCredentialId,
+  findDefaultModelCredential,
+  listProviderModelCredentials,
+  resolveModelProfileCredential,
+  upsertDefaultModelCredential
+} from '../shared/desktop-model-credentials';
 
 type SectionKey = 'workbench' | 'roles' | 'models' | 'tools' | 'knowledge' | 'settings';
 type AccountModalKey = 'enterprise' | 'help' | 'release' | 'download' | 'logout';
@@ -162,6 +173,14 @@ interface RoleConfigFormValues {
   modelProfileIds: string[];
   toolIds: string[];
   knowledgeSources: KnowledgeBindingSource[];
+  modelCredentialBindings?: Record<string, RoleModelCredentialFormValue>;
+}
+
+interface RoleModelCredentialFormValue {
+  mode?: ModelCredentialBindingMode;
+  credentialId?: string;
+  apiBaseUrl?: string;
+  apiKey?: string;
 }
 
 interface ToolSettingsFormValues {
@@ -972,18 +991,6 @@ export default function App() {
   }, [hasLoadedPersistedState, runtimeState]);
 
   useEffect(() => {
-    if (!hasLoadedPersistedState) {
-      return;
-    }
-
-    if (runtimeState.localRuntime.workspaceId === pendingWorkspaceId) {
-      onboardingForm.setFieldsValue({ bindingCode: '' });
-      setOnboardingNotice('');
-      setOnboardingOpen(true);
-    }
-  }, [hasLoadedPersistedState, onboardingForm, runtimeState.localRuntime.workspaceId]);
-
-  useEffect(() => {
     const firstModelId = runtimeState.modelProfiles[0]?.id;
     if (!selectedModelId && firstModelId) {
       setSelectedModelId(firstModelId);
@@ -1312,7 +1319,7 @@ export default function App() {
       setRuntimeState(nextState);
       setAuthorizedRoleTemplateCatalog(initialAuthorizedRoleTemplateCatalog);
       setAccountModal(null);
-      setOnboardingOpen(true);
+      setOnboardingOpen(false);
     } catch (error) {
       setOnboardingNotice(`解绑失败：${error instanceof Error ? error.message : 'unknown error'}`);
     } finally {
@@ -1359,6 +1366,11 @@ export default function App() {
   const selectedModelProfile = useMemo(() => {
     return runtimeState.modelProfiles.find((profile) => profile.id === selectedModelId);
   }, [runtimeState.modelProfiles, selectedModelId]);
+  const selectedModelDefaultCredential = useMemo(() => {
+    return selectedModelProfile
+      ? findDefaultModelCredential(runtimeState.modelCredentials, selectedModelProfile.providerId)
+      : undefined;
+  }, [runtimeState.modelCredentials, selectedModelProfile]);
 
   useEffect(() => {
     if (!selectedModelProfile) {
@@ -1369,15 +1381,15 @@ export default function App() {
       providerName: selectedModelProfile.providerName,
       modelName: selectedModelProfile.modelName,
       purpose: selectedModelProfile.purpose,
-      apiBaseUrl: selectedModelProfile.apiBaseUrl,
-      apiKey: selectedModelProfile.apiKey,
+      apiBaseUrl: selectedModelDefaultCredential?.apiBaseUrl ?? selectedModelProfile.apiBaseUrl,
+      apiKey: selectedModelDefaultCredential?.apiKey ?? selectedModelProfile.apiKey,
       temperature: selectedModelProfile.temperature,
       maxTokens: selectedModelProfile.maxTokens,
       monthlyBudgetCents: selectedModelProfile.monthlyBudgetCents,
       fallbackProfileId: selectedModelProfile.fallbackProfileId
     });
     setModelTestNotice('');
-  }, [modelForm, selectedModelProfile]);
+  }, [modelForm, selectedModelDefaultCredential, selectedModelProfile]);
 
   useEffect(() => {
     const webSearchSettings = runtimeState.localRuntime.toolSettings?.webSearch;
@@ -1387,6 +1399,19 @@ export default function App() {
       allowPrivateNetwork: webSearchSettings?.allowPrivateNetwork ?? false
     });
   }, [runtimeState.localRuntime.toolSettings, toolSettingsForm]);
+
+  function isRuntimeModelProfileConfigured(profile: ModelProfile, roleCode?: string): boolean {
+    return resolveModelProfileCredential({
+      profile,
+      roleCode,
+      credentials: runtimeState.modelCredentials,
+      roleBindings: runtimeState.roleModelCredentialBindings
+    }).configured;
+  }
+
+  function findPresetDefaultCredential(preset: ModelProviderPreset): ModelCredential | undefined {
+    return findDefaultModelCredential(runtimeState.modelCredentials, preset.id);
+  }
 
   const orderedTasks = useMemo(() => {
     return [...runtimeState.runtimeSnapshot.tasks].sort((left, right) =>
@@ -1481,7 +1506,7 @@ export default function App() {
   const enabledModelCount = runtimeState.localRuntime.enabledModelProfileIds.length;
   const enabledToolCount = runtimeState.localRuntime.enabledToolIds.length;
   const knowledgeBindingCount = runtimeState.localRuntime.knowledgeBindingIds.length;
-  const requiresOnboarding = runtimeState.localRuntime.workspaceId === pendingWorkspaceId;
+  const isEnterpriseUnbound = runtimeState.localRuntime.workspaceId === pendingWorkspaceId;
   const currentSectionMeta = sectionMeta(selectedSection);
   const desktopShellClassName = [
     'desktop-shell',
@@ -1518,9 +1543,9 @@ export default function App() {
                 </div>
 
                 <Space wrap>
-                  {requiresOnboarding ? (
+                  {isEnterpriseUnbound ? (
                     <Button type="primary" onClick={() => setOnboardingOpen(true)}>
-                      初始化工作区
+                      绑定企业
                     </Button>
                   ) : null}
                   <Tag icon={<SafetyCertificateOutlined />} color={connectionTone}>
@@ -1576,9 +1601,9 @@ export default function App() {
         </div>
 
         <div className="product-titlebar-actions">
-          {requiresOnboarding ? (
+          {isEnterpriseUnbound ? (
             <Button size="small" type="primary" onClick={() => setOnboardingOpen(true)}>
-              Bind
+              绑定企业
             </Button>
           ) : null}
           <Tag icon={<SafetyCertificateOutlined />} color={connectionTone}>
@@ -1691,14 +1716,11 @@ export default function App() {
       <Modal
         title="桌面端绑定"
         open={onboardingOpen}
-        closable={!requiresOnboarding}
-        maskClosable={false}
+        closable
+        maskClosable
         okText="绑定"
         cancelText="稍后"
         confirmLoading={isBindingDevice}
-        cancelButtonProps={{
-          style: requiresOnboarding ? { display: 'none' } : undefined
-        }}
         onCancel={() => setOnboardingOpen(false)}
         onOk={() => onboardingForm.submit()}
       >
@@ -1711,7 +1733,7 @@ export default function App() {
             <Input placeholder="例如：QIU-ABCD-EFGH" />
           </Form.Item>
           <Typography.Text type="secondary">
-            绑定后，桌面端会自动接入当前工作区；本机数据仍保存在本地。
+            未绑定时可直接使用免费版；绑定企业后，桌面端会自动接入对应企业工作区。
           </Typography.Text>
           {onboardingNotice ? <Typography.Text type="danger">{onboardingNotice}</Typography.Text> : null}
         </Form>
@@ -1737,7 +1759,7 @@ export default function App() {
             <Descriptions column={1} size="small" bordered>
               <Descriptions.Item label="企业工作区">
                 {runtimeState.localRuntime.workspaceId === pendingWorkspaceId
-                  ? '未绑定'
+                  ? '免费版（未绑定企业）'
                   : runtimeState.localRuntime.workspaceId}
               </Descriptions.Item>
               <Descriptions.Item label="设备名称">{runtimeState.app.deviceName}</Descriptions.Item>
@@ -1777,7 +1799,7 @@ export default function App() {
         {accountModal === 'help' ? (
           <Space direction="vertical" size={14} className="account-modal-body">
             {[
-              ['怎么绑定企业？', '在 web-console 生成绑定码，在本机启动后输入绑定码即可接入企业工作区。'],
+              ['怎么绑定企业？', '客户端默认可直接使用免费版；在 web-console 生成绑定码后，点击“绑定企业”输入绑定码即可接入企业工作区。'],
               ['模型在哪里配置？', '进入左侧“模型”，选择供应商卡片并填写 API Key。不同数字员工可要求不同模型配置。'],
               ['文件怎么交给数字员工？', '在“对话”输入框直接拖入文档、表格、图片等文件，再输入任务要求。'],
               ['结果文件在哪里？', '任务完成后会在聊天记录里显示可下载或可打开的本地产物。'],
@@ -2419,13 +2441,21 @@ export default function App() {
       ? getRoleModelRuntimeRequirementStatuses(
           runtimeState.modelProfiles,
           runtimeState.localRuntime.enabledModelProfileIds,
-          roleConfigPreviewPackage
+          roleConfigPreviewPackage,
+          {
+            roleCode: roleConfigPreviewPackage.roleCode,
+            credentials: runtimeState.modelCredentials,
+            roleBindings: runtimeState.roleModelCredentialBindings
+          }
         )
       : [];
-    const roleConfigModelOptions = mergeModelProfileOptions(
-      runtimeState.modelProfiles,
-      roleConfigModelRequirements.map((requirement) => requirement.profile)
-    );
+    const roleConfigCredentialInitialValues = roleConfigPreviewPackage
+      ? buildRoleModelCredentialFormValues(
+          roleConfigPreviewPackage.roleCode,
+          roleConfigPreviewPackage.modelProfileIds,
+          runtimeState.roleModelCredentialBindings
+        )
+      : {};
     const roleConfigHasUnreadyModel = roleConfigModelRequirements.some(
       (requirement) => !requirement.ready
     );
@@ -2639,26 +2669,21 @@ export default function App() {
                   toolIds: roleConfigRolePackage?.toolIds ?? roleConfigTemplate.toolIds,
                   knowledgeSources:
                     roleConfigRolePackage?.requiredKnowledgeSources ??
-                    roleConfigTemplate.requiredKnowledgeSources
+                    roleConfigTemplate.requiredKnowledgeSources,
+                  modelCredentialBindings: roleConfigCredentialInitialValues
                 }}
                 onFinish={submitRoleConfig}
               >
-                <Form.Item
-                  name="modelProfileIds"
-                  label="模型"
-                  rules={[{ required: true, message: '至少选择一个模型绑定' }]}
-                >
-                  <Select
-                    mode="multiple"
-                    allowClear
-                    optionLabelProp="label"
-                    placeholder="选择可使用的模型"
-                    options={roleConfigModelOptions.map((profile) => ({
-                      label: `${profile.providerName} / ${profile.modelName}`,
-                      value: profile.id
-                    }))}
-                  />
-                </Form.Item>
+                <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                  <Typography.Text strong>API Key 使用方式</Typography.Text>
+                  {roleConfigModelRequirements.length === 0 ? (
+                    <Empty description="当前数字员工没有声明模型需求" />
+                  ) : (
+                    roleConfigModelRequirements.map((requirement) =>
+                      renderRoleModelCredentialEditor(requirement.profile)
+                    )
+                  )}
+                </Space>
 
                 <Form.Item name="toolIds" label="工具">
                   <Select
@@ -2696,7 +2721,9 @@ export default function App() {
   }
 
   function renderModels() {
-    const configuredModelCount = runtimeState.modelProfiles.filter(hasConfiguredModelApi).length;
+    const configuredModelCount = runtimeState.modelProfiles.filter((profile) =>
+      isRuntimeModelProfileConfigured(profile)
+    ).length;
     const enabledModelProfiles = runtimeState.modelProfiles.filter((profile) =>
       runtimeState.localRuntime.enabledModelProfileIds.includes(profile.id)
     );
@@ -2725,7 +2752,7 @@ export default function App() {
                 模型配置
               </Typography.Title>
               <Typography.Text type="secondary">
-                选择供应商，填写 API Key，模型配置只保存在本机。
+                配置供应商默认 API Key；数字员工也可以单独覆盖自己的 Key。
               </Typography.Text>
             </div>
 
@@ -2754,22 +2781,32 @@ export default function App() {
 
           <div className="model-summary-row">
             <Tag color={configuredModelCount > 0 ? 'green' : 'orange'}>
-              已接通 {configuredModelCount}/{runtimeState.modelProfiles.length}
+              已接通模型 {configuredModelCount}/{runtimeState.modelProfiles.length}
             </Tag>
             <Tag color={enabledModelProfiles.length > 0 ? 'blue' : 'default'}>
               已启用 {enabledModelProfiles.length}
             </Tag>
+            <Tag color={runtimeState.modelCredentials.length > 0 ? 'green' : 'default'}>
+              默认 Key {runtimeState.modelCredentials.filter((credential) => credential.isDefault).length}
+            </Tag>
           </div>
 
           <div className="catalog-grid model-provider-grid">
-            {filteredPresets.map((preset) => (
+            {filteredPresets.map((preset) => {
+              const defaultCredential = findPresetDefaultCredential(preset);
+              return (
               <Card key={preset.id} bordered={false} className="catalog-card model-provider-card">
                 <Space direction="vertical" size={12} className="catalog-card-content">
                   <Flex align="flex-start" justify="space-between" gap={12}>
                     <span className={`model-provider-logo provider-${preset.id}`}>
                       {modelProviderLogoText(preset.name)}
                     </span>
-                    {preset.apiBaseUrl ? <Tag color="blue">兼容接口</Tag> : null}
+                    <Space size={4} wrap>
+                      {preset.apiBaseUrl ? <Tag color="blue">兼容接口</Tag> : null}
+                      <Tag color={defaultCredential ? 'green' : 'orange'}>
+                        {defaultCredential ? '默认 Key 已配置' : '待配置默认 Key'}
+                      </Tag>
+                    </Space>
                   </Flex>
 
                   <Space direction="vertical" size={6} style={{ width: '100%' }}>
@@ -2803,12 +2840,13 @@ export default function App() {
                         setModelConfigOpen(true);
                       }}
                     >
-                      配置
+                      配置默认 Key
                     </Button>
                   </div>
                 </Space>
               </Card>
-            ))}
+              );
+            })}
           </div>
 
           {filteredPresets.length === 0 ? (
@@ -2820,7 +2858,7 @@ export default function App() {
 
         <Modal
           open={modelConfigOpen}
-          title="模型配置"
+          title="供应商默认 Key"
           okText="保存"
           cancelText="关闭"
           width={760}
@@ -2831,7 +2869,7 @@ export default function App() {
           {selectedModelProfile ? (
             <Form<ModelFormValues> form={modelForm} layout="vertical" onFinish={saveModelProfile}>
               <Form.Item name="apiKey" label="API Key">
-                <Input.Password placeholder="只保存在本机，不上传服务端" />
+                <Input.Password placeholder="作为该供应商默认 Key，只保存在本机" />
               </Form.Item>
               <div className="inline-form-grid">
                 <Form.Item name="providerName" label="供应商" rules={[{ required: true }]}>
@@ -2841,7 +2879,7 @@ export default function App() {
                   <Input />
                 </Form.Item>
               </div>
-              <Form.Item name="purpose" label="模型角色" rules={[{ required: true }]}>
+              <Form.Item name="purpose" label="能力类型" rules={[{ required: true }]}>
                 <Select
                   options={[
                     { label: '通用执行', value: 'general' },
@@ -2913,6 +2951,107 @@ export default function App() {
           )}
         </Modal>
       </>
+    );
+  }
+
+  function renderRoleModelCredentialEditor(profile: ModelProfile) {
+    const defaultCredential = findDefaultModelCredential(
+      runtimeState.modelCredentials,
+      profile.providerId
+    );
+    const providerCredentials = listProviderModelCredentials(
+      runtimeState.modelCredentials,
+      profile.providerId
+    );
+    const modePath = ['modelCredentialBindings', profile.id, 'mode'];
+
+    return (
+      <div key={profile.id} className="role-model-credential-editor">
+        <Flex align="flex-start" justify="space-between" gap={12} wrap="wrap">
+          <Space direction="vertical" size={2}>
+            <Typography.Text strong>
+              {profile.providerName} / {profile.modelName}
+            </Typography.Text>
+            <Typography.Text type="secondary">
+              {modelPurposeLabel(profile.purpose)} · Profile ID：{profile.id}
+            </Typography.Text>
+          </Space>
+          <Tag color={isRuntimeModelProfileConfigured(profile, roleConfigRoleCode) ? 'green' : 'orange'}>
+            {isRuntimeModelProfileConfigured(profile, roleConfigRoleCode) ? '已就绪' : '待配置'}
+          </Tag>
+        </Flex>
+
+        <Form.Item
+          name={modePath}
+          rules={[{ required: true, message: '请选择 API Key 使用方式' }]}
+        >
+          <Radio.Group
+            optionType="button"
+            buttonStyle="solid"
+            options={[
+              { label: '使用默认 Key', value: 'provider_default' },
+              {
+                label: '选择已有 Key',
+                value: 'credential_ref',
+                disabled: providerCredentials.length === 0
+              },
+              { label: '单独输入 Key', value: 'inline' }
+            ]}
+          />
+        </Form.Item>
+
+        <Form.Item noStyle shouldUpdate>
+          {({ getFieldValue }) => {
+            const mode = (getFieldValue(modePath) ?? 'provider_default') as ModelCredentialBindingMode;
+
+            if (mode === 'credential_ref') {
+              return (
+                <Form.Item
+                  name={['modelCredentialBindings', profile.id, 'credentialId']}
+                  rules={[{ required: true, message: '请选择已有 Key' }]}
+                >
+                  <Select
+                    placeholder="选择已有 Key"
+                    options={providerCredentials.map((credential) => ({
+                      label: `${credential.label}${credential.isDefault ? '（默认）' : ''}`,
+                      value: credential.id
+                    }))}
+                  />
+                </Form.Item>
+              );
+            }
+
+            if (mode === 'inline') {
+              return (
+                <div className="inline-form-grid">
+                  <Form.Item
+                    name={['modelCredentialBindings', profile.id, 'apiBaseUrl']}
+                    label="API Base URL"
+                    initialValue={profile.apiBaseUrl}
+                  >
+                    <Input placeholder={profile.apiBaseUrl ?? 'https://api.example.com/v1'} />
+                  </Form.Item>
+                  <Form.Item
+                    name={['modelCredentialBindings', profile.id, 'apiKey']}
+                    label="专用 API Key"
+                    rules={[{ required: true, message: '请输入专用 API Key' }]}
+                  >
+                    <Input.Password placeholder="只给当前数字员工使用" />
+                  </Form.Item>
+                </div>
+              );
+            }
+
+            return (
+              <Typography.Text type={defaultCredential ? 'secondary' : 'danger'}>
+                {defaultCredential
+                  ? `将使用 ${defaultCredential.label}`
+                  : `尚未配置 ${profile.providerName} 默认 Key，可先去“模型配置”填写，或选择“单独输入 Key”。`}
+              </Typography.Text>
+            );
+          }}
+        </Form.Item>
+      </div>
     );
   }
 
@@ -3390,7 +3529,7 @@ export default function App() {
       const now = new Date().toISOString();
       const configuredRolePackage = {
         ...(existingRole ?? toInstalledRolePackage(template)),
-        modelProfileIds: values?.modelProfileIds ?? template.modelProfileIds,
+        modelProfileIds: template.modelProfileIds,
         toolIds: values?.toolIds ?? template.toolIds,
         requiredKnowledgeSources: values?.knowledgeSources ?? template.requiredKnowledgeSources
       };
@@ -3419,6 +3558,18 @@ export default function App() {
         current.localRuntime.enabledToolIds,
         installedRolePackage.toolIds
       );
+      const roleModelCredentialBindings = values?.modelCredentialBindings
+        ? [
+            ...current.roleModelCredentialBindings.filter(
+              (binding) => binding.roleCode !== installedRolePackage.roleCode
+            ),
+            ...buildRoleModelCredentialBindingsFromForm(
+              installedRolePackage.roleCode,
+              installedRolePackage.modelProfileIds,
+              values.modelCredentialBindings
+            )
+          ]
+        : current.roleModelCredentialBindings;
       const activeRoleCode =
         current.localRuntime.activeRoleCode && rolePackages.some((rolePackage) => rolePackage.roleCode === current.localRuntime.activeRoleCode)
           ? current.localRuntime.activeRoleCode
@@ -3429,6 +3580,7 @@ export default function App() {
         ...current,
         rolePackages,
         modelProfiles,
+        roleModelCredentialBindings,
         localRuntime: {
           ...current.localRuntime,
           installedRoleCodes: rolePackages.map((rolePackage) => rolePackage.roleCode),
@@ -3521,25 +3673,33 @@ export default function App() {
       return;
     }
 
+    const updatedProfile: ModelProfile = {
+      ...selectedModelProfile,
+      providerId: selectedModelProfile.providerId,
+      providerName: values.providerName.trim(),
+      modelName: values.modelName.trim(),
+      purpose: values.purpose,
+      apiBaseUrl: values.apiBaseUrl?.trim() || undefined,
+      apiKey: undefined,
+      temperature: values.temperature,
+      maxTokens: values.maxTokens,
+      monthlyBudgetCents: values.monthlyBudgetCents,
+      fallbackProfileId: values.fallbackProfileId || undefined
+    };
+
     setRuntimeState((current) => ({
       ...current,
       modelProfiles: current.modelProfiles.map((profile) =>
         profile.id === selectedModelProfile.id
-          ? {
-              ...profile,
-              providerId: selectedModelProfile.providerId,
-              providerName: values.providerName.trim(),
-              modelName: values.modelName.trim(),
-              purpose: values.purpose,
-              apiBaseUrl: values.apiBaseUrl?.trim() || undefined,
-              apiKey: values.apiKey?.trim() || undefined,
-              temperature: values.temperature,
-              maxTokens: values.maxTokens,
-              monthlyBudgetCents: values.monthlyBudgetCents,
-              fallbackProfileId: values.fallbackProfileId || undefined
-            }
+          ? updatedProfile
           : profile
-      )
+      ),
+      modelCredentials: upsertDefaultModelCredential({
+        credentials: current.modelCredentials,
+        profile: updatedProfile,
+        apiKey: values.apiKey,
+        apiBaseUrl: values.apiBaseUrl
+      })
     }));
   }
 
@@ -3553,6 +3713,10 @@ export default function App() {
       return;
     }
 
+    const defaultCredential = findDefaultModelCredential(
+      runtimeState.modelCredentials,
+      selection.profile.providerId
+    );
     setSelectedModelId(selection.profile.id);
     setRuntimeState((current) => ({
       ...current,
@@ -3562,8 +3726,8 @@ export default function App() {
       providerName: preset.name,
       modelName: model.modelName,
       purpose: model.purpose,
-      apiBaseUrl: selection.profile.apiBaseUrl,
-      apiKey: selection.apiKeyPreserved ? selection.profile.apiKey : undefined,
+      apiBaseUrl: defaultCredential?.apiBaseUrl ?? selection.profile.apiBaseUrl,
+      apiKey: defaultCredential?.apiKey,
       temperature: selection.profile.temperature,
       maxTokens: selection.profile.maxTokens,
       monthlyBudgetCents: selection.profile.monthlyBudgetCents,
@@ -3798,10 +3962,16 @@ export default function App() {
     setRoleConfigRoleCode(roleCode);
     setRoleConfigMode(mode);
     setRoleConfigModalOpen(true);
+    const normalizedModelProfileIds = readRequiredModelProfileIdsForRolePackage(currentRolePackage);
     roleConfigForm.setFieldsValue({
-      modelProfileIds: currentRolePackage.modelProfileIds,
+      modelProfileIds: normalizedModelProfileIds,
       toolIds: currentRolePackage.toolIds,
-      knowledgeSources: currentRolePackage.requiredKnowledgeSources
+      knowledgeSources: currentRolePackage.requiredKnowledgeSources,
+      modelCredentialBindings: buildRoleModelCredentialFormValues(
+        currentRolePackage.roleCode,
+        normalizedModelProfileIds,
+        runtimeState.roleModelCredentialBindings
+      )
     });
   }
 
@@ -3819,7 +3989,7 @@ export default function App() {
 
     const previewRolePackage: RolePackageManifest = {
       ...toInstalledRolePackage(template),
-      modelProfileIds: values.modelProfileIds,
+      modelProfileIds: template.modelProfileIds,
       toolIds: values.toolIds,
       requiredKnowledgeSources: values.knowledgeSources
     };
@@ -3838,7 +4008,16 @@ export default function App() {
     const firstUnreadyModelProfileId = findFirstUnreadyRequiredModelProfileId(
       nextModelProfiles,
       nextEnabledModelProfileIds,
-      normalizedPreviewRolePackage
+      normalizedPreviewRolePackage,
+      {
+        roleCode: normalizedPreviewRolePackage.roleCode,
+        credentials: runtimeState.modelCredentials,
+        roleBindings: buildRoleModelCredentialBindingsFromForm(
+          normalizedPreviewRolePackage.roleCode,
+          normalizedPreviewRolePackage.modelProfileIds,
+          values.modelCredentialBindings
+        )
+      }
     );
 
     installRole(template, values);
@@ -3869,7 +4048,12 @@ export default function App() {
     const modelReadiness = getRoleModelRuntimeRequirementStatuses(
       preparedModelProfiles,
       runtimeState.localRuntime.enabledModelProfileIds,
-      preparedRolePackage
+      preparedRolePackage,
+      {
+        roleCode: preparedRolePackage.roleCode,
+        credentials: runtimeState.modelCredentials,
+        roleBindings: runtimeState.roleModelCredentialBindings
+      }
     );
     const firstUnreadyModel = modelReadiness.find((requirement) => !requirement.ready);
     const preparedState = replaceRolePackageAndModelProfiles(
@@ -3997,6 +4181,8 @@ export default function App() {
           (rolePackage) => rolePackage.roleCode === runningTask.roleCode
         ),
         modelProfiles: sourceState.modelProfiles,
+        modelCredentials: sourceState.modelCredentials,
+        roleModelCredentialBindings: sourceState.roleModelCredentialBindings,
         tools: sourceState.tools,
         knowledgeSources: sourceState.knowledgeSources,
         enabledModelProfileIds: sourceState.localRuntime.enabledModelProfileIds,
@@ -4182,7 +4368,11 @@ function buildVerificationExecutionContext(
     enabledModelProfileIds.has(profileId)
   );
   const configuredModelProfileIds = state.modelProfiles
-    .filter((profile) => enabledModelProfileIds.has(profile.id) && hasConfiguredModelApi(profile))
+    .filter(
+      (profile) =>
+        enabledModelProfileIds.has(profile.id) &&
+        hasConfiguredModelApi(state, profile, rolePackage.roleCode)
+    )
     .map((profile) => profile.id);
   const knownEnabledModelProfileIds = state.modelProfiles
     .filter((profile) => enabledModelProfileIds.has(profile.id))
@@ -4205,8 +4395,17 @@ function buildVerificationExecutionContext(
   };
 }
 
-function hasConfiguredModelApi(profile: ModelProfile): boolean {
-  return Boolean(profile.apiBaseUrl?.trim() && profile.apiKey?.trim());
+function hasConfiguredModelApi(
+  state: DesktopRuntimeState,
+  profile: ModelProfile,
+  roleCode?: string
+): boolean {
+  return resolveModelProfileCredential({
+    profile,
+    roleCode,
+    credentials: state.modelCredentials,
+    roleBindings: state.roleModelCredentialBindings
+  }).configured;
 }
 
 function roleTemplateCategory(template: DesktopRoleTemplate): string {
@@ -4925,6 +5124,74 @@ function replaceRolePackageAndModelProfiles(
       )
     }
   };
+}
+
+function buildRoleModelCredentialFormValues(
+  roleCode: string,
+  modelProfileIds: string[],
+  bindings: RoleModelCredentialBinding[]
+): NonNullable<RoleConfigFormValues['modelCredentialBindings']> {
+  const bindingsByModelId = new Map(
+    bindings
+      .filter((binding) => binding.roleCode === roleCode)
+      .map((binding) => [binding.modelProfileId, binding])
+  );
+
+  return Object.fromEntries(
+    modelProfileIds.map((modelProfileId) => {
+      const binding = bindingsByModelId.get(modelProfileId);
+      return [
+        modelProfileId,
+        {
+          mode: binding?.mode ?? 'provider_default',
+          credentialId: binding?.credentialId,
+          apiBaseUrl: binding?.apiBaseUrl,
+          apiKey: binding?.apiKey
+        } satisfies RoleModelCredentialFormValue
+      ];
+    })
+  );
+}
+
+function buildRoleModelCredentialBindingsFromForm(
+  roleCode: string,
+  modelProfileIds: string[],
+  values: RoleConfigFormValues['modelCredentialBindings'] | undefined
+): RoleModelCredentialBinding[] {
+  const now = new Date().toISOString();
+
+  return modelProfileIds.map((modelProfileId) => {
+    const value = values?.[modelProfileId];
+    const mode = value?.mode ?? 'provider_default';
+
+    if (mode === 'credential_ref' && value?.credentialId) {
+      return {
+        roleCode,
+        modelProfileId,
+        mode,
+        credentialId: value.credentialId,
+        updatedAt: now
+      };
+    }
+
+    if (mode === 'inline' && value?.apiKey?.trim()) {
+      return {
+        roleCode,
+        modelProfileId,
+        mode,
+        apiBaseUrl: value.apiBaseUrl?.trim() || undefined,
+        apiKey: value.apiKey.trim(),
+        updatedAt: now
+      };
+    }
+
+    return {
+      roleCode,
+      modelProfileId,
+      mode: 'provider_default',
+      updatedAt: now
+    };
+  });
 }
 
 function rebuildRoleSummaries(

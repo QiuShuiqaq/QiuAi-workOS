@@ -39,15 +39,12 @@ export function selectModelProfileForPreset(
     };
   }
 
-  const reusableProfile =
-    modelProfiles.find((profile) =>
+  const reusableProfile = modelProfiles.find(
+    (profile) =>
       profile.purpose === model.purpose &&
       !hasConfiguredModelApi(profile) &&
-      isDefaultOrPendingProfile(profile)
-    ) ??
-    modelProfiles.find((profile) =>
-      profile.purpose === model.purpose && !hasConfiguredModelApi(profile)
-    );
+      isPendingProviderProfile(profile)
+  );
 
   if (reusableProfile) {
     const updatedProfile = applyPresetToProfile(reusableProfile, preset, model);
@@ -148,9 +145,8 @@ function createUniquePresetProfileId(
   return `${baseId}-${Date.now()}`;
 }
 
-function isDefaultOrPendingProfile(profile: ModelProfile): boolean {
+function isPendingProviderProfile(profile: ModelProfile): boolean {
   return (
-    profile.id.startsWith('qiu-') ||
     profile.providerId === 'provider-pending' ||
     profile.providerId === 'provider-local'
   );

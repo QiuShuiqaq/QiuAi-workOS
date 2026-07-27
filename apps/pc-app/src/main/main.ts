@@ -13,6 +13,12 @@ const shouldDisableHardwareAcceleration =
 if (shouldDisableHardwareAcceleration) {
   app.disableHardwareAcceleration();
   app.commandLine.appendSwitch('disable-gpu');
+  app.commandLine.appendSwitch('disable-gpu-compositing');
+  app.commandLine.appendSwitch('disable-gpu-sandbox');
+  app.commandLine.appendSwitch('disable-software-rasterizer');
+  app.commandLine.appendSwitch('disable-accelerated-2d-canvas');
+  app.commandLine.appendSwitch('disable-accelerated-video-decode');
+  app.commandLine.appendSwitch('disable-features', 'DawnGraphite,WebGPU,Vulkan,CanvasOopRasterization');
 }
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -72,7 +78,9 @@ async function createMainWindow() {
 
   if (isDev && process.env.QIUAI_PC_DEV_SERVER_URL) {
     await mainWindow.loadURL(process.env.QIUAI_PC_DEV_SERVER_URL);
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
+    if (process.env.QIUAI_PC_OPEN_DEVTOOLS === '1') {
+      mainWindow.webContents.openDevTools({ mode: 'detach' });
+    }
     return;
   }
 

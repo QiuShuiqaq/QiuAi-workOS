@@ -1,4 +1,10 @@
-import type { ModelProfile, RolePackageManifest } from './desktop-contract.js';
+import type {
+  ModelCredential,
+  ModelProfile,
+  RoleModelCredentialBinding,
+  RolePackageManifest
+} from './desktop-contract.js';
+import { isModelProfileConfiguredByCredentials } from './desktop-model-credentials.js';
 import { parseWorkflowGraph } from './desktop-workflow-graph.js';
 
 export interface RoleModelRequirementStatus {
@@ -14,6 +20,12 @@ export interface RoleModelRuntimeRequirementStatus extends RoleModelRequirementS
   enabled: boolean;
   ready: boolean;
   issue?: RoleModelRuntimeIssue;
+}
+
+export interface RoleModelCredentialContext {
+  roleCode?: string;
+  credentials?: ModelCredential[];
+  roleBindings?: RoleModelCredentialBinding[];
 }
 
 export function readWorkflowRequiredModelProfileIds(workflowGraph: unknown): string[] {
@@ -60,7 +72,8 @@ export function ensureModelProfilesForRolePackage(
 
 export function getRoleModelRequirementStatuses(
   modelProfiles: ModelProfile[],
-  rolePackage: Pick<RolePackageManifest, 'modelProfileIds' | 'workflowGraph'>
+  rolePackage: Pick<RolePackageManifest, 'roleCode' | 'modelProfileIds' | 'workflowGraph'>,
+  credentialContext: RoleModelCredentialContext = {}
 ): RoleModelRequirementStatus[] {
   const knownProfilesById = new Map(modelProfiles.map((profile) => [profile.id, profile]));
   const nodeIdsByModelId = readWorkflowModelNodeIdsByModelProfileId(rolePackage.workflowGraph);
@@ -72,7 +85,11 @@ export function getRoleModelRequirementStatuses(
     return {
       profile: normalizedProfile,
       requiredByNodeIds: nodeIdsByModelId.get(profileId) ?? [],
-      configured: hasConfiguredModelApi(normalizedProfile),
+      configured: hasConfiguredModelApi(normalizedProfile, {
+        roleCode: credentialContext.roleCode ?? rolePackage.roleCode,
+        credentials: credentialContext.credentials,
+        roleBindings: credentialContext.roleBindings
+      }),
       known: Boolean(profile)
     };
   });
@@ -81,11 +98,12 @@ export function getRoleModelRequirementStatuses(
 export function getRoleModelRuntimeRequirementStatuses(
   modelProfiles: ModelProfile[],
   enabledModelProfileIds: string[],
-  rolePackage: Pick<RolePackageManifest, 'modelProfileIds' | 'workflowGraph'>
+  rolePackage: Pick<RolePackageManifest, 'roleCode' | 'modelProfileIds' | 'workflowGraph'>,
+  credentialContext: RoleModelCredentialContext = {}
 ): RoleModelRuntimeRequirementStatus[] {
   const enabledIds = new Set(enabledModelProfileIds);
 
-  return getRoleModelRequirementStatuses(modelProfiles, rolePackage).map((requirement) => {
+  return getRoleModelRequirementStatuses(modelProfiles, rolePackage, credentialContext).map((requirement) => {
     const enabled = requirement.known && enabledIds.has(requirement.profile.id);
     const ready = requirement.known && enabled && requirement.configured;
 
@@ -106,9 +124,10 @@ export function getRoleModelRuntimeRequirementStatuses(
 
 export function findFirstUnconfiguredRequiredModelProfileId(
   modelProfiles: ModelProfile[],
-  rolePackage: Pick<RolePackageManifest, 'modelProfileIds' | 'workflowGraph'>
+  rolePackage: Pick<RolePackageManifest, 'roleCode' | 'modelProfileIds' | 'workflowGraph'>,
+  credentialContext: RoleModelCredentialContext = {}
 ): string | undefined {
-  return getRoleModelRequirementStatuses(modelProfiles, rolePackage).find(
+  return getRoleModelRequirementStatuses(modelProfiles, rolePackage, credentialContext).find(
     (requirement) => !requirement.configured
   )?.profile.id;
 }
@@ -116,12 +135,14 @@ export function findFirstUnconfiguredRequiredModelProfileId(
 export function findFirstUnreadyRequiredModelProfileId(
   modelProfiles: ModelProfile[],
   enabledModelProfileIds: string[],
-  rolePackage: Pick<RolePackageManifest, 'modelProfileIds' | 'workflowGraph'>
+  rolePackage: Pick<RolePackageManifest, 'roleCode' | 'modelProfileIds' | 'workflowGraph'>,
+  credentialContext: RoleModelCredentialContext = {}
 ): string | undefined {
   return getRoleModelRuntimeRequirementStatuses(
     modelProfiles,
     enabledModelProfileIds,
-    rolePackage
+    rolePackage,
+    credentialContext
   ).find((requirement) => !requirement.ready)?.profile.id;
 }
 
@@ -208,7 +229,7 @@ function inferModelProviderFromProfileId(profileId: string): {
     return {
       providerId: 'moonshot',
       providerName: 'Kimi / Moonshot',
-      modelName: profileId.replace(/^moonshot[-_]/i, ''),
+      modelName: profileId,
       apiBaseUrl: 'https://api.moonshot.cn/v1',
       temperature: 0.4,
       maxTokens: 4096
@@ -246,7 +267,12 @@ function inferModelPurposeFromProfileId(profileId: string): ModelProfile['purpos
     return 'embeddings';
   }
 
-  if (normalized.includes('document') || normalized.includes('doc')) {
+  if (
+    normalized.includes('document') ||
+    normalized.includes('doc') ||
+    normalized.includes('32k') ||
+    normalized.includes('128k')
+  ) {
     return 'document';
   }
 
@@ -257,8 +283,16 @@ function inferModelPurposeFromProfileId(profileId: string): ModelProfile['purpos
   return 'general';
 }
 
-function hasConfiguredModelApi(profile: ModelProfile): boolean {
-  return Boolean(profile.apiBaseUrl?.trim() && profile.apiKey?.trim());
+function hasConfiguredModelApi(
+  profile: ModelProfile,
+  credentialContext: RoleModelCredentialContext = {}
+): boolean {
+  return isModelProfileConfiguredByCredentials({
+    profile,
+    roleCode: credentialContext.roleCode,
+    credentials: credentialContext.credentials,
+    roleBindings: credentialContext.roleBindings
+  });
 }
 
 function mergeUniqueStrings(left: string[], right: string[]): string[] {

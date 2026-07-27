@@ -85,12 +85,40 @@ export interface ModelProfile {
   providerName: string;
   modelName: string;
   purpose: ModelPurpose;
+  /**
+   * @deprecated API keys are moving to local model credentials. This field is
+   * kept for older local data and will be used only as a compatibility fallback.
+   */
   apiBaseUrl?: string;
   apiKey?: string;
   temperature?: number;
   maxTokens?: number;
   fallbackProfileId?: string;
   monthlyBudgetCents?: number;
+}
+
+export interface ModelCredential {
+  id: string;
+  providerId: string;
+  providerName: string;
+  label: string;
+  apiBaseUrl?: string;
+  apiKey: string;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ModelCredentialBindingMode = 'provider_default' | 'credential_ref' | 'inline';
+
+export interface RoleModelCredentialBinding {
+  roleCode: string;
+  modelProfileId: string;
+  mode: ModelCredentialBindingMode;
+  credentialId?: string;
+  apiBaseUrl?: string;
+  apiKey?: string;
+  updatedAt: string;
 }
 
 export interface ToolManifest {

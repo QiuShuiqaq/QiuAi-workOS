@@ -400,16 +400,24 @@ const workflowNodeCatalogGroups: Array<{
 ];
 
 const modelProfileOptions = [
-  { value: 'qiu-general-default', label: '通用执行模型（PC 端配置）' },
-  { value: 'qiu-reasoning-default', label: '深度推理模型（PC 端配置）' },
-  { value: 'qiu-vision-default', label: '视觉理解模型（PC 端配置）' },
-  { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
-  { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
-  { value: 'openai-gpt-5.6-terra', label: 'OpenAI GPT-5.6 Terra' },
-  { value: 'openai-gpt-5.6-sol', label: 'OpenAI GPT-5.6 Sol' },
-  { value: 'qwen-plus', label: '通义千问 Qwen Plus' },
-  { value: 'qwen-max', label: '通义千问 Qwen Max' },
-  { value: 'custom-model', label: '自定义兼容模型' }
+  { value: 'deepseek-v4-flash', label: 'DeepSeek / deepseek-v4-flash（通用生成）' },
+  { value: 'deepseek-chat', label: 'DeepSeek / deepseek-chat（通用对话）' },
+  { value: 'deepseek-reasoner', label: 'DeepSeek / deepseek-reasoner（深度推理）' },
+  { value: 'deepseek-v4-pro', label: 'DeepSeek / deepseek-v4-pro（深度推理）' },
+  { value: 'openai-gpt-4o', label: 'OpenAI / gpt-4o（多模态）' },
+  { value: 'openai-gpt-4o-mini', label: 'OpenAI / gpt-4o-mini（轻量通用）' },
+  { value: 'openai-gpt-5.6-terra', label: 'OpenAI / gpt-5.6-terra（平衡）' },
+  { value: 'openai-gpt-5.6-sol', label: 'OpenAI / gpt-5.6-sol（高质量）' },
+  { value: 'qwen-plus', label: '通义千问 / qwen-plus（通用生成）' },
+  { value: 'qwen-max', label: '通义千问 / qwen-max（高质量）' },
+  { value: 'qwen-long', label: '通义千问 / qwen-long（长文档）' },
+  { value: 'qwen-vl-max', label: '通义千问 / qwen-vl-max（图片理解）' },
+  { value: 'moonshot-v1-32k', label: 'Kimi / moonshot-v1-32k（长文档）' },
+  { value: 'moonshot-v1-128k', label: 'Kimi / moonshot-v1-128k（超长文档）' },
+  { value: 'qiu-general-default', label: '企业默认通用模型（兜底，PC 端配置）' },
+  { value: 'qiu-reasoning-default', label: '企业默认推理模型（兜底，PC 端配置）' },
+  { value: 'qiu-vision-default', label: '企业默认视觉模型（兜底，PC 端配置）' },
+  { value: 'custom-model', label: '自定义 OpenAI 兼容模型' }
 ];
 
 const artifactTypeOptions: Array<{ value: WorkflowArtifactType; label: string }> = [
@@ -1473,7 +1481,7 @@ function WorkflowReactFlowEditor({
                 allowClear
                 showSearch
                 value={selectedNode.modelProfileId}
-                placeholder="模型要求（PC 端安装时配置 API Key）"
+                placeholder="选择具体模型（PC 端安装时配置 API Key）"
                 options={modelProfileOptions}
                 optionFilterProp="label"
                 onChange={(modelProfileId) => updateNode(selectedNode.id, { modelProfileId })}

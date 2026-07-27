@@ -179,6 +179,8 @@ export function createInitialDesktopRuntimeState(
     runtimeSnapshot,
     rolePackages: initialRolePackages,
     modelProfiles: initialModelProfiles,
+    modelCredentials: [],
+    roleModelCredentialBindings: [],
     tools: initialTools,
     knowledgeSources: [],
     taskDetails,

@@ -172,6 +172,8 @@ export async function writeWorkspaceSnapshotBundle(
       savedAt,
       rolePackages: state.rolePackages,
       modelProfiles: state.modelProfiles,
+      modelCredentials: state.modelCredentials,
+      roleModelCredentialBindings: state.roleModelCredentialBindings,
       tools: state.tools
     };
     const runtime = {
