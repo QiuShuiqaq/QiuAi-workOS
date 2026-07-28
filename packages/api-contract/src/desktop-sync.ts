@@ -1,6 +1,6 @@
 export type DesktopPlatform = 'windows' | 'macos' | 'linux';
 
-export type DesktopRolePackageState = 'installed' | 'running' | 'paused' | 'error';
+export type DesktopRolePackageState = 'installed' | 'running' | 'paused' | 'error' | 'deleted';
 
 export type DesktopTaskState = 'queued' | 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled';
 

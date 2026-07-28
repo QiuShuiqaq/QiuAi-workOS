@@ -41,6 +41,7 @@ import Input from 'antd/es/input';
 import InputNumber from 'antd/es/input-number';
 import Layout from 'antd/es/layout';
 import List from 'antd/es/list';
+import message from 'antd/es/message';
 import Modal from 'antd/es/modal';
 import Popover from 'antd/es/popover';
 import Radio from 'antd/es/radio';
@@ -67,13 +68,22 @@ import type {
   DesktopTaskSummary,
   DesktopKnowledgeSourceSummary,
   KnowledgeBindingSource,
+  ModelCapability,
   ModelCredential,
   ModelCredentialBindingMode,
+  ModelProviderCatalog,
   ModelProfile,
   RoleModelCredentialBinding,
   RolePackageManifest,
   ToolManifest
 } from '../shared/desktop-contract';
+import {
+  modelCapabilityOptions,
+  modelCapabilitySummary,
+  normalizeModelCapabilities,
+  purposeForModelCapabilities,
+  readModelProfileCapabilities
+} from '../shared/desktop-model-capabilities';
 import type { RoleTemplateCatalogEntry } from '@qiuai/domain';
 import { createDesktopRuntimePreviewState } from '../shared/desktop-state';
 import {
@@ -156,7 +166,8 @@ interface WorkflowRuntimeNodeLogDetail {
 interface ModelFormValues {
   providerName: string;
   modelName: string;
-  purpose: ModelProfile['purpose'];
+  purpose?: ModelProfile['purpose'];
+  capabilities?: ModelCapability[];
   apiBaseUrl?: string;
   apiKey?: string;
   temperature?: number;
@@ -881,6 +892,7 @@ export default function App() {
   const [updateCheckResult, setUpdateCheckResult] = useState<DesktopUpdateCheckResult | null>(null);
   const [modelTestNotice, setModelTestNotice] = useState('');
   const [isTestingModel, setIsTestingModel] = useState(false);
+  const [isPullingProviderModels, setIsPullingProviderModels] = useState(false);
   const [localActionNotice, setLocalActionNotice] = useState('');
   const [roleTemplateNotice, setRoleTemplateNotice] = useState('');
   const [isLoadingRoleTemplates, setIsLoadingRoleTemplates] = useState(false);
@@ -1032,7 +1044,7 @@ export default function App() {
       if (catalog.source === 'server') {
         const authorizedTemplates = catalog.templates.map(toDesktopRoleTemplate);
         setRuntimeState((current) =>
-          pruneUnauthorizedRolePackages(current, authorizedTemplates)
+          pruneUnauthorizedRolePackages(current, authorizedTemplates, catalog.deletedTemplateIds ?? [])
         );
       }
       setRoleTemplateNotice(
@@ -1325,12 +1337,18 @@ export default function App() {
   }
 
   const activeRolePackage = useMemo(() => {
-    return (
-      runtimeState.rolePackages.find(
-        (rolePackage) => rolePackage.roleCode === runtimeState.localRuntime.activeRoleCode
-      ) ?? runtimeState.rolePackages[0]
+    const currentRolePackage = runtimeState.rolePackages.find(
+      (rolePackage) => rolePackage.roleCode === runtimeState.localRuntime.activeRoleCode
     );
-  }, [runtimeState.localRuntime.activeRoleCode, runtimeState.rolePackages]);
+    if (currentRolePackage) {
+      return currentRolePackage;
+    }
+
+    const availableRolePackages = runtimeState.rolePackages.filter(
+      (rolePackage) => !isRuntimeRolePackageDeleted(runtimeState, rolePackage.roleCode)
+    );
+    return availableRolePackages[0];
+  }, [runtimeState]);
 
   const selectedModelProfile = useMemo(() => {
     return runtimeState.modelProfiles.find((profile) => profile.id === selectedModelId);
@@ -1350,8 +1368,9 @@ export default function App() {
       providerName: selectedModelProfile.providerName,
       modelName: selectedModelProfile.modelName,
       purpose: selectedModelProfile.purpose,
+      capabilities: readModelProfileCapabilities(selectedModelProfile),
       apiBaseUrl: selectedModelDefaultCredential?.apiBaseUrl ?? selectedModelProfile.apiBaseUrl,
-      apiKey: selectedModelDefaultCredential?.apiKey ?? selectedModelProfile.apiKey,
+      apiKey: selectedModelDefaultCredential?.apiKey ?? selectedModelProfile.apiKey ?? '',
       temperature: selectedModelProfile.temperature,
       maxTokens: selectedModelProfile.maxTokens,
       monthlyBudgetCents: selectedModelProfile.monthlyBudgetCents,
@@ -1380,6 +1399,48 @@ export default function App() {
 
   function findPresetDefaultCredential(preset: ModelProviderPreset): ModelCredential | undefined {
     return findDefaultModelCredential(runtimeState.modelCredentials, preset.id);
+  }
+
+  function findPresetModelCatalog(preset: ModelProviderPreset): ModelProviderCatalog | undefined {
+    const credential = findPresetDefaultCredential(preset);
+    return findModelProviderCatalog(
+      runtimeState.modelCatalogs,
+      preset.id,
+      credential?.apiBaseUrl ?? preset.apiBaseUrl
+    );
+  }
+
+  function findRecommendedPresetForRequiredModelProfile(profile: ModelProfile):
+    | { preset: ModelProviderPreset; model: ModelProviderPresetModel }
+    | undefined {
+    if (!isPendingModelProviderProfile(profile)) {
+      return undefined;
+    }
+
+    const capabilities = readModelProfileCapabilities(profile);
+    const preferredModelName = capabilities.includes('reasoning_text')
+      ? 'deepseek-v4-pro'
+      : capabilities.includes('vision_text')
+        ? 'qwen-vl-max'
+        : 'deepseek-v4-flash';
+    const fallbackPurpose = purposeForModelCapabilities(capabilities, profile.purpose);
+    const preferredPreset = modelProviderPresets.find((preset) =>
+      preset.models.some((model) => model.modelName === preferredModelName)
+    );
+    const preferredModel = preferredPreset?.models.find((model) => model.modelName === preferredModelName);
+
+    if (preferredPreset && preferredModel) {
+      return { preset: preferredPreset, model: preferredModel };
+    }
+
+    for (const preset of modelProviderPresets) {
+      const model = preset.models.find((item) => item.purpose === fallbackPurpose);
+      if (model) {
+        return { preset, model };
+      }
+    }
+
+    return undefined;
   }
 
   const orderedTasks = useMemo(() => {
@@ -1886,7 +1947,10 @@ export default function App() {
       latestTaskByRole.set(task.roleCode, detail);
     }
 
-    const activeRoleCode = activeRolePackage?.roleCode ?? runtimeState.rolePackages[0]?.roleCode ?? '';
+    const activeRoleCode = activeRolePackage?.roleCode ?? '';
+    const activeRoleDeleted = activeRoleCode
+      ? isRuntimeRolePackageDeleted(runtimeState, activeRoleCode)
+      : false;
     const activeRoleTasks = taskDetails
       .filter((task) => task.roleCode === activeRoleCode)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
@@ -1906,6 +1970,7 @@ export default function App() {
       : [];
     const canRunConversationTask =
       conversationTask &&
+      !activeRoleDeleted &&
       conversationTask.state !== 'running' &&
       conversationTask.state !== 'completed' &&
       conversationTask.state !== 'cancelled';
@@ -1922,7 +1987,7 @@ export default function App() {
       <div className="task-history-popover">
         <Flex align="center" justify="space-between" gap={8} className="task-history-header">
           <Typography.Text strong>任务记录</Typography.Text>
-          <Button size="small" onClick={startNewConversationTask}>
+          <Button size="small" disabled={activeRoleDeleted} onClick={startNewConversationTask}>
             新任务
           </Button>
         </Flex>
@@ -1971,12 +2036,17 @@ export default function App() {
               const latestTask = latestTaskByRole.get(rolePackage.roleCode);
               const isActive = rolePackage.roleCode === activeRoleCode;
               const summary = installedRoleSummaries.find((item) => item.roleCode === rolePackage.roleCode);
+              const isDeleted = summary?.state === 'deleted';
 
               return (
                 <button
                   key={rolePackage.roleCode}
                   type="button"
-                  className={isActive ? 'agent-session-item selected' : 'agent-session-item'}
+                  className={[
+                    'agent-session-item',
+                    isActive ? 'selected' : '',
+                    isDeleted ? 'deleted' : ''
+                  ].filter(Boolean).join(' ')}
                   onClick={() => {
                     activateRole(rolePackage.roleCode);
                     setTaskHistoryOpen(false);
@@ -1998,10 +2068,14 @@ export default function App() {
                     <Typography.Text type="secondary" ellipsis className="agent-session-preview">
                       {latestTask
                         ? `${taskStateLabel(latestTask.state)}：${latestTask.title}`
-                        : rolePackage.summary ?? '点击后开始一段新的任务对话'}
+                        : isDeleted
+                          ? '该数字员工已被服务端删除，历史任务仍可查看'
+                          : rolePackage.summary ?? '点击后开始一段新的任务对话'}
                     </Typography.Text>
                     <span className="agent-session-tags">
-                      <Tag color={isActive ? 'green' : 'default'}>{isActive ? '当前' : '可用'}</Tag>
+                      <Tag color={isDeleted ? 'red' : isActive ? 'green' : 'default'}>
+                        {isDeleted ? '已删除' : isActive ? '当前' : '可用'}
+                      </Tag>
                       <Tag>任务 {summary?.taskCount ?? 0}</Tag>
                     </span>
                   </span>
@@ -2047,7 +2121,7 @@ export default function App() {
               <Tag color="geekblue">运行中 {runningTaskCount}</Tag>
               <Tag color="gold">待处理 {waitingTaskCount}</Tag>
               <Tag color="green">已完成 {completedTaskCount}</Tag>
-              <Button size="small" onClick={startNewConversationTask}>
+              <Button size="small" disabled={activeRoleDeleted} onClick={startNewConversationTask}>
                 新任务
               </Button>
               <Button size="small" onClick={() => navigateToSection('models')}>
@@ -2238,6 +2312,10 @@ export default function App() {
             onDrop={handleComposerDrop}
             onFinish={(values) => {
               const input = values.input?.trim() ?? '';
+              if (activeRoleDeleted) {
+                message.warning('该数字员工已被服务端删除，不能继续执行。');
+                return;
+              }
               if (!activeRoleCode || (!input && composerAttachments.length === 0)) {
                 return;
               }
@@ -2306,7 +2384,7 @@ export default function App() {
             >
               <Input.TextArea
                 autoSize={{ minRows: 3, maxRows: 7 }}
-                disabled={!activeRoleCode}
+                disabled={!activeRoleCode || activeRoleDeleted}
                 onKeyDown={(event) => {
                   if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) {
                     return;
@@ -2335,7 +2413,7 @@ export default function App() {
                 type="primary"
                 htmlType="submit"
                 icon={<PlayCircleOutlined />}
-                disabled={!activeRoleCode}
+                disabled={!activeRoleCode || activeRoleDeleted}
               >
                 发送任务
               </Button>
@@ -2583,7 +2661,7 @@ export default function App() {
                               <Typography.Text strong>
                                 {requirement.profile.providerName} / {requirement.profile.modelName}
                               </Typography.Text>
-                              <Tag>{modelPurposeLabel(requirement.profile.purpose)}</Tag>
+                              <Tag>{modelCapabilitySummary(requirement.profile.capabilities, requirement.profile.purpose)}</Tag>
                               <Tag color={requirement.ready ? 'green' : 'orange'}>
                                 {renderModelRequirementStatusLabel(requirement.issue)}
                               </Tag>
@@ -2698,6 +2776,13 @@ export default function App() {
         )
       );
     });
+    const selectedModelCatalog = selectedModelProfile
+      ? findModelProviderCatalog(
+          runtimeState.modelCatalogs,
+          selectedModelProfile.providerId,
+          selectedModelDefaultCredential?.apiBaseUrl ?? selectedModelProfile.apiBaseUrl
+        )
+      : undefined;
 
     return (
       <>
@@ -2750,6 +2835,7 @@ export default function App() {
           <div className="catalog-grid model-provider-grid">
             {filteredPresets.map((preset) => {
               const defaultCredential = findPresetDefaultCredential(preset);
+              const modelCatalog = findPresetModelCatalog(preset);
               return (
               <Card key={preset.id} bordered={false} className="catalog-card model-provider-card">
                 <Space direction="vertical" size={12} className="catalog-card-content">
@@ -2762,6 +2848,7 @@ export default function App() {
                       <Tag color={defaultCredential ? 'green' : 'orange'}>
                         {defaultCredential ? '默认 Key 已配置' : '待配置默认 Key'}
                       </Tag>
+                      {modelCatalog ? <Tag color="purple">已拉取 {modelCatalog.models.length}</Tag> : null}
                     </Space>
                   </Flex>
 
@@ -2796,7 +2883,7 @@ export default function App() {
                         setModelConfigOpen(true);
                       }}
                     >
-                      配置默认 Key
+                      配置模型
                     </Button>
                   </div>
                 </Space>
@@ -2814,7 +2901,7 @@ export default function App() {
 
         <Modal
           open={modelConfigOpen}
-          title="供应商默认 Key"
+          title="供应商模型配置"
           okText="保存"
           cancelText="关闭"
           width={760}
@@ -2835,16 +2922,18 @@ export default function App() {
                   <Input />
                 </Form.Item>
               </div>
-              <Form.Item name="purpose" label="能力类型" rules={[{ required: true }]}>
+              <Form.Item name="capabilities" label="模型能力" rules={[{ required: true, message: '请选择模型能力' }]}>
                 <Select
-                  options={[
-                    { label: '通用执行', value: 'general' },
-                    { label: '深度推理', value: 'reasoning' },
-                    { label: '视觉理解', value: 'vision' },
-                    { label: '知识库向量', value: 'embeddings' },
-                    { label: '文档处理', value: 'document' }
-                  ]}
+                  mode="multiple"
+                  placeholder="按模型真实输入输出选择"
+                  options={modelCapabilityOptions.map((option) => ({
+                    label: `${option.label} - ${option.description}`,
+                    value: option.value
+                  }))}
                 />
+              </Form.Item>
+              <Form.Item name="purpose" hidden>
+                <Input />
               </Form.Item>
 
               <Divider style={{ margin: '8px 0 16px' }} />
@@ -2870,7 +2959,7 @@ export default function App() {
                   options={runtimeState.modelProfiles
                     .filter((profile) => profile.id !== selectedModelProfile.id)
                     .map((profile) => ({
-                      label: `${modelPurposeLabel(profile.purpose)} · ${profile.providerName}/${profile.modelName}`,
+                      label: `${modelCapabilitySummary(profile.capabilities, profile.purpose)} · ${profile.providerName}/${profile.modelName}`,
                       value: profile.id
                     }))}
                 />
@@ -2892,13 +2981,53 @@ export default function App() {
                     loading={isTestingModel}
                     onClick={() => void testSelectedModelConnection()}
                   >
-                    测试连接
+                    测试模型
+                  </Button>
+                  <Button
+                    icon={<CloudDownloadOutlined />}
+                    loading={isPullingProviderModels}
+                    onClick={() => void pullSelectedProviderModels()}
+                  >
+                    拉取模型
                   </Button>
                 </Space>
                 {modelTestNotice ? (
-                  <Typography.Text type={modelTestNotice.startsWith('模型连接正常') ? 'success' : 'danger'}>
+                  <Typography.Text
+                    type={
+                      modelTestNotice.startsWith('模型连接正常') || modelTestNotice.startsWith('已拉取')
+                        ? 'success'
+                        : 'danger'
+                    }
+                  >
                     {modelTestNotice}
                   </Typography.Text>
+                ) : null}
+                {selectedModelCatalog ? (
+                  <div className="provider-model-catalog">
+                    <Flex align="center" justify="space-between" gap={12} wrap="wrap">
+                      <Typography.Text strong>可调用模型</Typography.Text>
+                      <Typography.Text type="secondary">
+                        最近拉取：{formatDateTime(selectedModelCatalog.fetchedAt)}
+                      </Typography.Text>
+                    </Flex>
+                    <div className="provider-model-list">
+                      {selectedModelCatalog.models.map((model) => (
+                        <button
+                          key={model.id}
+                          type="button"
+                          className={
+                            selectedModelProfile.modelName === model.id
+                              ? 'provider-model-option active'
+                              : 'provider-model-option'
+                          }
+                          onClick={() => applyFetchedProviderModel(selectedModelProfile, model)}
+                        >
+                          <span>{model.label ?? model.id}</span>
+                          <small>{modelCapabilitySummary(model.capabilities, 'general')}</small>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 ) : null}
               </Space>
             </Form>
@@ -2929,7 +3058,7 @@ export default function App() {
               {profile.providerName} / {profile.modelName}
             </Typography.Text>
             <Typography.Text type="secondary">
-              {modelPurposeLabel(profile.purpose)} · Profile ID：{profile.id}
+              {modelCapabilitySummary(profile.capabilities, profile.purpose)} · Profile ID：{profile.id}
             </Typography.Text>
           </Space>
           <Tag color={isRuntimeModelProfileConfigured(profile, roleConfigRoleCode) ? 'green' : 'orange'}>
@@ -3013,7 +3142,7 @@ export default function App() {
 
   function renderTools() {
     const webSearchSettings = runtimeState.localRuntime.toolSettings?.webSearch;
-    const webSearchConfigured = Boolean(webSearchSettings?.endpoint);
+    const webSearchUsesCustomEndpoint = Boolean(webSearchSettings?.endpoint);
     const toolCategories = buildToolCategoryTabs(runtimeState.tools);
     const filteredTools = runtimeState.tools.filter((tool) => {
       const search = toolSearchQuery.trim().toLowerCase();
@@ -3091,12 +3220,7 @@ export default function App() {
                   <Space size={6} wrap>
                     <Tag color={enabled ? 'green' : 'default'}>{enabled ? '已启用' : '已停用'}</Tag>
                     <Tag>{toolCategory(tool)}</Tag>
-                    {tool.requiresApproval ? <Tag color="gold">需审批</Tag> : null}
-                    {tool.id === 'web-search' ? (
-                      <Tag color={webSearchConfigured ? 'green' : 'orange'}>
-                        {webSearchConfigured ? '已配置' : '待配置'}
-                      </Tag>
-                    ) : null}
+                    {renderToolRuntimeTags(tool, webSearchUsesCustomEndpoint)}
                   </Space>
 
                   <Space size={6} wrap>
@@ -3162,6 +3286,9 @@ export default function App() {
                 }
               }}
             >
+              <Typography.Paragraph type="secondary">
+                默认使用内置网页搜索；只有需要接入企业自有搜索服务时，才填写下面的地址和密钥。
+              </Typography.Paragraph>
               <Form.Item name="webSearchEndpoint" label="搜索服务地址">
                 <Input placeholder="https://search.example.com/api/search" />
               </Form.Item>
@@ -3604,24 +3731,41 @@ export default function App() {
   }
 
   function openRequiredModelProfileConfig(profile: ModelProfile) {
+    const recommendation = findRecommendedPresetForRequiredModelProfile(profile);
+    const hasProfile = runtimeState.modelProfiles.some((item) => item.id === profile.id);
+    const baseModelProfiles = hasProfile ? runtimeState.modelProfiles : [...runtimeState.modelProfiles, profile];
+    const selectedModelProfile = recommendation
+      ? selectModelProfileForPreset(
+          baseModelProfiles,
+          recommendation.preset,
+          recommendation.model,
+          { preferredProfileId: profile.id }
+        )
+      : undefined;
+    const nextSelectedProfile = selectedModelProfile?.profile ?? profile;
+
     setRuntimeState((current) => {
-      const hasProfile = current.modelProfiles.some((item) => item.id === profile.id);
       const enabledModelProfileIds = mergeUniqueStrings(
         current.localRuntime.enabledModelProfileIds,
-        [profile.id]
+        [nextSelectedProfile.id]
       );
 
       return {
         ...current,
-        modelProfiles: hasProfile ? current.modelProfiles : [...current.modelProfiles, profile],
+        modelProfiles: selectedModelProfile?.modelProfiles ?? baseModelProfiles,
         localRuntime: {
           ...current.localRuntime,
           enabledModelProfileIds
         }
       };
     });
-    setSelectedModelId(profile.id);
+    setSelectedModelId(nextSelectedProfile.id);
     setModelConfigOpen(true);
+    if (recommendation) {
+      setModelTestNotice(
+        `已为 ${profile.id} 推荐 ${recommendation.preset.name} / ${recommendation.model.modelName}，填写 API Key 后保存并测试模型。`
+      );
+    }
   }
 
   function saveModelProfile(values: ModelFormValues) {
@@ -3629,12 +3773,18 @@ export default function App() {
       return;
     }
 
+    const capabilities = normalizeModelCapabilities(
+      values.capabilities,
+      values.purpose ?? selectedModelProfile.purpose
+    );
+    const purpose = purposeForModelCapabilities(capabilities, selectedModelProfile.purpose);
     const updatedProfile: ModelProfile = {
       ...selectedModelProfile,
       providerId: selectedModelProfile.providerId,
       providerName: values.providerName.trim(),
       modelName: values.modelName.trim(),
-      purpose: values.purpose,
+      purpose,
+      capabilities,
       apiBaseUrl: values.apiBaseUrl?.trim() || undefined,
       apiKey: undefined,
       temperature: values.temperature,
@@ -3661,9 +3811,13 @@ export default function App() {
 
   function applyModelProviderPreset(
     preset: ModelProviderPreset,
-    model: ModelProviderPresetModel
+    model: ModelProviderPresetModel,
+    options: { apiBaseUrl?: string; apiKey?: string } = {}
   ) {
-    const selection = selectModelProfileForPreset(runtimeState.modelProfiles, preset, model);
+    const presetForSelection = options.apiBaseUrl
+      ? { ...preset, apiBaseUrl: options.apiBaseUrl }
+      : preset;
+    const selection = selectModelProfileForPreset(runtimeState.modelProfiles, presetForSelection, model);
 
     if (!selection) {
       return;
@@ -3682,8 +3836,9 @@ export default function App() {
       providerName: preset.name,
       modelName: model.modelName,
       purpose: model.purpose,
-      apiBaseUrl: defaultCredential?.apiBaseUrl ?? selection.profile.apiBaseUrl,
-      apiKey: defaultCredential?.apiKey,
+      capabilities: normalizeModelCapabilities(model.capabilities, model.purpose),
+      apiBaseUrl: options.apiBaseUrl ?? defaultCredential?.apiBaseUrl ?? selection.profile.apiBaseUrl,
+      apiKey: options.apiKey ?? defaultCredential?.apiKey ?? '',
       temperature: selection.profile.temperature,
       maxTokens: selection.profile.maxTokens,
       monthlyBudgetCents: selection.profile.monthlyBudgetCents,
@@ -3714,7 +3869,14 @@ export default function App() {
         ...selectedModelProfile,
         providerName: values.providerName.trim(),
         modelName: values.modelName.trim(),
-        purpose: values.purpose,
+        purpose: purposeForModelCapabilities(
+          values.capabilities,
+          values.purpose ?? selectedModelProfile.purpose
+        ),
+        capabilities: normalizeModelCapabilities(
+          values.capabilities,
+          values.purpose ?? selectedModelProfile.purpose
+        ),
         apiBaseUrl,
         apiKey,
         temperature: values.temperature,
@@ -3744,6 +3906,78 @@ export default function App() {
     } finally {
       setIsTestingModel(false);
     }
+  }
+
+  async function pullSelectedProviderModels() {
+    if (!selectedModelProfile || !window.qiuDesktop) {
+      return;
+    }
+
+    setIsPullingProviderModels(true);
+    setModelTestNotice('');
+
+    try {
+      const values = await modelForm.validateFields();
+      const apiBaseUrl = values.apiBaseUrl?.trim();
+      const apiKey = values.apiKey?.trim();
+
+      if (!apiBaseUrl || !apiKey) {
+        setModelTestNotice('请先填写 API Base URL 和 API Key。');
+        return;
+      }
+
+      const catalog = await window.qiuDesktop.listProviderModels({
+        providerId: selectedModelProfile.providerId,
+        providerName: values.providerName.trim(),
+        apiBaseUrl,
+        apiKey,
+        timeoutMs: 20_000
+      });
+
+      setRuntimeState((current) => ({
+        ...current,
+        modelCatalogs: upsertModelProviderCatalog(current.modelCatalogs, catalog)
+      }));
+      setModelTestNotice(
+        catalog.models.length > 0
+          ? `已拉取 ${catalog.models.length} 个可调用模型。请选择需要启用的模型后保存。`
+          : '已拉取模型列表，但供应商没有返回可用模型。'
+      );
+    } catch (error) {
+      setModelTestNotice(`拉取模型失败：${error instanceof Error ? error.message : 'unknown error'}`);
+    } finally {
+      setIsPullingProviderModels(false);
+    }
+  }
+
+  function applyFetchedProviderModel(
+    currentProfile: ModelProfile,
+    model: ModelProviderCatalog['models'][number]
+  ) {
+    const capabilities = normalizeModelCapabilities(model.capabilities, currentProfile.purpose);
+    const purpose = purposeForModelCapabilities(capabilities, currentProfile.purpose);
+    const preset =
+      modelProviderPresets.find((item) => item.id === currentProfile.providerId) ?? {
+        id: currentProfile.providerId,
+        name: currentProfile.providerName,
+        summary: `${currentProfile.providerName} compatible endpoint.`,
+        apiBaseUrl: currentProfile.apiBaseUrl,
+        models: []
+      };
+    const presetModel: ModelProviderPresetModel = {
+      label: model.label ?? model.id,
+      modelName: model.id,
+      purpose,
+      capabilities,
+      temperature: purpose === 'reasoning' ? 0.2 : 0.4,
+      maxTokens: purpose === 'reasoning' ? 8192 : 4096
+    };
+
+    applyModelProviderPreset(preset, presetModel, {
+      apiBaseUrl: modelForm.getFieldValue('apiBaseUrl')?.trim(),
+      apiKey: modelForm.getFieldValue('apiKey')?.trim()
+    });
+    setModelTestNotice(`已选择 ${preset.name} / ${model.id}，保存后可作为独立模型使用。`);
   }
 
   function toggleTool(toolId: string, enabled: boolean) {
@@ -3991,6 +4225,10 @@ export default function App() {
     const rolePackage = runtimeState.rolePackages.find((item) => item.roleCode === roleCode);
     if (!rolePackage) {
       return runtimeState;
+    }
+    if (isRuntimeRolePackageDeleted(runtimeState, roleCode)) {
+      message.warning('该数字员工已被服务端删除，不能继续执行。');
+      return undefined;
     }
 
     const preparedRolePackage: RolePackageManifest = {
@@ -4391,13 +4629,12 @@ function toolCategory(tool: ToolManifest): string {
   if (includesAny(text, ['web', 'search', 'fetch', 'url', '网页', '搜索'])) return '网页';
   if (includesAny(text, ['file', 'filesystem', 'folder', 'local', '文件', '目录'])) return '文件';
   if (includesAny(text, ['http', 'api', 'custom_api', 'mcp', '接口'])) return '接口';
-  if (tool.requiresApproval) return '安全';
   if (tool.entryPoint === 'bridge') return '本地';
   return '通用';
 }
 
 function buildToolCategoryTabs(tools: ToolManifest[]): string[] {
-  const fixedCategories = ['全部', '文档', '网页', '视频', '文件', '接口', '本地', '安全', '通用'];
+  const fixedCategories = ['全部', '文档', '网页', '视频', '文件', '接口', '本地', '通用'];
   const availableCategories = new Set(tools.map(toolCategory));
   return fixedCategories.filter((category) => category === '全部' || availableCategories.has(category));
 }
@@ -4409,8 +4646,35 @@ function toolCategoryIcon(tool: ToolManifest): ReactNode {
   if (category === '视频') return <PlayCircleOutlined />;
   if (category === '文件') return <FolderOpenOutlined />;
   if (category === '接口') return <ApiOutlined />;
-  if (category === '安全') return <SafetyCertificateOutlined />;
   return <ToolOutlined />;
+}
+
+function renderToolRuntimeTags(tool: ToolManifest, webSearchUsesCustomEndpoint: boolean): ReactNode {
+  if (tool.id === 'web-search') {
+    return (
+      <Tag color="green">
+        {webSearchUsesCustomEndpoint ? '自定义搜索' : '内置可用'}
+      </Tag>
+    );
+  }
+
+  if (tool.id === 'office-document') {
+    return <Tag color="blue">本机产物</Tag>;
+  }
+
+  if (tool.id === 'local-filesystem') {
+    return <Tag color="blue">本机文件</Tag>;
+  }
+
+  if (tool.id === 'http-request' || tool.id === 'mcp') {
+    return <Tag color="gold">高风险</Tag>;
+  }
+
+  if (tool.scope === 'desktop') {
+    return <Tag color="blue">本机执行</Tag>;
+  }
+
+  return null;
 }
 
 function modelProviderLogoText(providerName: string): string {
@@ -4500,6 +4764,10 @@ function taskStateColor(state: DesktopTaskState) {
 
 function formatDate(value?: string) {
   return value ? new Date(value).toLocaleString('zh-CN') : '—';
+}
+
+function formatDateTime(value?: string) {
+  return formatDate(value);
 }
 
 function formatShortTime(value?: string) {
@@ -4978,6 +5246,52 @@ function mergeUniqueStrings(left: string[], right: string[]) {
   return [...new Set([...left, ...right])];
 }
 
+function findModelProviderCatalog(
+  catalogs: ModelProviderCatalog[],
+  providerId: string,
+  apiBaseUrl?: string
+): ModelProviderCatalog | undefined {
+  const normalizedApiBaseUrl = normalizeComparableUrl(apiBaseUrl);
+  return catalogs.find(
+    (catalog) =>
+      catalog.providerId === providerId &&
+      (!normalizedApiBaseUrl || normalizeComparableUrl(catalog.apiBaseUrl) === normalizedApiBaseUrl)
+  );
+}
+
+function upsertModelProviderCatalog(
+  catalogs: ModelProviderCatalog[],
+  catalog: ModelProviderCatalog
+): ModelProviderCatalog[] {
+  const normalizedApiBaseUrl = normalizeComparableUrl(catalog.apiBaseUrl);
+  const nextCatalog: ModelProviderCatalog = {
+    ...catalog,
+    models: [...catalog.models].sort((left, right) => left.id.localeCompare(right.id))
+  };
+  const existing = catalogs.find(
+    (item) =>
+      item.providerId === catalog.providerId &&
+      normalizeComparableUrl(item.apiBaseUrl) === normalizedApiBaseUrl
+  );
+
+  return existing
+    ? catalogs.map((item) =>
+        item.providerId === catalog.providerId &&
+        normalizeComparableUrl(item.apiBaseUrl) === normalizedApiBaseUrl
+          ? nextCatalog
+          : item
+      )
+    : [...catalogs, nextCatalog];
+}
+
+function normalizeComparableUrl(value?: string) {
+  return value?.trim().replace(/\/+$/, '').toLowerCase() ?? '';
+}
+
+function isPendingModelProviderProfile(profile: ModelProfile): boolean {
+  return profile.providerId === 'provider-pending' || profile.providerId === 'provider-local';
+}
+
 function mergeModelProfileOptions(
   currentProfiles: ModelProfile[],
   requiredProfiles: ModelProfile[]
@@ -5009,26 +5323,68 @@ function createKnowledgeSourceFromBindingId(bindingId: string): DesktopKnowledge
   };
 }
 
+function isRuntimeRolePackageDeleted(state: DesktopRuntimeState, roleCode: string): boolean {
+  return state.runtimeSnapshot.rolePackages.some(
+    (summary) => summary.roleCode === roleCode && summary.state === 'deleted'
+  );
+}
+
+function isRolePackageTemplateDeleted(
+  rolePackage: RolePackageManifest,
+  deletedTemplateIds: Set<string>
+): boolean {
+  return Boolean(rolePackage.templateId && deletedTemplateIds.has(rolePackage.templateId));
+}
+
 function pruneUnauthorizedRolePackages(
   state: DesktopRuntimeState,
-  authorizedTemplates: DesktopRoleTemplate[]
+  authorizedTemplates: DesktopRoleTemplate[],
+  deletedTemplateIds: string[] = []
 ): DesktopRuntimeState {
   const authorizedRoleCodes = new Set(authorizedTemplates.map((template) => template.roleCode));
+  const deletedTemplateIdSet = new Set(deletedTemplateIds);
   const rolePackages = state.rolePackages.filter((rolePackage) =>
-    authorizedRoleCodes.has(rolePackage.roleCode)
+    authorizedRoleCodes.has(rolePackage.roleCode) ||
+    isRolePackageTemplateDeleted(rolePackage, deletedTemplateIdSet)
   );
+  const deletedRoleCodes = new Set(
+    rolePackages
+      .filter((rolePackage) => isRolePackageTemplateDeleted(rolePackage, deletedTemplateIdSet))
+      .map((rolePackage) => rolePackage.roleCode)
+  );
+  const activeRoleIsAvailable =
+    Boolean(state.localRuntime.activeRoleCode) &&
+    rolePackages.some(
+      (rolePackage) =>
+        rolePackage.roleCode === state.localRuntime.activeRoleCode &&
+        !deletedRoleCodes.has(rolePackage.roleCode)
+    );
 
   if (
     rolePackages.length === state.rolePackages.length &&
-    (!state.localRuntime.activeRoleCode || authorizedRoleCodes.has(state.localRuntime.activeRoleCode))
+    deletedRoleCodes.size === 0 &&
+    (!state.localRuntime.activeRoleCode || activeRoleIsAvailable)
   ) {
     return state;
   }
 
   const activeRoleCode =
-    state.localRuntime.activeRoleCode && authorizedRoleCodes.has(state.localRuntime.activeRoleCode)
+    state.localRuntime.activeRoleCode && activeRoleIsAvailable
       ? state.localRuntime.activeRoleCode
-      : rolePackages[0]?.roleCode;
+      : rolePackages.find((rolePackage) => !deletedRoleCodes.has(rolePackage.roleCode))?.roleCode;
+  const rolePackageSummaries = rebuildRoleSummaries(
+    rolePackages,
+    state.runtimeSnapshot.tasks,
+    state.runtimeSnapshot.rolePackages,
+    activeRoleCode
+  ).map((summary) =>
+    deletedRoleCodes.has(summary.roleCode)
+      ? {
+          ...summary,
+          state: 'deleted' as const
+        }
+      : summary
+  );
 
   return {
     ...state,
@@ -5040,12 +5396,7 @@ function pruneUnauthorizedRolePackages(
     },
     runtimeSnapshot: {
       ...state.runtimeSnapshot,
-      rolePackages: rebuildRoleSummaries(
-        rolePackages,
-        state.runtimeSnapshot.tasks,
-        state.runtimeSnapshot.rolePackages,
-        activeRoleCode
-      )
+      rolePackages: rolePackageSummaries
     }
   };
 }
@@ -5174,14 +5525,20 @@ function rebuildRoleSummaries(
   return rolePackages.map((rolePackage) => {
     const previous = previousByCode.get(rolePackage.roleCode);
     const preservedState: DesktopRolePackageState =
-      previous && (previous.state === 'paused' || previous.state === 'error')
+      previous && previous.state === 'deleted'
+      ? 'deleted'
+      : previous && (previous.state === 'paused' || previous.state === 'error')
       ? previous.state
       : 'installed';
 
     return {
       roleCode: rolePackage.roleCode,
       version: rolePackage.version,
-      state: rolePackage.roleCode === activeRoleCode ? 'running' : preservedState,
+      state: preservedState === 'deleted'
+        ? 'deleted'
+        : rolePackage.roleCode === activeRoleCode
+          ? 'running'
+          : preservedState,
       installedAt: previous?.installedAt ?? installedAt,
       lastRunAt: lastRuns.get(rolePackage.roleCode) ?? previous?.lastRunAt,
       taskCount: taskCounts.get(rolePackage.roleCode) ?? previous?.taskCount ?? 0,
@@ -5236,18 +5593,6 @@ function buildExecutionContextForRole(
 function resolveModelProfileLabel(modelProfiles: ModelProfile[], profileId: string): string {
   const profile = modelProfiles.find((item) => item.id === profileId);
   return profile ? `${profile.providerName} / ${profile.modelName}` : profileId;
-}
-
-function modelPurposeLabel(purpose: ModelProfile['purpose']): string {
-  const labels: Record<ModelProfile['purpose'], string> = {
-    general: '通用执行模型',
-    reasoning: '深度推理模型',
-    vision: '视觉理解模型',
-    embeddings: '知识库向量模型',
-    document: '文档处理模型'
-  };
-
-  return labels[purpose];
 }
 
 function renderModelRequirementStatusLabel(issue: RoleModelRuntimeIssue | undefined): string {

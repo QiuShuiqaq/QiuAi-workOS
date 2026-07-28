@@ -6,6 +6,18 @@ export type KnowledgeBindingSource =
 
 export type ModelPurpose = 'general' | 'reasoning' | 'vision' | 'embeddings' | 'document';
 
+export type ModelCapability =
+  | 'text'
+  | 'reasoning_text'
+  | 'vision_text'
+  | 'video_text'
+  | 'embedding'
+  | 'rerank'
+  | 'text_to_image'
+  | 'image_to_image'
+  | 'audio_to_text'
+  | 'text_to_audio';
+
 export type ToolScope = 'desktop' | 'server' | 'hybrid';
 
 export type ToolEntryPoint = 'native' | 'bridge' | 'api' | 'mcp';
@@ -88,6 +100,7 @@ export interface ModelProfile {
   providerName: string;
   modelName: string;
   purpose: ModelPurpose;
+  capabilities?: ModelCapability[];
   /**
    * @deprecated API keys are moving to local model credentials. This field is
    * kept for older local data and will be used only as a compatibility fallback.
@@ -98,6 +111,21 @@ export interface ModelProfile {
   maxTokens?: number;
   fallbackProfileId?: string;
   monthlyBudgetCents?: number;
+}
+
+export interface ModelCatalogEntry {
+  id: string;
+  label?: string;
+  ownedBy?: string;
+  capabilities: ModelCapability[];
+}
+
+export interface ModelProviderCatalog {
+  providerId: string;
+  providerName: string;
+  apiBaseUrl?: string;
+  fetchedAt: string;
+  models: ModelCatalogEntry[];
 }
 
 export interface ModelCredential {
@@ -204,7 +232,7 @@ export interface LocalRuntimeContract {
 
 export type DesktopPlatform = 'windows' | 'macos' | 'linux';
 
-export type DesktopRolePackageState = 'installed' | 'running' | 'paused' | 'error';
+export type DesktopRolePackageState = 'installed' | 'running' | 'paused' | 'error' | 'deleted';
 
 export type DesktopTaskState =
   | 'queued'

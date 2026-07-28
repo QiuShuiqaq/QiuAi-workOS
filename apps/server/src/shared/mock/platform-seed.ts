@@ -48,7 +48,7 @@ export interface MockRoleTemplateSummary {
   sampleInputs: string[];
   outputFormat: string;
   approvalPolicy: string;
-  status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+  status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED' | 'DELETED';
   allowedPlanCodes: string[];
   visibleWorkspaceIds: string[];
   publishedAt?: string;

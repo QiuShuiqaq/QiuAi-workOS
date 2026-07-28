@@ -639,6 +639,18 @@ async function seedRoleTemplates() {
   const publishedAt = new Date('2026-07-24T00:00:00.000Z');
 
   for (const template of roleTemplates) {
+    const existingTemplate = await prisma.roleTemplate.findUnique({
+      where: {
+        id: template.templateId
+      },
+      select: {
+        status: true
+      }
+    });
+    if (existingTemplate?.status === 'DELETED') {
+      continue;
+    }
+
     await prisma.roleTemplate.upsert({
       where: {
         id: template.templateId

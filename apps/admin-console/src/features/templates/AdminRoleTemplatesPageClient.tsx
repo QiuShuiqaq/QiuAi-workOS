@@ -371,7 +371,7 @@ export function AdminRoleTemplatesPageClient({
           )}
           <Popconfirm
             title="确认删除这个数字员工？"
-            description="删除后 PC 端将无法再安装该模板；已安装过的模板会被系统阻止删除。"
+            description="删除后 PC 端将无法再安装该模板；已安装设备同步后会标记为已删除并停止执行。"
             okText="删除"
             cancelText="取消"
             okButtonProps={{ danger: true }}

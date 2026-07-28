@@ -19,6 +19,18 @@ export type KnowledgeBindingSource =
 
 export type ModelPurpose = 'general' | 'reasoning' | 'vision' | 'embeddings' | 'document';
 
+export type ModelCapability =
+  | 'text'
+  | 'reasoning_text'
+  | 'vision_text'
+  | 'video_text'
+  | 'embedding'
+  | 'rerank'
+  | 'text_to_image'
+  | 'image_to_image'
+  | 'audio_to_text'
+  | 'text_to_audio';
+
 export type ToolScope = 'desktop' | 'server' | 'hybrid';
 
 export type ToolEntryPoint = 'native' | 'bridge' | 'api' | 'mcp';
@@ -55,6 +67,7 @@ export interface ModelProfile {
   providerName: string;
   modelName: string;
   purpose: ModelPurpose;
+  capabilities?: ModelCapability[];
   apiBaseUrl?: string;
   apiKey?: string;
   temperature?: number;
@@ -152,6 +165,18 @@ export function validateModelProfile(input: unknown): ModelProfile {
       'embeddings',
       'document'
     ]),
+    capabilities: requireStringEnumArray(record.capabilities, 'modelProfile.capabilities', [
+      'text',
+      'reasoning_text',
+      'vision_text',
+      'video_text',
+      'embedding',
+      'rerank',
+      'text_to_image',
+      'image_to_image',
+      'audio_to_text',
+      'text_to_audio'
+    ]) as ModelCapability[],
     apiBaseUrl: optionalString(record.apiBaseUrl, 'modelProfile.apiBaseUrl'),
     apiKey: optionalString(record.apiKey, 'modelProfile.apiKey'),
     temperature: optionalNumber(record.temperature, 'modelProfile.temperature'),

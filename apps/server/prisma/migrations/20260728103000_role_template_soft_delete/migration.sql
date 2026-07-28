@@ -1,0 +1,1 @@
+ALTER TYPE "RoleTemplateStatus" ADD VALUE IF NOT EXISTS 'DELETED';

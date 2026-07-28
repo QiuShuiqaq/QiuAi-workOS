@@ -131,11 +131,19 @@ export class RoleTemplateFactoryService {
 
     if (!isDatabasePersistenceEnabled()) {
       return {
-        data: this.store.listRoleTemplates().map((template) => this.toAdminTemplateDetail(template))
+        data: this.store
+          .listRoleTemplates()
+          .filter((template) => template.status !== 'DELETED')
+          .map((template) => this.toAdminTemplateDetail(template))
       };
     }
 
     const templates = await this.prismaService.roleTemplate.findMany({
+      where: {
+        status: {
+          not: 'DELETED'
+        }
+      },
       orderBy: [
         {
           updatedAt: 'desc'
@@ -156,7 +164,7 @@ export class RoleTemplateFactoryService {
 
     if (!isDatabasePersistenceEnabled()) {
       const template = this.store.getRoleTemplate(templateId);
-      if (!template) {
+      if (!template || template.status === 'DELETED') {
         throw this.templateNotFound(templateId);
       }
 
@@ -171,7 +179,7 @@ export class RoleTemplateFactoryService {
       }
     });
 
-    if (!template) {
+    if (!template || template.status === 'DELETED') {
       throw this.templateNotFound(templateId);
     }
 
@@ -262,7 +270,7 @@ export class RoleTemplateFactoryService {
 
     if (!isDatabasePersistenceEnabled()) {
       const current = this.store.getRoleTemplate(id);
-      if (!current) {
+      if (!current || current.status === 'DELETED') {
         throw this.templateNotFound(id);
       }
 
@@ -285,7 +293,7 @@ export class RoleTemplateFactoryService {
         id
       }
     });
-    if (!existing) {
+    if (!existing || existing.status === 'DELETED') {
       throw this.templateNotFound(id);
     }
 
@@ -341,7 +349,7 @@ export class RoleTemplateFactoryService {
         status: 'PUBLISHED',
         publishedAt: new Date().toISOString()
       });
-      if (!template) {
+      if (!template || template.status === 'DELETED') {
         throw this.templateNotFound(id);
       }
       return {
@@ -354,7 +362,7 @@ export class RoleTemplateFactoryService {
         id
       }
     });
-    if (!existing) {
+    if (!existing || existing.status === 'DELETED') {
       throw this.templateNotFound(id);
     }
 
@@ -404,7 +412,7 @@ export class RoleTemplateFactoryService {
       const template = this.store.updateRoleTemplate(id, {
         status: 'ARCHIVED'
       });
-      if (!template) {
+      if (!template || template.status === 'DELETED') {
         throw this.templateNotFound(id);
       }
       return {
@@ -417,7 +425,7 @@ export class RoleTemplateFactoryService {
         id
       }
     });
-    if (!existing) {
+    if (!existing || existing.status === 'DELETED') {
       throw this.templateNotFound(id);
     }
 
@@ -462,13 +470,17 @@ export class RoleTemplateFactoryService {
       if (!template) {
         throw this.templateNotFound(id);
       }
-
-      const roleInstanceCount = this.store.countRoleInstancesByTemplateId(id);
-      if (roleInstanceCount > 0) {
-        throw this.templateInUse(id, roleInstanceCount);
+      if (template.status === 'DELETED') {
+        return {
+          data: {
+            id
+          }
+        };
       }
 
-      this.store.deleteRoleTemplate(id);
+      this.store.updateRoleTemplate(id, {
+        status: 'DELETED'
+      });
       return {
         data: {
           id
@@ -485,19 +497,16 @@ export class RoleTemplateFactoryService {
       if (!template) {
         throw this.templateNotFound(id);
       }
-
-      const roleInstanceCount = await tx.roleInstance.count({
-        where: {
-          templateId: id
-        }
-      });
-      if (roleInstanceCount > 0) {
-        throw this.templateInUse(id, roleInstanceCount);
+      if (template.status === 'DELETED') {
+        return template.id;
       }
 
-      await tx.roleTemplate.delete({
+      const deleted = await tx.roleTemplate.update({
         where: {
           id
+        },
+        data: {
+          status: 'DELETED'
         }
       });
 
@@ -509,7 +518,8 @@ export class RoleTemplateFactoryService {
         summary: `Deleted role template ${template.name}`,
         metadata: {
           version: template.version,
-          status: template.status
+          previousStatus: template.status,
+          status: deleted.status
         }
       });
 
@@ -533,7 +543,7 @@ export class RoleTemplateFactoryService {
 
     if (!isDatabasePersistenceEnabled()) {
       const template = this.store.getRoleTemplate(id);
-      if (!template) {
+      if (!template || template.status === 'DELETED') {
         throw this.templateNotFound(id);
       }
       const testedAt = new Date().toISOString();
@@ -550,7 +560,7 @@ export class RoleTemplateFactoryService {
           id
         }
       });
-      if (!current) {
+      if (!current || current.status === 'DELETED') {
         throw this.templateNotFound(id);
       }
 
@@ -1256,8 +1266,8 @@ export class RoleTemplateFactoryService {
       .sort((left, right) => left.order - right.order);
   }
 
-  private toRoleTemplateStatus(value: string): 'DRAFT' | 'PUBLISHED' | 'ARCHIVED' {
-    if (value === 'DRAFT' || value === 'ARCHIVED') {
+  private toRoleTemplateStatus(value: string): 'DRAFT' | 'PUBLISHED' | 'ARCHIVED' | 'DELETED' {
+    if (value === 'DRAFT' || value === 'ARCHIVED' || value === 'DELETED') {
       return value;
     }
 
@@ -1327,16 +1337,4 @@ export class RoleTemplateFactoryService {
     });
   }
 
-  private templateInUse(templateId: string, roleInstanceCount: number) {
-    return new ConflictException({
-      error: {
-        code: 'TEMPLATE_IN_USE',
-        message: 'Role template is already installed and cannot be deleted.',
-        details: {
-          templateId,
-          roleInstanceCount
-        }
-      }
-    });
-  }
 }

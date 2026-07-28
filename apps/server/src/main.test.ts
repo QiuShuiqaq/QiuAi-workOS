@@ -607,8 +607,36 @@ test('admin role template factory governs publication and workspace visibility',
         cookie
       }
     });
-    assert.equal(deleteInstalledTemplateResponse.statusCode, 409);
-    assert.equal(JSON.parse(deleteInstalledTemplateResponse.body).error.code, 'TEMPLATE_IN_USE');
+    assert.equal(deleteInstalledTemplateResponse.statusCode, 200);
+    assert.equal(JSON.parse(deleteInstalledTemplateResponse.body).data.id, templateId);
+
+    const templatesAfterDeleteResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/admin/role-templates',
+      headers: {
+        cookie
+      }
+    });
+    assert.equal(templatesAfterDeleteResponse.statusCode, 200);
+    assert.equal(
+      JSON.parse(templatesAfterDeleteResponse.body).data.some(
+        (template: { id: string }) => template.id === templateId
+      ),
+      false
+    );
+
+    const desktopDeletedTemplateMarkersResponse = await app.inject({
+      method: 'GET',
+      url: `/api/v1/workspaces/enterprise/desktop/role-templates?installedTemplateIds=${encodeURIComponent(templateId)}`,
+      headers: {
+        'x-qiuai-device-token': deviceToken
+      }
+    });
+    assert.equal(desktopDeletedTemplateMarkersResponse.statusCode, 200);
+    assert.deepEqual(
+      JSON.parse(desktopDeletedTemplateMarkersResponse.body).deletedTemplateIds,
+      [templateId]
+    );
   } finally {
     await app.close();
   }

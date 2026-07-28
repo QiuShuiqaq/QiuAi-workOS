@@ -368,6 +368,16 @@ body,
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
 }
 
+.agent-session-item.deleted {
+  cursor: not-allowed;
+  opacity: 0.68;
+}
+
+.agent-session-item.deleted:hover {
+  background: transparent;
+  box-shadow: none;
+}
+
 .agent-avatar,
 .chat-agent-avatar,
 .message-avatar {
@@ -1100,6 +1110,54 @@ body,
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.provider-model-catalog {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafbfc;
+}
+
+.provider-model-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.provider-model-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 58px;
+  padding: 8px 10px;
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  background: #fff;
+  color: #1f2328;
+  text-align: left;
+  cursor: pointer;
+}
+
+.provider-model-option:hover,
+.provider-model-option.active {
+  border-color: #1677ff;
+  background: #eef4ff;
+}
+
+.provider-model-option span,
+.provider-model-option small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-model-option small {
+  color: #6b7280;
 }
 
 .simple-panel {

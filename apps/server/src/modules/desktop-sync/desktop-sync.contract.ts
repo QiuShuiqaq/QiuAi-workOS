@@ -103,7 +103,7 @@ export interface DesktopRuntimeSnapshot {
 export interface DesktopRolePackageSummary {
   roleCode: string;
   version: string;
-  state: 'installed' | 'running' | 'paused' | 'error';
+  state: 'installed' | 'running' | 'paused' | 'error' | 'deleted';
   installedAt: string;
   lastRunAt?: string;
   taskCount?: number;
@@ -216,7 +216,7 @@ function parseRolePackageSummaries(input: unknown): DesktopRuntimeSnapshot['role
       state: requireEnum(
         record.state,
         `desktopRuntimeSnapshot.rolePackages[${index}].state`,
-        ['installed', 'running', 'paused', 'error']
+        ['installed', 'running', 'paused', 'error', 'deleted']
       ),
       installedAt: requireString(
         record.installedAt,

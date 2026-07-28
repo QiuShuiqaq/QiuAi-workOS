@@ -10,7 +10,7 @@ import {
   unbindDesktopDevice
 } from './runtime-state.js';
 import { saveDesktopRuntimeState } from './runtime-store.js';
-import { invokeOpenAiCompatibleModelChat } from './model-chat.js';
+import { invokeOpenAiCompatibleModelChat, listOpenAiCompatibleModels } from './model-chat.js';
 import { selectKnowledgeSourcePath } from './knowledge-source.js';
 import { writeTaskArtifactFile } from './artifact-store.js';
 import { invokeDesktopTool } from './desktop-tool.js';
@@ -37,6 +37,7 @@ const channels = {
   createWorkspaceBackup: 'qiuai:desktop:create-workspace-backup',
   restoreWorkspaceBackup: 'qiuai:desktop:restore-workspace-backup',
   invokeModelChat: 'qiuai:desktop:invoke-model-chat',
+  listProviderModels: 'qiuai:desktop:list-provider-models',
   selectKnowledgeSourcePath: 'qiuai:desktop:select-knowledge-source-path',
   writeTaskArtifact: 'qiuai:desktop:write-task-artifact',
   invokeDesktopTool: 'qiuai:desktop:invoke-desktop-tool',
@@ -77,6 +78,9 @@ export function registerDesktopIpc() {
   });
   ipcMain.handle(channels.invokeModelChat, async (_, request) => {
     return invokeOpenAiCompatibleModelChat(request);
+  });
+  ipcMain.handle(channels.listProviderModels, async (_, request) => {
+    return listOpenAiCompatibleModels(request);
   });
   ipcMain.handle(channels.selectKnowledgeSourcePath, async (_, source) => {
     return selectKnowledgeSourcePath(source);

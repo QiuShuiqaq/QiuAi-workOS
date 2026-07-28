@@ -271,6 +271,47 @@ assert.match(String(pptxExtractResult.output?.text), /Pilot Goals/);
 assert.match(String(pptxExtractResult.output?.text), /Reduce repetitive work/);
 assert.match(String(pptxExtractResult.output?.text), /Next Actions/);
 
+const originalFetch = globalThis.fetch;
+let builtInSearchResult: Awaited<ReturnType<typeof invokeDesktopTool>> | undefined;
+try {
+  globalThis.fetch = (async () =>
+    new Response(
+      [
+        '<html><body>',
+        '<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fai-research">AI enterprise research</a>',
+        '<a class="result__snippet">Practical enterprise research workflow.</a>',
+        '</body></html>'
+      ].join(''),
+      {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' }
+      }
+    )) as typeof fetch;
+
+  builtInSearchResult = await invokeDesktopTool(tempDir, {
+    workspaceId,
+    toolId: 'web-search',
+    action: 'web.search',
+    input: {
+      query: 'enterprise ai research',
+      maxResults: 3
+    }
+  });
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+assert.ok(builtInSearchResult);
+assert.equal(builtInSearchResult.ok, true);
+assert.equal(builtInSearchResult.output?.provider, 'builtin-duckduckgo-html');
+assert.deepEqual(builtInSearchResult.output?.results, [
+  {
+    title: 'AI enterprise research',
+    url: 'https://example.com/ai-research',
+    snippet: 'Practical enterprise research workflow.'
+  }
+]);
+
 const blockedWebResult = await invokeDesktopTool(tempDir, {
   workspaceId,
   toolId: 'web-search',

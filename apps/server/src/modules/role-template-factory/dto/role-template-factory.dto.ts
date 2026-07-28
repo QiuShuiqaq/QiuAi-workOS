@@ -96,8 +96,8 @@ export class AdminRoleTemplateDetailDto {
   @ApiProperty({ example: '正式对外发送前需要销售负责人确认。' })
   approvalPolicy!: string;
 
-  @ApiProperty({ enum: ['DRAFT', 'PUBLISHED', 'ARCHIVED'] })
-  status!: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+  @ApiProperty({ enum: ['DRAFT', 'PUBLISHED', 'ARCHIVED', 'DELETED'] })
+  status!: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED' | 'DELETED';
 
   @ApiProperty({ type: [String], example: ['ENTERPRISE_BASIC_MONTHLY'] })
   allowedPlanCodes!: string[];

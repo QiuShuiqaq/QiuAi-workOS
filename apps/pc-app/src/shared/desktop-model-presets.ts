@@ -1,4 +1,5 @@
-import type { ModelProfile } from './desktop-contract.js';
+import type { ModelCapability, ModelProfile } from './desktop-contract.js';
+import { defaultCapabilitiesForPurpose, normalizeModelCapabilities } from './desktop-model-capabilities.js';
 
 export interface ModelProviderPreset {
   id: string;
@@ -9,6 +10,7 @@ export interface ModelProviderPreset {
     label: string;
     modelName: string;
     purpose: ModelProfile['purpose'];
+    capabilities?: ModelCapability[];
     temperature?: number;
     maxTokens?: number;
   }>;
@@ -22,11 +24,33 @@ export interface ModelProviderPresetSelection {
   apiKeyPreserved: boolean;
 }
 
+export interface ModelProviderPresetSelectionOptions {
+  preferredProfileId?: string;
+}
+
 export function selectModelProfileForPreset(
   modelProfiles: ModelProfile[],
   preset: ModelProviderPreset,
-  model: ModelProviderPresetModel
+  model: ModelProviderPresetModel,
+  options: ModelProviderPresetSelectionOptions = {}
 ): ModelProviderPresetSelection | undefined {
+  const preferredReusableProfile = findPreferredReusableProfile(
+    modelProfiles,
+    model,
+    options.preferredProfileId
+  );
+  if (preferredReusableProfile) {
+    const updatedProfile = applyPresetToProfile(preferredReusableProfile, preset, model);
+
+    return {
+      modelProfiles: modelProfiles.map((profile) =>
+        profile.id === preferredReusableProfile.id ? updatedProfile : profile
+      ),
+      profile: updatedProfile,
+      apiKeyPreserved: false
+    };
+  }
+
   const exactProfile = modelProfiles.find((profile) =>
     matchesPresetModel(profile, preset, model)
   );
@@ -71,6 +95,27 @@ export function selectModelProfileForPreset(
   };
 }
 
+function findPreferredReusableProfile(
+  modelProfiles: ModelProfile[],
+  model: ModelProviderPresetModel,
+  preferredProfileId?: string
+): ModelProfile | undefined {
+  if (!preferredProfileId?.trim()) {
+    return undefined;
+  }
+
+  const preferredProfile = modelProfiles.find((profile) => profile.id === preferredProfileId);
+  if (
+    preferredProfile?.purpose === model.purpose &&
+    !hasConfiguredModelApi(preferredProfile) &&
+    isPendingProviderProfile(preferredProfile)
+  ) {
+    return preferredProfile;
+  }
+
+  return undefined;
+}
+
 export function matchesPresetModel(
   profile: ModelProfile,
   preset: ModelProviderPreset,
@@ -98,6 +143,7 @@ function applyPresetToProfile(
     providerName: preset.name,
     modelName: model.modelName,
     purpose: model.purpose,
+    capabilities: normalizeModelCapabilities(model.capabilities, model.purpose),
     apiBaseUrl: preset.apiBaseUrl,
     apiKey: undefined,
     temperature: model.temperature,
@@ -116,6 +162,10 @@ function createModelProfileFromPreset(
     providerName: preset.name,
     modelName: model.modelName,
     purpose: model.purpose,
+    capabilities: normalizeModelCapabilities(
+      model.capabilities ?? defaultCapabilitiesForPurpose(model.purpose),
+      model.purpose
+    ),
     apiBaseUrl: preset.apiBaseUrl,
     temperature: model.temperature,
     maxTokens: model.maxTokens,

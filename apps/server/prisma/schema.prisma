@@ -118,6 +118,7 @@ enum RoleTemplateStatus {
   DRAFT
   PUBLISHED
   ARCHIVED
+  DELETED
 }
 
 enum TaskStatus {

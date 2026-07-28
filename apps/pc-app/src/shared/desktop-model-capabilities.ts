@@ -1,0 +1,149 @@
+import type { ModelCapability, ModelProfile, ModelPurpose } from './desktop-contract.js';
+
+export const modelCapabilityOptions: Array<{
+  value: ModelCapability;
+  label: string;
+  description: string;
+}> = [
+  { value: 'text', label: '文本', description: '文本输入，文本输出' },
+  { value: 'reasoning_text', label: '深度推理文本', description: '复杂分析、规划、推理任务' },
+  { value: 'vision_text', label: '图片理解', description: '图片输入，文本输出' },
+  { value: 'video_text', label: '视频理解', description: '视频或视频帧输入，文本输出' },
+  { value: 'embedding', label: '文本向量', description: '知识库检索、语义匹配' },
+  { value: 'rerank', label: '重排模型', description: '检索结果重排' },
+  { value: 'text_to_image', label: '文生图', description: '文本输入，图片输出' },
+  { value: 'image_to_image', label: '图生图', description: '图片输入，图片输出' },
+  { value: 'audio_to_text', label: '语音转文字', description: '音频输入，文本输出' },
+  { value: 'text_to_audio', label: '文本转语音', description: '文本输入，音频输出' }
+];
+
+export function defaultCapabilitiesForPurpose(purpose: ModelPurpose): ModelCapability[] {
+  if (purpose === 'reasoning') {
+    return ['reasoning_text', 'text'];
+  }
+
+  if (purpose === 'vision') {
+    return ['vision_text', 'text'];
+  }
+
+  if (purpose === 'embeddings') {
+    return ['embedding'];
+  }
+
+  return ['text'];
+}
+
+export function normalizeModelCapabilities(
+  capabilities: ModelCapability[] | undefined,
+  purpose: ModelPurpose
+): ModelCapability[] {
+  const allowed = new Set(modelCapabilityOptions.map((option) => option.value));
+  const normalized = [...new Set((capabilities ?? []).filter((item) => allowed.has(item)))];
+  return normalized.length > 0 ? normalized : defaultCapabilitiesForPurpose(purpose);
+}
+
+export function readModelProfileCapabilities(profile: ModelProfile): ModelCapability[] {
+  return normalizeModelCapabilities(profile.capabilities, profile.purpose);
+}
+
+export function primaryCapabilityForPurpose(purpose: ModelPurpose): ModelCapability {
+  return defaultCapabilitiesForPurpose(purpose)[0] ?? 'text';
+}
+
+export function purposeForModelCapabilities(
+  capabilities: ModelCapability[] | undefined,
+  fallbackPurpose: ModelPurpose = 'general'
+): ModelPurpose {
+  const normalized = normalizeModelCapabilities(capabilities, fallbackPurpose);
+
+  if (normalized.includes('embedding')) {
+    return 'embeddings';
+  }
+
+  if (
+    normalized.includes('vision_text') ||
+    normalized.includes('video_text') ||
+    normalized.includes('text_to_image') ||
+    normalized.includes('image_to_image')
+  ) {
+    return 'vision';
+  }
+
+  if (normalized.includes('reasoning_text')) {
+    return 'reasoning';
+  }
+
+  return 'general';
+}
+
+export function modelCapabilityLabel(capability: ModelCapability): string {
+  return modelCapabilityOptions.find((option) => option.value === capability)?.label ?? capability;
+}
+
+export function modelCapabilitySummary(capabilities: ModelCapability[] | undefined, purpose: ModelPurpose): string {
+  return normalizeModelCapabilities(capabilities, purpose).map(modelCapabilityLabel).join(' / ');
+}
+
+export function inferModelCapabilitiesFromName(
+  modelName: string,
+  fallbackPurpose: ModelPurpose = 'general'
+): ModelCapability[] {
+  const normalizedName = modelName.trim().toLowerCase();
+
+  if (!normalizedName) {
+    return defaultCapabilitiesForPurpose(fallbackPurpose);
+  }
+
+  if (matchesAny(normalizedName, ['embedding', 'embeddings', 'bge-m3', 'text-embedding'])) {
+    return ['embedding'];
+  }
+
+  if (matchesAny(normalizedName, ['rerank', 'reranker'])) {
+    return ['rerank'];
+  }
+
+  if (matchesAny(normalizedName, ['whisper', 'asr', 'speech-to-text', 'audio-transcription'])) {
+    return ['audio_to_text'];
+  }
+
+  if (matchesAny(normalizedName, ['tts', 'text-to-speech', 'speech-synthesis'])) {
+    return ['text_to_audio'];
+  }
+
+  if (matchesAny(normalizedName, ['image-to-image', 'img2img', 'inpaint', 'edit-image'])) {
+    return ['image_to_image'];
+  }
+
+  if (matchesAny(normalizedName, ['dall-e', 'imagen', 'flux', 'stable-diffusion', 'wanx', 'text-to-image', 'cogview'])) {
+    return ['text_to_image'];
+  }
+
+  if (matchesAny(normalizedName, ['video', 'videounderstanding'])) {
+    return ['video_text', 'vision_text', 'text'];
+  }
+
+  if (matchesAny(normalizedName, ['vision', 'vl', 'gpt-4o', 'gemini', 'qwen-vl', 'glm-4v', 'minimax-vl'])) {
+    return ['vision_text', 'text'];
+  }
+
+  if (
+    matchesAny(normalizedName, [
+      'reason',
+      'reasoner',
+      'thinking',
+      'deepseek-r1',
+      'deepseek-v4-pro',
+      'o1',
+      'o3',
+      'r1'
+    ])
+  ) {
+    return ['reasoning_text', 'text'];
+  }
+
+  return defaultCapabilitiesForPurpose(fallbackPurpose);
+}
+
+function matchesAny(value: string, tokens: string[]): boolean {
+  return tokens.some((token) => value.includes(token));
+}

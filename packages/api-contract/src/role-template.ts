@@ -2,7 +2,8 @@ import type { PaginationMeta } from './pagination';
 import type { RoleSkillSummary, RoleTemplateWorkflowStep } from './role';
 import type { RoleWorkflowGraph } from './workflow-graph';
 
-export type AdminRoleTemplateStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+export type AdminRoleTemplateStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED' | 'DELETED';
+export type AdminRoleTemplateEditableStatus = Exclude<AdminRoleTemplateStatus, 'DELETED'>;
 
 export interface AdminRoleTemplateDetail {
   id: string;
@@ -57,7 +58,7 @@ export interface CreateAdminRoleTemplateRequest {
   sampleInputs?: string[];
   outputFormat?: string;
   approvalPolicy: string;
-  status?: AdminRoleTemplateStatus;
+  status?: AdminRoleTemplateEditableStatus;
   allowedPlanCodes?: string[];
   visibleWorkspaceIds?: string[];
 }
@@ -78,7 +79,7 @@ export interface UpdateAdminRoleTemplateRequest {
   sampleInputs?: string[];
   outputFormat?: string;
   approvalPolicy?: string;
-  status?: AdminRoleTemplateStatus;
+  status?: AdminRoleTemplateEditableStatus;
   allowedPlanCodes?: string[];
   visibleWorkspaceIds?: string[];
 }
@@ -140,7 +141,7 @@ export interface UpdateAdminRoleTemplateResponse {
 }
 
 export interface ListAdminRoleTemplatesQuery {
-  status?: AdminRoleTemplateStatus;
+  status?: AdminRoleTemplateEditableStatus;
   query?: string;
   page?: number;
   pageSize?: number;

@@ -5,6 +5,7 @@ import type {
   RolePackageManifest
 } from './desktop-contract.js';
 import { isModelProfileConfiguredByCredentials } from './desktop-model-credentials.js';
+import { inferModelCapabilitiesFromName } from './desktop-model-capabilities.js';
 import { parseWorkflowGraph } from './desktop-workflow-graph.js';
 
 export interface RoleModelRequirementStatus {
@@ -149,13 +150,15 @@ export function findFirstUnreadyRequiredModelProfileId(
 export function createPlaceholderModelProfile(profileId: string): ModelProfile {
   const normalizedProfileId = profileId.trim() || 'qiu-general-default';
   const provider = inferModelProviderFromProfileId(normalizedProfileId);
+  const purpose = inferModelPurposeFromProfileId(normalizedProfileId);
 
   return {
     id: normalizedProfileId,
     providerId: provider.providerId,
     providerName: provider.providerName,
     modelName: provider.modelName,
-    purpose: inferModelPurposeFromProfileId(normalizedProfileId),
+    purpose,
+    capabilities: inferModelCapabilitiesFromName(provider.modelName, purpose),
     apiBaseUrl: provider.apiBaseUrl,
     temperature: provider.temperature,
     maxTokens: provider.maxTokens,

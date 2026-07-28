@@ -47,6 +47,7 @@ interface SyncDesktopRuntimeResponse {
 
 interface ListAuthorizedRoleTemplatesResponse {
   data: DesktopAuthorizedRoleTemplateSummary[];
+  deletedTemplateIds?: string[];
 }
 
 interface CheckDesktopUpdateInput {
@@ -116,10 +117,16 @@ export async function redeemDesktopBindingCode(
 export async function listAuthorizedRoleTemplates(
   baseUrl: string,
   workspaceId: string,
-  deviceToken: string
+  deviceToken: string,
+  installedTemplateIds: string[] = []
 ): Promise<ListAuthorizedRoleTemplatesResponse> {
+  const searchParams = new URLSearchParams();
+  if (installedTemplateIds.length > 0) {
+    searchParams.set('installedTemplateIds', installedTemplateIds.join(','));
+  }
+  const queryString = searchParams.toString();
   const response = await fetch(
-    `${normalizeBaseUrl(baseUrl)}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/desktop/role-templates`,
+    `${normalizeBaseUrl(baseUrl)}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/desktop/role-templates${queryString ? `?${queryString}` : ''}`,
     {
       headers: {
         accept: 'application/json',
@@ -139,9 +146,15 @@ export async function listAuthorizedRoleTemplates(
 }
 
 export async function listPublicFreeRoleTemplates(
-  baseUrl: string
+  baseUrl: string,
+  installedTemplateIds: string[] = []
 ): Promise<ListAuthorizedRoleTemplatesResponse> {
-  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/api/v1/desktop/role-templates/free`, {
+  const searchParams = new URLSearchParams();
+  if (installedTemplateIds.length > 0) {
+    searchParams.set('installedTemplateIds', installedTemplateIds.join(','));
+  }
+  const queryString = searchParams.toString();
+  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/api/v1/desktop/role-templates/free${queryString ? `?${queryString}` : ''}`, {
     headers: {
       accept: 'application/json'
     }

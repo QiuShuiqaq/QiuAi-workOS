@@ -33,6 +33,9 @@ const maxDirectoryEntries = 100;
 const maxWebTextChars = 24_000;
 const maxExtractedDocumentChars = 30_000;
 const webFetchTimeoutMs = 15_000;
+const builtInWebSearchBingEndpoint = 'https://cn.bing.com/search';
+const builtInWebSearchHtmlEndpoint = 'https://html.duckduckgo.com/html/';
+const builtInWebSearchInstantEndpoint = 'https://api.duckduckgo.com/';
 const execFileAsync = promisify(execFile);
 
 export async function invokeDesktopTool(
@@ -648,13 +651,7 @@ async function searchWeb(
     settings?.allowPrivateNetwork ?? process.env.QIUAI_DESKTOP_ALLOW_PRIVATE_WEB_TOOL === 'true';
 
   if (!endpoint) {
-    return {
-      toolId: request.toolId,
-      action: request.action,
-      ok: false,
-      message:
-        'Web search endpoint is not configured. Set it in the Tool Center, or provide QIUAI_WEB_SEARCH_ENDPOINT for development.'
-    };
+    return searchBuiltInWeb(request, query, maxResults);
   }
 
   const endpointUrl = normalizePublicHttpUrl(endpoint, allowPrivateNetwork);
@@ -689,6 +686,129 @@ async function searchWeb(
       results: normalizeSearchResults(bodyText).slice(0, maxResults)
     }
   };
+}
+
+async function searchBuiltInWeb(
+  request: DesktopToolInvocationRequest,
+  query: string,
+  maxResults: number
+): Promise<DesktopToolInvocationResult> {
+  const errors: string[] = [];
+
+  const bingSearchUrl = new URL(builtInWebSearchBingEndpoint);
+  bingSearchUrl.searchParams.set('q', query);
+  bingSearchUrl.searchParams.set('count', String(maxResults));
+  bingSearchUrl.searchParams.set('mkt', 'zh-CN');
+
+  try {
+    const response = await fetch(bingSearchUrl.toString(), {
+      headers: {
+        accept: 'text/html,application/xhtml+xml',
+        'user-agent': 'QiuAI-WorkOS-Desktop/1.0'
+      },
+      signal: AbortSignal.timeout(webFetchTimeoutMs)
+    });
+    const bodyText = await response.text();
+
+    if (response.ok) {
+      const results = normalizeBingHtmlResults(bodyText).slice(0, maxResults);
+      if (results.length > 0) {
+        return {
+          toolId: request.toolId,
+          action: request.action,
+          ok: true,
+          output: {
+            query,
+            provider: 'builtin-bing',
+            results
+          }
+        };
+      }
+    } else {
+      errors.push(`Bing search returned HTTP ${response.status}`);
+    }
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : 'Bing search failed');
+  }
+
+  const htmlSearchUrl = new URL(builtInWebSearchHtmlEndpoint);
+  htmlSearchUrl.searchParams.set('q', query);
+  htmlSearchUrl.searchParams.set('kl', 'cn-zh');
+
+  try {
+    const response = await fetch(htmlSearchUrl.toString(), {
+      headers: {
+        accept: 'text/html,application/xhtml+xml',
+        'user-agent': 'QiuAI-WorkOS-Desktop/1.0'
+      },
+      signal: AbortSignal.timeout(webFetchTimeoutMs)
+    });
+    const bodyText = await response.text();
+
+    if (response.ok) {
+      const results = normalizeDuckDuckGoHtmlResults(bodyText).slice(0, maxResults);
+      if (results.length > 0) {
+        return {
+          toolId: request.toolId,
+          action: request.action,
+          ok: true,
+          output: {
+            query,
+            provider: 'builtin-duckduckgo-html',
+            results
+          }
+        };
+      }
+    } else {
+      errors.push(`HTML search returned HTTP ${response.status}`);
+    }
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : 'HTML search failed');
+  }
+
+  const instantSearchUrl = new URL(builtInWebSearchInstantEndpoint);
+  instantSearchUrl.searchParams.set('q', query);
+  instantSearchUrl.searchParams.set('format', 'json');
+  instantSearchUrl.searchParams.set('no_html', '1');
+  instantSearchUrl.searchParams.set('skip_disambig', '1');
+
+  try {
+    const response = await fetch(instantSearchUrl.toString(), {
+      headers: {
+        accept: 'application/json',
+        'user-agent': 'QiuAI-WorkOS-Desktop/1.0'
+      },
+      signal: AbortSignal.timeout(webFetchTimeoutMs)
+    });
+    const bodyText = await response.text();
+
+    if (response.ok) {
+      const results = normalizeDuckDuckGoInstantResults(bodyText).slice(0, maxResults);
+      if (results.length > 0) {
+        return {
+          toolId: request.toolId,
+          action: request.action,
+          ok: true,
+          output: {
+            query,
+            provider: 'builtin-duckduckgo-instant',
+            results
+          }
+        };
+      }
+
+      errors.push('Built-in search returned no results');
+    } else {
+      errors.push(`Instant search returned HTTP ${response.status}`);
+    }
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : 'Instant search failed');
+  }
+
+  return fail(
+    request,
+    `Built-in web search failed. Check network access, or configure a custom search service in Tool Center. ${errors.join('; ')}`
+  );
 }
 
 function writeOfficeMarkdownDocument(
@@ -1718,7 +1838,19 @@ function decodeHtmlEntities(value: string): string {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+    .replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, (_, code: string) => {
+      const value = Number.parseInt(code, 10);
+      return isValidCodePoint(value) ? String.fromCodePoint(value) : _;
+    })
+    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => {
+      const value = Number.parseInt(code, 16);
+      return isValidCodePoint(value) ? String.fromCodePoint(value) : _;
+    });
+}
+
+function isValidCodePoint(value: number): boolean {
+  return Number.isInteger(value) && value >= 0 && value <= 0x10ffff;
 }
 
 function truncate(value: string, maxLength: number): string {
@@ -1756,6 +1888,145 @@ function normalizeSearchResults(bodyText: string): Array<Record<string, unknown>
   }
 
   return [];
+}
+
+function normalizeBingHtmlResults(bodyText: string): Array<Record<string, unknown>> {
+  const results: Array<Record<string, unknown>> = [];
+  const itemPattern = /<li\b[^>]*class=["'][^"']*\bb_algo\b[^"']*["'][^>]*>([\s\S]*?)<\/li>/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = itemPattern.exec(bodyText)) && results.length < 20) {
+    const itemHtml = match[1] ?? '';
+    const linkMatch = itemHtml.match(/<h2[^>]*>\s*<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>\s*<\/h2>/i);
+    if (!linkMatch) {
+      continue;
+    }
+
+    const title = extractReadableTextFromHtml(linkMatch[2] ?? '');
+    const url = normalizeSearchUrl(linkMatch[1] ?? '');
+    const snippetMatch = itemHtml.match(/<p[^>]*>([\s\S]*?)<\/p>/i);
+    const snippet = snippetMatch?.[1]
+      ? truncate(extractReadableTextFromHtml(snippetMatch[1]), 500)
+      : undefined;
+
+    if (title || url || snippet) {
+      results.push({ title, url, snippet });
+    }
+  }
+
+  return results;
+}
+
+function normalizeDuckDuckGoHtmlResults(bodyText: string): Array<Record<string, unknown>> {
+  const results: Array<Record<string, unknown>> = [];
+  const resultPattern =
+    /<a\b[^>]*class=["'][^"']*\bresult__a\b[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = resultPattern.exec(bodyText)) && results.length < 20) {
+    const title = extractReadableTextFromHtml(match[2] ?? '');
+    const url = normalizeDuckDuckGoResultUrl(match[1] ?? '');
+    if (!title && !url) {
+      continue;
+    }
+
+    results.push({
+      title,
+      url,
+      snippet: readNearestDuckDuckGoSnippet(bodyText, match.index)
+    });
+  }
+
+  return results;
+}
+
+function normalizeDuckDuckGoInstantResults(bodyText: string): Array<Record<string, unknown>> {
+  const parsed = parseJson(bodyText);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return [];
+  }
+
+  const record = parsed as Record<string, unknown>;
+  const results: Array<Record<string, unknown>> = [];
+  const abstractText = readSearchString(record.AbstractText);
+  const abstractUrl = readSearchString(record.AbstractURL);
+  const heading = readSearchString(record.Heading);
+
+  if (abstractText || abstractUrl) {
+    results.push({
+      title: heading ?? abstractUrl ?? 'DuckDuckGo result',
+      url: abstractUrl,
+      snippet: abstractText
+    });
+  }
+
+  collectDuckDuckGoRelatedTopics(record.RelatedTopics, results);
+  return results;
+}
+
+function collectDuckDuckGoRelatedTopics(value: unknown, results: Array<Record<string, unknown>>): void {
+  if (!Array.isArray(value)) {
+    return;
+  }
+
+  for (const item of value) {
+    if (results.length >= 20 || typeof item !== 'object' || item === null || Array.isArray(item)) {
+      continue;
+    }
+
+    const record = item as Record<string, unknown>;
+    if (Array.isArray(record.Topics)) {
+      collectDuckDuckGoRelatedTopics(record.Topics, results);
+      continue;
+    }
+
+    const text = readSearchString(record.Text);
+    const url = readSearchString(record.FirstURL);
+    if (text || url) {
+      results.push({
+        title: text ? truncate(text, 120) : url,
+        url,
+        snippet: text
+      });
+    }
+  }
+}
+
+function readNearestDuckDuckGoSnippet(bodyText: string, startIndex: number): string | undefined {
+  const windowText = bodyText.slice(startIndex, startIndex + 2500);
+  const snippetMatch = windowText.match(
+    /<a\b[^>]*class=["'][^"']*\bresult__snippet\b[^"']*["'][^>]*>([\s\S]*?)<\/a>/i
+  ) ?? windowText.match(/<div\b[^>]*class=["'][^"']*\bresult__snippet\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
+
+  return snippetMatch?.[1]
+    ? truncate(extractReadableTextFromHtml(snippetMatch[1]), 500)
+    : undefined;
+}
+
+function normalizeSearchUrl(value: string): string | undefined {
+  const decodedValue = decodeHtmlEntities(value).trim();
+  return decodedValue ? decodedValue : undefined;
+}
+
+function normalizeDuckDuckGoResultUrl(value: string): string | undefined {
+  const decodedValue = decodeHtmlEntities(value).trim();
+  if (!decodedValue) {
+    return undefined;
+  }
+
+  const absoluteValue = decodedValue.startsWith('//')
+    ? `https:${decodedValue}`
+    : decodedValue.startsWith('/')
+      ? `https://duckduckgo.com${decodedValue}`
+      : decodedValue;
+
+  try {
+    const url = new URL(absoluteValue);
+    const redirectedUrl = url.searchParams.get('uddg');
+    return redirectedUrl ? decodeURIComponent(redirectedUrl) : url.toString();
+  } catch {
+    return absoluteValue;
+  }
 }
 
 function normalizeSearchResult(value: unknown): Record<string, unknown> | undefined {

@@ -94,10 +94,20 @@ export class DesktopSyncService {
     private readonly roleService: RoleService
   ) {}
 
-  async listAuthorizedRoleTemplates(workspaceId: string, deviceToken?: string) {
+  async listAuthorizedRoleTemplates(
+    workspaceId: string,
+    deviceToken?: string,
+    installedTemplateIds: string[] = []
+  ) {
+    const deletedTemplateIds = await this.roleService.listDeletedTemplateIds(installedTemplateIds);
+
     if (isDatabasePersistenceEnabled()) {
       await this.requireDatabaseDeviceTokenForWorkspace(workspaceId, deviceToken);
-      return this.roleService.listPublishedTemplatesForDesktop(workspaceId);
+      const response = await this.roleService.listPublishedTemplatesForDesktop(workspaceId);
+      return {
+        ...response,
+        deletedTemplateIds
+      };
     }
 
     if (!this.store.workspaceExists(workspaceId)) {
@@ -112,11 +122,22 @@ export class DesktopSyncService {
       });
     }
     this.requireMockDeviceTokenForWorkspace(workspaceId, deviceToken, new Date());
-    return this.roleService.listPublishedTemplatesForDesktop(workspaceId);
+    const response = await this.roleService.listPublishedTemplatesForDesktop(workspaceId);
+    return {
+      ...response,
+      deletedTemplateIds
+    };
   }
 
-  async listPublicFreeRoleTemplates() {
-    return this.roleService.listPublicFreeTemplatesForDesktop();
+  async listPublicFreeRoleTemplates(installedTemplateIds: string[] = []) {
+    const [response, deletedTemplateIds] = await Promise.all([
+      this.roleService.listPublicFreeTemplatesForDesktop(),
+      this.roleService.listDeletedTemplateIds(installedTemplateIds)
+    ]);
+    return {
+      ...response,
+      deletedTemplateIds
+    };
   }
 
   async checkDesktopUpdate(

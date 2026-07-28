@@ -1,7 +1,10 @@
 import type {
+  DesktopModelListRequest,
+  DesktopModelListResponse,
   DesktopModelChatRequest,
   DesktopModelChatResponse
 } from '../shared/desktop-api.js';
+import { inferModelCapabilitiesFromName } from '../shared/desktop-model-capabilities.js';
 
 interface OpenAiCompatibleChatResponse {
   choices?: Array<{
@@ -13,6 +16,16 @@ interface OpenAiCompatibleChatResponse {
     prompt_tokens?: unknown;
     completion_tokens?: unknown;
   };
+  error?: {
+    message?: unknown;
+  };
+}
+
+interface OpenAiCompatibleModelListResponse {
+  data?: Array<{
+    id?: unknown;
+    owned_by?: unknown;
+  }>;
   error?: {
     message?: unknown;
   };
@@ -80,6 +93,65 @@ export async function invokeOpenAiCompatibleModelChat(
   };
 }
 
+export async function listOpenAiCompatibleModels(
+  request: DesktopModelListRequest
+): Promise<DesktopModelListResponse> {
+  const apiBaseUrl = normalizeApiBaseUrl(request.apiBaseUrl);
+  const apiKey = request.apiKey?.trim();
+
+  if (!apiBaseUrl) {
+    throw new Error('Model API Base URL is missing.');
+  }
+
+  if (!apiKey) {
+    throw new Error('Model API Key is missing.');
+  }
+
+  const response = await fetch(`${apiBaseUrl}/models`, {
+    method: 'GET',
+    headers: {
+      authorization: `Bearer ${apiKey}`
+    },
+    signal: AbortSignal.timeout(request.timeoutMs ?? 20_000)
+  });
+
+  const bodyText = await response.text();
+  const body = parseModelListJsonBody(bodyText);
+
+  if (!response.ok) {
+    const errorMessage = readProviderErrorMessage(body) ?? bodyText.slice(0, 500);
+    throw new Error(`Model list API returned HTTP ${response.status}: ${errorMessage}`);
+  }
+
+  if (!Array.isArray(body?.data)) {
+    throw new Error('Model list API response did not include a data array.');
+  }
+
+  const models = body.data.flatMap((item) => {
+    const id = typeof item.id === 'string' ? item.id.trim() : '';
+    if (!id) {
+      return [];
+    }
+
+    return [
+      {
+        id,
+        label: id,
+        ownedBy: typeof item.owned_by === 'string' ? item.owned_by : undefined,
+        capabilities: inferModelCapabilitiesFromName(id)
+      }
+    ];
+  });
+
+  return {
+    providerId: request.providerId.trim(),
+    providerName: request.providerName.trim(),
+    apiBaseUrl,
+    fetchedAt: new Date().toISOString(),
+    models
+  };
+}
+
 function normalizeApiBaseUrl(value: string | undefined): string | undefined {
   const normalized = value?.trim().replace(/\/+$/, '');
   return normalized || undefined;
@@ -92,6 +164,18 @@ function parseJsonBody(bodyText: string): OpenAiCompatibleChatResponse | undefin
 
   try {
     return JSON.parse(bodyText) as OpenAiCompatibleChatResponse;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseModelListJsonBody(bodyText: string): OpenAiCompatibleModelListResponse | undefined {
+  if (!bodyText.trim()) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(bodyText) as OpenAiCompatibleModelListResponse;
   } catch {
     return undefined;
   }

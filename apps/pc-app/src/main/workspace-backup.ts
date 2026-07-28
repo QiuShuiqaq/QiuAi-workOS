@@ -23,7 +23,9 @@ import type {
   DesktopTaskSummary,
   DesktopToolSummary,
   LocalRuntimeContract,
+  ModelCapability,
   ModelCredential,
+  ModelProviderCatalog,
   ModelProfile,
   RoleModelCredentialBinding,
   DesktopRoleSkillSummary,
@@ -348,6 +350,9 @@ function validateDesktopRuntimeState(input: unknown): DesktopRuntimeState {
     modelCredentials: Array.isArray(record.modelCredentials)
       ? record.modelCredentials.map(validateModelCredential)
       : [],
+    modelCatalogs: Array.isArray(record.modelCatalogs)
+      ? record.modelCatalogs.map(validateModelProviderCatalog)
+      : [],
     roleModelCredentialBindings: Array.isArray(record.roleModelCredentialBindings)
       ? record.roleModelCredentialBindings.map(validateRoleModelCredentialBinding)
       : [],
@@ -449,7 +454,8 @@ function validateDesktopRolePackageSummary(value: unknown): DesktopRuntimeState[
       'installed',
       'running',
       'paused',
-      'error'
+      'error',
+      'deleted'
     ]) as DesktopRolePackageState,
     installedAt: requireString(record.installedAt, 'rolePackageSummary.installedAt'),
     lastRunAt: optionalString(record.lastRunAt, 'rolePackageSummary.lastRunAt'),
@@ -682,6 +688,18 @@ function validateModelProfile(value: unknown): ModelProfile {
       'embeddings',
       'document'
     ]),
+    capabilities: requireStringEnumArray(record.capabilities, 'modelProfile.capabilities', [
+      'text',
+      'reasoning_text',
+      'vision_text',
+      'video_text',
+      'embedding',
+      'rerank',
+      'text_to_image',
+      'image_to_image',
+      'audio_to_text',
+      'text_to_audio'
+    ]) as ModelCapability[],
     apiBaseUrl: optionalString(record.apiBaseUrl, 'modelProfile.apiBaseUrl'),
     apiKey: optionalString(record.apiKey, 'modelProfile.apiKey'),
     temperature: optionalNumber(record.temperature, 'modelProfile.temperature'),
@@ -691,6 +709,40 @@ function validateModelProfile(value: unknown): ModelProfile {
       record.monthlyBudgetCents,
       'modelProfile.monthlyBudgetCents'
     )
+  };
+}
+
+function validateModelProviderCatalog(value: unknown): ModelProviderCatalog {
+  const record = requireRecord(value, 'model provider catalog');
+  return {
+    providerId: requireString(record.providerId, 'modelProviderCatalog.providerId'),
+    providerName: requireString(record.providerName, 'modelProviderCatalog.providerName'),
+    apiBaseUrl: optionalString(record.apiBaseUrl, 'modelProviderCatalog.apiBaseUrl'),
+    fetchedAt: requireString(record.fetchedAt, 'modelProviderCatalog.fetchedAt'),
+    models: requireArray(record.models, 'modelProviderCatalog.models').map((item, index) => {
+      const modelRecord = requireRecord(item, `modelProviderCatalog.models[${index}]`);
+      return {
+        id: requireString(modelRecord.id, `modelProviderCatalog.models[${index}].id`),
+        label: optionalString(modelRecord.label, `modelProviderCatalog.models[${index}].label`),
+        ownedBy: optionalString(modelRecord.ownedBy, `modelProviderCatalog.models[${index}].ownedBy`),
+        capabilities: requireStringEnumArray(
+          modelRecord.capabilities,
+          `modelProviderCatalog.models[${index}].capabilities`,
+          [
+            'text',
+            'reasoning_text',
+            'vision_text',
+            'video_text',
+            'embedding',
+            'rerank',
+            'text_to_image',
+            'image_to_image',
+            'audio_to_text',
+            'text_to_audio'
+          ]
+        ) as ModelCapability[]
+      };
+    })
   };
 }
 

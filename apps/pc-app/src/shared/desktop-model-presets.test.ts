@@ -16,6 +16,13 @@ const deepSeekPreset: ModelProviderPreset = {
       purpose: 'general',
       temperature: 0.4,
       maxTokens: 4096
+    },
+    {
+      label: 'DeepSeek V4 Pro',
+      modelName: 'deepseek-v4-pro',
+      purpose: 'reasoning',
+      temperature: 0.2,
+      maxTokens: 8192
     }
   ]
 };
@@ -71,6 +78,93 @@ assert.equal(sameModelSelection.profile.id, 'qiu-general-default');
 assert.equal(sameModelSelection.profile.apiKey, 'deepseek-key');
 assert.equal(sameModelSelection.apiKeyPreserved, true);
 
+const credentialManagedDeepSeekProfiles = firstSelection.modelProfiles.map((profile) =>
+  profile.id === 'qiu-general-default' ? { ...profile, apiKey: undefined } : profile
+);
+
+const deepSeekProSelection = selectModelProfileForPreset(
+  [
+    ...credentialManagedDeepSeekProfiles,
+    {
+      id: 'qiu-reasoning-default',
+      providerId: 'provider-pending',
+      providerName: 'Pending Model Provider',
+      modelName: 'reasoning-core',
+      purpose: 'reasoning'
+    }
+  ],
+  deepSeekPreset,
+  deepSeekPreset.models[1]
+);
+
+assert.ok(deepSeekProSelection);
+assert.equal(deepSeekProSelection.profile.id, 'qiu-reasoning-default');
+assert.equal(deepSeekProSelection.profile.providerId, 'deepseek');
+assert.equal(deepSeekProSelection.profile.modelName, 'deepseek-v4-pro');
+assert.deepEqual(deepSeekProSelection.profile.capabilities, ['reasoning_text', 'text']);
+assert.equal(
+  deepSeekProSelection.modelProfiles.find((profile) => profile.id === 'qiu-general-default')?.modelName,
+  'deepseek-v4-flash'
+);
+
+const preferredReasoningSelection = selectModelProfileForPreset(
+  [
+    {
+      id: 'custom-reasoning-placeholder',
+      providerId: 'provider-pending',
+      providerName: 'Pending Model Provider',
+      modelName: 'custom-reasoning',
+      purpose: 'reasoning'
+    },
+    {
+      id: 'qiu-reasoning-default',
+      providerId: 'provider-pending',
+      providerName: 'Pending Model Provider',
+      modelName: 'reasoning-core',
+      purpose: 'reasoning'
+    }
+  ],
+  deepSeekPreset,
+  deepSeekPreset.models[1],
+  { preferredProfileId: 'qiu-reasoning-default' }
+);
+
+assert.ok(preferredReasoningSelection);
+assert.equal(preferredReasoningSelection.profile.id, 'qiu-reasoning-default');
+assert.equal(
+  preferredReasoningSelection.modelProfiles.find((profile) => profile.id === 'custom-reasoning-placeholder')
+    ?.providerId,
+  'provider-pending'
+);
+
+const preferredReasoningWithExistingExactSelection = selectModelProfileForPreset(
+  [
+    {
+      id: 'deepseek-deepseek-v4-pro-reasoning',
+      providerId: 'deepseek',
+      providerName: 'DeepSeek',
+      modelName: 'deepseek-v4-pro',
+      purpose: 'reasoning',
+      apiBaseUrl: 'https://api.deepseek.com'
+    },
+    {
+      id: 'qiu-reasoning-default',
+      providerId: 'provider-pending',
+      providerName: 'Pending Model Provider',
+      modelName: 'reasoning-core',
+      purpose: 'reasoning'
+    }
+  ],
+  deepSeekPreset,
+  deepSeekPreset.models[1],
+  { preferredProfileId: 'qiu-reasoning-default' }
+);
+
+assert.ok(preferredReasoningWithExistingExactSelection);
+assert.equal(preferredReasoningWithExistingExactSelection.profile.id, 'qiu-reasoning-default');
+assert.equal(preferredReasoningWithExistingExactSelection.profile.providerId, 'deepseek');
+assert.equal(preferredReasoningWithExistingExactSelection.profile.modelName, 'deepseek-v4-pro');
+
 const differentProviderSelection = selectModelProfileForPreset(
   configuredDeepSeekProfiles,
   openAiPreset,
@@ -84,10 +178,6 @@ assert.equal(differentProviderSelection.profile.apiKey, undefined);
 assert.equal(
   differentProviderSelection.modelProfiles.find((profile) => profile.id === 'qiu-general-default')?.apiKey,
   'deepseek-key'
-);
-
-const credentialManagedDeepSeekProfiles = firstSelection.modelProfiles.map((profile) =>
-  profile.id === 'qiu-general-default' ? { ...profile, apiKey: undefined } : profile
 );
 
 const differentProviderWithCredentialStoreSelection = selectModelProfileForPreset(

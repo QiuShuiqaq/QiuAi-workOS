@@ -19,6 +19,18 @@ function readDesktopDeviceToken(request: FastifyRequest): string | undefined {
   return Array.isArray(header) ? header[0] : header;
 }
 
+function parseInstalledTemplateIds(value: unknown): string[] {
+  const values = Array.isArray(value) ? value : value === undefined ? [] : [value];
+  return [
+    ...new Set(
+      values
+        .flatMap((item) => (typeof item === 'string' ? item.split(',') : []))
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  ];
+}
+
 @ApiTags('desktop')
 @Controller({
   path: 'workspaces/:workspaceId/desktop/runtimes',
@@ -46,10 +58,15 @@ export class WorkspaceDesktopController {
   constructor(@Inject(DesktopSyncService) private readonly desktopSyncService: DesktopSyncService) {}
 
   @Get('role-templates')
-  listRoleTemplates(@Param('workspaceId') workspaceId: string, @Req() request: FastifyRequest) {
+  listRoleTemplates(
+    @Param('workspaceId') workspaceId: string,
+    @Req() request: FastifyRequest,
+    @Query('installedTemplateIds') installedTemplateIds: string | string[] | undefined
+  ) {
     return this.desktopSyncService.listAuthorizedRoleTemplates(
       workspaceId,
-      readDesktopDeviceToken(request)
+      readDesktopDeviceToken(request),
+      parseInstalledTemplateIds(installedTemplateIds)
     );
   }
 
@@ -115,8 +132,12 @@ export class DesktopRoleTemplateController {
   constructor(@Inject(DesktopSyncService) private readonly desktopSyncService: DesktopSyncService) {}
 
   @Get('free')
-  listPublicFreeRoleTemplates() {
-    return this.desktopSyncService.listPublicFreeRoleTemplates();
+  listPublicFreeRoleTemplates(
+    @Query('installedTemplateIds') installedTemplateIds: string | string[] | undefined
+  ) {
+    return this.desktopSyncService.listPublicFreeRoleTemplates(
+      parseInstalledTemplateIds(installedTemplateIds)
+    );
   }
 }
 

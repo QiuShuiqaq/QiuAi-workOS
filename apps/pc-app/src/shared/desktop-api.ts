@@ -4,8 +4,10 @@ import type {
   DesktopKnowledgeSourceSummary,
   KnowledgeBindingSource,
   LocalRuntimeContract,
+  ModelCatalogEntry,
   ModelCredential,
   ModelProfile,
+  ModelProviderCatalog,
   RoleModelCredentialBinding,
   RolePackageManifest,
   ToolManifest,
@@ -73,6 +75,7 @@ export interface DesktopRuntimeState {
   rolePackages: RolePackageManifest[];
   modelProfiles: ModelProfile[];
   modelCredentials: ModelCredential[];
+  modelCatalogs: ModelProviderCatalog[];
   roleModelCredentialBindings: RoleModelCredentialBinding[];
   tools: ToolManifest[];
   knowledgeSources: DesktopKnowledgeSourceSummary[];
@@ -128,6 +131,7 @@ export interface DesktopAuthorizedRoleTemplateCatalog {
   workspaceId: string;
   loadedAt: string;
   templates: DesktopAuthorizedRoleTemplateSummary[];
+  deletedTemplateIds?: string[];
   message?: string;
 }
 
@@ -156,6 +160,22 @@ export interface DesktopModelChatResponse {
   content: string;
   inputTokens?: number;
   outputTokens?: number;
+}
+
+export interface DesktopModelListRequest {
+  providerId: string;
+  providerName: string;
+  apiBaseUrl?: string;
+  apiKey: string;
+  timeoutMs?: number;
+}
+
+export interface DesktopModelListResponse {
+  providerId: string;
+  providerName: string;
+  apiBaseUrl?: string;
+  fetchedAt: string;
+  models: ModelCatalogEntry[];
 }
 
 export interface DesktopKnowledgeSourcePathResult {
@@ -230,6 +250,7 @@ export interface QiuDesktopBridge {
   createWorkspaceBackup(state: DesktopRuntimeState): Promise<DesktopBackupSummary>;
   restoreWorkspaceBackup(bundlePath: string): Promise<DesktopBackupSummary>;
   invokeModelChat(request: DesktopModelChatRequest): Promise<DesktopModelChatResponse>;
+  listProviderModels(request: DesktopModelListRequest): Promise<DesktopModelListResponse>;
   selectKnowledgeSourcePath(source: KnowledgeBindingSource): Promise<DesktopKnowledgeSourcePathResult>;
   writeTaskArtifact(request: DesktopTaskArtifactWriteRequest): Promise<DesktopTaskArtifactWriteResult>;
   invokeDesktopTool(request: DesktopToolInvocationRequest): Promise<DesktopToolInvocationResult>;

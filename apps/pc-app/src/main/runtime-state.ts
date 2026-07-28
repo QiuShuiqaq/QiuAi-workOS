@@ -195,15 +195,18 @@ export async function listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRo
   const appInfo = getDesktopAppInfo();
   const identity = loadRuntimeIdentity(appInfo.userDataPath);
   const workspaceId = identity.deviceToken ? identity.workspaceId : 'workspace_pending_login';
+  const persistedState = await loadDesktopRuntimeState(appInfo.userDataPath, workspaceId);
+  const installedTemplateIds = readInstalledTemplateIds(persistedState);
 
   if (!identity.deviceToken) {
     try {
-      const response = await fetchPublicFreeRoleTemplates(appInfo.serverBaseUrl);
+      const response = await fetchPublicFreeRoleTemplates(appInfo.serverBaseUrl, installedTemplateIds);
       return {
         source: 'server',
         workspaceId,
         loadedAt: new Date().toISOString(),
         templates: response.data,
+        deletedTemplateIds: response.deletedTemplateIds,
         message: `已同步 ${response.data.length} 个免费数字员工。`
       };
     } catch (error) {
@@ -223,14 +226,16 @@ export async function listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRo
     const response = await fetchAuthorizedRoleTemplates(
       appInfo.serverBaseUrl,
       workspaceId,
-      identity.deviceToken
+      identity.deviceToken,
+      installedTemplateIds
     );
 
     return {
       source: 'server',
       workspaceId,
       loadedAt: new Date().toISOString(),
-      templates: response.data
+      templates: response.data,
+      deletedTemplateIds: response.deletedTemplateIds
     };
   } catch (error) {
     return {
@@ -241,6 +246,20 @@ export async function listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRo
       message: error instanceof Error ? error.message : '授权模板目录加载失败。'
     };
   }
+}
+
+function readInstalledTemplateIds(state: DesktopRuntimeState | undefined): string[] {
+  if (!state) {
+    return [];
+  }
+
+  return [
+    ...new Set(
+      state.rolePackages
+        .map((rolePackage) => rolePackage.templateId?.trim())
+        .filter((templateId): templateId is string => Boolean(templateId))
+    )
+  ];
 }
 
 export async function checkForDesktopUpdates(): Promise<DesktopUpdateCheckResult> {
@@ -304,6 +323,7 @@ function hydratePersistedRuntimeState(state: DesktopRuntimeState): DesktopRuntim
     ...state,
     knowledgeSources: state.knowledgeSources ?? [],
     modelCredentials,
+    modelCatalogs: state.modelCatalogs ?? [],
     roleModelCredentialBindings: normalizeRoleModelCredentialBindings(
       state.roleModelCredentialBindings,
       validRoleCodes,

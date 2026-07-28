@@ -196,6 +196,35 @@ export class RoleService {
     };
   }
 
+  async listDeletedTemplateIds(templateIds: string[]): Promise<string[]> {
+    const normalizedTemplateIds = [...new Set(templateIds.map((id) => id.trim()).filter(Boolean))];
+    if (normalizedTemplateIds.length === 0) {
+      return [];
+    }
+
+    if (!isDatabasePersistenceEnabled()) {
+      return this.store
+        .listRoleTemplates()
+        .filter((template) => normalizedTemplateIds.includes(template.id))
+        .filter((template) => template.status === 'DELETED')
+        .map((template) => template.id);
+    }
+
+    const deletedTemplates = await this.prismaService.roleTemplate.findMany({
+      where: {
+        id: {
+          in: normalizedTemplateIds
+        },
+        status: 'DELETED'
+      },
+      select: {
+        id: true
+      }
+    });
+
+    return deletedTemplates.map((template) => template.id);
+  }
+
   async listRoles(workspaceId: string) {
     if (!isDatabasePersistenceEnabled()) {
       return {
