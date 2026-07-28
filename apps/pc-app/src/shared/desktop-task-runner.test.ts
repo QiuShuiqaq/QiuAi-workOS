@@ -24,7 +24,21 @@ const tools: ToolManifest[] = [
     scope: 'hybrid',
     entryPoint: 'api',
     capabilities: ['web_search'],
-    requiresApproval: false
+    requiresApproval: false,
+    actions: [
+      {
+        action: 'web.search',
+        name: 'Web search',
+        inputTypes: ['text'],
+        outputTypes: ['json', 'text']
+      },
+      {
+        action: 'web.fetch_url',
+        name: 'Fetch URL',
+        inputTypes: ['text'],
+        outputTypes: ['text']
+      }
+    ]
   },
   {
     id: 'office-document',
@@ -33,7 +47,51 @@ const tools: ToolManifest[] = [
     scope: 'desktop',
     entryPoint: 'bridge',
     capabilities: ['document_edit'],
-    requiresApproval: true
+    requiresApproval: true,
+    actions: [
+      {
+        action: 'document.extract_text',
+        name: 'Extract document text',
+        inputTypes: ['file'],
+        outputTypes: ['text']
+      },
+      {
+        action: 'office.write_markdown_document',
+        name: 'Write Markdown',
+        inputTypes: ['text'],
+        outputTypes: ['artifact']
+      },
+      {
+        action: 'office.write_docx_document',
+        name: 'Write Word',
+        inputTypes: ['text'],
+        outputTypes: ['artifact']
+      },
+      {
+        action: 'spreadsheet.write_csv',
+        name: 'Write CSV',
+        inputTypes: ['table', 'json'],
+        outputTypes: ['artifact']
+      },
+      {
+        action: 'spreadsheet.write_xlsx',
+        name: 'Write Excel',
+        inputTypes: ['table', 'json'],
+        outputTypes: ['artifact']
+      },
+      {
+        action: 'presentation.write_pptx',
+        name: 'Write PPT',
+        inputTypes: ['json'],
+        outputTypes: ['artifact']
+      },
+      {
+        action: 'presentation.write_outline_markdown',
+        name: 'Write PPT outline',
+        inputTypes: ['json'],
+        outputTypes: ['artifact']
+      }
+    ]
   },
   {
     id: 'local-filesystem',
@@ -42,7 +100,27 @@ const tools: ToolManifest[] = [
     scope: 'desktop',
     entryPoint: 'native',
     capabilities: ['filesystem'],
-    requiresApproval: true
+    requiresApproval: true,
+    actions: [
+      {
+        action: 'filesystem.read_text_file',
+        name: 'Read text file',
+        inputTypes: ['file'],
+        outputTypes: ['text']
+      },
+      {
+        action: 'filesystem.write_text_file',
+        name: 'Write text file',
+        inputTypes: ['text'],
+        outputTypes: ['artifact']
+      },
+      {
+        action: 'filesystem.list_directory',
+        name: 'List directory',
+        inputTypes: ['file'],
+        outputTypes: ['json']
+      }
+    ]
   },
   {
     id: 'http-request',
@@ -51,7 +129,15 @@ const tools: ToolManifest[] = [
     scope: 'desktop',
     entryPoint: 'api',
     capabilities: ['custom_api'],
-    requiresApproval: true
+    requiresApproval: true,
+    actions: [
+      {
+        action: 'http.request',
+        name: 'HTTP request',
+        inputTypes: ['json'],
+        outputTypes: ['json', 'text']
+      }
+    ]
   },
   {
     id: 'mcp',
@@ -60,7 +146,15 @@ const tools: ToolManifest[] = [
     scope: 'desktop',
     entryPoint: 'mcp',
     capabilities: ['mcp'],
-    requiresApproval: true
+    requiresApproval: true,
+    actions: [
+      {
+        action: 'mcp.call',
+        name: 'MCP call',
+        inputTypes: ['json'],
+        outputTypes: ['json', 'text']
+      }
+    ]
   },
   {
     id: 'video-processing',
@@ -69,7 +163,33 @@ const tools: ToolManifest[] = [
     scope: 'desktop',
     entryPoint: 'native',
     capabilities: ['video_processing'],
-    requiresApproval: true
+    requiresApproval: true,
+    actions: [
+      {
+        action: 'video.probe',
+        name: 'Probe video',
+        inputTypes: ['video'],
+        outputTypes: ['json']
+      },
+      {
+        action: 'video.extract_frames',
+        name: 'Extract frames',
+        inputTypes: ['video'],
+        outputTypes: ['images']
+      },
+      {
+        action: 'video.compose_clips',
+        name: 'Compose clips',
+        inputTypes: ['video', 'json'],
+        outputTypes: ['artifact']
+      },
+      {
+        action: 'video.export_mp4',
+        name: 'Export MP4',
+        inputTypes: ['video', 'json'],
+        outputTypes: ['artifact']
+      }
+    ]
   }
 ];
 

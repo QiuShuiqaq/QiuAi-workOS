@@ -1,6 +1,10 @@
 import type { BillingAccountSummary, BillingOrderSummary, BillingSubscriptionSummary } from './billing';
 import type { EntitlementSummary, PlanDetail } from './commercial';
-import type { CreateDesktopBindingCodeRequest, DesktopBindingCodeSummary } from './desktop-sync';
+import type {
+  CreateDesktopBindingCodeRequest,
+  DesktopBindingCodeSummary,
+  DesktopToolActionHealthSummary
+} from './desktop-sync';
 import type {
   AdminRoleTemplateDetail,
   ArchiveAdminRoleTemplateResponse,
@@ -113,6 +117,7 @@ export interface AdminDesktopDeviceSummary {
   boundAt: string;
   lastSeenAt?: string;
   lastSyncedAt?: string;
+  toolActions?: DesktopToolActionHealthSummary[];
 }
 
 export interface AdminWorkspaceDetail {

@@ -1,9 +1,8 @@
-import type {
+﻿import type {
   DesktopRuntimeSnapshot,
   LocalRuntimeContract,
   ModelProfile,
   RolePackageManifest,
-  ToolManifest,
   DesktopTaskSummary
 } from './desktop-contract.js';
 import type {
@@ -29,7 +28,7 @@ const initialRolePackages: RolePackageManifest[] = [
     version: '0.1.0',
     summary: 'Handles content review, title generation, publication prep, and daily reports.',
     modelProfileIds: ['qiu-general-default', 'qiu-vision-default'],
-    toolIds: ['web-search', 'office-document', 'local-filesystem'],
+    toolIds: [],
     requiredKnowledgeSources: ['local_folder', 'server_summary'],
     defaultTaskTypes: ['content_review', 'publish_plan', 'daily_report'],
     syncPolicy: 'summary_only'
@@ -74,84 +73,6 @@ const initialModelProfiles: ModelProfile[] = [
   }
 ];
 
-const initialTools: ToolManifest[] = [
-  {
-    id: 'web-search',
-    name: 'Web Search',
-    version: '0.1.0',
-    scope: 'hybrid',
-    entryPoint: 'api',
-    capabilities: ['web_search'],
-    requiresApproval: false
-  },
-  {
-    id: 'office-document',
-    name: 'Office Document Handling',
-    version: '0.1.0',
-    scope: 'desktop',
-    entryPoint: 'bridge',
-    capabilities: ['document_extract', 'document_edit', 'presentation_edit', 'spreadsheet_edit'],
-    requiresApproval: true
-  },
-  {
-    id: 'local-filesystem',
-    name: 'Local Filesystem',
-    version: '0.1.0',
-    scope: 'desktop',
-    entryPoint: 'native',
-    capabilities: ['filesystem'],
-    requiresApproval: true
-  },
-  {
-    id: 'http-request',
-    name: 'HTTP Request',
-    version: '0.1.0',
-    scope: 'desktop',
-    entryPoint: 'api',
-    capabilities: ['custom_api'],
-    requiresApproval: true
-  },
-  {
-    id: 'mcp',
-    name: 'MCP Gateway',
-    version: '0.1.0',
-    scope: 'desktop',
-    entryPoint: 'mcp',
-    capabilities: ['mcp'],
-    requiresApproval: true
-  },
-  {
-    id: 'video-processing',
-    name: 'Video Processing',
-    version: '0.1.0',
-    scope: 'desktop',
-    entryPoint: 'native',
-    capabilities: ['video_processing'],
-    requiresApproval: true,
-    actions: [
-      {
-        action: 'video.probe',
-        name: '读取视频信息',
-        description: '读取本地视频路径、文件大小和基础元信息。'
-      },
-      {
-        action: 'video.extract_frames',
-        name: '抽取关键帧',
-        description: '调用本地 FFmpeg 从视频中按间隔抽取图片帧，输出本地图片路径。'
-      },
-      {
-        action: 'video.compose_clips',
-        name: '按剪辑方案导出 MP4',
-        description: '根据 cutPlan 调用本地 FFmpeg 生成成品视频。'
-      },
-      {
-        action: 'video.export_mp4',
-        name: '导出 MP4',
-        description: '根据输入视频和剪辑片段导出 MP4 文件。'
-      }
-    ]
-  }
-];
 
 export function createInitialDesktopRuntimeState(
   input: CreateDesktopRuntimeStateInput
@@ -161,9 +82,7 @@ export function createInitialDesktopRuntimeState(
   const runtimeTasks = taskDetails.map(toDesktopTaskSummary);
   const taskCountByRole = countTasksByRole(runtimeTasks);
   const lastTaskAtByRole = lastTaskAtMap(runtimeTasks);
-  const enabledToolIds = initialTools
-    .filter((tool) => ['web-search', 'local-filesystem'].includes(tool.id))
-    .map((tool) => tool.id);
+  const enabledToolIds: string[] = [];
   const enabledModelProfileIds = initialModelProfiles
     .filter((modelProfile) => modelProfile.purpose !== 'reasoning')
     .map((modelProfile) => modelProfile.id);
@@ -200,10 +119,8 @@ export function createInitialDesktopRuntimeState(
       lastRunAt: lastTaskAtByRole.get(rolePackage.roleCode),
       taskCount: taskCountByRole.get(rolePackage.roleCode) ?? 0
     })),
-    tools: initialTools.map((tool) => ({
-      toolId: tool.id,
-      enabled: enabledToolIds.includes(tool.id)
-    })),
+    tools: [],
+    toolActions: [],
     tasks: runtimeTasks
   };
 
@@ -216,7 +133,7 @@ export function createInitialDesktopRuntimeState(
     modelCredentials: [],
     modelCatalogs: [],
     roleModelCredentialBindings: [],
-    tools: initialTools,
+    tools: [],
     knowledgeSources: [],
     taskDetails,
     serverConnection:

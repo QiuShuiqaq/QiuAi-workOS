@@ -172,7 +172,7 @@ test('admin role template factory governs publication and workspace visibility',
         recommendedPlanCode: 'ENTERPRISE_PRO_MONTHLY',
         businessGoal: 'Verify role template factory governance before enterprise rollout.',
         knowledgeSources: ['workspace_library'],
-        tools: ['web-search'],
+        tools: ['office-document'],
         skills: [
           {
             code: 'factory_flow_check',
@@ -196,6 +196,89 @@ test('admin role template factory governs publication and workspace visibility',
             instruction: 'Return a concise validation result for the operator.'
           }
         ],
+        workflowGraph: {
+          version: '1.0.0',
+          entryNodeId: 'start',
+          nodes: [
+            {
+              id: 'start',
+              type: 'start',
+              name: 'Start',
+              inputVariables: ['start.text', 'start.files'],
+              outputVariables: ['start.text']
+            },
+            {
+              id: 'receive_input',
+              type: 'input',
+              name: 'Receive Input',
+              instruction: 'Confirm the requested template factory smoke test scope.',
+              inputVariables: ['start.text', 'start.files'],
+              outputVariables: ['task_brief']
+            },
+            {
+              id: 'draft_result',
+              type: 'llm',
+              name: 'Draft Result',
+              instruction: 'Return a concise validation result for the operator.',
+              modelProfileId: 'qiu-general-default',
+              inputVariables: ['task_brief'],
+              outputVariables: ['draft_result.text']
+            },
+            {
+              id: 'write_artifact',
+              type: 'artifact',
+              name: 'Write Deliverable',
+              instruction: 'Write the final validation report as Markdown.',
+              toolId: 'office-document',
+              artifactType: 'markdown',
+              inputVariables: ['draft_result.text'],
+              outputVariables: ['deliverable_file'],
+              config: {
+                action: 'office.write_markdown_document',
+                input: {
+                  title: '{{start.text}}',
+                  folder: 'documents',
+                  fileName: 'template-factory-flow',
+                  content: '{{draft_result.text}}'
+                }
+              }
+            },
+            {
+              id: 'final_output',
+              type: 'output',
+              name: 'Final Output',
+              instruction: 'Return the validation summary and generated artifact link.',
+              inputVariables: ['draft_result.text', 'deliverable_file'],
+              outputVariables: ['final_answer']
+            }
+          ],
+          edges: [
+            {
+              id: 'start__receive_input',
+              sourceNodeId: 'start',
+              targetNodeId: 'receive_input',
+              condition: { type: 'always' }
+            },
+            {
+              id: 'receive_input__draft_result',
+              sourceNodeId: 'receive_input',
+              targetNodeId: 'draft_result',
+              condition: { type: 'always' }
+            },
+            {
+              id: 'draft_result__write_artifact',
+              sourceNodeId: 'draft_result',
+              targetNodeId: 'write_artifact',
+              condition: { type: 'always' }
+            },
+            {
+              id: 'write_artifact__final_output',
+              sourceNodeId: 'write_artifact',
+              targetNodeId: 'final_output',
+              condition: { type: 'always' }
+            }
+          ]
+        },
         sampleInputs: ['Please verify the template factory flow.'],
         outputFormat: 'Markdown checklist with validation result and risks.',
         approvalPolicy: 'Manual review is required before customer-facing output.',
@@ -286,6 +369,7 @@ test('admin role template factory governs publication and workspace visibility',
     assert.equal(testResponse.statusCode, 201);
     const testResponseData = JSON.parse(testResponse.body).data;
     assert.equal(testResponseData.valid, true);
+    assert.deepEqual(testResponseData.requiredToolActions, ['office.write_markdown_document']);
     assert.ok(testResponseData.graphTrace);
     assert.ok(testResponseData.graphTrace.nodes.length >= 2);
     assert.ok(

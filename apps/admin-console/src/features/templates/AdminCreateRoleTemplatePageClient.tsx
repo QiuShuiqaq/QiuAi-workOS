@@ -20,6 +20,7 @@ import type {
   RoleWorkflowGraph,
   RoleWorkflowGraphNode,
   RoleWorkflowGraphSourceStep,
+  ToolActionCatalog,
   UpdateAdminRoleTemplateRequest
 } from '@qiuai/api-contract';
 import { buildRoleWorkflowGraphFromSteps } from '@qiuai/api-contract';
@@ -65,6 +66,7 @@ export interface AdminCreateRoleTemplatePageClientProps {
   templates: AdminRoleTemplateDetail[];
   plans: AdminPlanDetail[];
   workspaces: AdminWorkspaceSummary[];
+  toolCatalog: ToolActionCatalog;
   templateId?: string;
 }
 
@@ -118,6 +120,7 @@ type ToolConfigField = {
 };
 
 type ToolActionTemplate = {
+  toolId: string;
   value: string;
   label: string;
   defaults: Record<string, unknown>;
@@ -132,6 +135,7 @@ type TemplateTestResult = {
   warnings: string[];
   sampleInput?: string;
   graphTrace?: AdminRoleTemplateTestGraphTrace;
+  requiredToolActions?: string[];
 };
 type WorkflowNodeTrace = NonNullable<TemplateTestResult['graphTrace']>['nodes'][number];
 
@@ -175,243 +179,6 @@ const knowledgeOptions = [
   'workspace_library',
   'server_summary'
 ].map((value) => ({ value, label: value }));
-
-const toolOptions = [
-  { value: 'web-search', label: '网页搜索 / web-search' },
-  { value: 'office-document', label: 'Office 文档 / office-document' },
-  { value: 'local-filesystem', label: '本地文件 / local-filesystem' },
-  { value: 'video-processing', label: '视频处理 / video-processing' },
-  { value: 'browser-automation', label: '浏览器自动化 / browser-automation' },
-  { value: 'http-request', label: 'HTTP 接口 / http-request' },
-  { value: 'mcp', label: 'MCP 工具 / mcp' }
-];
-
-const toolActionTemplatesByToolId: Record<string, ToolActionTemplate[]> = {
-  'web-search': [
-    {
-      value: 'web.search',
-      label: '网页搜索',
-      defaults: { query: '{{start.text}}', maxResults: 5 },
-      fields: [
-        { key: 'query', label: '搜索词', placeholder: '{{start.text}}' },
-        { key: 'maxResults', label: '结果数量', type: 'number' }
-      ]
-    },
-    {
-      value: 'web.fetch_url',
-      label: '读取网页',
-      defaults: { url: 'https://example.com', maxChars: 12000 },
-      fields: [
-        { key: 'url', label: 'URL', placeholder: 'https://example.com' },
-        { key: 'maxChars', label: '最大字符', type: 'number' }
-      ]
-    }
-  ],
-  'office-document': [
-    {
-      value: 'document.extract_text',
-      label: '读取文档文本',
-      defaults: { path: '$start.files.0.localPath', maxChars: 30000 },
-      fields: [
-        { key: 'path', label: '文件路径', placeholder: '$start.files.0.localPath' },
-        { key: 'maxChars', label: '最大字符', type: 'number' }
-      ]
-    },
-    {
-      value: 'office.write_docx_document',
-      label: '生成 Word',
-      defaults: {
-        title: '{{task.title}}',
-        folder: 'documents',
-        fileName: '{{task.title}}',
-        content: '{{runtime.previous_text}}'
-      },
-      fields: [
-        { key: 'title', label: '标题' },
-        { key: 'folder', label: '目录' },
-        { key: 'fileName', label: '文件名' },
-        { key: 'content', label: '内容', type: 'textarea', format: 'text', placeholder: '{{runtime.previous_text}}' }
-      ]
-    },
-    {
-      value: 'office.write_markdown_document',
-      label: '生成 Markdown',
-      defaults: {
-        title: '{{task.title}}',
-        folder: 'documents',
-        fileName: '{{task.title}}',
-        content: '{{runtime.previous_text}}'
-      },
-      fields: [
-        { key: 'title', label: '标题' },
-        { key: 'folder', label: '目录' },
-        { key: 'fileName', label: '文件名' },
-        { key: 'content', label: '内容', type: 'textarea', format: 'text', placeholder: '{{runtime.previous_text}}' }
-      ]
-    },
-    {
-      value: 'spreadsheet.write_xlsx',
-      label: '生成 Excel',
-      defaults: {
-        folder: 'spreadsheets',
-        fileName: '{{task.title}}',
-        rows: [['项目', '内容'], ['结果', '{{runtime.previous_text}}']]
-      },
-      fields: [
-        { key: 'folder', label: '目录' },
-        { key: 'fileName', label: '文件名' },
-        { key: 'rows', label: '行数据 JSON', type: 'textarea', format: 'json', placeholder: '[["项目","内容"],["结果","{{runtime.previous_text}}"]]' }
-      ]
-    },
-    {
-      value: 'spreadsheet.write_csv',
-      label: '生成 CSV',
-      defaults: {
-        folder: 'spreadsheets',
-        fileName: '{{task.title}}',
-        rows: [['项目', '内容'], ['结果', '{{runtime.previous_text}}']]
-      },
-      fields: [
-        { key: 'folder', label: '目录' },
-        { key: 'fileName', label: '文件名' },
-        { key: 'rows', label: '行数据 JSON', type: 'textarea', format: 'json', placeholder: '[["项目","内容"],["结果","{{runtime.previous_text}}"]]' }
-      ]
-    },
-    {
-      value: 'presentation.write_pptx',
-      label: '生成 PPT',
-      defaults: {
-        title: '{{task.title}}',
-        folder: 'presentations',
-        fileName: '{{task.title}}',
-        slides: [{ title: '{{task.title}}', bullets: ['{{runtime.previous_text}}'] }]
-      },
-      fields: [
-        { key: 'title', label: '标题' },
-        { key: 'folder', label: '目录' },
-        { key: 'fileName', label: '文件名' },
-        { key: 'slides', label: '幻灯片 JSON', type: 'textarea', format: 'json', placeholder: '[{"title":"标题","bullets":["要点"]}]' }
-      ]
-    }
-  ],
-  'local-filesystem': [
-    {
-      value: 'filesystem.read_text_file',
-      label: '读取文本文件',
-      defaults: { path: '$start.files.0.localPath', maxChars: 30000 },
-      fields: [
-        { key: 'path', label: '路径', placeholder: '$start.files.0.localPath' },
-        { key: 'maxChars', label: '最大字符', type: 'number' }
-      ]
-    },
-    {
-      value: 'filesystem.write_text_file',
-      label: '写入文本文件',
-      defaults: { folder: 'reports', fileName: '{{task.title}}', content: '{{runtime.previous_text}}' },
-      fields: [
-        { key: 'folder', label: '目录' },
-        { key: 'fileName', label: '文件名' },
-        { key: 'content', label: '内容', type: 'textarea', placeholder: '{{runtime.previous_text}}' }
-      ]
-    },
-    {
-      value: 'filesystem.list_directory',
-      label: '列出目录',
-      defaults: { path: '$start.files.0.localPath' },
-      fields: [{ key: 'path', label: '目录路径' }]
-    }
-  ],
-  'http-request': [
-    {
-      value: 'http.request',
-      label: 'HTTP 请求',
-      defaults: {
-        method: 'GET',
-        url: 'https://api.example.com',
-        headers: {},
-        body: '',
-        maxChars: 24000,
-        timeoutMs: 30000,
-        allowPrivateNetwork: false
-      },
-      fields: [
-        { key: 'method', label: '方法' },
-        { key: 'url', label: 'URL' },
-        { key: 'headers', label: '请求头 JSON', type: 'textarea', format: 'json', placeholder: '{"Authorization":"Bearer ..."}' },
-        { key: 'body', label: '请求体', type: 'textarea', format: 'text' },
-        { key: 'maxChars', label: '最大字符', type: 'number' },
-        { key: 'timeoutMs', label: '超时毫秒', type: 'number' },
-        { key: 'allowPrivateNetwork', label: '允许内网', type: 'boolean' }
-      ]
-    }
-  ],
-  mcp: [
-    {
-      value: 'mcp.call',
-      label: '调用 MCP 工具',
-      defaults: {
-        endpoint: 'http://127.0.0.1:3001/mcp',
-        toolName: '',
-        arguments: {},
-        headers: {},
-        timeoutMs: 30000,
-        allowPrivateNetwork: true
-      },
-      fields: [
-        { key: 'endpoint', label: '服务地址' },
-        { key: 'toolName', label: '工具名' },
-        { key: 'arguments', label: '参数 JSON', type: 'textarea', format: 'json', placeholder: '{"query":"{{start.text}}"}' },
-        { key: 'headers', label: '请求头 JSON', type: 'textarea', format: 'json' },
-        { key: 'timeoutMs', label: '超时毫秒', type: 'number' },
-        { key: 'allowPrivateNetwork', label: '允许内网', type: 'boolean' }
-      ]
-    }
-  ],
-  'video-processing': [
-    {
-      value: 'video.probe',
-      label: '读取视频信息',
-      defaults: { videoPath: '$runtime.current_item.localPath' },
-      fields: [
-        { key: 'videoPath', label: '视频路径', placeholder: '$runtime.current_item.localPath' }
-      ]
-    },
-    {
-      value: 'video.extract_frames',
-      label: '抽取关键帧',
-      defaults: {
-        videoPath: '$runtime.current_item.localPath',
-        frameIntervalSeconds: 5,
-        maxFrames: 12,
-        folder: 'frames',
-        fileName: '{{task.title}}'
-      },
-      fields: [
-        { key: 'videoPath', label: '视频路径', placeholder: '$runtime.current_item.localPath' },
-        { key: 'frameIntervalSeconds', label: '抽帧间隔秒', type: 'number' },
-        { key: 'maxFrames', label: '最多帧数', type: 'number' },
-        { key: 'folder', label: '保存目录' },
-        { key: 'fileName', label: '文件名' }
-      ]
-    },
-    {
-      value: 'video.compose_clips',
-      label: '导出剪辑视频',
-      defaults: {
-        videoPath: '$runtime.current_item.localPath',
-        cutPlan: [{ start: 0, end: 15 }],
-        folder: 'videos',
-        fileName: '{{task.title}}'
-      },
-      fields: [
-        { key: 'videoPath', label: '视频路径', placeholder: '$runtime.current_item.localPath' },
-        { key: 'cutPlan', label: '剪辑方案 JSON', type: 'textarea', format: 'json', placeholder: '[{"start":0,"end":15}]' },
-        { key: 'folder', label: '保存目录' },
-        { key: 'fileName', label: '文件名' }
-      ]
-    }
-  ]
-};
 
 const workflowPresetOptions: Array<{ value: WorkflowPreset; label: string; description: string }> = [
   {
@@ -680,18 +447,26 @@ function createWorkflowEdgeId(sourceNodeId: string, targetNodeId: string, edges:
   return candidate;
 }
 
-function createCanvasNode(type: WorkflowNodeType, nodes: RoleWorkflowGraphNode[]): RoleWorkflowGraphNode {
+function createCanvasNode(
+  type: WorkflowNodeType,
+  nodes: RoleWorkflowGraphNode[],
+  options?: {
+    defaultToolId?: string;
+    getDefaultToolActionTemplate?: (toolId: string) => ToolActionTemplate | undefined;
+    getDefaultArtifactActionTemplate?: (artifactType: WorkflowArtifactType | undefined) => ToolActionTemplate | undefined;
+  }
+): RoleWorkflowGraphNode {
   const id = createWorkflowNodeId(type, nodes);
   const artifactType = type === 'artifact' ? 'docx' : undefined;
-  const toolId = type === 'tool'
-    ? 'office-document'
-    : type === 'artifact'
-      ? 'office-document'
-      : undefined;
   const toolActionTemplate = type === 'artifact'
-    ? getDefaultArtifactActionTemplate(artifactType)
-    : toolId
-      ? getDefaultToolActionTemplate(toolId)
+    ? options?.getDefaultArtifactActionTemplate?.(artifactType)
+    : type === 'tool' && options?.defaultToolId
+      ? options.getDefaultToolActionTemplate?.(options.defaultToolId)
+      : undefined;
+  const toolId = type === 'artifact'
+    ? toolActionTemplate?.toolId
+    : type === 'tool'
+      ? toolActionTemplate?.toolId ?? options?.defaultToolId
       : undefined;
   const modelOutputMode: WorkflowModelOutputMode = type === 'parameter_extractor' ? 'json' : 'text';
   const defaultConfig =
@@ -787,48 +562,6 @@ function createCanvasNode(type: WorkflowNodeType, nodes: RoleWorkflowGraphNode[]
     requiresApproval: type === 'approval',
     config: defaultConfig
   };
-}
-
-function getDefaultToolActionTemplate(toolId: string): ToolActionTemplate | undefined {
-  return toolActionTemplatesByToolId[toolId]?.[0];
-}
-
-function getDefaultArtifactActionTemplate(artifactType: WorkflowArtifactType | undefined): ToolActionTemplate | undefined {
-  if (artifactType === 'mp4') {
-    return toolActionTemplatesByToolId['video-processing']?.find((template) => template.value === 'video.compose_clips');
-  }
-
-  const officeTemplates = toolActionTemplatesByToolId['office-document'] ?? [];
-  if (artifactType === 'pptx') {
-    return officeTemplates.find((template) => template.value === 'presentation.write_pptx');
-  }
-  if (artifactType === 'xlsx') {
-    return officeTemplates.find((template) => template.value === 'spreadsheet.write_xlsx');
-  }
-  if (artifactType === 'csv') {
-    return officeTemplates.find((template) => template.value === 'spreadsheet.write_csv');
-  }
-  if (artifactType === 'markdown' || artifactType === 'pdf') {
-    return officeTemplates.find((template) => template.value === 'office.write_markdown_document');
-  }
-
-  return officeTemplates.find((template) => template.value === 'office.write_docx_document');
-}
-
-function getSelectedToolActionTemplate(toolId: string | undefined, action: string | undefined): ToolActionTemplate | undefined {
-  if (!toolId) return undefined;
-  const templates = toolActionTemplatesByToolId[toolId] ?? [];
-  if (!action) return templates[0];
-  return templates.find((template) => template.value === action) ?? templates[0];
-}
-
-function getSelectedWorkflowNodeToolActionTemplate(node: RoleWorkflowGraphNode): ToolActionTemplate | undefined {
-  const action = typeof node.config?.action === 'string' ? node.config.action : undefined;
-  if (!action && node.type === 'artifact') {
-    return getDefaultArtifactActionTemplate(node.artifactType);
-  }
-
-  return getSelectedToolActionTemplate(node.toolId, action);
 }
 
 function parseJsonConfigValue(value: string, fallback: unknown) {
@@ -1687,6 +1420,20 @@ function WorkflowTestTracePanel({ result }: { result: TemplateTestResult }) {
           </Space>
         }
       />
+      {result.requiredToolActions?.length ? (
+        <Card size="small" bordered={false} className="workflow-empty-panel">
+          <Space direction="vertical" size={6} style={{ width: '100%' }}>
+            <Typography.Text strong>需要的工具动作</Typography.Text>
+            <Space wrap>
+              {result.requiredToolActions.map((actionId) => (
+                <Tag key={actionId} color="blue">
+                  {actionId}
+                </Tag>
+              ))}
+            </Space>
+          </Space>
+        </Card>
+      ) : null}
       {result.graphTrace ? (
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
           <Typography.Text strong>
@@ -1702,6 +1449,17 @@ function WorkflowTestTracePanel({ result }: { result: TemplateTestResult }) {
                 </Space>
                 <Typography.Text type="secondary">输入：{node.inputPreview}</Typography.Text>
                 <Typography.Text type="secondary">输出：{node.outputPreview}</Typography.Text>
+                {node.toolActionId ? (
+                  <Space wrap size={4}>
+                    <Tag color="blue">{node.toolActionId}</Tag>
+                    {(node.requiredInputTypes ?? []).map((type) => (
+                      <Tag key={`in-${node.nodeId}-${type}`}>入：{type}</Tag>
+                    ))}
+                    {(node.producedOutputTypes ?? []).map((type) => (
+                      <Tag key={`out-${node.nodeId}-${type}`}>出：{type}</Tag>
+                    ))}
+                  </Space>
+                ) : null}
                 {node.warnings.length ? (
                   <Typography.Text type="warning">警告：{node.warnings.join('；')}</Typography.Text>
                 ) : null}
@@ -2233,11 +1991,13 @@ function workflowNodeConfigDescription(node: RoleWorkflowGraphNode) {
 function WorkflowReactFlowEditor({
   graph,
   onChange,
-  testGraphTrace
+  testGraphTrace,
+  toolCatalog
 }: {
   graph: RoleWorkflowGraph;
   onChange: (graph: RoleWorkflowGraph) => void;
   testGraphTrace?: AdminRoleTemplateTestGraphTrace;
+  toolCatalog: ToolActionCatalog;
 }) {
   const [selection, setSelection] = useState<WorkflowSelection>({
     type: 'node',
@@ -2251,6 +2011,78 @@ function WorkflowReactFlowEditor({
   }>({ open: false });
   const [runningCodePreviewNodeId, setRunningCodePreviewNodeId] = useState<string | null>(null);
   const [codePreviewResults, setCodePreviewResults] = useState<Record<string, WorkflowCodePreviewResult>>({});
+  const serverToolOptions = useMemo(
+    () =>
+      toolCatalog.packages.map((toolPackage) => ({
+        value: toolPackage.id,
+        label: `${toolPackage.name} / ${toolPackage.id}`
+      })),
+    [toolCatalog]
+  );
+  const serverToolActionTemplatesByToolId = useMemo(() => {
+    const grouped: Record<string, ToolActionTemplate[]> = {};
+    for (const action of toolCatalog.actions) {
+      const templates = grouped[action.packageId] ?? [];
+      templates.push({
+        toolId: action.packageId,
+        value: action.actionId,
+        label: `${action.name} / ${action.actionId}`,
+        defaults: action.defaultInput,
+        fields: action.uiFields
+      });
+      grouped[action.packageId] = templates;
+    }
+    return grouped;
+  }, [toolCatalog]);
+  const getDefaultToolActionTemplateForCanvas = useCallback(
+    (toolId: string): ToolActionTemplate | undefined => serverToolActionTemplatesByToolId[toolId]?.[0],
+    [serverToolActionTemplatesByToolId]
+  );
+  const getSelectedToolActionTemplateForCanvas = useCallback(
+    (toolId: string | undefined, action: string | undefined): ToolActionTemplate | undefined => {
+      if (!toolId) return undefined;
+      const templates = serverToolActionTemplatesByToolId[toolId] ?? [];
+      return templates.find((template) => template.value === action) ?? templates[0];
+    },
+    [serverToolActionTemplatesByToolId]
+  );
+  const getDefaultArtifactActionTemplateForCanvas = useCallback(
+    (artifactType: WorkflowArtifactType | undefined): ToolActionTemplate | undefined => {
+      if (artifactType === 'mp4') {
+        return serverToolActionTemplatesByToolId['video-processing']?.find(
+          (template) => template.value === 'video.compose_clips'
+        );
+      }
+      const officeTemplates = serverToolActionTemplatesByToolId['office-document'] ?? [];
+      if (artifactType === 'xlsx') {
+        return officeTemplates.find((template) => template.value === 'spreadsheet.write_xlsx');
+      }
+      if (artifactType === 'csv') {
+        return officeTemplates.find((template) => template.value === 'spreadsheet.write_csv');
+      }
+      if (artifactType === 'pptx') {
+        return officeTemplates.find((template) => template.value === 'presentation.write_pptx');
+      }
+      if (artifactType === 'markdown' || artifactType === 'pdf') {
+        return officeTemplates.find((template) => template.value === 'office.write_markdown_document');
+      }
+      return officeTemplates.find((template) => template.value === 'office.write_docx_document');
+    },
+    [serverToolActionTemplatesByToolId]
+  );
+  const getSelectedWorkflowNodeToolActionTemplateForCanvas = useCallback(
+    (node: RoleWorkflowGraphNode): ToolActionTemplate | undefined => {
+      const action = typeof node.config?.action === 'string' ? node.config.action : undefined;
+      if (node.type === 'artifact') {
+        return getSelectedToolActionTemplateForCanvas(
+          node.toolId,
+          action ?? getDefaultArtifactActionTemplateForCanvas(node.artifactType)?.value
+        );
+      }
+      return getSelectedToolActionTemplateForCanvas(node.toolId, action);
+    },
+    [getDefaultArtifactActionTemplateForCanvas, getSelectedToolActionTemplateForCanvas]
+  );
   const variableOptions = useMemo(() => deriveWorkflowVariableOptions(graph), [graph]);
   const variableSelectOptions = useMemo(
     () => buildWorkflowVariableSelectOptions(variableOptions),
@@ -2429,7 +2261,11 @@ function WorkflowReactFlowEditor({
       edgeToInsert?.sourceNodeId ?? options?.sourceNodeId ?? nodePicker.sourceNodeId ?? selectedNode?.id ?? graph.entryNodeId;
     const sourcePosition = nodePositions.get(sourceNodeId);
     const targetPosition = edgeToInsert ? nodePositions.get(edgeToInsert.targetNodeId) : undefined;
-    const node = writeWorkflowNodeCanvasPosition(createCanvasNode(type, graph.nodes), {
+    const node = writeWorkflowNodeCanvasPosition(createCanvasNode(type, graph.nodes, {
+      defaultToolId: serverToolOptions[0]?.value,
+      getDefaultToolActionTemplate: getDefaultToolActionTemplateForCanvas,
+      getDefaultArtifactActionTemplate: getDefaultArtifactActionTemplateForCanvas
+    }), {
       x: targetPosition ? Math.round(((sourcePosition?.x ?? 80) + targetPosition.x) / 2) : (sourcePosition?.x ?? 80) + 260,
       y: targetPosition ? Math.round(((sourcePosition?.y ?? 180) + targetPosition.y) / 2) + 80 : Math.max(80, sourcePosition?.y ?? 180)
     });
@@ -2526,10 +2362,10 @@ function WorkflowReactFlowEditor({
             : node.artifactType
         : node.artifactType;
     const template = node.type === 'artifact'
-      ? getDefaultArtifactActionTemplate(nextArtifactType)
-      : getDefaultToolActionTemplate(toolId);
+      ? getDefaultArtifactActionTemplateForCanvas(nextArtifactType) ?? getDefaultToolActionTemplateForCanvas(toolId)
+      : getDefaultToolActionTemplateForCanvas(toolId);
     updateNode(node.id, {
-      toolId,
+      toolId: template?.toolId ?? toolId,
       artifactType: nextArtifactType,
       config: template
         ? buildToolNodeConfig(node, {
@@ -2541,7 +2377,7 @@ function WorkflowReactFlowEditor({
   }
 
   function updateToolNodeAction(node: RoleWorkflowGraphNode, action: string) {
-    const template = getSelectedToolActionTemplate(node.toolId, action);
+    const template = getSelectedToolActionTemplateForCanvas(node.toolId, action);
     updateNode(node.id, {
       config: buildToolNodeConfig(node, {
         action: template?.value ?? action,
@@ -2703,7 +2539,7 @@ function WorkflowReactFlowEditor({
   }
 
   function updateArtifactTableSource(node: RoleWorkflowGraphNode, sourceRef?: string) {
-    const template = getDefaultArtifactActionTemplate(node.artifactType ?? 'xlsx');
+    const template = getDefaultArtifactActionTemplateForCanvas(node.artifactType ?? 'xlsx');
     const currentInput = readWorkflowToolInputConfig(node);
     const rows = sourceRef ? `$${sourceRef}` : currentInput.rows;
     updateNode(node.id, {
@@ -2890,21 +2726,21 @@ function WorkflowReactFlowEditor({
                     const nextArtifactType = type === 'artifact' ? selectedNode.artifactType ?? 'docx' : selectedNode.artifactType;
                     const nextToolId =
                       type === 'tool'
-                        ? selectedNode.toolId ?? 'office-document'
+                        ? selectedNode.toolId ?? serverToolOptions[0]?.value
                         : type === 'artifact'
-                          ? nextArtifactType === 'mp4' ? 'video-processing' : 'office-document'
+                          ? getDefaultArtifactActionTemplateForCanvas(nextArtifactType)?.toolId ?? selectedNode.toolId
                           : selectedNode.toolId;
                     const nextToolTemplate =
                       type === 'artifact'
-                        ? getDefaultArtifactActionTemplate(nextArtifactType)
-                        : getSelectedToolActionTemplate(
-                            nextToolId ?? 'office-document',
+                        ? getDefaultArtifactActionTemplateForCanvas(nextArtifactType)
+                        : getSelectedToolActionTemplateForCanvas(
+                            nextToolId,
                             String(selectedNode.config?.action ?? '')
                           );
 
                     updateNode(selectedNode.id, {
                       type,
-                      toolId: nextToolId,
+                      toolId: nextToolTemplate?.toolId ?? nextToolId,
                       modelProfileId:
                         type === 'llm' || type === 'reasoning' || type === 'parameter_extractor'
                           ? selectedNode.modelProfileId ?? 'qiu-general-default'
@@ -3260,7 +3096,7 @@ function WorkflowReactFlowEditor({
                   allowClear
                   value={selectedNode.toolId}
                   placeholder="工具 ID"
-                  options={toolOptions}
+                  options={serverToolOptions}
                   onChange={(toolId) => updateToolNodeToolId(selectedNode, toolId)}
                 />
               </WorkflowConfigSection>
@@ -3277,11 +3113,10 @@ function WorkflowReactFlowEditor({
                   placeholder="产物格式"
                   options={artifactTypeOptions}
                   onChange={(artifactType) => {
-                    const nextToolId = artifactType === 'mp4' ? 'video-processing' : 'office-document';
-                    const nextToolTemplate = getDefaultArtifactActionTemplate(artifactType);
+                    const nextToolTemplate = getDefaultArtifactActionTemplateForCanvas(artifactType);
                     updateNode(selectedNode.id, {
                       artifactType,
-                      toolId: nextToolId,
+                      toolId: nextToolTemplate?.toolId ?? selectedNode.toolId,
                       config: buildToolNodeConfig(selectedNode, {
                         action: nextToolTemplate?.value,
                         input: nextToolTemplate?.defaults ?? {}
@@ -3367,16 +3202,16 @@ function WorkflowReactFlowEditor({
                   size="small"
                   value={String(
                     selectedNode.config?.action ??
-                    getSelectedWorkflowNodeToolActionTemplate(selectedNode)?.value ??
+                    getSelectedWorkflowNodeToolActionTemplateForCanvas(selectedNode)?.value ??
                     ''
                   )}
-                  options={(toolActionTemplatesByToolId[selectedNode.toolId ?? ''] ?? []).map((template) => ({
+                  options={(serverToolActionTemplatesByToolId[selectedNode.toolId ?? ''] ?? []).map((template) => ({
                     value: template.value,
                     label: template.label
                   }))}
                   onChange={(action) => updateToolNodeAction(selectedNode, action)}
                 />
-                {(getSelectedWorkflowNodeToolActionTemplate(selectedNode)?.fields ?? []).map((field) => {
+                {(getSelectedWorkflowNodeToolActionTemplateForCanvas(selectedNode)?.fields ?? []).map((field) => {
                   const inputConfig =
                     selectedNode.config?.input && typeof selectedNode.config.input === 'object' && !Array.isArray(selectedNode.config.input)
                       ? (selectedNode.config.input as Record<string, unknown>)
@@ -3706,6 +3541,7 @@ export function AdminCreateRoleTemplatePageClient({
   templates,
   plans,
   workspaces,
+  toolCatalog,
   templateId
 }: AdminCreateRoleTemplatePageClientProps) {
   const router = useRouter();
@@ -4022,6 +3858,7 @@ export function AdminCreateRoleTemplatePageClient({
               graph={editableGraph}
               onChange={setEditableGraph}
               testGraphTrace={testResult?.graphTrace}
+              toolCatalog={toolCatalog}
             />
           </section>
 

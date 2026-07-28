@@ -42,6 +42,7 @@ import type {
   ListAdminDesktopReleasesQuery,
   ListAdminDesktopReleasesResponse,
   ListAdminRoleTemplatesResponse,
+  ListToolActionCatalogResponse,
   CancelWorkspaceInvitationResponse,
   CancelDesktopBindingCodeResponse,
   CreateDesktopBindingCodeRequest,
@@ -140,6 +141,10 @@ export class QiuApiClient {
 
   listAdminPlans(): Promise<ListAdminPlansResponse> {
     return this.get('/api/v1/admin/plans');
+  }
+
+  listAdminToolActionCatalog(): Promise<ListToolActionCatalogResponse> {
+    return this.get('/api/v1/admin/tool-actions');
   }
 
   createAdminWorkspace(input: CreateAdminWorkspaceRequest): Promise<CreateAdminWorkspaceResponse> {

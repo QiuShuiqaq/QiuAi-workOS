@@ -16,6 +16,7 @@ import { saveDesktopReleaseAsset } from '../../shared/desktop-release-assets';
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import { listServerToolActionCatalog } from '../../shared/tool-action-catalog';
 import { AuthService } from '../auth/auth.service';
 import { EntitlementService } from '../entitlement/entitlement.service';
 import {
@@ -239,6 +240,13 @@ export class AdminService {
     @Inject(MockPlatformStore)
     private readonly store: MockPlatformStore
   ) {}
+
+  async listToolActionCatalog(cookieHeader?: string) {
+    await this.requireAdminOperator(cookieHeader);
+    return {
+      data: listServerToolActionCatalog()
+    };
+  }
 
   async listPlans(cookieHeader?: string): Promise<ListAdminPlansResponseDto> {
     await this.requireAdminOperator(cookieHeader);

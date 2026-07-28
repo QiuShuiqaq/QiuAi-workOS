@@ -97,6 +97,7 @@ export interface DesktopRuntimeSnapshot {
   lastSyncedAt?: string;
   rolePackages: DesktopRolePackageSummary[];
   tools: DesktopToolSummary[];
+  toolActions?: DesktopToolActionHealthSummary[];
   tasks: DesktopTaskSummary[];
 }
 
@@ -122,6 +123,22 @@ export interface DesktopToolSummary {
   toolId: string;
   enabled: boolean;
   lastUsedAt?: string;
+}
+
+export interface DesktopToolActionHealthSummary {
+  toolId: string;
+  actionId: string;
+  name: string;
+  category?: string;
+  status: 'ready' | 'disabled' | 'missing_config' | 'missing_dependency' | 'unavailable' | 'experimental';
+  inputTypes?: string[];
+  outputTypes?: string[];
+  requiredConfig?: string[];
+  missingConfig?: string[];
+  requiredDependencies?: string[];
+  missingDependencies?: string[];
+  message?: string;
+  checkedAt?: string;
 }
 
 export interface DesktopTaskSummary {
@@ -199,6 +216,7 @@ function parseDesktopRuntimeSnapshot(input: unknown): DesktopRuntimeSnapshot {
     lastSyncedAt: optionalString(record.lastSyncedAt, 'desktopRuntimeSnapshot.lastSyncedAt'),
     rolePackages: parseRolePackageSummaries(record.rolePackages),
     tools: parseToolSummaries(record.tools),
+    toolActions: parseToolActionHealthSummaries(record.toolActions),
     tasks: parseTaskSummaries(record.tasks)
   };
 }
@@ -270,6 +288,51 @@ function parseToolSummaries(input: unknown): DesktopRuntimeSnapshot['tools'] {
       toolId: requireString(record.toolId, `desktopRuntimeSnapshot.tools[${index}].toolId`),
       enabled: requireBoolean(record.enabled, `desktopRuntimeSnapshot.tools[${index}].enabled`),
       lastUsedAt: optionalString(record.lastUsedAt, `desktopRuntimeSnapshot.tools[${index}].lastUsedAt`)
+    };
+  });
+}
+
+function parseToolActionHealthSummaries(input: unknown): DesktopRuntimeSnapshot['toolActions'] {
+  if (input === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(input)) {
+    throw new Error('desktopRuntimeSnapshot.toolActions must be an array.');
+  }
+
+  return input.map((item, index) => {
+    const record = requireRecord(item, `desktopRuntimeSnapshot.toolActions[${index}]`);
+    return {
+      toolId: requireString(record.toolId, `desktopRuntimeSnapshot.toolActions[${index}].toolId`),
+      actionId: requireString(record.actionId, `desktopRuntimeSnapshot.toolActions[${index}].actionId`),
+      name: requireString(record.name, `desktopRuntimeSnapshot.toolActions[${index}].name`),
+      category: optionalString(record.category, `desktopRuntimeSnapshot.toolActions[${index}].category`),
+      status: requireEnum(
+        record.status,
+        `desktopRuntimeSnapshot.toolActions[${index}].status`,
+        ['ready', 'disabled', 'missing_config', 'missing_dependency', 'unavailable', 'experimental']
+      ),
+      inputTypes: optionalStringArray(record.inputTypes, `desktopRuntimeSnapshot.toolActions[${index}].inputTypes`),
+      outputTypes: optionalStringArray(record.outputTypes, `desktopRuntimeSnapshot.toolActions[${index}].outputTypes`),
+      requiredConfig: optionalStringArray(
+        record.requiredConfig,
+        `desktopRuntimeSnapshot.toolActions[${index}].requiredConfig`
+      ),
+      missingConfig: optionalStringArray(
+        record.missingConfig,
+        `desktopRuntimeSnapshot.toolActions[${index}].missingConfig`
+      ),
+      requiredDependencies: optionalStringArray(
+        record.requiredDependencies,
+        `desktopRuntimeSnapshot.toolActions[${index}].requiredDependencies`
+      ),
+      missingDependencies: optionalStringArray(
+        record.missingDependencies,
+        `desktopRuntimeSnapshot.toolActions[${index}].missingDependencies`
+      ),
+      message: optionalString(record.message, `desktopRuntimeSnapshot.toolActions[${index}].message`),
+      checkedAt: optionalString(record.checkedAt, `desktopRuntimeSnapshot.toolActions[${index}].checkedAt`)
     };
   });
 }
@@ -371,6 +434,14 @@ function requireStringArray(value: unknown, fieldName: string): string[] {
   }
 
   return value.map((item, index) => requireString(item, `${fieldName}[${index}]`));
+}
+
+function optionalStringArray(value: unknown, fieldName: string): string[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  return requireStringArray(value, fieldName);
 }
 
 function optionalNonNegativeInteger(value: unknown, fieldName: string): number | undefined {

@@ -54,8 +54,8 @@ assert.ok(Array.isArray(storedRuntimeSnapshot?.tasks));
 assert.ok(storedRuntimeSnapshot?.tasks?.[0].executionContext);
 assert.equal(toolRegistry.length, initialState.tools.length);
 assert.equal(
-  toolRegistry.find((tool) => tool.toolId === 'office-document')?.enabled,
-  false
+  toolRegistry.find((tool) => tool.toolId === 'office-document'),
+  undefined
 );
 assert.equal(loadedState?.localRuntime.lastSyncedAt, '2026-07-20T01:00:00.000Z');
 assert.equal(loadedState?.runtimeSnapshot.tasks.length, initialState.runtimeSnapshot.tasks.length);

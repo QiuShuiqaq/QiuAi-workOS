@@ -11,6 +11,7 @@ import type { Prisma, RoleTemplateStatus } from '@prisma/client';
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import { getServerToolAction } from '../../shared/tool-action-catalog';
 import {
   buildWorkflowGraphFromSteps,
   normalizeWorkflowGraph,
@@ -817,6 +818,8 @@ export class RoleTemplateFactoryService {
       warnings.push('No sample input was provided; only structural validation was performed.');
     }
 
+    const graph = this.getTemplateWorkflowGraphForInspection(template);
+    const requiredToolActions = graph ? this.getRequiredWorkflowToolActionIds(graph) : [];
     const valid = issues.length === 0;
 
     return {
@@ -829,7 +832,8 @@ export class RoleTemplateFactoryService {
           : 'Template failed basic factory validation.',
         warnings,
         sampleInput: input.sampleInput?.trim(),
-        graphTrace: this.buildTemplateTestGraphTrace(template, input)
+        graphTrace: this.buildTemplateTestGraphTrace(template, input),
+        requiredToolActions
       }
     };
   }
@@ -858,6 +862,8 @@ export class RoleTemplateFactoryService {
       nodeCount: graph.nodes.length,
       edgeCount: graph.edges.length,
       nodes: graph.nodes.map((node) => {
+        const actionId = this.getWorkflowNodeToolActionId(node);
+        const actionDefinition = actionId ? getServerToolAction(actionId) : undefined;
         const warnings = this.getWorkflowNodeTraceWarnings(node, templateTools);
         return {
           nodeId: node.id,
@@ -866,7 +872,10 @@ export class RoleTemplateFactoryService {
           status: warnings.length > 0 ? 'warning' : 'passed',
           inputPreview: this.describeWorkflowNodeInput(node, input, knowledgeSources),
           outputPreview: this.describeWorkflowNodeOutput(node, outgoingEdgesByNodeId.get(node.id) ?? []),
-          warnings
+          warnings,
+          toolActionId: actionId,
+          requiredInputTypes: actionDefinition?.input.map((port) => port.type),
+          producedOutputTypes: actionDefinition?.output.map((port) => port.type)
         };
       })
     };
@@ -878,11 +887,40 @@ export class RoleTemplateFactoryService {
   ): string[] {
     const warnings: string[] = [];
 
-    if (node.type === 'tool') {
+    if (node.type === 'tool' || node.type === 'artifact') {
       if (!node.toolId) {
-        warnings.push('Tool node has no toolId.');
-      } else if (!templateTools.has(node.toolId)) {
-        warnings.push(`Tool node references ${node.toolId}, but the template tools list does not include it.`);
+        warnings.push(`${node.type} node has no toolId.`);
+      }
+
+      const actionId = this.getWorkflowNodeToolActionId(node);
+      if (!actionId) {
+        warnings.push(`${node.type} node has no tool action.`);
+      } else {
+        const actionDefinition = getServerToolAction(actionId);
+        if (!actionDefinition) {
+          warnings.push(`Tool action ${actionId} is not defined in the server tool catalog.`);
+        } else {
+          if (node.toolId && actionDefinition.packageId !== node.toolId) {
+            warnings.push(
+              `Tool action ${actionId} belongs to ${actionDefinition.packageId}, but node toolId is ${node.toolId}.`
+            );
+          }
+          if (!templateTools.has(actionDefinition.packageId)) {
+            warnings.push(
+              `Template tools list does not include required tool package ${actionDefinition.packageId}.`
+            );
+          }
+          if (node.type === 'artifact' && node.artifactType && actionDefinition.artifactFormat) {
+            const actionArtifactType = actionDefinition.artifactFormat === 'md'
+              ? 'markdown'
+              : actionDefinition.artifactFormat;
+            if (actionArtifactType !== node.artifactType) {
+              warnings.push(
+                `Artifact node outputs ${node.artifactType}, but tool action ${actionId} outputs ${actionArtifactType}.`
+              );
+            }
+          }
+        }
       }
     }
 
@@ -914,6 +952,37 @@ export class RoleTemplateFactoryService {
     }
 
     return warnings;
+  }
+
+  private getWorkflowNodeToolActionId(node: ServerRoleWorkflowGraphNode): string | undefined {
+    const action = typeof node.config?.action === 'string' ? node.config.action.trim() : '';
+    return action || undefined;
+  }
+
+  private getTemplateWorkflowGraphForInspection(template: RoleTemplateRecord): ServerRoleWorkflowGraph | undefined {
+    try {
+      return normalizeWorkflowGraphOrFallback(template.workflowGraph, this.toWorkflowSteps(template.workflowSteps));
+    } catch {
+      return undefined;
+    }
+  }
+
+  private getRequiredWorkflowToolActionIds(graph: ServerRoleWorkflowGraph): string[] {
+    return [
+      ...new Set(
+        graph.nodes
+          .filter((node) => node.type === 'tool' || node.type === 'artifact')
+          .map((node) => this.getWorkflowNodeToolActionId(node))
+          .filter((actionId): actionId is string => Boolean(actionId))
+      )
+    ];
+  }
+
+  private validateWorkflowGraphToolActions(
+    graph: ServerRoleWorkflowGraph,
+    templateTools: Set<string>
+  ): string[] {
+    return graph.nodes.flatMap((node) => this.getWorkflowNodeTraceWarnings(node, templateTools));
   }
 
   private describeWorkflowNodeInput(
@@ -1028,7 +1097,10 @@ export class RoleTemplateFactoryService {
       issues.push('Template must define at least one workflow step.');
     }
     try {
-      normalizeWorkflowGraph(template.workflowGraph, workflowSteps);
+      const graph = normalizeWorkflowGraph(template.workflowGraph, workflowSteps);
+      issues.push(
+        ...this.validateWorkflowGraphToolActions(graph, new Set(this.toStringArray(template.tools)))
+      );
     } catch (error) {
       issues.push(error instanceof Error ? error.message : 'Template workflow graph is invalid.');
     }

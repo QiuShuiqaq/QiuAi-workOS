@@ -4,6 +4,8 @@ import path from 'node:path';
 import { createInitialDesktopRuntimeState } from '../shared/desktop-state.js';
 import {
   checkDesktopUpdate as fetchDesktopUpdate,
+  fetchPublicDesktopToolActionCatalog,
+  fetchWorkspaceDesktopToolActionCatalog,
   listAuthorizedRoleTemplates as fetchAuthorizedRoleTemplates,
   listPublicFreeRoleTemplates as fetchPublicFreeRoleTemplates,
   redeemDesktopBindingCode,
@@ -27,6 +29,7 @@ import {
   saveDesktopRuntimeState,
   updateRuntimeIdentity
 } from './runtime-store.js';
+import { buildDesktopToolStateFromServerCatalog } from './desktop-tool-catalog.js';
 
 const electronApi = (electron as typeof electron & { default?: typeof electron }).default ?? electron;
 const { app } = electronApi;
@@ -79,8 +82,9 @@ export async function getDesktopRuntimeState(): Promise<DesktopRuntimeState> {
   });
 
   if (!persistedState) {
-    await saveDesktopRuntimeState(appInfo.userDataPath, initialState);
-    return initialState;
+    const serverDefinedState = await applyServerDefinedToolCatalog(initialState, identity.deviceToken);
+    await saveDesktopRuntimeState(appInfo.userDataPath, serverDefinedState);
+    return serverDefinedState;
   }
 
   const hydratedPersistedState = hydratePersistedRuntimeState(persistedState);
@@ -88,7 +92,7 @@ export async function getDesktopRuntimeState(): Promise<DesktopRuntimeState> {
     await saveDesktopRuntimeState(appInfo.userDataPath, hydratedPersistedState);
   }
 
-  return {
+  const mergedState = {
     ...initialState,
     ...hydratedPersistedState,
     app: appInfo,
@@ -112,6 +116,13 @@ export async function getDesktopRuntimeState(): Promise<DesktopRuntimeState> {
     },
     serverConnection
   };
+
+  const serverDefinedState = await applyServerDefinedToolCatalog(mergedState, identity.deviceToken);
+  if (serverDefinedState !== mergedState) {
+    await saveDesktopRuntimeState(appInfo.userDataPath, serverDefinedState);
+  }
+
+  return serverDefinedState;
 }
 
 export async function bindDesktopDevice(bindingCode: string): Promise<DesktopRuntimeState> {
@@ -148,13 +159,13 @@ export async function bindDesktopDevice(bindingCode: string): Promise<DesktopRun
     }
   };
 
-  await saveDesktopRuntimeState(appInfo.userDataPath, boundState);
   updateRuntimeIdentity(appInfo.userDataPath, {
     workspaceId: response.data.workspaceId,
     deviceToken: response.data.deviceToken
   });
 
-  return boundState;
+  await saveDesktopRuntimeState(appInfo.userDataPath, boundState);
+  return getDesktopRuntimeState();
 }
 
 export async function unbindDesktopDevice(): Promise<DesktopRuntimeState> {
@@ -176,19 +187,80 @@ export async function syncDesktopRuntimeState(state: DesktopRuntimeState) {
     throw new Error('Desktop device token is missing. Bind the device first.');
   }
 
+  const serverDefinedState = await applyServerDefinedToolCatalog(state, identity.deviceToken);
   const result = await syncDesktopRuntimeSnapshot(
     appInfo.serverBaseUrl,
-    state.localRuntime.workspaceId,
-    state.runtimeSnapshot,
+    serverDefinedState.localRuntime.workspaceId,
+    serverDefinedState.runtimeSnapshot,
     identity.deviceToken
   );
 
   updateRuntimeIdentity(appInfo.userDataPath, {
-    workspaceId: state.localRuntime.workspaceId,
+    workspaceId: serverDefinedState.localRuntime.workspaceId,
     lastSyncedAt: result.data.syncedAt
   });
 
+  await saveDesktopRuntimeState(appInfo.userDataPath, {
+    ...serverDefinedState,
+    localRuntime: {
+      ...serverDefinedState.localRuntime,
+      lastSyncedAt: result.data.syncedAt
+    },
+    runtimeSnapshot: {
+      ...serverDefinedState.runtimeSnapshot,
+      lastSyncedAt: result.data.syncedAt
+    }
+  });
+
   return result;
+}
+
+async function applyServerDefinedToolCatalog(
+  state: DesktopRuntimeState,
+  deviceToken?: string
+): Promise<DesktopRuntimeState> {
+  const appInfo = getDesktopAppInfo();
+  try {
+    const catalogResponse = deviceToken
+      ? await fetchWorkspaceDesktopToolActionCatalog(
+          appInfo.serverBaseUrl,
+          state.localRuntime.workspaceId,
+          deviceToken
+        )
+      : await fetchPublicDesktopToolActionCatalog(appInfo.serverBaseUrl);
+    const toolState = await buildDesktopToolStateFromServerCatalog({
+      catalog: catalogResponse.data,
+      enabledToolIds: state.localRuntime.enabledToolIds
+    });
+
+    return {
+      ...state,
+      tools: toolState.tools,
+      localRuntime: {
+        ...state.localRuntime,
+        enabledToolIds: toolState.enabledToolIds
+      },
+      runtimeSnapshot: {
+        ...state.runtimeSnapshot,
+        tools: toolState.toolSummaries,
+        toolActions: toolState.toolActions
+      }
+    };
+  } catch {
+    return {
+      ...state,
+      tools: [],
+      localRuntime: {
+        ...state.localRuntime,
+        enabledToolIds: []
+      },
+      runtimeSnapshot: {
+        ...state.runtimeSnapshot,
+        tools: [],
+        toolActions: []
+      }
+    };
+  }
 }
 
 export async function listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRoleTemplateCatalog> {

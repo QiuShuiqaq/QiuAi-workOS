@@ -57,6 +57,11 @@ export class DesktopSyncController {
 export class WorkspaceDesktopController {
   constructor(@Inject(DesktopSyncService) private readonly desktopSyncService: DesktopSyncService) {}
 
+  @Get('tools')
+  listTools(@Param('workspaceId') workspaceId: string, @Req() request: FastifyRequest) {
+    return this.desktopSyncService.listDesktopToolActionCatalog(workspaceId, readDesktopDeviceToken(request));
+  }
+
   @Get('role-templates')
   listRoleTemplates(
     @Param('workspaceId') workspaceId: string,
@@ -138,6 +143,20 @@ export class DesktopRoleTemplateController {
     return this.desktopSyncService.listPublicFreeRoleTemplates(
       parseInstalledTemplateIds(installedTemplateIds)
     );
+  }
+}
+
+@ApiTags('desktop')
+@Controller({
+  path: 'desktop/tools',
+  version: '1'
+})
+export class DesktopToolCatalogController {
+  constructor(@Inject(DesktopSyncService) private readonly desktopSyncService: DesktopSyncService) {}
+
+  @Get()
+  listPublicTools() {
+    return this.desktopSyncService.listDesktopToolActionCatalog();
   }
 }
 

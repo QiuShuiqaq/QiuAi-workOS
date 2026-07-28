@@ -458,6 +458,15 @@ export class AdminRoleTemplateTestNodeTraceDto {
 
   @ApiProperty({ type: [String] })
   warnings!: string[];
+
+  @ApiProperty({ required: false, example: 'web.search' })
+  toolActionId?: string;
+
+  @ApiProperty({ required: false, type: [String], example: ['text'] })
+  requiredInputTypes?: string[];
+
+  @ApiProperty({ required: false, type: [String], example: ['text', 'json'] })
+  producedOutputTypes?: string[];
 }
 
 export class AdminRoleTemplateTestGraphTraceDto {
@@ -493,5 +502,6 @@ export class TestAdminRoleTemplateResponseDto {
     warnings: string[];
     sampleInput?: string;
     graphTrace?: AdminRoleTemplateTestGraphTraceDto;
+    requiredToolActions?: string[];
   };
 }

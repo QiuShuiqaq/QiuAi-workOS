@@ -17,10 +17,11 @@ export default async function TemplateCanvasPage({
 
   const resolvedSearchParams = await searchParams;
   const apiClient = await createServerApiClient();
-  const [templates, plans, workspaces] = await Promise.all([
+  const [templates, plans, workspaces, toolCatalog] = await Promise.all([
     apiClient.listAdminRoleTemplates(),
     apiClient.listAdminPlans(),
-    apiClient.listAdminWorkspaces({ page: 1, pageSize: 100 })
+    apiClient.listAdminWorkspaces({ page: 1, pageSize: 100 }),
+    apiClient.listAdminToolActionCatalog()
   ]);
 
   return (
@@ -29,6 +30,7 @@ export default async function TemplateCanvasPage({
       templates={templates.data}
       plans={plans.data}
       workspaces={workspaces.data}
+      toolCatalog={toolCatalog.data}
       templateId={resolvedSearchParams?.templateId}
     />
   );

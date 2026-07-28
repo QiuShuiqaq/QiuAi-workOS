@@ -1,8 +1,11 @@
-import type {
+﻿import type {
   DesktopAuthorizedRoleTemplateSummary,
   DesktopUpdateCheckResult
 } from './desktop-api.js';
-import type { DesktopRuntimeSnapshot } from './desktop-contract.js';
+import type {
+  DesktopRuntimeSnapshot,
+  ListDesktopServerToolActionCatalogResponse
+} from './desktop-contract.js';
 
 interface RedeemDesktopBindingCodeRequest {
   bindingCode: string;
@@ -168,6 +171,50 @@ export async function listPublicFreeRoleTemplates(
   }
 
   return body as ListAuthorizedRoleTemplatesResponse;
+}
+
+export async function fetchPublicDesktopToolActionCatalog(
+  baseUrl: string
+): Promise<ListDesktopServerToolActionCatalogResponse> {
+  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/api/v1/desktop/tools`, {
+    headers: {
+      accept: 'application/json'
+    }
+  });
+
+  const body = (await response.json()) as ListDesktopServerToolActionCatalogResponse | { error?: { message?: string } };
+  if (!response.ok) {
+    const errorBody = body as { error?: { message?: string } };
+    const message = errorBody.error?.message ?? `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return body as ListDesktopServerToolActionCatalogResponse;
+}
+
+export async function fetchWorkspaceDesktopToolActionCatalog(
+  baseUrl: string,
+  workspaceId: string,
+  deviceToken: string
+): Promise<ListDesktopServerToolActionCatalogResponse> {
+  const response = await fetch(
+    `${normalizeBaseUrl(baseUrl)}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/desktop/tools`,
+    {
+      headers: {
+        accept: 'application/json',
+        'x-qiuai-device-token': deviceToken
+      }
+    }
+  );
+
+  const body = (await response.json()) as ListDesktopServerToolActionCatalogResponse | { error?: { message?: string } };
+  if (!response.ok) {
+    const errorBody = body as { error?: { message?: string } };
+    const message = errorBody.error?.message ?? `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return body as ListDesktopServerToolActionCatalogResponse;
 }
 
 export async function checkDesktopUpdate(

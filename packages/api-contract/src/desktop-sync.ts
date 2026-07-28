@@ -38,6 +38,30 @@ export interface DesktopToolSummary {
   lastUsedAt?: string;
 }
 
+export type DesktopToolActionStatus =
+  | 'ready'
+  | 'disabled'
+  | 'missing_config'
+  | 'missing_dependency'
+  | 'unavailable'
+  | 'experimental';
+
+export interface DesktopToolActionHealthSummary {
+  toolId: string;
+  actionId: string;
+  name: string;
+  status: DesktopToolActionStatus;
+  category?: string;
+  inputTypes?: string[];
+  outputTypes?: string[];
+  requiredConfig?: string[];
+  missingConfig?: string[];
+  requiredDependencies?: string[];
+  missingDependencies?: string[];
+  message?: string;
+  checkedAt?: string;
+}
+
 export interface DesktopTaskSummary {
   taskId: string;
   roleCode: string;
@@ -59,6 +83,7 @@ export interface DesktopRuntimeSnapshot {
   lastSyncedAt?: string;
   rolePackages: DesktopRolePackageSummary[];
   tools: DesktopToolSummary[];
+  toolActions?: DesktopToolActionHealthSummary[];
   tasks: DesktopTaskSummary[];
 }
 

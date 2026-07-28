@@ -12,6 +12,7 @@ import { Prisma } from '@prisma/client';
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import { listServerToolActionCatalog } from '../../shared/tool-action-catalog';
 import { AuthService } from '../auth/auth.service';
 import { EntitlementService } from '../entitlement/entitlement.service';
 import { RoleService } from '../role/role.service';
@@ -93,6 +94,21 @@ export class DesktopSyncService {
     @Inject(RoleService)
     private readonly roleService: RoleService
   ) {}
+
+  async listDesktopToolActionCatalog(workspaceId?: string, deviceToken?: string) {
+    if (workspaceId) {
+      if (isDatabasePersistenceEnabled()) {
+        await this.requireDatabaseDeviceTokenForWorkspace(workspaceId, deviceToken);
+      } else {
+        this.assertMockWorkspace(workspaceId);
+        this.requireMockDeviceTokenForWorkspace(workspaceId, deviceToken, new Date());
+      }
+    }
+
+    return {
+      data: listServerToolActionCatalog()
+    };
+  }
 
   async listAuthorizedRoleTemplates(
     workspaceId: string,

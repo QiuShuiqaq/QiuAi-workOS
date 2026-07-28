@@ -1,3 +1,4 @@
+import type { DesktopToolActionHealthSummary } from './desktop-sync';
 import type { PaginationMeta } from './pagination';
 import type { RoleSkillSummary, RoleTemplateWorkflowStep } from './role';
 import type { RoleWorkflowGraph } from './workflow-graph';
@@ -97,6 +98,9 @@ export interface AdminRoleTemplateTestNodeTrace {
   inputPreview: string;
   outputPreview: string;
   warnings: string[];
+  toolActionId?: string;
+  requiredInputTypes?: string[];
+  producedOutputTypes?: string[];
 }
 
 export interface AdminRoleTemplateTestGraphTrace {
@@ -115,6 +119,8 @@ export interface TestAdminRoleTemplateResponse {
     warnings: string[];
     sampleInput?: string;
     graphTrace?: AdminRoleTemplateTestGraphTrace;
+    requiredToolActions?: string[];
+    deviceToolActions?: DesktopToolActionHealthSummary[];
   };
 }
 

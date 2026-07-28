@@ -43,6 +43,11 @@ import {
 export class AdminController {
   constructor(@Inject(AdminService) private readonly adminService: AdminService) {}
 
+  @Get('tool-actions')
+  listToolActionCatalog(@Req() request: FastifyRequest) {
+    return this.adminService.listToolActionCatalog(request.headers.cookie);
+  }
+
   @Get('plans')
   @ApiOkResponse({ type: ListAdminPlansResponseDto })
   listPlans(@Req() request: FastifyRequest): Promise<ListAdminPlansResponseDto> {

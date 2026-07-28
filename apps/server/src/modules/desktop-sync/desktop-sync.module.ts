@@ -7,6 +7,7 @@ import {
   DesktopBindingController,
   DesktopReleaseController,
   DesktopRoleTemplateController,
+  DesktopToolCatalogController,
   DesktopSyncController,
   WorkspaceDesktopController
 } from './desktop-sync.controller';
@@ -18,6 +19,7 @@ import { DesktopSyncService } from './desktop-sync.service';
     DesktopBindingController,
     DesktopReleaseController,
     DesktopRoleTemplateController,
+    DesktopToolCatalogController,
     DesktopSyncController,
     WorkspaceDesktopController
   ],

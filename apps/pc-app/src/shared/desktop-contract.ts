@@ -169,7 +169,91 @@ export interface ToolManifestAction {
   description?: string;
   inputSchema?: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
+  category?: string;
+  inputTypes?: string[];
+  outputTypes?: string[];
+  requiredConfig?: string[];
+  requiredDependencies?: string[];
+  maturity?: 'stable' | 'experimental';
+  artifactFormat?: string;
   requiresApproval?: boolean;
+}
+
+export type ServerToolValueType =
+  | 'text'
+  | 'json'
+  | 'table'
+  | 'file'
+  | 'files'
+  | 'image'
+  | 'images'
+  | 'video'
+  | 'videos'
+  | 'artifact'
+  | 'artifact[]'
+  | 'number'
+  | 'boolean';
+
+export interface DesktopServerToolPackageDefinition {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+}
+
+export interface DesktopServerToolActionDefinition {
+  packageId: string;
+  actionId: string;
+  name: string;
+  category: string;
+  description: string;
+  input: Array<{ key: string; label: string; type: ServerToolValueType; required?: boolean; description?: string }>;
+  output: Array<{ key: string; label: string; type: ServerToolValueType; required?: boolean; description?: string }>;
+  defaultInput: Record<string, unknown>;
+  uiFields: Array<{
+    key: string;
+    label: string;
+    placeholder?: string;
+    type?: 'text' | 'number' | 'textarea' | 'boolean';
+    format?: 'text' | 'json';
+  }>;
+  requiredConfig: string[];
+  requiredDependencies: string[];
+  artifactFormat?: string;
+  maturity: 'stable' | 'experimental';
+}
+
+export interface DesktopServerToolActionCatalog {
+  packages: DesktopServerToolPackageDefinition[];
+  actions: DesktopServerToolActionDefinition[];
+}
+
+export interface ListDesktopServerToolActionCatalogResponse {
+  data: DesktopServerToolActionCatalog;
+}
+
+export type DesktopToolActionStatus =
+  | 'ready'
+  | 'disabled'
+  | 'missing_config'
+  | 'missing_dependency'
+  | 'unavailable'
+  | 'experimental';
+
+export interface DesktopToolActionHealthSummary {
+  toolId: string;
+  actionId: string;
+  name: string;
+  category?: string;
+  status: DesktopToolActionStatus;
+  inputTypes?: string[];
+  outputTypes?: string[];
+  requiredConfig?: string[];
+  missingConfig?: string[];
+  requiredDependencies?: string[];
+  missingDependencies?: string[];
+  message?: string;
+  checkedAt?: string;
 }
 
 export interface DesktopRoleSkillSummary {
@@ -312,5 +396,6 @@ export interface DesktopRuntimeSnapshot {
   lastSyncedAt?: string;
   rolePackages: DesktopRolePackageSummary[];
   tools: DesktopToolSummary[];
+  toolActions?: DesktopToolActionHealthSummary[];
   tasks: DesktopTaskSummary[];
 }

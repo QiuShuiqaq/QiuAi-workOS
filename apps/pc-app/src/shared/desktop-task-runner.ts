@@ -2860,6 +2860,30 @@ async function invokeWorkflowRuntimeToolNode(input: {
     };
   }
 
+  if (!isToolActionEnabledForManifest(availableTool, toolRequest.action)) {
+    const message = `Workflow tool action is not enabled by server catalog: ${toolRequest.toolId}/${toolRequest.action}.`;
+    const outputVariables = writeWorkflowNodeOutputs({
+      pool: input.pool,
+      node: input.node,
+      text: message
+    });
+    return {
+      response: {
+        ...input.currentResponse,
+        content: input.currentResponse.content || message
+      },
+      primaryProfile: input.primaryProfile,
+      logs: [
+        createLog(input.task.taskId, 'warning', 'WORKFLOW_RUNTIME_TOOL_SKIPPED', message, input.createdAt, input.node.id)
+      ],
+      usedToolIds: [],
+      generatedArtifacts: [],
+      inputVariables,
+      outputVariables,
+      message
+    };
+  }
+
   if (!input.desktopToolInvoker || !input.workspaceId) {
     const message = 'Workflow tool skipped because desktop tool bridge or workspace ID is unavailable.';
     const outputVariables = writeWorkflowNodeOutputs({
@@ -3932,6 +3956,36 @@ async function maybeExecuteDesktopToolCall(input: {
       };
     }
 
+    if (!isToolActionEnabledForManifest(availableTool, toolCall.action)) {
+      const toolRejectedLog = createLog(
+        input.task.taskId,
+        'warning',
+        'TOOL_CALL_REJECTED',
+        `Requested tool action is not enabled by server catalog: ${toolCall.toolId}/${toolCall.action}.`,
+        input.createdAt,
+        `turn-${turnIndex + 1}`
+      );
+      logs.push(toolRejectedLog);
+      progressTask = await emitTaskProgress({
+        onProgress: input.onProgress,
+        task: progressTask,
+        updatedAt: input.createdAt,
+        executionLogs: [toolRejectedLog],
+        state: 'running',
+        currentRunStatus: 'running'
+      });
+      return {
+        response: {
+          ...currentResponse,
+          content: removeToolCallBlock(currentResponse.content)
+        },
+        logs,
+        usedToolIds,
+        generatedArtifacts,
+        progressTask
+      };
+    }
+
     if (!input.desktopToolInvoker || !input.workspaceId) {
       const toolSkippedLog = createLog(
         input.task.taskId,
@@ -4710,7 +4764,7 @@ function buildWorkflowToolExecutionInstructions(
     }
 
     if (node.artifactType) {
-      const actionHint = buildArtifactToolActionHint(node.artifactType, availableToolIds);
+      const actionHint = buildArtifactToolActionHint(node.artifactType, availableTools);
       lines.push(
         actionHint
           ? `- Node "${node.name}" expects ${node.artifactType}. Prefer ${actionHint} and include the generated local path in the final answer.`
@@ -4724,37 +4778,42 @@ function buildWorkflowToolExecutionInstructions(
 
 function buildArtifactToolActionHint(
   artifactType: WorkflowExecutionNodeSummary['artifactType'],
-  availableToolIds: Set<string>
+  availableTools: ToolManifest[]
 ): string | undefined {
   if (!artifactType) {
     return undefined;
   }
 
-  if (artifactType === 'pptx' && availableToolIds.has('office-document')) {
+  const hasAction = (toolId: string, action: DesktopToolInvocationAction) => {
+    const tool = availableTools.find((item) => item.id === toolId);
+    return tool ? isToolActionEnabledForManifest(tool, action) : false;
+  };
+
+  if (artifactType === 'pptx' && hasAction('office-document', 'presentation.write_pptx')) {
     return 'office-document/presentation.write_pptx';
   }
 
-  if (artifactType === 'xlsx' && availableToolIds.has('office-document')) {
+  if (artifactType === 'xlsx' && hasAction('office-document', 'spreadsheet.write_xlsx')) {
     return 'office-document/spreadsheet.write_xlsx';
   }
 
-  if (artifactType === 'csv' && availableToolIds.has('office-document')) {
+  if (artifactType === 'csv' && hasAction('office-document', 'spreadsheet.write_csv')) {
     return 'office-document/spreadsheet.write_csv';
   }
 
-  if (artifactType === 'docx' && availableToolIds.has('office-document')) {
+  if (artifactType === 'docx' && hasAction('office-document', 'office.write_docx_document')) {
     return 'office-document/office.write_docx_document';
   }
 
-  if (['markdown', 'pdf'].includes(artifactType) && availableToolIds.has('office-document')) {
+  if (['markdown', 'pdf'].includes(artifactType) && hasAction('office-document', 'office.write_markdown_document')) {
     return 'office-document/office.write_markdown_document';
   }
 
-  if (artifactType === 'markdown' && availableToolIds.has('local-filesystem')) {
+  if (artifactType === 'markdown' && hasAction('local-filesystem', 'filesystem.write_text_file')) {
     return 'local-filesystem/filesystem.write_text_file';
   }
 
-  if (artifactType === 'mp4' && availableToolIds.has('video-processing')) {
+  if (artifactType === 'mp4' && hasAction('video-processing', 'video.compose_clips')) {
     return 'video-processing/video.compose_clips';
   }
 
@@ -4764,54 +4823,11 @@ function buildArtifactToolActionHint(
 function buildToolInstructions(tools: ToolManifest[]): string {
   return tools
     .flatMap((tool) => {
-      if (tool.id === 'local-filesystem') {
-        return [
-          '- local-filesystem/filesystem.write_text_file input: {"folder":"reports","fileName":"result","content":"markdown text"}',
-          '- local-filesystem/filesystem.read_text_file input: {"path":"absolute allowed local file path"}',
-          '- local-filesystem/filesystem.list_directory input: {"path":"absolute allowed local folder path"}'
-        ];
-      }
-
-      if (tool.id === 'web-search') {
-        return [
-          '- web-search/web.fetch_url input: {"url":"https://example.com","maxChars":12000}',
-          '- web-search/web.search input: {"query":"search terms","maxResults":5}'
-        ];
-      }
-
-      if (tool.id === 'http-request') {
-        return [
-          '- http-request/http.request input: {"method":"GET","url":"https://api.example.com/items","headers":{},"maxChars":12000}'
-        ];
-      }
-
-      if (tool.id === 'mcp') {
-        return [
-          '- mcp/mcp.call input: {"endpoint":"http://127.0.0.1:3001/mcp","toolName":"tool_name","arguments":{},"allowPrivateNetwork":true}'
-        ];
-      }
-
-      if (tool.id === 'video-processing') {
-        return [
-          '- video-processing/video.probe input: {"videoPath":"absolute allowed local video path"}',
-          '- video-processing/video.extract_frames input: {"videoPath":"absolute allowed local video path","frameIntervalSeconds":5,"maxFrames":12,"folder":"frames","fileName":"video-frames"}',
-          '- video-processing/video.compose_clips input: {"videoPath":"absolute allowed local video path","cutPlan":[{"start":0,"end":15}],"folder":"videos","fileName":"edited-video"}'
-        ];
-      }
-
-      if (tool.id === 'office-document') {
-        return [
-          '- office-document/document.extract_text input: {"path":"absolute allowed local document path","maxChars":30000}',
-          '- office-document/office.write_markdown_document input: {"title":"title","folder":"documents","fileName":"file-name","content":"markdown text"}',
-          '- office-document/office.write_docx_document input: {"title":"title","folder":"documents","fileName":"file-name","content":"document text"}',
-          '- office-document/spreadsheet.write_csv input: {"folder":"spreadsheets","fileName":"file-name","rows":[["name","value"],["A","1"]]}',
-          '- office-document/spreadsheet.write_xlsx input: {"folder":"spreadsheets","fileName":"file-name","rows":[["name","value"],["A","1"]]}',
-          '- office-document/presentation.write_pptx input: {"title":"title","folder":"presentations","fileName":"file-name","slides":[{"title":"slide","bullets":["point"]}]}',
-          '- office-document/presentation.write_outline_markdown input: {"title":"title","folder":"presentations","fileName":"file-name","slides":[{"title":"slide","bullets":["point"]}]}'
-        ];
-      }
-
-      return [];
+      return (tool.actions ?? []).map((action) => {
+        const inputTypes = action.inputTypes?.length ? ` inputTypes=${action.inputTypes.join('|')}` : '';
+        const outputTypes = action.outputTypes?.length ? ` outputTypes=${action.outputTypes.join('|')}` : '';
+        return `- ${tool.id}/${action.action}${inputTypes}${outputTypes}`;
+      });
     })
     .join('\n');
 }
@@ -4981,6 +4997,10 @@ function removeToolCallBlock(content: string): string {
 
 function isDesktopToolInvocationAction(value: unknown): value is DesktopToolInvocationAction {
   return typeof value === 'string' && supportedToolActions.includes(value as DesktopToolInvocationAction);
+}
+
+function isToolActionEnabledForManifest(tool: ToolManifest, action: DesktopToolInvocationAction): boolean {
+  return Boolean(tool.actions?.some((item) => item.action === action));
 }
 
 function sumOptionalTokenCounts(left: number | undefined, right: number | undefined): number | undefined {
