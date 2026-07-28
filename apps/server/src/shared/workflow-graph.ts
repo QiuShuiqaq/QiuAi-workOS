@@ -7,6 +7,7 @@ export type ServerRoleWorkflowGraphNodeType =
   | 'reasoning'
   | 'llm'
   | 'assign'
+  | 'code'
   | 'template'
   | 'tool'
   | 'condition'
@@ -117,6 +118,7 @@ const nodeTypes = new Set<string>([
   'reasoning',
   'llm',
   'assign',
+  'code',
   'template',
   'tool',
   'condition',

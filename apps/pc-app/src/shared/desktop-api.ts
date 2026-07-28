@@ -198,6 +198,16 @@ export interface DesktopTaskArtifactWriteResult {
   localPath: string;
 }
 
+export interface DesktopArtifactSaveAsRequest {
+  sourcePath: string;
+  suggestedFileName?: string;
+}
+
+export interface DesktopArtifactSaveAsResult {
+  canceled: boolean;
+  savedPath?: string;
+}
+
 export type DesktopToolInvocationAction =
   | 'filesystem.write_text_file'
   | 'filesystem.read_text_file'
@@ -253,6 +263,7 @@ export interface QiuDesktopBridge {
   listProviderModels(request: DesktopModelListRequest): Promise<DesktopModelListResponse>;
   selectKnowledgeSourcePath(source: KnowledgeBindingSource): Promise<DesktopKnowledgeSourcePathResult>;
   writeTaskArtifact(request: DesktopTaskArtifactWriteRequest): Promise<DesktopTaskArtifactWriteResult>;
+  saveArtifactAs(request: DesktopArtifactSaveAsRequest): Promise<DesktopArtifactSaveAsResult>;
   invokeDesktopTool(request: DesktopToolInvocationRequest): Promise<DesktopToolInvocationResult>;
   openLocalPath(path: string): Promise<void>;
   openExternalUrl(url: string): Promise<void>;

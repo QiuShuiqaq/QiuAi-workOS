@@ -214,6 +214,7 @@ export function writeWorkflowNodeOutputs(input: {
   json?: unknown;
   result?: WorkflowRuntimeValue;
   file?: WorkflowFileValue;
+  outputValue?: WorkflowRuntimeValue;
 }): string[] {
   const outputRefs: string[] = [];
 
@@ -243,7 +244,9 @@ export function writeWorkflowNodeOutputs(input: {
       continue;
     }
 
-    const value = input.text ?? input.result ?? input.file ?? input.json;
+    const value = Object.prototype.hasOwnProperty.call(input, 'outputValue')
+      ? input.outputValue
+      : input.text ?? input.result ?? input.file ?? input.json;
     if (value === undefined) {
       continue;
     }

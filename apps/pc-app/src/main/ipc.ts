@@ -1,4 +1,5 @@
 import * as electron from 'electron';
+import path from 'node:path';
 import {
   bindDesktopDevice,
   checkForDesktopUpdates,
@@ -12,7 +13,11 @@ import {
 import { saveDesktopRuntimeState } from './runtime-store.js';
 import { invokeOpenAiCompatibleModelChat, listOpenAiCompatibleModels } from './model-chat.js';
 import { selectKnowledgeSourcePath } from './knowledge-source.js';
-import { writeTaskArtifactFile } from './artifact-store.js';
+import {
+  cleanupExpiredArtifactCache,
+  saveArtifactFileAs,
+  writeTaskArtifactFile
+} from './artifact-store.js';
 import { invokeDesktopTool } from './desktop-tool.js';
 import {
   createWorkspaceBackupBundle,
@@ -21,7 +26,7 @@ import {
 } from './workspace-backup.js';
 
 const electronApi = (electron as typeof electron & { default?: typeof electron }).default ?? electron;
-const { BrowserWindow, ipcMain, shell } = electronApi;
+const { BrowserWindow, dialog, ipcMain, shell, app } = electronApi;
 
 const channels = {
   getAppInfo: 'qiuai:desktop:get-app-info',
@@ -40,6 +45,7 @@ const channels = {
   listProviderModels: 'qiuai:desktop:list-provider-models',
   selectKnowledgeSourcePath: 'qiuai:desktop:select-knowledge-source-path',
   writeTaskArtifact: 'qiuai:desktop:write-task-artifact',
+  saveArtifactAs: 'qiuai:desktop:save-artifact-as',
   invokeDesktopTool: 'qiuai:desktop:invoke-desktop-tool',
   openLocalPath: 'qiuai:desktop:open-local-path',
   openExternalUrl: 'qiuai:desktop:open-external-url',
@@ -87,6 +93,33 @@ export function registerDesktopIpc() {
   });
   ipcMain.handle(channels.writeTaskArtifact, async (_, request) => {
     return writeTaskArtifactFile(getDesktopAppInfo().userDataPath, request);
+  });
+  ipcMain.handle(channels.saveArtifactAs, async (event, request) => {
+    const sourcePath = typeof request?.sourcePath === 'string' ? request.sourcePath.trim() : '';
+    if (!sourcePath) {
+      throw new Error('Artifact source path is required.');
+    }
+
+    const suggestedFileName = typeof request?.suggestedFileName === 'string' && request.suggestedFileName.trim()
+      ? request.suggestedFileName.trim()
+      : path.basename(sourcePath);
+    const currentWindow = BrowserWindow.fromWebContents(event.sender);
+    const saveDialogOptions = {
+      title: '保存结果文件',
+      defaultPath: path.join(getPreferredArtifactExportDirectoryPath(), suggestedFileName),
+      buttonLabel: '保存'
+    };
+    saveDialogOptions.title = '保存结果文件';
+    saveDialogOptions.buttonLabel = '保存';
+    const result = currentWindow
+      ? await dialog.showSaveDialog(currentWindow, saveDialogOptions)
+      : await dialog.showSaveDialog(saveDialogOptions);
+
+    if (result.canceled || !result.filePath) {
+      return { canceled: true };
+    }
+
+    return saveArtifactFileAs({ sourcePath, suggestedFileName }, result.filePath);
   });
   ipcMain.handle(channels.invokeDesktopTool, async (_, request) => {
     return invokeDesktopTool(getDesktopAppInfo().userDataPath, request);
@@ -142,4 +175,22 @@ export function registerDesktopIpc() {
 
     throw new Error(`Unsupported window action: ${action}`);
   });
+
+  cleanupLocalArtifactCache();
+}
+
+function cleanupLocalArtifactCache(): void {
+  try {
+    cleanupExpiredArtifactCache(getDesktopAppInfo().userDataPath);
+  } catch {
+    // Cache cleanup must never block desktop startup.
+  }
+}
+
+function getPreferredArtifactExportDirectoryPath(): string {
+  try {
+    return app.getPath('downloads');
+  } catch {
+    return process.cwd();
+  }
 }

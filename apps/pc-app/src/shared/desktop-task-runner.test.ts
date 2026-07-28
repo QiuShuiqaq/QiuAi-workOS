@@ -947,6 +947,474 @@ assert.equal(
   'C:\\QiuAI\\workspace\\spreadsheets\\lead-score.xlsx'
 );
 
+let workflowStructuredRowsXlsxToolCallCount = 0;
+const workflowStructuredRowsXlsxTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-structured-rows-xlsx-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Create structured lead table',
+    input: 'Create a structured lead table.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    toolIds: ['office-document'],
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'prepare_rows',
+          type: 'assign',
+          name: 'Prepare rows',
+          config: {
+            values: {
+              lead_rows: [
+                ['客户', '分数', '建议'],
+                ['Acme', '92', '优先跟进'],
+                ['Beta', '76', '补充预算信息']
+              ]
+            }
+          },
+          outputVariables: ['lead_rows']
+        },
+        {
+          id: 'write_rows_table',
+          type: 'artifact',
+          name: 'Write rows table',
+          toolId: 'office-document',
+          artifactType: 'xlsx',
+          inputVariables: ['lead_rows'],
+          outputVariables: ['lead_table_file'],
+          config: {
+            action: 'spreadsheet.write_xlsx',
+            input: {
+              folder: 'spreadsheets',
+              fileName: 'structured-leads',
+              rows: '$lead_rows'
+            }
+          }
+        }
+      ],
+      edges: [
+        { id: 'start-prepare-rows', sourceNodeId: 'start', targetNodeId: 'prepare_rows', condition: { type: 'always' } },
+        { id: 'prepare-rows-write', sourceNodeId: 'prepare_rows', targetNodeId: 'write_rows_table', condition: { type: 'always' } }
+      ]
+    }
+  },
+  workspaceId: 'workspace-workflow-structured-rows-xlsx',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['office-document'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async () => {
+    throw new Error('Structured rows xlsx should not invoke model.');
+  },
+  desktopToolInvoker: async (request) => {
+    workflowStructuredRowsXlsxToolCallCount += 1;
+    assert.equal(request.toolId, 'office-document');
+    assert.equal(request.action, 'spreadsheet.write_xlsx');
+    assert.deepEqual(request.input.rows, [
+      ['客户', '分数', '建议'],
+      ['Acme', '92', '优先跟进'],
+      ['Beta', '76', '补充预算信息']
+    ]);
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\spreadsheets\\structured-leads.xlsx'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:05.950Z'
+});
+
+assert.equal(workflowStructuredRowsXlsxToolCallCount, 1);
+assert.equal(workflowStructuredRowsXlsxTask.task.state, 'completed');
+assert.equal(
+  workflowStructuredRowsXlsxTask.task.artifacts[0]?.localPath,
+  'C:\\QiuAI\\workspace\\spreadsheets\\structured-leads.xlsx'
+);
+
+let workflowJsonToRowsXlsxModelInvocationCount = 0;
+let workflowJsonToRowsXlsxToolCallCount = 0;
+const workflowJsonToRowsXlsxTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-json-to-rows-xlsx-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Extract leads into Excel',
+    input: 'Extract leads and create a spreadsheet.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    toolIds: ['office-document'],
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'extract_leads',
+          type: 'llm',
+          name: 'Extract leads',
+          instruction: 'Return JSON with an items array.',
+          config: {
+            outputMode: 'json',
+            schema: {
+              items: [
+                {
+                  customer: 'string',
+                  score: 'number',
+                  suggestion: 'string'
+                }
+              ]
+            }
+          },
+          outputVariables: ['lead_payload']
+        },
+        {
+          id: 'build_rows',
+          type: 'assign',
+          name: 'Build spreadsheet rows',
+          inputVariables: ['lead_payload.items'],
+          outputVariables: ['lead_rows'],
+          config: {
+            tableMapping: {
+              sourceRef: 'lead_payload.items',
+              outputVariable: 'lead_rows',
+              columns: [
+                { header: 'Customer', path: 'customer' },
+                { header: 'Score', path: 'score' },
+                { header: 'Suggestion', path: 'suggestion' }
+              ]
+            }
+          }
+        },
+        {
+          id: 'write_leads',
+          type: 'artifact',
+          name: 'Write leads spreadsheet',
+          toolId: 'office-document',
+          artifactType: 'xlsx',
+          inputVariables: ['lead_rows'],
+          outputVariables: ['lead_file'],
+          config: {
+            action: 'spreadsheet.write_xlsx',
+            input: {
+              folder: 'spreadsheets',
+              fileName: 'lead-table',
+              rows: '$lead_rows'
+            }
+          }
+        }
+      ],
+      edges: [
+        { id: 'start-extract-leads', sourceNodeId: 'start', targetNodeId: 'extract_leads', condition: { type: 'always' } },
+        { id: 'extract-build-rows', sourceNodeId: 'extract_leads', targetNodeId: 'build_rows', condition: { type: 'always' } },
+        { id: 'build-rows-write', sourceNodeId: 'build_rows', targetNodeId: 'write_leads', condition: { type: 'always' } }
+      ]
+    }
+  },
+  workspaceId: 'workspace-workflow-json-to-rows-xlsx',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['office-document'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    workflowJsonToRowsXlsxModelInvocationCount += 1;
+    const prompt = request.messages.map((message) => message.content).join('\n');
+    assert.match(prompt, /Return valid JSON only/);
+    assert.match(prompt, /items/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: JSON.stringify({
+        items: [
+          { customer: 'Acme', score: 92, suggestion: 'Follow up first' },
+          { customer: 'Beta', score: 76, suggestion: 'Confirm budget' }
+        ]
+      })
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    workflowJsonToRowsXlsxToolCallCount += 1;
+    assert.equal(request.toolId, 'office-document');
+    assert.equal(request.action, 'spreadsheet.write_xlsx');
+    assert.deepEqual(request.input.rows, [
+      ['Customer', 'Score', 'Suggestion'],
+      ['Acme', '92', 'Follow up first'],
+      ['Beta', '76', 'Confirm budget']
+    ]);
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\spreadsheets\\lead-table.xlsx'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:05.970Z'
+});
+
+assert.equal(workflowJsonToRowsXlsxModelInvocationCount, 1);
+assert.equal(workflowJsonToRowsXlsxToolCallCount, 1);
+assert.equal(workflowJsonToRowsXlsxTask.task.state, 'completed');
+assert.equal(
+  workflowJsonToRowsXlsxTask.task.artifacts[0]?.localPath,
+  'C:\\QiuAI\\workspace\\spreadsheets\\lead-table.xlsx'
+);
+
+let workflowCodeRowsXlsxModelInvocationCount = 0;
+let workflowCodeRowsXlsxToolCallCount = 0;
+const workflowCodeRowsXlsxTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-code-rows-xlsx-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Transform leads with code',
+    input: 'Extract and score leads.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    toolIds: ['office-document'],
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'extract_leads',
+          type: 'llm',
+          name: 'Extract leads',
+          instruction: 'Return JSON with an items array.',
+          config: {
+            outputMode: 'json',
+            schema: {
+              items: [{ customer: 'string', score: 'number', suggestion: 'string' }]
+            }
+          },
+          outputVariables: ['lead_payload']
+        },
+        {
+          id: 'build_rows_with_code',
+          type: 'code',
+          name: 'Build rows with code',
+          inputVariables: ['lead_payload'],
+          outputVariables: ['lead_rows'],
+          config: {
+            outputVariable: 'lead_rows',
+            code: [
+              'const items = Array.isArray(input.lead_payload.items) ? input.lead_payload.items : [];',
+              'return helpers.toRows(items, [',
+              "  { header: 'Customer', path: 'customer' },",
+              "  { header: 'Score', path: 'score' },",
+              "  { header: 'Priority', path: 'priority' }",
+              '].map((column) => column)).map((row, index) => index === 0 ? row : [row[0], row[1], Number(row[1]) >= 90 ? "High" : "Normal"]);'
+            ].join('\n')
+          }
+        },
+        {
+          id: 'write_leads',
+          type: 'artifact',
+          name: 'Write transformed spreadsheet',
+          toolId: 'office-document',
+          artifactType: 'xlsx',
+          inputVariables: ['lead_rows'],
+          outputVariables: ['lead_file'],
+          config: {
+            action: 'spreadsheet.write_xlsx',
+            input: {
+              folder: 'spreadsheets',
+              fileName: 'coded-lead-table',
+              rows: '$lead_rows'
+            }
+          }
+        }
+      ],
+      edges: [
+        { id: 'start-extract-code-leads', sourceNodeId: 'start', targetNodeId: 'extract_leads', condition: { type: 'always' } },
+        { id: 'extract-code-rows', sourceNodeId: 'extract_leads', targetNodeId: 'build_rows_with_code', condition: { type: 'always' } },
+        { id: 'code-rows-write', sourceNodeId: 'build_rows_with_code', targetNodeId: 'write_leads', condition: { type: 'always' } }
+      ]
+    }
+  },
+  workspaceId: 'workspace-workflow-code-rows-xlsx',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['office-document'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    workflowCodeRowsXlsxModelInvocationCount += 1;
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: JSON.stringify({
+        items: [
+          { customer: 'Acme', score: 92, suggestion: 'Follow up first' },
+          { customer: 'Beta', score: 76, suggestion: 'Confirm budget' }
+        ]
+      })
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    workflowCodeRowsXlsxToolCallCount += 1;
+    assert.equal(request.toolId, 'office-document');
+    assert.equal(request.action, 'spreadsheet.write_xlsx');
+    assert.deepEqual(request.input.rows, [
+      ['Customer', 'Score', 'Priority'],
+      ['Acme', '92', 'High'],
+      ['Beta', '76', 'Normal']
+    ]);
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\spreadsheets\\coded-lead-table.xlsx'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:05.980Z'
+});
+
+assert.equal(workflowCodeRowsXlsxModelInvocationCount, 1);
+assert.equal(workflowCodeRowsXlsxToolCallCount, 1);
+assert.equal(workflowCodeRowsXlsxTask.task.state, 'completed');
+assert.equal(
+  workflowCodeRowsXlsxTask.task.artifacts[0]?.localPath,
+  'C:\\QiuAI\\workspace\\spreadsheets\\coded-lead-table.xlsx'
+);
+
+const blockedCodeNodeTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-blocked-code-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Blocked code',
+    input: 'Run unsafe code.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'unsafe_code',
+          type: 'code',
+          name: 'Unsafe code',
+          inputVariables: ['start.text'],
+          outputVariables: ['unsafe_result'],
+          config: {
+            outputVariable: 'unsafe_result',
+            code: 'return process.env;'
+          }
+        }
+      ],
+      edges: [
+        { id: 'start-unsafe-code', sourceNodeId: 'start', targetNodeId: 'unsafe_code', condition: { type: 'always' } }
+      ]
+    }
+  },
+  workspaceId: 'workspace-workflow-blocked-code',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: [],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => ({
+    provider: request.profile.providerName,
+    modelName: request.profile.modelName,
+    content: 'This model response should not be used by the blocked code node.'
+  }),
+  completedAt: '2026-07-20T10:00:05.990Z'
+});
+
+assert.equal(blockedCodeNodeTask.task.state, 'failed');
+assert.ok(
+  blockedCodeNodeTask.task.executionLogs.some((log) =>
+    /blocked token: process/.test(log.message)
+  )
+);
+
+const timedOutCodeNodeTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-timed-out-code-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Timed out code',
+    input: 'Run a non-terminating transform.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'slow_code',
+          type: 'code',
+          name: 'Slow code',
+          inputVariables: ['start.text'],
+          outputVariables: ['slow_result'],
+          config: {
+            outputVariable: 'slow_result',
+            timeoutMs: 100,
+            code: 'while (true) {}'
+          }
+        }
+      ],
+      edges: [
+        { id: 'start-slow-code', sourceNodeId: 'start', targetNodeId: 'slow_code', condition: { type: 'always' } }
+      ]
+    }
+  },
+  workspaceId: 'workspace-workflow-timed-out-code',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: [],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => ({
+    provider: request.profile.providerName,
+    modelName: request.profile.modelName,
+    content: 'This model response should not be used by the timed out code node.'
+  }),
+  completedAt: '2026-07-20T10:00:06.000Z'
+});
+
+assert.equal(timedOutCodeNodeTask.task.state, 'failed');
+assert.ok(
+  timedOutCodeNodeTask.task.executionLogs.some((log) =>
+    /exceeded timeout 100ms/.test(log.message)
+  )
+);
+
 let workflowPptxArtifactToolCallCount = 0;
 const workflowPptxArtifactTask = await runDesktopTask({
   task: createMockTaskDetail({
@@ -1210,6 +1678,13 @@ const runtimeJsonBranchTask = await runDesktopTask({
           type: 'llm',
           name: 'Classify intent',
           instruction: 'Return JSON with intent and query fields.',
+          config: {
+            outputMode: 'json',
+            schema: {
+              intent: 'string',
+              query: 'string'
+            }
+          },
           outputVariables: ['intent_payload']
         },
         {
@@ -1226,11 +1701,11 @@ const runtimeJsonBranchTask = await runDesktopTask({
           config: {
             action: 'web.search',
             input: {
-              query: '{{classify.json.query}}',
+              query: '{{intent_payload.query}}',
               maxResults: 3
             }
           },
-          inputVariables: ['classify.json.query'],
+          inputVariables: ['intent_payload.query'],
           outputVariables: ['research_context']
         },
         {
@@ -1264,7 +1739,7 @@ const runtimeJsonBranchTask = await runDesktopTask({
           id: 'route-research',
           sourceNodeId: 'route',
           targetNodeId: 'research',
-          condition: { type: 'equals', variable: 'classify.json.intent', value: 'proposal' }
+          condition: { type: 'equals', variable: 'intent_payload.intent', value: 'proposal' }
         },
         { id: 'route-fallback', sourceNodeId: 'route', targetNodeId: 'fallback', condition: { type: 'always' } },
         { id: 'research-draft', sourceNodeId: 'research', targetNodeId: 'draft', condition: { type: 'always' } },
@@ -1289,6 +1764,8 @@ const runtimeJsonBranchTask = await runDesktopTask({
 
     if (runtimeJsonBranchModelInvocationCount === 1) {
       assert.match(prompt, /Classify intent/);
+      assert.match(prompt, /Return valid JSON only/);
+      assert.match(prompt, /"intent": "string"/);
       return {
         provider: request.profile.providerName,
         modelName: request.profile.modelName,
@@ -1365,6 +1842,71 @@ assert.ok(
 assert.doesNotMatch(
   runtimeJsonBranchTask.task.artifacts.find((artifact) => artifact.type === 'report')?.content ?? '',
   /Fallback answer/
+);
+
+const invalidJsonOutputTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-invalid-json-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Extract structured payload',
+    input: 'Return structured lead information.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'extract_json',
+          type: 'llm',
+          name: 'Extract JSON',
+          instruction: 'Extract lead fields as JSON.',
+          config: {
+            outputMode: 'json',
+            schema: {
+              name: 'string',
+              need: 'string'
+            }
+          },
+          outputVariables: ['lead_payload']
+        }
+      ],
+      edges: [
+        { id: 'start-extract', sourceNodeId: 'start', targetNodeId: 'extract_json', condition: { type: 'always' } }
+      ]
+    }
+  },
+  workspaceId: 'workspace-workflow-invalid-json',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: [],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    const prompt = request.messages.map((message) => message.content).join('\n');
+    assert.match(prompt, /Return valid JSON only/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: 'I found a lead, but this is not JSON.'
+    };
+  },
+  completedAt: '2026-07-20T10:00:06.700Z'
+});
+
+assert.equal(invalidJsonOutputTask.task.state, 'failed');
+assert.ok(
+  invalidJsonOutputTask.task.executionLogs.some(
+    (log) =>
+      log.eventType === 'WORKFLOW_RUNTIME_NODE_FAILED' &&
+      /expected JSON output/.test(log.message)
+  )
 );
 
 let workflowStructureModelInvocationCount = 0;

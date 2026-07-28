@@ -8,7 +8,7 @@ declare module 'electron' {
     quit(): void;
     setAppUserModelId(id: string): void;
     setPath(name: 'userData', value: string): void;
-    getPath(name: 'userData'): string;
+    getPath(name: 'userData' | 'downloads'): string;
   };
 
   export class BrowserWindow {
@@ -72,6 +72,25 @@ declare module 'electron' {
     }): Promise<{
       canceled: boolean;
       filePaths: string[];
+    }>;
+    showSaveDialog(
+      browserWindow: BrowserWindow | null,
+      options: {
+        title?: string;
+        defaultPath?: string;
+        buttonLabel?: string;
+      }
+    ): Promise<{
+      canceled: boolean;
+      filePath?: string;
+    }>;
+    showSaveDialog(options: {
+      title?: string;
+      defaultPath?: string;
+      buttonLabel?: string;
+    }): Promise<{
+      canceled: boolean;
+      filePath?: string;
     }>;
   };
 

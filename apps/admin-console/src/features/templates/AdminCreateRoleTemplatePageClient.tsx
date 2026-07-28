@@ -71,17 +71,30 @@ export interface AdminCreateRoleTemplatePageClientProps {
 type WorkflowPreset = 'standard' | 'document' | 'research';
 type WorkflowNodeType = RoleWorkflowGraphNode['type'];
 type WorkflowArtifactType = NonNullable<RoleWorkflowGraphNode['artifactType']>;
+type WorkflowVariableType = NonNullable<NonNullable<RoleWorkflowGraph['variables']>[number]['type']>;
 type WorkflowEdge = RoleWorkflowGraph['edges'][number];
 type WorkflowEdgeConditionType = NonNullable<WorkflowEdge['condition']>['type'];
 type ToolConfigFieldType = 'text' | 'number' | 'textarea' | 'boolean';
+type WorkflowModelOutputMode = 'text' | 'json';
 type WorkflowCanvasPosition = { x: number; y: number };
 type WorkflowSelection = { type: 'node' | 'edge'; id: string };
+type WorkflowConfigPanelTab = 'settings' | 'lastRun';
+type WorkflowTableColumnConfig = { header: string; path: string };
+type WorkflowCodePreviewResult = {
+  status: 'passed' | 'failed';
+  inputPreview: string;
+  outputPreview: string;
+  error?: string;
+};
 type WorkflowFlowNodeData = {
   nodeType: WorkflowNodeType;
   title: string;
   meta: string;
   details: string[];
   tone: string;
+  statusLabel: string;
+  statusClass: 'ready' | 'warning' | 'failed';
+  warnings: string[];
 } & Record<string, unknown>;
 type WorkflowFlowNode = FlowNode<WorkflowFlowNodeData, 'workflowNode'>;
 type WorkflowFlowEdge = FlowEdge<{ conditionLabel: string }>;
@@ -119,6 +132,15 @@ type TemplateTestResult = {
   warnings: string[];
   sampleInput?: string;
   graphTrace?: AdminRoleTemplateTestGraphTrace;
+};
+type WorkflowNodeTrace = NonNullable<TemplateTestResult['graphTrace']>['nodes'][number];
+
+type WorkflowVariableOption = {
+  value: string;
+  label: string;
+  type: WorkflowVariableType;
+  source: string;
+  description?: string;
 };
 
 type SkillForm = {
@@ -420,6 +442,7 @@ const workflowNodeTypeOptions: Array<{ value: WorkflowNodeType; label: string }>
   { value: 'iteration', label: '迭代' },
   { value: 'loop', label: '循环' },
   { value: 'aggregator', label: '变量聚合' },
+  { value: 'code', label: '代码转换' },
   { value: 'template', label: '模板' },
   { value: 'assign', label: '变量赋值' },
   { value: 'artifact', label: '产物' },
@@ -449,6 +472,7 @@ const workflowNodeCatalogGroups: Array<{
       { value: 'list', label: '列表处理', hint: '筛选、排序和整理文件或数组' },
       { value: 'iteration', label: '迭代', hint: '逐个处理数组里的每一项' },
       { value: 'aggregator', label: '变量聚合', hint: '合并多个分支或变量结果' },
+      { value: 'code', label: '代码转换', hint: '用受限 JS 清洗 JSON、计算字段或生成 rows' },
       { value: 'template', label: '内容模板', hint: '把变量拼成稳定格式' },
       { value: 'assign', label: '变量赋值', hint: '设置固定值或复制变量' },
       { value: 'knowledge', label: '知识库', hint: '读取企业或本地知识' }
@@ -514,19 +538,97 @@ const conditionTypeOptions: Array<{ value: WorkflowEdgeConditionType; label: str
   { value: 'expression', label: '表达式' }
 ];
 
-const workflowVariableReferenceTags = [
-  { value: 'start.text', label: '用户任务' },
-  { value: 'start.files', label: '拖入附件列表' },
-  { value: 'start.videos', label: '视频附件' },
-  { value: 'runtime.previous_text', label: '上一步文本' },
-  { value: 'runtime.current_item', label: '当前迭代项' },
-  { value: 'node_id.text', label: '节点文本' },
-  { value: 'node_id.json', label: '节点 JSON' },
-  { value: 'node_id.file', label: '节点文件' }
+const modelOutputModeOptions: Array<{ value: WorkflowModelOutputMode; label: string }> = [
+  { value: 'text', label: '文本' },
+  { value: 'json', label: 'JSON 结构化数据' }
 ];
 
+const workflowVariableTypeLabels: Record<WorkflowVariableType, string> = {
+  text: '文本',
+  number: '数字',
+  boolean: '布尔',
+  json: 'JSON',
+  asset: '文件',
+  'asset[]': '文件组',
+  table: '表格',
+  artifact: '产物'
+};
+
+const workflowVariableTypeColors: Record<WorkflowVariableType, string> = {
+  text: 'blue',
+  number: 'cyan',
+  boolean: 'gold',
+  json: 'purple',
+  asset: 'green',
+  'asset[]': 'green',
+  table: 'magenta',
+  artifact: 'volcano'
+};
+
+const defaultWorkflowVariableOptions: WorkflowVariableOption[] = [
+  {
+    value: 'start.text',
+    label: '用户输入的任务文本',
+    type: 'text',
+    source: '开始节点'
+  },
+  {
+    value: 'start.files',
+    label: '用户拖入的全部附件',
+    type: 'asset[]',
+    source: '开始节点',
+    description: '文件只传引用和本地路径，节点执行时再读取'
+  },
+  {
+    value: 'start.documents',
+    label: '文档附件',
+    type: 'asset[]',
+    source: '开始节点'
+  },
+  {
+    value: 'start.spreadsheets',
+    label: '表格附件',
+    type: 'asset[]',
+    source: '开始节点'
+  },
+  {
+    value: 'start.images',
+    label: '图片附件',
+    type: 'asset[]',
+    source: '开始节点'
+  },
+  {
+    value: 'start.videos',
+    label: '视频附件',
+    type: 'asset[]',
+    source: '开始节点'
+  },
+  {
+    value: 'runtime.previous_text',
+    label: '上一步文本结果',
+    type: 'text',
+    source: '运行时'
+  },
+  {
+    value: 'runtime.current_item',
+    label: '当前迭代项',
+    type: 'asset',
+    source: '运行时'
+  }
+];
+
+const legacyWorkflowNodeNameTranslations: Record<string, string> = {
+  Start: '开始',
+  'Receive task': '接收任务',
+  'Gather context': '读取上下文',
+  'Web research': '网页调研',
+  'Draft result': '生成初稿',
+  'Write deliverable': '生成产物',
+  'Final response': '返回结果'
+};
+
 const defaultNodeNames: Record<WorkflowNodeType, string> = {
-  start: 'Start',
+  start: '开始',
   input: '接收输入',
   parameter_extractor: '提取参数',
   list: '整理列表',
@@ -534,6 +636,7 @@ const defaultNodeNames: Record<WorkflowNodeType, string> = {
   reasoning: '分析推理',
   llm: 'LLM 生成',
   assign: '变量赋值',
+  code: '代码转换',
   template: '套用模板',
   tool: '调用工具',
   condition: '条件判断',
@@ -590,9 +693,11 @@ function createCanvasNode(type: WorkflowNodeType, nodes: RoleWorkflowGraphNode[]
     : toolId
       ? getDefaultToolActionTemplate(toolId)
       : undefined;
+  const modelOutputMode: WorkflowModelOutputMode = type === 'parameter_extractor' ? 'json' : 'text';
   const defaultConfig =
     type === 'parameter_extractor'
       ? {
+          outputMode: 'json',
           schema: {
             targetDuration: 'number',
             outputFormat: 'string',
@@ -605,10 +710,24 @@ function createCanvasNode(type: WorkflowNodeType, nodes: RoleWorkflowGraphNode[]
           ? { sourceRef: 'list.items' }
           : type === 'loop'
             ? { maxIterations: 3 }
-            : type === 'aggregator'
-              ? { mode: 'object' }
-              : type === 'template'
-                ? { template: '{{runtime.previous_text}}' }
+                : type === 'aggregator'
+                  ? { mode: 'object' }
+                : type === 'template'
+                  ? { template: '{{runtime.previous_text}}' }
+                : type === 'assign'
+                  ? { assignments: [{ name: `${id}.value`, value: '$runtime.previous_text' }] }
+                : type === 'code'
+                  ? {
+                      code: [
+                        'const text = input.runtime?.previous_text || input.start?.text || "";',
+                        'return {',
+                        '  text,',
+                        "  rows: [['项目', '内容'], ['输入', text]]",
+                        '};'
+                      ].join('\n'),
+                      outputVariable: `${id}.json`,
+                      timeoutMs: 2_000
+                    }
                 : (type === 'tool' || type === 'artifact') && toolActionTemplate
                   ? {
                       action: toolActionTemplate.value,
@@ -633,6 +752,8 @@ function createCanvasNode(type: WorkflowNodeType, nodes: RoleWorkflowGraphNode[]
                 ? '把多个变量或分支结果合并成一个结果。'
                 : type === 'loop'
                   ? '控制循环次数和继续条件。'
+                  : type === 'code'
+                    ? '运行受限 JavaScript，把输入变量转换成结构化 JSON 或表格 rows。'
         : type === 'tool'
           ? '调用指定工具完成当前步骤。'
           : type === 'artifact'
@@ -654,9 +775,15 @@ function createCanvasNode(type: WorkflowNodeType, nodes: RoleWorkflowGraphNode[]
         ? [`${id}.items`]
         : type === 'iteration'
           ? [`${id}.current`]
+          : type === 'assign'
+            ? [`${id}.value`]
+          : type === 'code'
+            ? [`${id}.json`]
           : type === 'parameter_extractor'
             ? [`${id}.json`]
-            : [`${id}.text`],
+            : type === 'llm' || type === 'reasoning'
+              ? [`${id}.${modelOutputMode === 'json' ? 'json' : 'text'}`]
+              : [`${id}.text`],
     requiresApproval: type === 'approval',
     config: defaultConfig
   };
@@ -731,6 +858,99 @@ function buildToolNodeConfig(node: RoleWorkflowGraphNode, patch: Record<string, 
   };
 }
 
+function readWorkflowModelOutputMode(node: RoleWorkflowGraphNode): WorkflowModelOutputMode {
+  if (node.type === 'parameter_extractor') return 'json';
+  return node.config?.outputMode === 'json' ? 'json' : 'text';
+}
+
+function defaultWorkflowModelSchema(node: RoleWorkflowGraphNode): Record<string, unknown> {
+  if (node.type === 'parameter_extractor') {
+    return {
+      target: 'string',
+      constraints: 'string[]',
+      outputFormat: 'string'
+    };
+  }
+
+  return {
+    summary: 'string',
+    items: 'array',
+    risks: 'string[]',
+    nextActions: 'string[]'
+  };
+}
+
+function readWorkflowModelSchema(node: RoleWorkflowGraphNode): unknown {
+  return node.config?.schema ?? node.config?.jsonSchema ?? {};
+}
+
+function readWorkflowAssignConfig(node: RoleWorkflowGraphNode): { name: string; value: string } {
+  const assignments = Array.isArray(node.config?.assignments) ? node.config.assignments : [];
+  const firstAssignment = assignments.find(
+    (item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item)
+  );
+  const assignmentName = typeof firstAssignment?.name === 'string' ? firstAssignment.name : '';
+  const assignmentValue = firstAssignment?.value;
+  const fallbackName = node.outputVariables?.[0] ?? `${node.id}.value`;
+  const fallbackValue = node.config?.value ?? node.config?.template ?? '$runtime.previous_text';
+
+  return {
+    name: assignmentName || fallbackName,
+    value: typeof assignmentValue === 'string'
+      ? assignmentValue
+      : assignmentValue === undefined
+        ? String(fallbackValue)
+        : stringifyJsonConfigValue(assignmentValue)
+  };
+}
+
+function readWorkflowToolInputConfig(node: RoleWorkflowGraphNode): Record<string, unknown> {
+  return node.config?.input && typeof node.config.input === 'object' && !Array.isArray(node.config.input)
+    ? (node.config.input as Record<string, unknown>)
+    : {};
+}
+
+function readArtifactTableSourceRef(node: RoleWorkflowGraphNode): string | undefined {
+  const rows = readWorkflowToolInputConfig(node).rows;
+  if (typeof rows !== 'string') return undefined;
+  const match = rows.trim().match(/^\$([a-zA-Z0-9_.-]+)$/);
+  return match?.[1];
+}
+
+function readWorkflowAssignTableMappingConfig(node: RoleWorkflowGraphNode): {
+  sourceRef?: string;
+  outputVariable: string;
+  columns: WorkflowTableColumnConfig[];
+} {
+  const mapping = node.config?.tableMapping && typeof node.config.tableMapping === 'object' && !Array.isArray(node.config.tableMapping)
+    ? (node.config.tableMapping as Record<string, unknown>)
+    : {};
+  const columns = Array.isArray(mapping.columns)
+    ? mapping.columns.flatMap((item) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+        const record = item as Record<string, unknown>;
+        const header = typeof record.header === 'string' ? record.header.trim() : '';
+        const path = typeof record.path === 'string' ? record.path.trim() : '';
+        return header && path ? [{ header, path }] : [];
+      })
+    : [];
+
+  return {
+    sourceRef: typeof mapping.sourceRef === 'string' && mapping.sourceRef.trim() ? mapping.sourceRef.trim() : undefined,
+    outputVariable:
+      typeof mapping.outputVariable === 'string' && mapping.outputVariable.trim()
+        ? mapping.outputVariable.trim()
+        : node.outputVariables?.[0] ?? `${node.id}.rows`,
+    columns
+  };
+}
+
+const defaultWorkflowTableColumns: WorkflowTableColumnConfig[] = [
+  { header: '名称', path: 'name' },
+  { header: '分数', path: 'score' },
+  { header: '建议', path: 'suggestion' }
+];
+
 function readWorkflowNodeCanvasPosition(
   node: RoleWorkflowGraphNode,
   fallback: WorkflowCanvasPosition
@@ -766,6 +986,137 @@ function writeWorkflowNodeCanvasPosition(
       }
     }
   };
+}
+
+function workflowVariableTypeClass(type: WorkflowVariableType) {
+  return type.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+}
+
+function inferWorkflowVariableTypeFromName(value: string): WorkflowVariableType {
+  const normalized = value.toLowerCase();
+  if (/(table|rows|sheet|spreadsheet|csv|xlsx)/.test(normalized)) return 'table';
+  if (/(files|attachments|documents|spreadsheets|images|videos|audios)/.test(normalized)) return 'asset[]';
+  if (/(artifact|deliverable|final_file|output_file|\.file$|_file$)/.test(normalized)) return 'artifact';
+  if (/(current_item|asset|localpath|file_path|video_path|image_path|document_path)/.test(normalized)) return 'asset';
+  if (/(json|object|items|list|array|schema|plan|payload|result)/.test(normalized)) return 'json';
+  if (/(count|score|duration|seconds|number|index|total|max|min|price|amount|cost|ratio)/.test(normalized)) return 'number';
+  if (/(flag|valid|ok|success|enabled|boolean|needs_|is_|has_)/.test(normalized)) return 'boolean';
+  return 'text';
+}
+
+function inferWorkflowToolOutputType(node: RoleWorkflowGraphNode): WorkflowVariableType {
+  const action = typeof node.config?.action === 'string' ? node.config.action : '';
+  if (node.type === 'artifact') return 'artifact';
+  if (action.includes('extract_text') || action.includes('read_text') || action.includes('web.search') || action.includes('web.fetch')) {
+    return 'text';
+  }
+  if (action.includes('write_xlsx') || action.includes('write_csv')) return 'table';
+  if (action.includes('compose_clips')) return 'artifact';
+  if (action.includes('extract_frames')) return 'asset[]';
+  if (action.includes('probe') || action.includes('http.request') || action.includes('mcp.call')) return 'json';
+  return 'json';
+}
+
+function inferWorkflowNodeOutputType(node: RoleWorkflowGraphNode, variableName: string): WorkflowVariableType {
+  const byName = inferWorkflowVariableTypeFromName(variableName);
+  if (byName !== 'text') return byName;
+
+  if (node.type === 'artifact') return 'artifact';
+  if (node.type === 'tool') return inferWorkflowToolOutputType(node);
+  if (node.type === 'parameter_extractor' || node.type === 'aggregator' || node.type === 'assign' || node.type === 'code') return 'json';
+  if (node.type === 'list') return 'asset[]';
+  if (node.type === 'iteration') return 'asset';
+  if (node.type === 'condition') return 'boolean';
+  if ((node.type === 'llm' || node.type === 'reasoning') && readWorkflowModelOutputMode(node) === 'json') {
+    return 'json';
+  }
+  if (node.type === 'knowledge' || node.type === 'llm' || node.type === 'reasoning' || node.type === 'template' || node.type === 'output') {
+    return 'text';
+  }
+  return byName;
+}
+
+function getWorkflowNodeDefaultOutputVariables(node: RoleWorkflowGraphNode): string[] {
+  if (node.type === 'start') return [];
+  if (node.type === 'artifact') return [`${node.id}.file`];
+  if (node.type === 'parameter_extractor') return [`${node.id}.json`];
+  if (node.type === 'list') return [`${node.id}.items`];
+  if (node.type === 'iteration') return [`${node.id}.current`];
+  if (node.type === 'tool') {
+    const outputType = inferWorkflowToolOutputType(node);
+    if (outputType === 'asset[]') return [`${node.id}.files`];
+    if (outputType === 'asset') return [`${node.id}.file`];
+    if (outputType === 'artifact') return [`${node.id}.file`];
+    if (outputType === 'table') return [`${node.id}.table`];
+    if (outputType === 'json') return [`${node.id}.json`];
+  }
+  if ((node.type === 'llm' || node.type === 'reasoning') && readWorkflowModelOutputMode(node) === 'json') {
+    return [`${node.id}.json`];
+  }
+  if (node.type === 'condition') return [`${node.id}.matched`];
+  if (node.type === 'aggregator' || node.type === 'assign' || node.type === 'code') return [`${node.id}.json`];
+  return [`${node.id}.text`];
+}
+
+function addWorkflowVariableOption(
+  options: Map<string, WorkflowVariableOption>,
+  option: WorkflowVariableOption
+) {
+  const value = option.value.trim();
+  if (!value || options.has(value)) return;
+  options.set(value, { ...option, value });
+}
+
+function deriveWorkflowVariableOptions(graph: RoleWorkflowGraph): WorkflowVariableOption[] {
+  const options = new Map<string, WorkflowVariableOption>();
+
+  for (const option of defaultWorkflowVariableOptions) {
+    addWorkflowVariableOption(options, option);
+  }
+
+  for (const variable of graph.variables ?? []) {
+    addWorkflowVariableOption(options, {
+      value: variable.name,
+      label: variable.description ?? variable.name,
+      type: variable.type ?? inferWorkflowVariableTypeFromName(variable.name),
+      source: '画布变量',
+      description: variable.required ? '必填变量' : undefined
+    });
+  }
+
+  for (const node of graph.nodes) {
+    for (const variableName of uniqueTags([
+      ...(node.outputVariables ?? []),
+      ...getWorkflowNodeDefaultOutputVariables(node)
+    ])) {
+      addWorkflowVariableOption(options, {
+        value: variableName,
+        label: `${node.name} 输出`,
+        type: inferWorkflowNodeOutputType(node, variableName),
+        source: node.name,
+        description: workflowNodeTypeLabel(node.type)
+      });
+    }
+  }
+
+  return [...options.values()];
+}
+
+function buildWorkflowVariableSelectOptions(
+  variableOptions: WorkflowVariableOption[],
+  acceptedTypes?: WorkflowVariableType[]
+) {
+  const acceptedTypeSet = acceptedTypes ? new Set<WorkflowVariableType>(acceptedTypes) : undefined;
+  return variableOptions
+    .filter((option) => !acceptedTypeSet || acceptedTypeSet.has(option.type))
+    .map((option) => ({
+      value: option.value,
+      label: `${option.value} · ${workflowVariableTypeLabels[option.type]} · ${option.label}`
+    }));
+}
+
+function formatWorkflowVariableToken(value: string, mode: 'template' | 'path' = 'template') {
+  return mode === 'path' ? `$${value}` : `{{${value}}}`;
 }
 
 function readWorkflowGraphToolIds(graph: RoleWorkflowGraph): string[] {
@@ -846,6 +1197,22 @@ function deriveWorkflowCapabilitySummary(graph: RoleWorkflowGraph): WorkflowCapa
       ...(!hasOutputNode ? ['缺少输出节点，PC 端可能无法明确展示最终结果。'] : []),
       ...(orphanNodes.length ? [`存在 ${orphanNodes.length} 个孤立节点，请确认是否需要连线。`] : [])
     ]
+  };
+}
+
+function deriveWorkflowNodeWarningCount(graph: RoleWorkflowGraph) {
+  const variableOptions = deriveWorkflowVariableOptions(graph);
+  return graph.nodes.reduce((total, node) => total + workflowNodeWarnings(node, variableOptions).length, 0);
+}
+
+function deriveWorkflowTraceSummary(result: TemplateTestResult | null) {
+  const traces = result?.graphTrace?.nodes ?? [];
+  if (!traces.length) return undefined;
+
+  return {
+    passed: traces.filter((trace) => trace.status === 'passed').length,
+    warning: traces.filter((trace) => trace.status === 'warning').length,
+    failed: traces.filter((trace) => trace.status === 'failed').length
   };
 }
 
@@ -1074,6 +1441,16 @@ function createWorkflowGraph(preset: WorkflowPreset): RoleWorkflowGraph {
   };
 }
 
+function normalizeWorkflowGraphForCanvas(graph: RoleWorkflowGraph): RoleWorkflowGraph {
+  return {
+    ...graph,
+    nodes: graph.nodes.map((node) => ({
+      ...node,
+      name: legacyWorkflowNodeNameTranslations[node.name] ?? node.name
+    }))
+  };
+}
+
 function nodeTone(type: RoleWorkflowGraphNode['type']) {
   if (type === 'llm' || type === 'reasoning' || type === 'parameter_extractor') return 'blue';
   if (type === 'tool' || type === 'artifact') return 'purple';
@@ -1105,24 +1482,130 @@ function workflowNodeDetails(node: RoleWorkflowGraphNode) {
   return details.slice(0, 3);
 }
 
-function toWorkflowFlowNodes(graph: RoleWorkflowGraph): WorkflowFlowNode[] {
-  return graph.nodes.map((node, index) => ({
-    id: node.id,
-    type: 'workflowNode',
-    position: readWorkflowNodeCanvasPosition(node, {
-      x: 80 + index * 260,
-      y: 180 + (index % 2) * 140
-    }),
-    sourcePosition: Position.Right,
-    targetPosition: Position.Left,
-    data: {
-      nodeType: node.type,
-      title: node.name,
-      meta: workflowNodeMeta(node),
-      details: workflowNodeDetails(node),
-      tone: nodeTone(node.type)
+function workflowNodeWarnings(node: RoleWorkflowGraphNode, variableOptions?: WorkflowVariableOption[]) {
+  const warnings: string[] = [];
+  const instruction = node.instruction?.trim();
+  const action = typeof node.config?.action === 'string' ? node.config.action.trim() : '';
+  const variableTypeByValue = variableOptions
+    ? new Map(variableOptions.map((variable) => [variable.value, variable.type]))
+    : undefined;
+
+  if (node.type === 'llm' || node.type === 'reasoning' || node.type === 'parameter_extractor') {
+    if (!node.modelProfileId) warnings.push('未选模型');
+    if (!instruction) warnings.push('缺少提示词');
+    if (readWorkflowModelOutputMode(node) === 'json') {
+      const schema = readWorkflowModelSchema(node);
+      if (!schema || (typeof schema === 'object' && !Array.isArray(schema) && Object.keys(schema).length === 0)) {
+        warnings.push('JSON 输出缺少结构说明');
+      }
     }
-  }));
+  }
+
+  if (node.type === 'tool') {
+    if (!node.toolId) warnings.push('未选工具');
+    if (!action) warnings.push('未选动作');
+  }
+
+  if (node.type === 'assign') {
+    const assignConfig = readWorkflowAssignConfig(node);
+    if (!assignConfig.name.trim()) warnings.push('未设置变量名');
+    if (!assignConfig.value.trim()) warnings.push('未设置变量值');
+    if (node.config?.tableMapping) {
+      const tableMapping = readWorkflowAssignTableMappingConfig(node);
+      if (!tableMapping.sourceRef) warnings.push('表格映射缺少来源变量');
+      if (!tableMapping.outputVariable.trim()) warnings.push('表格映射缺少输出变量');
+      if (tableMapping.columns.length === 0) warnings.push('表格映射缺少列');
+    }
+  }
+
+  if (node.type === 'code') {
+    const code = typeof node.config?.code === 'string' ? node.config.code.trim() : '';
+    const outputVariable = typeof node.config?.outputVariable === 'string'
+      ? node.config.outputVariable.trim()
+      : node.outputVariables?.[0]?.trim();
+    const timeoutMs = typeof node.config?.timeoutMs === 'number' ? node.config.timeoutMs : 0;
+    if (!code) warnings.push('缺少转换脚本');
+    if (!outputVariable) warnings.push('未设置输出变量');
+    if (!timeoutMs) warnings.push('未设置超时');
+    if (timeoutMs > 10_000) warnings.push('超时不能超过 10000ms');
+  }
+
+  if (node.type === 'artifact') {
+    if (!node.artifactType) warnings.push('未选格式');
+    if (!node.toolId) warnings.push('未选写入工具');
+    if (!action) warnings.push('未选写入动作');
+    if (
+      (node.artifactType === 'xlsx' || node.artifactType === 'csv') &&
+      !(node.inputVariables ?? []).some((value) =>
+        variableTypeByValue
+          ? variableTypeByValue.get(value) === 'table'
+          : isSpreadsheetReadyVariableRef(value)
+      )
+    ) {
+      warnings.push('表格产物建议接 table/rows');
+    }
+  }
+
+  if (node.type === 'output' && !(node.inputVariables?.length)) {
+    warnings.push('未接结果变量');
+  }
+
+  return warnings;
+}
+
+function isSpreadsheetReadyVariableRef(value: string) {
+  const normalized = value.toLowerCase();
+  return (
+    normalized.includes('table') ||
+    normalized.includes('rows') ||
+    normalized.includes('sheet') ||
+    normalized.includes('xlsx') ||
+    normalized.includes('csv')
+  );
+}
+
+function workflowTraceStatusLabel(status: WorkflowNodeTrace['status']) {
+  if (status === 'passed') return '已通过';
+  if (status === 'failed') return '失败';
+  return '有警告';
+}
+
+function toWorkflowFlowNodes(
+  graph: RoleWorkflowGraph,
+  testGraphTrace?: AdminRoleTemplateTestGraphTrace,
+  variableOptions?: WorkflowVariableOption[]
+): WorkflowFlowNode[] {
+  const traceByNodeId = new Map((testGraphTrace?.nodes ?? []).map((trace) => [trace.nodeId, trace]));
+  return graph.nodes.map((node, index) => {
+    const warnings = workflowNodeWarnings(node, variableOptions);
+    const trace = traceByNodeId.get(node.id);
+    const statusClass =
+      trace?.status === 'failed'
+        ? 'failed'
+        : trace?.status === 'warning' || warnings.length
+          ? 'warning'
+          : 'ready';
+    return {
+      id: node.id,
+      type: 'workflowNode',
+      position: readWorkflowNodeCanvasPosition(node, {
+        x: 80 + index * 260,
+        y: 180 + (index % 2) * 140
+      }),
+      sourcePosition: Position.Right,
+      targetPosition: Position.Left,
+      data: {
+        nodeType: node.type,
+        title: node.name,
+        meta: workflowNodeMeta(node),
+        details: workflowNodeDetails(node),
+        tone: nodeTone(node.type),
+        statusLabel: trace ? workflowTraceStatusLabel(trace.status) : warnings.length ? '需配置' : '就绪',
+        statusClass,
+        warnings
+      }
+    };
+  });
 }
 
 function toWorkflowFlowEdges(graph: RoleWorkflowGraph): WorkflowFlowEdge[] {
@@ -1150,8 +1633,13 @@ function WorkflowFlowNodeCard({ data, selected }: NodeProps<WorkflowFlowNode>) {
     <div className={`workflow-flow-node tone-${data.tone}${selected ? ' selected' : ''}`}>
       <Handle type="target" position={Position.Left} className="workflow-flow-handle" />
       <div className="workflow-flow-node-header">
-        <span className="workflow-flow-node-dot" />
-        <span className="workflow-flow-node-type">{workflowNodeTypeLabel(data.nodeType)}</span>
+        <span className="workflow-flow-node-type-wrap">
+          <span className="workflow-flow-node-dot" />
+          <span className="workflow-flow-node-type">{workflowNodeTypeLabel(data.nodeType)}</span>
+        </span>
+        <span className={`workflow-flow-node-status ${data.statusClass}`}>
+          {data.statusLabel}
+        </span>
       </div>
       <Typography.Text strong ellipsis className="workflow-flow-node-title">
         {data.title}
@@ -1159,6 +1647,11 @@ function WorkflowFlowNodeCard({ data, selected }: NodeProps<WorkflowFlowNode>) {
       <Typography.Text type="secondary" ellipsis className="workflow-flow-node-meta">
         {data.meta}
       </Typography.Text>
+      {data.warnings.length ? (
+        <Typography.Text type="warning" ellipsis className="workflow-flow-node-warning">
+          {data.warnings[0]}
+        </Typography.Text>
+      ) : null}
       {data.details.length ? (
         <div className="workflow-flow-node-tags">
           {data.details.map((detail) => (
@@ -1247,19 +1740,480 @@ function WorkflowConfigSection({
   );
 }
 
-function WorkflowVariableReferencePanel() {
+function WorkflowVariableTypeBadge({ type }: { type: WorkflowVariableType }) {
+  return (
+    <Tag color={workflowVariableTypeColors[type]} className={`workflow-variable-type type-${workflowVariableTypeClass(type)}`}>
+      {workflowVariableTypeLabels[type]}
+    </Tag>
+  );
+}
+
+function WorkflowVariableReferencePanel({
+  variables,
+  selectedNode
+}: {
+  variables: WorkflowVariableOption[];
+  selectedNode: RoleWorkflowGraphNode;
+}) {
+  const variableByValue = new Map(variables.map((variable) => [variable.value, variable]));
+  const selectedInputs = selectedNode.inputVariables ?? [];
+  const selectedOutputs = selectedNode.outputVariables ?? [];
+  const visibleVariables = variables.slice(0, 18);
+
   return (
     <div className="workflow-variable-reference">
-      <Typography.Text strong>常用变量</Typography.Text>
-      <div className="workflow-variable-tags">
-        {workflowVariableReferenceTags.map((item) => (
-          <Tag key={item.value}>{item.value} · {item.label}</Tag>
-        ))}
-      </div>
-      <Typography.Text type="secondary" className="workflow-config-section-desc">
-        视频、图片、文档等大文件在节点之间传本地路径或文件引用，节点执行时再读取，不把大文件上传到服务端。
-      </Typography.Text>
+      <Space direction="vertical" size={10} style={{ width: '100%' }}>
+        <Space align="center" style={{ width: '100%', justifyContent: 'space-between' }}>
+          <Typography.Text strong>变量</Typography.Text>
+          <Typography.Text type="secondary" className="workflow-config-section-desc">
+            传值用引用，不传大文件内容
+          </Typography.Text>
+        </Space>
+
+        <div className="workflow-variable-current">
+          <Typography.Text type="secondary">当前节点输入</Typography.Text>
+          <div className="workflow-variable-tags compact">
+            {selectedInputs.length ? (
+              selectedInputs.map((value) => {
+                const variable = variableByValue.get(value);
+                return (
+                  <Tag key={value} color={variable ? workflowVariableTypeColors[variable.type] : undefined}>
+                    {value}
+                  </Tag>
+                );
+              })
+            ) : (
+              <Tag>无</Tag>
+            )}
+          </div>
+          <Typography.Text type="secondary">当前节点输出</Typography.Text>
+          <div className="workflow-variable-tags compact">
+            {selectedOutputs.length ? (
+              selectedOutputs.map((value) => {
+                const variable = variableByValue.get(value);
+                return (
+                  <Tag key={value} color={variable ? workflowVariableTypeColors[variable.type] : undefined}>
+                    {value}
+                  </Tag>
+                );
+              })
+            ) : (
+              <Tag>无</Tag>
+            )}
+          </div>
+        </div>
+
+        <div className="workflow-variable-list">
+          {visibleVariables.map((variable) => (
+            <div key={variable.value} className="workflow-variable-row">
+              <div className="workflow-variable-row-main">
+                <Typography.Text ellipsis className="workflow-variable-name">
+                  {variable.value}
+                </Typography.Text>
+                <Typography.Text type="secondary" ellipsis className="workflow-variable-label">
+                  {variable.source} · {variable.label}
+                </Typography.Text>
+              </div>
+              <WorkflowVariableTypeBadge type={variable.type} />
+            </div>
+          ))}
+        </div>
+
+        {variables.length > visibleVariables.length ? (
+          <Typography.Text type="secondary" className="workflow-config-section-desc">
+            已显示前 {visibleVariables.length} 个变量，其余可在输入框中搜索。
+          </Typography.Text>
+        ) : null}
+      </Space>
     </div>
+  );
+}
+
+function WorkflowVariableQuickSet({
+  variables,
+  onPick,
+  mode = 'template'
+}: {
+  variables: WorkflowVariableOption[];
+  onPick: (token: string) => void;
+  mode?: 'template' | 'path';
+}) {
+  return (
+    <Select
+      size="small"
+      allowClear
+      showSearch
+      value={undefined}
+      placeholder="填入变量"
+      optionFilterProp="label"
+      options={buildWorkflowVariableSelectOptions(variables)}
+      onChange={(value) => {
+        if (!value) return;
+        onPick(formatWorkflowVariableToken(value, mode));
+      }}
+    />
+  );
+}
+
+function WorkflowTableMappingColumnsEditor({
+  columns,
+  onChange
+}: {
+  columns: WorkflowTableColumnConfig[];
+  onChange: (columns: WorkflowTableColumnConfig[]) => void;
+}) {
+  const editorColumns = columns.length ? columns : defaultWorkflowTableColumns;
+
+  function updateColumn(index: number, patch: Partial<WorkflowTableColumnConfig>) {
+    onChange(
+      editorColumns.map((column, columnIndex) =>
+        columnIndex === index
+          ? {
+              header: patch.header ?? column.header,
+              path: patch.path ?? column.path
+            }
+          : column
+      )
+    );
+  }
+
+  function removeColumn(index: number) {
+    const nextColumns = editorColumns.filter((_, columnIndex) => columnIndex !== index);
+    onChange(nextColumns.length ? nextColumns : editorColumns);
+  }
+
+  return (
+    <div className="workflow-table-mapping-editor">
+      <div className="workflow-table-mapping-head">
+        <span>表格列名</span>
+        <span>读取字段路径</span>
+        <span />
+      </div>
+      {editorColumns.map((column, index) => (
+        <div className="workflow-table-mapping-row" key={`${column.header}-${column.path}-${index}`}>
+          <Input
+            size="small"
+            value={column.header}
+            placeholder="例如：客户名称"
+            onChange={(event) => updateColumn(index, { header: event.target.value })}
+          />
+          <Input
+            size="small"
+            value={column.path}
+            placeholder="例如：customer.name"
+            onChange={(event) => updateColumn(index, { path: event.target.value })}
+          />
+          <Button
+            size="small"
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            disabled={editorColumns.length <= 1}
+            onClick={() => removeColumn(index)}
+          />
+        </div>
+      ))}
+      <Space size={8}>
+        <Button
+          size="small"
+          icon={<PlusOutlined />}
+          onClick={() => onChange([...editorColumns, { header: '', path: '' }])}
+        >
+          添加列
+        </Button>
+        <Button size="small" type="text" onClick={() => onChange(defaultWorkflowTableColumns)}>
+          使用示例列
+        </Button>
+      </Space>
+    </div>
+  );
+}
+
+function buildWorkflowCodePreviewInput(
+  node: RoleWorkflowGraphNode,
+  variables: WorkflowVariableOption[]
+): Record<string, unknown> {
+  const input: Record<string, unknown> = {
+    variables: {}
+  };
+  const variablesByRef = input.variables as Record<string, unknown>;
+  const variableByRef = new Map(variables.map((variable) => [variable.value, variable]));
+  const refs = node.inputVariables?.length ? node.inputVariables : ['start.text'];
+
+  for (const ref of refs) {
+    const variable = variableByRef.get(ref) ?? {
+      value: ref,
+      label: ref,
+      source: '示例',
+      type: inferWorkflowVariableTypeFromName(ref)
+    };
+    const value = createWorkflowCodePreviewValue(variable);
+    variablesByRef[ref] = value;
+    writeWorkflowCodePreviewInputPath(input, ref, value);
+
+    const alias = ref.split('.').map((part) => part.trim()).filter(Boolean).at(-1);
+    if (alias && input[alias] === undefined) {
+      input[alias] = value;
+    }
+  }
+
+  return input;
+}
+
+function createWorkflowCodePreviewValue(variable: WorkflowVariableOption): unknown {
+  if (variable.value === 'start.text') {
+    return '请把这批客户线索整理成 Excel，并给出优先级。';
+  }
+  if (variable.value === 'runtime.previous_text') {
+    return '上一步已经提取出 2 条客户线索。';
+  }
+  if (variable.type === 'table' || /(rows|table|xlsx|csv)/i.test(variable.value)) {
+    return [
+      ['客户', '分数', '建议'],
+      ['Acme', '92', '优先跟进'],
+      ['Beta', '76', '确认预算']
+    ];
+  }
+  if (variable.type === 'asset[]') {
+    return [
+      {
+        id: 'sample-file-1',
+        name: '客户线索.txt',
+        kind: 'document',
+        localPath: 'C:\\QiuAI\\samples\\客户线索.txt'
+      }
+    ];
+  }
+  if (variable.type === 'asset') {
+    return {
+      id: 'sample-file-1',
+      name: '客户线索.txt',
+      kind: 'document',
+      localPath: 'C:\\QiuAI\\samples\\客户线索.txt'
+    };
+  }
+  if (variable.type === 'number') {
+    return 92;
+  }
+  if (variable.type === 'boolean') {
+    return true;
+  }
+  if (variable.type === 'json' || /(payload|items|records|data|json)/i.test(variable.value)) {
+    return {
+      items: [
+        { customer: 'Acme', score: 92, suggestion: '优先跟进' },
+        { customer: 'Beta', score: 76, suggestion: '确认预算' }
+      ],
+      summary: '示例结构化数据'
+    };
+  }
+  if (variable.type === 'artifact') {
+    return {
+      localPath: 'C:\\QiuAI\\outputs\\结果.xlsx',
+      type: 'xlsx'
+    };
+  }
+  return `示例文本：${variable.label}`;
+}
+
+function writeWorkflowCodePreviewInputPath(
+  target: Record<string, unknown>,
+  ref: string,
+  value: unknown
+) {
+  const parts = ref.split('.').map((part) => part.trim()).filter(Boolean);
+  if (!parts.length) return;
+
+  let current = target;
+  for (const part of parts.slice(0, -1)) {
+    const existing = current[part];
+    if (!existing || typeof existing !== 'object' || Array.isArray(existing)) {
+      current[part] = {};
+    }
+    current = current[part] as Record<string, unknown>;
+  }
+  current[parts[parts.length - 1]!] = value;
+}
+
+const workflowCodePreviewForbiddenPattern =
+  /\b(?:async|await|eval|Function|import|require|process|globalThis|window|document|fetch|XMLHttpRequest|WebSocket|localStorage|sessionStorage|indexedDB|navigator|electron|setTimeout|setInterval)\b|__proto__|prototype|constructor/;
+
+function runWorkflowCodePreview(input: {
+  code: string;
+  runtimeInput: Record<string, unknown>;
+  timeoutMs: number;
+}): Promise<unknown> {
+  const source = input.code.trim();
+  if (!source) {
+    return Promise.reject(new Error('代码为空。'));
+  }
+  const forbiddenMatch = source.match(workflowCodePreviewForbiddenPattern);
+  if (forbiddenMatch) {
+    return Promise.reject(new Error(`代码包含被禁止的关键词：${forbiddenMatch[0]}`));
+  }
+  if (typeof Worker !== 'function' || typeof Blob !== 'function' || typeof URL.createObjectURL !== 'function') {
+    return Promise.reject(new Error('当前浏览器不支持代码节点试算 Worker。'));
+  }
+
+  const workerUrl = URL.createObjectURL(
+    new Blob([createWorkflowCodePreviewWorkerSource()], { type: 'text/javascript' })
+  );
+  const worker = new Worker(workerUrl);
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      worker.terminate();
+      URL.revokeObjectURL(workerUrl);
+      reject(new Error(`代码试算超过 ${input.timeoutMs}ms，已停止。`));
+    }, input.timeoutMs);
+
+    worker.onmessage = (event: MessageEvent) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      worker.terminate();
+      URL.revokeObjectURL(workerUrl);
+      const payload = event.data as { ok?: boolean; result?: unknown; error?: string };
+      if (payload?.ok) {
+        resolve(payload.result);
+        return;
+      }
+      reject(new Error(payload?.error || '代码试算失败。'));
+    };
+    worker.onerror = (event) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      worker.terminate();
+      URL.revokeObjectURL(workerUrl);
+      reject(new Error(event.message || '代码 Worker 执行失败。'));
+    };
+    worker.postMessage({ source, input: input.runtimeInput });
+  });
+}
+
+function createWorkflowCodePreviewWorkerSource() {
+  return `
+function readColumn(value, path) {
+  const segments = String(path || '').split('.').map((segment) => segment.trim()).filter(Boolean);
+  let currentValue = value;
+  for (const segment of segments) {
+    if (currentValue === undefined || currentValue === null) return '';
+    if (Array.isArray(currentValue)) {
+      const index = Number(segment);
+      if (!Number.isInteger(index) || index < 0 || index >= currentValue.length) return '';
+      currentValue = currentValue[index];
+      continue;
+    }
+    if (typeof currentValue === 'object') {
+      currentValue = currentValue[segment];
+      continue;
+    }
+    return '';
+  }
+  return currentValue === undefined || currentValue === null ? '' : currentValue;
+}
+function formatCell(value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(value);
+}
+function normalizeRows(value) {
+  if (Array.isArray(value)) return value;
+  if (!value || typeof value !== 'object') return [];
+  for (const key of ['rows', 'items', 'results', 'data', 'records']) {
+    if (Array.isArray(value[key])) return value[key];
+  }
+  return [value];
+}
+function readColumnConfig(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  const path = typeof value.path === 'string' ? value.path.trim() : '';
+  const header = typeof value.header === 'string' && value.header.trim() ? value.header.trim() : path;
+  return path && header ? [{ header, path }] : [];
+}
+function ensureSerializable(value) {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) throw new Error('结果必须是 JSON 可序列化数据。');
+  return JSON.parse(serialized);
+}
+function createHelpers() {
+  return {
+    pick(value, path) {
+      return readColumn(value, path);
+    },
+    toRows(items, columns) {
+      const sourceRows = normalizeRows(items);
+      const normalizedColumns = Array.isArray(columns) ? columns.flatMap(readColumnConfig) : [];
+      if (normalizedColumns.length === 0) return sourceRows;
+      return [
+        normalizedColumns.map((column) => column.header),
+        ...sourceRows.map((item) => normalizedColumns.map((column) => formatCell(readColumn(item, column.path))))
+      ];
+    }
+  };
+}
+self.onmessage = function(event) {
+  try {
+    const runner = new Function('input', 'helpers', [
+      '"use strict";',
+      'const require = undefined;',
+      'const process = undefined;',
+      'const window = undefined;',
+      'const document = undefined;',
+      'const fetch = undefined;',
+      event.data.source
+    ].join('\\n'));
+    const result = runner(ensureSerializable(event.data.input), createHelpers());
+    if (result === undefined) throw new Error('代码必须 return 一个结果。');
+    if (result && typeof result === 'object' && typeof result.then === 'function') {
+      throw new Error('代码节点只支持同步转换。');
+    }
+    self.postMessage({ ok: true, result: ensureSerializable(result) });
+  } catch (error) {
+    self.postMessage({ ok: false, error: error && error.message ? error.message : String(error) });
+  }
+};`;
+}
+
+function WorkflowNodeLastRunPanel({
+  trace
+}: {
+  trace?: WorkflowNodeTrace;
+}) {
+  if (!trace) {
+    return (
+      <Card size="small" bordered={false} className="workflow-empty-panel">
+        <Typography.Text type="secondary">
+          还没有这个节点的试运行记录。点击右上角“试运行”后，这里会显示输入、输出和错误。
+        </Typography.Text>
+      </Card>
+    );
+  }
+
+  return (
+    <Space direction="vertical" size={10} style={{ width: '100%' }}>
+      <Alert
+        showIcon
+        type={trace.status === 'failed' ? 'error' : trace.warnings.length ? 'warning' : 'success'}
+        message={`上次运行：${trace.status}`}
+        description={trace.warnings.length ? trace.warnings.join('；') : '节点运行记录可用于定位提示词、变量和工具参数问题。'}
+      />
+      <WorkflowConfigSection title="输入快照">
+        <Typography.Paragraph className="workflow-trace-preview">
+          {trace.inputPreview || '无'}
+        </Typography.Paragraph>
+      </WorkflowConfigSection>
+      <WorkflowConfigSection title="输出快照">
+        <Typography.Paragraph className="workflow-trace-preview">
+          {trace.outputPreview || '无'}
+        </Typography.Paragraph>
+      </WorkflowConfigSection>
+    </Space>
   );
 }
 
@@ -1268,6 +2222,7 @@ function workflowNodeConfigDescription(node: RoleWorkflowGraphNode) {
   if (node.type === 'list') return '从附件或上游数组里筛选一批对象，例如只取视频、图片或表格。';
   if (node.type === 'iteration') return '取列表中的当前项，适合一条条处理多个文件。';
   if (node.type === 'aggregator') return '把多个节点输出合并成一个对象或数组，供后续节点统一使用。';
+  if (node.type === 'code') return '运行受限 JS 处理 JSON、表格和业务规则。输入变量会注入到 input 对象。';
   if (node.type === 'tool') return '调用本地或网络工具。工具参数支持 {{变量}} 模板和 $变量 引用。';
   if (node.type === 'artifact') return '生成真实可下载产物。这里的写入动作和参数会被 PC 端执行。';
   if (node.type === 'output') return '整理最终回复，通常放在流程最后，用于告诉用户结果和下载位置。';
@@ -1277,21 +2232,34 @@ function workflowNodeConfigDescription(node: RoleWorkflowGraphNode) {
 
 function WorkflowReactFlowEditor({
   graph,
-  onChange
+  onChange,
+  testGraphTrace
 }: {
   graph: RoleWorkflowGraph;
   onChange: (graph: RoleWorkflowGraph) => void;
+  testGraphTrace?: AdminRoleTemplateTestGraphTrace;
 }) {
   const [selection, setSelection] = useState<WorkflowSelection>({
     type: 'node',
     id: graph.entryNodeId
   });
+  const [configPanelTab, setConfigPanelTab] = useState<WorkflowConfigPanelTab>('settings');
   const [nodePicker, setNodePicker] = useState<{
     open: boolean;
     sourceNodeId?: string;
     edgeId?: string;
   }>({ open: false });
-  const flowNodes = useMemo(() => toWorkflowFlowNodes(graph), [graph]);
+  const [runningCodePreviewNodeId, setRunningCodePreviewNodeId] = useState<string | null>(null);
+  const [codePreviewResults, setCodePreviewResults] = useState<Record<string, WorkflowCodePreviewResult>>({});
+  const variableOptions = useMemo(() => deriveWorkflowVariableOptions(graph), [graph]);
+  const variableSelectOptions = useMemo(
+    () => buildWorkflowVariableSelectOptions(variableOptions),
+    [variableOptions]
+  );
+  const flowNodes = useMemo(
+    () => toWorkflowFlowNodes(graph, testGraphTrace, variableOptions),
+    [graph, testGraphTrace, variableOptions]
+  );
   const flowEdges = useMemo(() => toWorkflowFlowEdges(graph), [graph]);
   const nodePositions = useMemo(
     () => new Map(flowNodes.map((node) => [node.id, node.position] as const)),
@@ -1309,6 +2277,25 @@ function WorkflowReactFlowEditor({
     value: node.id,
     label: `${node.name} / ${node.id}`
   }));
+  const selectedNodeWarnings = selectedNode ? workflowNodeWarnings(selectedNode, variableOptions) : [];
+  const selectedNodeTrace = selectedNode
+    ? testGraphTrace?.nodes.find((node) => node.nodeId === selectedNode.id)
+    : undefined;
+  const selectedAssignConfig = selectedNode?.type === 'assign'
+    ? readWorkflowAssignConfig(selectedNode)
+    : undefined;
+  const selectedAssignTableMapping = selectedNode?.type === 'assign'
+    ? readWorkflowAssignTableMappingConfig(selectedNode)
+    : undefined;
+  const selectedArtifactTableSourceRef = selectedNode?.type === 'artifact'
+    ? readArtifactTableSourceRef(selectedNode)
+    : undefined;
+  const selectedCodePreviewInput = selectedNode?.type === 'code'
+    ? buildWorkflowCodePreviewInput(selectedNode, variableOptions)
+    : undefined;
+  const selectedCodePreviewResult = selectedNode?.type === 'code'
+    ? codePreviewResults[selectedNode.id]
+    : undefined;
 
   useEffect(() => {
     const selectedNodeExists = selection.type === 'node' && graph.nodes.some((node) => node.id === selection.id);
@@ -1317,6 +2304,10 @@ function WorkflowReactFlowEditor({
       setSelection({ type: 'node', id: graph.entryNodeId });
     }
   }, [graph, selection]);
+
+  useEffect(() => {
+    setConfigPanelTab('settings');
+  }, [selection.id, selection.type]);
 
   const updateNode = useCallback(
     (nodeId: string, patch: Partial<RoleWorkflowGraphNode>) => {
@@ -1585,6 +2576,149 @@ function WorkflowReactFlowEditor({
     });
   }
 
+  function updateAssignNodeConfig(node: RoleWorkflowGraphNode, name: string, value: string) {
+    const nextName = name.trim();
+    updateNode(node.id, {
+      outputVariables: nextName ? [nextName] : node.outputVariables,
+      config: {
+        ...(node.config ?? {}),
+        assignments: [
+          {
+            name: nextName || `${node.id}.value`,
+            value
+          }
+        ]
+      }
+    });
+  }
+
+  function updateAssignTableMapping(
+    node: RoleWorkflowGraphNode,
+    patch: Partial<{
+      sourceRef: string;
+      outputVariable: string;
+      columns: WorkflowTableColumnConfig[];
+    }>
+  ) {
+    const current = readWorkflowAssignTableMappingConfig(node);
+    const nextSourceRef = patch.sourceRef ?? current.sourceRef;
+    const nextOutputVariable = (patch.outputVariable ?? current.outputVariable).trim() || `${node.id}.rows`;
+    const nextColumns = patch.columns ?? current.columns;
+    updateNode(node.id, {
+      inputVariables: nextSourceRef ? uniqueTags([...(node.inputVariables ?? []), nextSourceRef]) : node.inputVariables,
+      outputVariables: uniqueTags([nextOutputVariable]),
+      config: {
+        ...(node.config ?? {}),
+        tableMapping: {
+          sourceRef: nextSourceRef ?? '',
+          outputVariable: nextOutputVariable,
+          columns: nextColumns.length ? nextColumns : defaultWorkflowTableColumns
+        }
+      }
+    });
+  }
+
+  function updateCodeNodeConfig(
+    node: RoleWorkflowGraphNode,
+    patch: Partial<{
+      code: string;
+      outputVariable: string;
+      timeoutMs: number;
+    }>
+  ) {
+    const currentOutputVariable = typeof node.config?.outputVariable === 'string' && node.config.outputVariable.trim()
+      ? node.config.outputVariable.trim()
+      : node.outputVariables?.[0] ?? `${node.id}.json`;
+    const nextOutputVariable = (patch.outputVariable ?? currentOutputVariable).trim() || `${node.id}.json`;
+    updateNode(node.id, {
+      outputVariables: uniqueTags([nextOutputVariable]),
+      config: {
+        ...(node.config ?? {}),
+        code: patch.code ?? (typeof node.config?.code === 'string' ? node.config.code : ''),
+        outputVariable: nextOutputVariable,
+        timeoutMs: patch.timeoutMs ?? (typeof node.config?.timeoutMs === 'number' ? node.config.timeoutMs : 2_000)
+      }
+    });
+  }
+
+  async function previewCodeNode(node: RoleWorkflowGraphNode) {
+    const runtimeInput = buildWorkflowCodePreviewInput(node, variableOptions);
+    const timeoutMs = typeof node.config?.timeoutMs === 'number' ? node.config.timeoutMs : 2_000;
+    setRunningCodePreviewNodeId(node.id);
+    setCodePreviewResults((current) => ({
+      ...current,
+      [node.id]: {
+        status: 'passed',
+        inputPreview: stringifyJsonConfigValue(runtimeInput),
+        outputPreview: '试算中...'
+      }
+    }));
+
+    try {
+      const result = await runWorkflowCodePreview({
+        code: typeof node.config?.code === 'string' ? node.config.code : '',
+        runtimeInput,
+        timeoutMs
+      });
+      setCodePreviewResults((current) => ({
+        ...current,
+        [node.id]: {
+          status: 'passed',
+          inputPreview: stringifyJsonConfigValue(runtimeInput),
+          outputPreview: stringifyJsonConfigValue(result)
+        }
+      }));
+      message.success('代码节点试算通过');
+    } catch (error) {
+      setCodePreviewResults((current) => ({
+        ...current,
+        [node.id]: {
+          status: 'failed',
+          inputPreview: stringifyJsonConfigValue(runtimeInput),
+          outputPreview: '',
+          error: error instanceof Error ? error.message : '代码试算失败'
+        }
+      }));
+    } finally {
+      setRunningCodePreviewNodeId(null);
+    }
+  }
+
+  function updateModelOutputMode(node: RoleWorkflowGraphNode, outputMode: WorkflowModelOutputMode) {
+    const schema = readWorkflowModelSchema(node);
+    const nextConfig = {
+      ...(node.config ?? {}),
+      outputMode,
+      ...(outputMode === 'json' && (!schema || (typeof schema === 'object' && Object.keys(schema).length === 0))
+        ? { schema: defaultWorkflowModelSchema(node) }
+        : {})
+    };
+    updateNode(node.id, {
+      config: nextConfig,
+      outputVariables:
+        node.type === 'llm' || node.type === 'reasoning' || node.type === 'parameter_extractor'
+          ? [`${node.id}.${outputMode === 'json' ? 'json' : 'text'}`]
+          : node.outputVariables
+    });
+  }
+
+  function updateArtifactTableSource(node: RoleWorkflowGraphNode, sourceRef?: string) {
+    const template = getDefaultArtifactActionTemplate(node.artifactType ?? 'xlsx');
+    const currentInput = readWorkflowToolInputConfig(node);
+    const rows = sourceRef ? `$${sourceRef}` : currentInput.rows;
+    updateNode(node.id, {
+      inputVariables: sourceRef ? uniqueTags([...(node.inputVariables ?? []), sourceRef]) : node.inputVariables,
+      config: buildToolNodeConfig(node, {
+        action: template?.value ?? (node.artifactType === 'csv' ? 'spreadsheet.write_csv' : 'spreadsheet.write_xlsx'),
+        input: {
+          ...(template?.defaults ?? {}),
+          ...currentInput,
+          rows
+        }
+      })
+    });
+  }
+
   function updateSelectedEdgeConditionType(type: WorkflowEdgeConditionType) {
     if (!selectedEdge) return;
     updateEdge(selectedEdge.id, {
@@ -1622,7 +2756,7 @@ function WorkflowReactFlowEditor({
                 <Button
                   key={`${group.title}-${node.value}`}
                   block
-                  className="workflow-palette-button"
+                  className={`workflow-palette-button tone-${nodeTone(node.value)}`}
                   onClick={() => addNode(node.value, { sourceNodeId: selectedNode?.id ?? graph.entryNodeId })}
                 >
                   <span>{node.label}</span>
@@ -1694,14 +2828,51 @@ function WorkflowReactFlowEditor({
       <aside className="workflow-config-panel">
         {selectedNode ? (
           <Space direction="vertical" size={10} style={{ width: '100%' }}>
-            <Space wrap>
-              <Tag color={nodeTone(selectedNode.type)}>{workflowNodeTypeLabel(selectedNode.type)}</Tag>
-              {selectedNode.requiresApproval ? <Tag color="orange">需要确认</Tag> : null}
-            </Space>
-            <Space direction="vertical" size={2} style={{ width: '100%' }}>
-              <Typography.Text strong>节点配置</Typography.Text>
-              <Typography.Text type="secondary">优先配置业务字段；变量名和原始 JSON 放在高级设置里。</Typography.Text>
-            </Space>
+            <div className="workflow-config-panel-header">
+              <div className="workflow-config-panel-title-row">
+                <Space wrap size={4}>
+                  <Tag color={nodeTone(selectedNode.type)}>{workflowNodeTypeLabel(selectedNode.type)}</Tag>
+                  {selectedNode.requiresApproval ? <Tag color="orange">需要确认</Tag> : null}
+                </Space>
+                <Tag color={selectedNodeWarnings.length ? 'gold' : 'green'}>
+                  {selectedNodeWarnings.length ? '需配置' : '就绪'}
+                </Tag>
+              </div>
+              <Typography.Title level={5} className="workflow-config-panel-title">
+                {selectedNode.name}
+              </Typography.Title>
+              <Typography.Text type="secondary" className="workflow-config-panel-subtitle">
+                {selectedNode.id}
+              </Typography.Text>
+              <div className="workflow-config-panel-tabs">
+                <button
+                  type="button"
+                  className={configPanelTab === 'settings' ? 'active' : ''}
+                  onClick={() => setConfigPanelTab('settings')}
+                >
+                  设置
+                </button>
+                <button
+                  type="button"
+                  className={configPanelTab === 'lastRun' ? 'active' : ''}
+                  onClick={() => setConfigPanelTab('lastRun')}
+                >
+                  上次运行
+                </button>
+              </div>
+            </div>
+            {configPanelTab === 'lastRun' ? (
+              <WorkflowNodeLastRunPanel trace={selectedNodeTrace} />
+            ) : (
+              <>
+                {selectedNodeWarnings.length ? (
+                  <Alert
+                    showIcon
+                    type="warning"
+                    message="节点未就绪"
+                    description={selectedNodeWarnings.join('；')}
+                  />
+                ) : null}
             <WorkflowConfigSection title="基础" description={workflowNodeConfigDescription(selectedNode)}>
               <Space direction="vertical" size={8} style={{ width: '100%' }}>
                 <Input
@@ -1758,7 +2929,7 @@ function WorkflowReactFlowEditor({
                 />
               </Space>
             </WorkflowConfigSection>
-            <WorkflowVariableReferencePanel />
+            <WorkflowVariableReferencePanel variables={variableOptions} selectedNode={selectedNode} />
             {selectedNode.type === 'parameter_extractor' ? (
               <WorkflowConfigSection
                 title="提取规则"
@@ -1784,11 +2955,15 @@ function WorkflowReactFlowEditor({
                 description="从附件或上游变量中筛出一组文件/对象，例如只保留视频文件。"
               >
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                <Input
+                <Select
                   size="small"
-                  addonBefore="来源变量"
+                  showSearch
+                  allowClear
                   value={typeof selectedNode.config?.sourceRef === 'string' ? selectedNode.config.sourceRef : 'start.files'}
-                  onChange={(event) => updateNodeConfigField(selectedNode, 'sourceRef', event.target.value)}
+                  placeholder="来源变量"
+                  optionFilterProp="label"
+                  options={variableSelectOptions}
+                  onChange={(sourceRef) => updateNodeConfigField(selectedNode, 'sourceRef', sourceRef ?? '')}
                 />
                 <Select
                   size="small"
@@ -1819,11 +2994,15 @@ function WorkflowReactFlowEditor({
                 title="逐项处理"
                 description="把列表里的当前项写入 runtime.current_item，后续工具节点通常读取这个变量。"
               >
-                <Input
+                <Select
                   size="small"
-                  addonBefore="遍历列表"
+                  showSearch
+                  allowClear
                   value={typeof selectedNode.config?.sourceRef === 'string' ? selectedNode.config.sourceRef : 'start.files'}
-                  onChange={(event) => updateNodeConfigField(selectedNode, 'sourceRef', event.target.value)}
+                  placeholder="遍历列表变量"
+                  optionFilterProp="label"
+                  options={buildWorkflowVariableSelectOptions(variableOptions, ['asset[]', 'json', 'table'])}
+                  onChange={(sourceRef) => updateNodeConfigField(selectedNode, 'sourceRef', sourceRef ?? '')}
                 />
               </WorkflowConfigSection>
             ) : null}
@@ -1856,6 +3035,141 @@ function WorkflowReactFlowEditor({
                 />
               </WorkflowConfigSection>
             ) : null}
+            {selectedNode.type === 'assign' && selectedAssignConfig ? (
+              <WorkflowConfigSection
+                title="变量赋值"
+                description="把固定值或上游变量写成一个稳定变量，后续节点直接引用这个变量。"
+              >
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Input
+                    size="small"
+                    addonBefore="变量名"
+                    value={selectedAssignConfig.name}
+                    placeholder={`${selectedNode.id}.value`}
+                    onChange={(event) =>
+                      updateAssignNodeConfig(selectedNode, event.target.value, selectedAssignConfig.value)
+                    }
+                  />
+                  <Input
+                    size="small"
+                    addonBefore="变量值"
+                    value={selectedAssignConfig.value}
+                    placeholder="$runtime.previous_text"
+                    onChange={(event) =>
+                      updateAssignNodeConfig(selectedNode, selectedAssignConfig.name, event.target.value)
+                    }
+                  />
+                  <WorkflowVariableQuickSet
+                    variables={variableOptions}
+                    mode="path"
+                    onPick={(token) => updateAssignNodeConfig(selectedNode, selectedAssignConfig.name, token)}
+                  />
+                </Space>
+              </WorkflowConfigSection>
+            ) : null}
+            {selectedNode.type === 'assign' && selectedAssignTableMapping ? (
+              <WorkflowConfigSection
+                title="生成表格 rows"
+                description="把上游 JSON 数组映射成 Excel/CSV 可直接写入的二维表格。字段路径支持 customer.name 这类嵌套路径。"
+              >
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Input
+                    size="small"
+                    value={selectedAssignTableMapping.sourceRef}
+                    addonBefore="来源变量"
+                    placeholder="来源 JSON 数组，例如 extract.json.items"
+                    onChange={(event) => updateAssignTableMapping(selectedNode, { sourceRef: event.target.value })}
+                  />
+                  <WorkflowVariableQuickSet
+                    variables={variableOptions}
+                    mode="path"
+                    onPick={(token) => updateAssignTableMapping(selectedNode, { sourceRef: token.replace(/^\$/, '') })}
+                  />
+                  <Input
+                    size="small"
+                    addonBefore="输出变量"
+                    value={selectedAssignTableMapping.outputVariable}
+                    placeholder={`${selectedNode.id}.rows`}
+                    onChange={(event) => updateAssignTableMapping(selectedNode, { outputVariable: event.target.value })}
+                  />
+                  <WorkflowTableMappingColumnsEditor
+                    columns={selectedAssignTableMapping.columns}
+                    onChange={(columns) => updateAssignTableMapping(selectedNode, { columns })}
+                  />
+                </Space>
+              </WorkflowConfigSection>
+            ) : null}
+            {selectedNode.type === 'code' ? (
+              <WorkflowConfigSection
+                title="代码转换"
+                description="只用于同步 JSON 转换。脚本里可读取 input 和 helpers，最后 return 一个 JSON 可序列化结果。"
+              >
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Input
+                    size="small"
+                    addonBefore="输出变量"
+                    value={
+                      typeof selectedNode.config?.outputVariable === 'string' && selectedNode.config.outputVariable.trim()
+                        ? selectedNode.config.outputVariable
+                        : selectedNode.outputVariables?.[0] ?? `${selectedNode.id}.json`
+                    }
+                    placeholder={`${selectedNode.id}.json`}
+                    onChange={(event) => updateCodeNodeConfig(selectedNode, { outputVariable: event.target.value })}
+                  />
+                  <InputNumber
+                    size="small"
+                    addonBefore="超时毫秒"
+                    min={100}
+                    max={10000}
+                    step={100}
+                    style={{ width: '100%' }}
+                    value={typeof selectedNode.config?.timeoutMs === 'number' ? selectedNode.config.timeoutMs : 2_000}
+                    onChange={(timeoutMs) => updateCodeNodeConfig(selectedNode, { timeoutMs: timeoutMs ?? 2_000 })}
+                  />
+                  <Input.TextArea
+                    rows={9}
+                    className="workflow-code-editor"
+                    value={typeof selectedNode.config?.code === 'string' ? selectedNode.config.code : ''}
+                    placeholder={'const items = Array.isArray(input.items) ? input.items : [];\nreturn { rows: helpers.toRows(items, [\n  { header: "名称", path: "name" },\n  { header: "分数", path: "score" }\n]) };'}
+                    onChange={(event) => updateCodeNodeConfig(selectedNode, { code: event.target.value })}
+                  />
+                  <Typography.Text type="secondary" className="workflow-config-section-desc">
+                    可用辅助函数：helpers.pick(item, &apos;customer.name&apos;)、helpers.toRows(items, columns)。
+                  </Typography.Text>
+                  <Button
+                    size="small"
+                    icon={<PlayCircleOutlined />}
+                    loading={runningCodePreviewNodeId === selectedNode.id}
+                    onClick={() => previewCodeNode(selectedNode)}
+                  >
+                    试算代码
+                  </Button>
+                  <div className="workflow-code-preview-grid">
+                    <div>
+                      <Typography.Text strong>输入预览</Typography.Text>
+                      <pre className="workflow-code-preview-box">
+                        {stringifyJsonConfigValue(selectedCodePreviewInput ?? {})}
+                      </pre>
+                    </div>
+                    <div>
+                      <Typography.Text strong>输出示例</Typography.Text>
+                      {selectedCodePreviewResult?.status === 'failed' ? (
+                        <Alert
+                          showIcon
+                          type="error"
+                          message="代码试算失败"
+                          description={selectedCodePreviewResult.error}
+                        />
+                      ) : (
+                        <pre className="workflow-code-preview-box">
+                          {selectedCodePreviewResult?.outputPreview || '点击“试算代码”后显示输出。'}
+                        </pre>
+                      )}
+                    </div>
+                  </div>
+                </Space>
+              </WorkflowConfigSection>
+            ) : null}
             {selectedNode.type === 'template' ? (
               <WorkflowConfigSection
                 title="模板内容"
@@ -1874,16 +3188,39 @@ function WorkflowReactFlowEditor({
                 title="模型"
                 description="模板里指定模型；PC 端安装员工时再配置对应 API Key。"
               >
-                <Select
-                  size="small"
-                  allowClear
-                  showSearch
-                  value={selectedNode.modelProfileId}
-                  placeholder="选择具体模型（PC 端安装时配置 API Key）"
-                  options={modelProfileOptions}
-                  optionFilterProp="label"
-                  onChange={(modelProfileId) => updateNode(selectedNode.id, { modelProfileId })}
-                />
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Select
+                    size="small"
+                    allowClear
+                    showSearch
+                    value={selectedNode.modelProfileId}
+                    placeholder="选择具体模型（PC 端安装时配置 API Key）"
+                    options={modelProfileOptions}
+                    optionFilterProp="label"
+                    onChange={(modelProfileId) => updateNode(selectedNode.id, { modelProfileId })}
+                  />
+                  <Select
+                    size="small"
+                    value={readWorkflowModelOutputMode(selectedNode)}
+                    disabled={selectedNode.type === 'parameter_extractor'}
+                    options={modelOutputModeOptions}
+                    onChange={(outputMode) => updateModelOutputMode(selectedNode, outputMode)}
+                  />
+                  {readWorkflowModelOutputMode(selectedNode) === 'json' && selectedNode.type !== 'parameter_extractor' ? (
+                    <Input.TextArea
+                      rows={5}
+                      value={stringifyJsonConfigValue(readWorkflowModelSchema(selectedNode))}
+                      placeholder='{"summary":"string","items":"array","risks":"string[]"}'
+                      onChange={(event) =>
+                        updateNodeConfigField(
+                          selectedNode,
+                          'schema',
+                          parseJsonConfigValue(event.target.value, readWorkflowModelSchema(selectedNode) ?? {})
+                        )
+                      }
+                    />
+                  ) : null}
+                </Space>
               </WorkflowConfigSection>
             ) : null}
             {selectedNode.type === 'knowledge' ? (
@@ -1954,6 +3291,23 @@ function WorkflowReactFlowEditor({
                 />
               </WorkflowConfigSection>
             ) : null}
+            {selectedNode.type === 'artifact' && (selectedNode.artifactType === 'xlsx' || selectedNode.artifactType === 'csv') ? (
+              <WorkflowConfigSection
+                title="表格数据"
+                description="Excel/CSV 最好绑定上游 JSON 数组或 rows/table 变量；这样每条记录会成为表格行。"
+              >
+                <Select
+                  size="small"
+                  showSearch
+                  allowClear
+                  value={selectedArtifactTableSourceRef}
+                  placeholder="选择表格数据变量，例如 extract.json.rows"
+                  optionFilterProp="label"
+                  options={buildWorkflowVariableSelectOptions(variableOptions, ['table', 'json'])}
+                  onChange={(sourceRef) => updateArtifactTableSource(selectedNode, sourceRef)}
+                />
+              </WorkflowConfigSection>
+            ) : null}
             <WorkflowConfigSection
               title="输入输出"
               description="输入变量决定节点能读什么；输出变量决定后续节点怎么引用结果。"
@@ -1964,6 +3318,8 @@ function WorkflowReactFlowEditor({
                   mode="tags"
                   value={selectedNode.inputVariables ?? []}
                   placeholder="输入变量，例如 start.text / start.files / 上一步输出"
+                  options={variableSelectOptions}
+                  optionFilterProp="label"
                   tokenSeparators={[',']}
                   onChange={(inputVariables) => updateNode(selectedNode.id, { inputVariables })}
                 />
@@ -1972,8 +3328,16 @@ function WorkflowReactFlowEditor({
                   mode="tags"
                   value={selectedNode.outputVariables ?? []}
                   placeholder="输出变量，例如 analyze.json / final_video"
+                  options={variableSelectOptions}
+                  optionFilterProp="label"
                   tokenSeparators={[',']}
-                  onChange={(outputVariables) => updateNode(selectedNode.id, { outputVariables })}
+                  onChange={(outputVariables) => {
+                    if (selectedNode.type === 'code') {
+                      updateCodeNodeConfig(selectedNode, { outputVariable: outputVariables[0] ?? `${selectedNode.id}.json` });
+                      return;
+                    }
+                    updateNode(selectedNode.id, { outputVariables });
+                  }}
                 />
               </Space>
             </WorkflowConfigSection>
@@ -2050,40 +3414,54 @@ function WorkflowReactFlowEditor({
                   }
 
                   if (field.type === 'textarea') {
+                    const tokenMode = field.key.toLowerCase().includes('path') ? 'path' : 'template';
                     return (
-                      <Input.TextArea
-                        key={field.key}
-                        rows={3}
-                        value={
-                          field.format === 'json'
-                            ? stringifyJsonConfigValue(fieldValue)
-                            : typeof fieldValue === 'string'
-                              ? fieldValue
-                              : stringifyJsonConfigValue(fieldValue)
-                        }
-                        placeholder={field.placeholder}
-                        onChange={(event) =>
-                          updateToolNodeField(
-                            selectedNode,
-                            field.key,
+                      <Space key={field.key} direction="vertical" size={4} style={{ width: '100%' }}>
+                        <Input.TextArea
+                          rows={3}
+                          value={
                             field.format === 'json'
-                              ? parseJsonConfigValue(event.target.value, fieldValue ?? '')
-                              : event.target.value
-                          )
-                        }
-                      />
+                              ? stringifyJsonConfigValue(fieldValue)
+                              : typeof fieldValue === 'string'
+                                ? fieldValue
+                                : stringifyJsonConfigValue(fieldValue)
+                          }
+                          placeholder={field.placeholder}
+                          onChange={(event) =>
+                            updateToolNodeField(
+                              selectedNode,
+                              field.key,
+                              field.format === 'json'
+                                ? parseJsonConfigValue(event.target.value, fieldValue ?? '')
+                                : event.target.value
+                            )
+                          }
+                        />
+                        <WorkflowVariableQuickSet
+                          variables={variableOptions}
+                          mode={tokenMode}
+                          onPick={(token) => updateToolNodeField(selectedNode, field.key, token)}
+                        />
+                      </Space>
                     );
                   }
 
+                  const tokenMode = field.key.toLowerCase().includes('path') ? 'path' : 'template';
                   return (
-                    <Input
-                      key={field.key}
-                      size="small"
-                      value={typeof fieldValue === 'string' ? fieldValue : stringifyJsonConfigValue(fieldValue)}
-                      addonBefore={field.label}
-                      placeholder={field.placeholder}
-                      onChange={(event) => updateToolNodeField(selectedNode, field.key, event.target.value)}
-                    />
+                    <Space key={field.key} direction="vertical" size={4} style={{ width: '100%' }}>
+                      <Input
+                        size="small"
+                        value={typeof fieldValue === 'string' ? fieldValue : stringifyJsonConfigValue(fieldValue)}
+                        addonBefore={field.label}
+                        placeholder={field.placeholder}
+                        onChange={(event) => updateToolNodeField(selectedNode, field.key, event.target.value)}
+                      />
+                      <WorkflowVariableQuickSet
+                        variables={variableOptions}
+                        mode={tokenMode}
+                        onPick={(token) => updateToolNodeField(selectedNode, field.key, token)}
+                      />
+                    </Space>
                   );
                 })}
                 </Space>
@@ -2098,6 +3476,8 @@ function WorkflowReactFlowEditor({
             >
               删除节点
             </Button>
+              </>
+            )}
           </Space>
         ) : null}
 
@@ -2139,17 +3519,20 @@ function WorkflowReactFlowEditor({
                 />
                 {selectedEdge.condition?.type && selectedEdge.condition.type !== 'always' && selectedEdge.condition.type !== 'expression' ? (
                   <>
-                    <Input
+                    <Select
                       size="small"
-                      value={selectedEdge.condition.variable ?? ''}
-                      addonBefore="变量"
-                      placeholder="start.text / draft_result.text"
-                      onChange={(event) =>
+                      showSearch
+                      allowClear
+                      value={selectedEdge.condition.variable ?? undefined}
+                      placeholder="选择变量"
+                      optionFilterProp="label"
+                      options={variableSelectOptions}
+                      onChange={(variable) =>
                         updateEdge(selectedEdge.id, {
                           condition: {
                             ...selectedEdge.condition,
                             type: selectedEdge.condition?.type ?? 'exists',
-                            variable: event.target.value
+                            variable
                           }
                         })
                       }
@@ -2344,13 +3727,21 @@ export function AdminCreateRoleTemplatePageClient({
   const watchedIndustry = Form.useWatch('industry', form);
   const persistedTemplateId = savedTemplateId ?? editingTemplate?.id;
   const initialGraph = useMemo(
-    () => editingTemplate?.workflowGraph ?? createWorkflowGraph(inferInitialPreset(editingTemplate)),
+    () => normalizeWorkflowGraphForCanvas(editingTemplate?.workflowGraph ?? createWorkflowGraph(inferInitialPreset(editingTemplate))),
     [editingTemplate]
   );
   const [editableGraph, setEditableGraph] = useState<RoleWorkflowGraph>(initialGraph);
   const capabilitySummary = useMemo(
     () => deriveWorkflowCapabilitySummary(editableGraph),
     [editableGraph]
+  );
+  const nodeWarningCount = useMemo(
+    () => deriveWorkflowNodeWarningCount(editableGraph),
+    [editableGraph]
+  );
+  const traceSummary = useMemo(
+    () => deriveWorkflowTraceSummary(testResult),
+    [testResult]
   );
 
   const activePlans = useMemo(
@@ -2589,7 +3980,18 @@ export function AdminCreateRoleTemplatePageClient({
                   {capabilitySummary.nodeCount} 个节点 / {capabilitySummary.edgeCount} 条连线，能力从画布节点自动识别。
                 </Typography.Text>
               </Space>
-              <Space wrap>
+              <Space wrap className="workflow-studio-status">
+                <Tag color={nodeWarningCount ? 'gold' : 'green'}>
+                  节点配置 {nodeWarningCount ? `${nodeWarningCount} 个提示` : '就绪'}
+                </Tag>
+                {traceSummary ? (
+                  <Tag color={traceSummary.failed ? 'red' : traceSummary.warning ? 'gold' : 'green'}>
+                    试运行 通过 {traceSummary.passed} / 警告 {traceSummary.warning} / 失败 {traceSummary.failed}
+                  </Tag>
+                ) : (
+                  <Tag>未试运行</Tag>
+                )}
+                <Tag color="blue">手动保存</Tag>
                 <Typography.Text type="secondary">预设</Typography.Text>
                 <Form.Item name="workflowPreset" noStyle rules={[{ required: true }]}>
                   <Select
@@ -2599,7 +4001,7 @@ export function AdminCreateRoleTemplatePageClient({
                       value: option.value,
                       label: option.label
                     }))}
-                    onChange={(preset) => setEditableGraph(createWorkflowGraph(preset))}
+                    onChange={(preset) => setEditableGraph(normalizeWorkflowGraphForCanvas(createWorkflowGraph(preset)))}
                   />
                 </Form.Item>
               </Space>
@@ -2616,7 +4018,11 @@ export function AdminCreateRoleTemplatePageClient({
               ))}
             </div>
 
-            <WorkflowReactFlowEditor graph={editableGraph} onChange={setEditableGraph} />
+            <WorkflowReactFlowEditor
+              graph={editableGraph}
+              onChange={setEditableGraph}
+              testGraphTrace={testResult?.graphTrace}
+            />
           </section>
 
           <Drawer

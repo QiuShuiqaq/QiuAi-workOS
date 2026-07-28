@@ -13,6 +13,7 @@ export type WorkflowGraphNodeType =
   | 'reasoning'
   | 'llm'
   | 'assign'
+  | 'code'
   | 'template'
   | 'tool'
   | 'condition'
@@ -135,6 +136,7 @@ const workflowGraphNodeTypes: WorkflowGraphNodeType[] = [
   'reasoning',
   'llm',
   'assign',
+  'code',
   'template',
   'tool',
   'condition',

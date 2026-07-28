@@ -10,6 +10,8 @@ import type {
   DesktopRuntimeState,
   DesktopRuntimeSyncResponse,
   DesktopServerConnectionStatus,
+  DesktopArtifactSaveAsRequest,
+  DesktopArtifactSaveAsResult,
   DesktopTaskArtifactWriteRequest,
   DesktopTaskArtifactWriteResult,
   DesktopToolInvocationRequest,
@@ -39,6 +41,7 @@ const channels = {
   listProviderModels: 'qiuai:desktop:list-provider-models',
   selectKnowledgeSourcePath: 'qiuai:desktop:select-knowledge-source-path',
   writeTaskArtifact: 'qiuai:desktop:write-task-artifact',
+  saveArtifactAs: 'qiuai:desktop:save-artifact-as',
   invokeDesktopTool: 'qiuai:desktop:invoke-desktop-tool',
   openLocalPath: 'qiuai:desktop:open-local-path',
   openExternalUrl: 'qiuai:desktop:open-external-url',
@@ -76,6 +79,8 @@ const bridge: QiuDesktopBridge = {
     ipcRenderer.invoke(channels.selectKnowledgeSourcePath, source) as Promise<DesktopKnowledgeSourcePathResult>,
   writeTaskArtifact: (request: DesktopTaskArtifactWriteRequest) =>
     ipcRenderer.invoke(channels.writeTaskArtifact, request) as Promise<DesktopTaskArtifactWriteResult>,
+  saveArtifactAs: (request: DesktopArtifactSaveAsRequest) =>
+    ipcRenderer.invoke(channels.saveArtifactAs, request) as Promise<DesktopArtifactSaveAsResult>,
   invokeDesktopTool: (request: DesktopToolInvocationRequest) =>
     ipcRenderer.invoke(channels.invokeDesktopTool, request) as Promise<DesktopToolInvocationResult>,
   openLocalPath: (path: string) =>

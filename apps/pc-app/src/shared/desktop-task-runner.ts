@@ -131,6 +131,7 @@ const maxAttachmentContextChars = 40_000;
 const maxKnowledgeRetrievalSources = 4;
 const maxKnowledgeRetrievalFiles = 4;
 const maxKnowledgeRetrievalChars = 30_000;
+type WorkflowRuntimeModelOutputMode = 'text' | 'json';
 const supportedToolActions: DesktopToolInvocationAction[] = [
   'filesystem.write_text_file',
   'filesystem.read_text_file',
@@ -1355,6 +1356,8 @@ async function executeWorkflowRuntimeNode(input: {
       return completeWorkflowRuntimeKnowledgeNode(input);
     case 'assign':
       return completeWorkflowRuntimeAssignNode(input);
+    case 'code':
+      return completeWorkflowRuntimeCodeNode(input);
     case 'template':
       return completeWorkflowRuntimeTemplateNode(input);
     case 'iteration':
@@ -1476,7 +1479,8 @@ async function invokeWorkflowRuntimeParameterExtractorNode(input: {
     node: input.node,
     text: response.content,
     json: parsedJson,
-    result: parsedJson as WorkflowRuntimeValue
+    result: parsedJson as WorkflowRuntimeValue,
+    outputValue: parsedJson as WorkflowRuntimeValue
   });
   input.pool.set('runtime.previous_text', response.content);
 
@@ -2131,10 +2135,426 @@ function completeWorkflowRuntimeAggregatorNode(input: {
   });
 }
 
+async function completeWorkflowRuntimeCodeNode(input: {
+  node: WorkflowGraphNode;
+  pool: WorkflowVariablePool;
+  currentResponse: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+}): Promise<{
+  response: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  logs: DesktopExecutionLogEntry[];
+  usedToolIds: string[];
+  generatedArtifacts: DesktopArtifactSummary[];
+  inputVariables: string[];
+  outputVariables: string[];
+  message: string;
+}> {
+  const variables = resolveWorkflowVariableRefs(
+    input.pool,
+    input.node.inputVariables,
+    getWorkflowRuntimeFallbackInputRefs(input.pool)
+  );
+  const code = readWorkflowRuntimeString(input.node.config?.code) ?? '';
+  const outputVariable = readWorkflowRuntimeString(input.node.config?.outputVariable)
+    ?? input.node.outputVariables?.[0]
+    ?? `${input.node.id}.json`;
+  const codeInput = buildWorkflowRuntimeCodeInput(variables);
+  const timeoutMs = normalizeWorkflowRuntimeCodeTimeout(input.node.config?.timeoutMs);
+  const result = await executeRestrictedWorkflowRuntimeCode(code, codeInput, timeoutMs);
+  const text = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+
+  input.pool.set(outputVariable, result as WorkflowRuntimeValue);
+  input.pool.set(`${input.node.id}.text`, text);
+  input.pool.set(`${input.node.id}.json`, result as WorkflowRuntimeValue);
+  input.pool.set(`${input.node.id}.result`, result as WorkflowRuntimeValue);
+  input.pool.set('runtime.previous_text', text);
+
+  return Promise.resolve({
+    response: {
+      ...input.currentResponse,
+      content: input.currentResponse.content || text
+    },
+    primaryProfile: input.primaryProfile,
+    logs: [],
+    usedToolIds: [],
+    generatedArtifacts: [],
+    inputVariables: variables.map((variable) => variable.ref),
+    outputVariables: [...new Set([outputVariable, `${input.node.id}.text`, `${input.node.id}.json`, `${input.node.id}.result`])],
+    message: `Code transform completed with ${variables.length} input variable(s), timeout=${timeoutMs}ms.`
+  });
+}
+
+function buildWorkflowRuntimeCodeInput(
+  variables: Array<{ ref: string; value: WorkflowRuntimeValue }>
+): Record<string, unknown> {
+  const input: Record<string, unknown> = {
+    variables: {}
+  };
+  const variablesByRef = input.variables as Record<string, unknown>;
+
+  for (const variable of variables) {
+    variablesByRef[variable.ref] = variable.value;
+    writeWorkflowRuntimeCodeInputPath(input, variable.ref, variable.value);
+
+    const alias = variable.ref.split('.').map((part) => part.trim()).filter(Boolean).at(-1);
+    if (alias && input[alias] === undefined) {
+      input[alias] = variable.value;
+    }
+  }
+
+  return input;
+}
+
+function writeWorkflowRuntimeCodeInputPath(
+  target: Record<string, unknown>,
+  ref: string,
+  value: WorkflowRuntimeValue
+): void {
+  const parts = ref.split('.').map((part) => part.trim()).filter(Boolean);
+  if (parts.length === 0) {
+    return;
+  }
+
+  let current: Record<string, unknown> = target;
+  for (const part of parts.slice(0, -1)) {
+    const existing = current[part];
+    if (!existing || typeof existing !== 'object' || Array.isArray(existing)) {
+      current[part] = {};
+    }
+    current = current[part] as Record<string, unknown>;
+  }
+
+  current[parts[parts.length - 1]!] = value;
+}
+
+const restrictedWorkflowCodeForbiddenPattern =
+  /\b(?:async|await|eval|Function|import|require|process|globalThis|window|document|fetch|XMLHttpRequest|WebSocket|localStorage|sessionStorage|indexedDB|navigator|electron|setTimeout|setInterval)\b|__proto__|prototype|constructor/;
+
+async function executeRestrictedWorkflowRuntimeCode(
+  code: string,
+  input: Record<string, unknown>,
+  timeoutMs: number
+): Promise<WorkflowRuntimeValue> {
+  const source = code.trim();
+  if (!source) {
+    throw new Error('Code node script is empty.');
+  }
+  if (source.length > 12_000) {
+    throw new Error('Code node script is too long. Keep it under 12000 characters.');
+  }
+
+  const forbiddenMatch = source.match(restrictedWorkflowCodeForbiddenPattern);
+  if (forbiddenMatch) {
+    throw new Error(`Code node script uses a blocked token: ${forbiddenMatch[0]}.`);
+  }
+
+  const serializableInput = ensureWorkflowRuntimeJsonSerializable(input) as Record<string, unknown>;
+  if (canUseWorkflowRuntimeBrowserWorker()) {
+    return executeRestrictedWorkflowRuntimeCodeInBrowserWorker(source, serializableInput, timeoutMs);
+  }
+  if (canUseWorkflowRuntimeNodeWorker()) {
+    return executeRestrictedWorkflowRuntimeCodeInNodeWorker(source, serializableInput, timeoutMs);
+  }
+
+  throw new Error('Code node isolated runner is unavailable in this desktop environment.');
+}
+
+function normalizeWorkflowRuntimeCodeTimeout(value: unknown): number {
+  const timeoutMs = readWorkflowRuntimeNumber(value, 2_000);
+  return Math.min(10_000, Math.max(100, Math.round(timeoutMs)));
+}
+
+type WorkflowRuntimeBrowserWorker = {
+  postMessage(message: unknown): void;
+  terminate(): void;
+  onmessage: ((event: { data: unknown }) => void) | null;
+  onerror: ((event: { message?: string; error?: unknown }) => void) | null;
+};
+
+function canUseWorkflowRuntimeBrowserWorker(): boolean {
+  const globalRecord = globalThis as unknown as Record<string, unknown>;
+  const urlRecord = globalRecord.URL as { createObjectURL?: unknown; revokeObjectURL?: unknown } | undefined;
+  return (
+    typeof globalRecord.Worker === 'function' &&
+    typeof globalRecord.Blob === 'function' &&
+    typeof urlRecord?.createObjectURL === 'function' &&
+    typeof urlRecord?.revokeObjectURL === 'function'
+  );
+}
+
+function canUseWorkflowRuntimeNodeWorker(): boolean {
+  const globalRecord = globalThis as unknown as { process?: { versions?: { node?: string } } };
+  return Boolean(globalRecord.process?.versions?.node);
+}
+
+function executeRestrictedWorkflowRuntimeCodeInBrowserWorker(
+  source: string,
+  input: Record<string, unknown>,
+  timeoutMs: number
+): Promise<WorkflowRuntimeValue> {
+  const globalRecord = globalThis as unknown as Record<string, unknown>;
+  const WorkerConstructor = globalRecord.Worker as new (url: string) => WorkflowRuntimeBrowserWorker;
+  const BlobConstructor = globalRecord.Blob as new (parts: string[], options?: { type?: string }) => object;
+  const urlRecord = globalRecord.URL as {
+    createObjectURL(blob: object): string;
+    revokeObjectURL(url: string): void;
+  };
+  const workerUrl = urlRecord.createObjectURL(
+    new BlobConstructor([createWorkflowRuntimeCodeBrowserWorkerSource()], { type: 'text/javascript' })
+  );
+  const worker = new WorkerConstructor(workerUrl);
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      worker.terminate();
+      urlRecord.revokeObjectURL(workerUrl);
+      reject(new Error(`Code node script exceeded timeout ${timeoutMs}ms.`));
+    }, timeoutMs);
+
+    worker.onmessage = (event) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      worker.terminate();
+      urlRecord.revokeObjectURL(workerUrl);
+      handleWorkflowRuntimeCodeWorkerMessage(event.data, resolve, reject);
+    };
+    worker.onerror = (event) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      worker.terminate();
+      urlRecord.revokeObjectURL(workerUrl);
+      reject(new Error(event.message || readErrorMessage(event.error)));
+    };
+    worker.postMessage({ source, input });
+  });
+}
+
+async function executeRestrictedWorkflowRuntimeCodeInNodeWorker(
+  source: string,
+  input: Record<string, unknown>,
+  timeoutMs: number
+): Promise<WorkflowRuntimeValue> {
+  const importer = new Function('specifier', 'return import(specifier)') as (
+    specifier: string
+  ) => Promise<{ Worker: new (filename: string, options: Record<string, unknown>) => WorkflowRuntimeNodeWorker }>;
+  const { Worker } = await importer('node:worker_threads');
+  const worker = new Worker(createWorkflowRuntimeCodeNodeWorkerSource(), {
+    eval: true,
+    workerData: { source, input }
+  });
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      void worker.terminate();
+      reject(new Error(`Code node script exceeded timeout ${timeoutMs}ms.`));
+    }, timeoutMs);
+
+    worker.once('message', (message: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      void worker.terminate();
+      handleWorkflowRuntimeCodeWorkerMessage(message, resolve, reject);
+    });
+    worker.once('error', (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      void worker.terminate();
+      reject(new Error(readErrorMessage(error)));
+    });
+    worker.once('exit', (code: number) => {
+      if (settled || code === 0) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(new Error(`Code node worker exited with code ${code}.`));
+    });
+  });
+}
+
+type WorkflowRuntimeNodeWorker = {
+  once(eventName: 'message', listener: (message: unknown) => void): void;
+  once(eventName: 'error', listener: (error: unknown) => void): void;
+  once(eventName: 'exit', listener: (code: number) => void): void;
+  terminate(): Promise<number>;
+};
+
+function handleWorkflowRuntimeCodeWorkerMessage(
+  message: unknown,
+  resolve: (value: WorkflowRuntimeValue) => void,
+  reject: (reason: Error) => void
+) {
+  if (!message || typeof message !== 'object' || Array.isArray(message)) {
+    reject(new Error('Code node worker returned an invalid message.'));
+    return;
+  }
+
+  const record = message as Record<string, unknown>;
+  if (record.ok === true) {
+    resolve(ensureWorkflowRuntimeJsonSerializable(record.result));
+    return;
+  }
+
+  reject(new Error(readWorkflowRuntimeString(record.error) ?? 'Code node worker failed.'));
+}
+
+function createWorkflowRuntimeCodeBrowserWorkerSource(): string {
+  return [
+    createWorkflowRuntimeCodeWorkerSharedSource(),
+    'self.onmessage = function(event) {',
+    '  try {',
+    '    const result = executeQiuWorkflowCode(event.data.source, event.data.input);',
+    '    self.postMessage({ ok: true, result });',
+    '  } catch (error) {',
+    '    self.postMessage({ ok: false, error: error && error.message ? error.message : String(error) });',
+    '  }',
+    '};'
+  ].join('\n');
+}
+
+function createWorkflowRuntimeCodeNodeWorkerSource(): string {
+  return [
+    "const { parentPort, workerData } = require('node:worker_threads');",
+    createWorkflowRuntimeCodeWorkerSharedSource(),
+    'try {',
+    '  const result = executeQiuWorkflowCode(workerData.source, workerData.input);',
+    '  parentPort.postMessage({ ok: true, result });',
+    '} catch (error) {',
+    '  parentPort.postMessage({ ok: false, error: error && error.message ? error.message : String(error) });',
+    '}'
+  ].join('\n');
+}
+
+function createWorkflowRuntimeCodeWorkerSharedSource(): string {
+  return `
+function readColumn(value, path) {
+  const segments = String(path || '').split('.').map((segment) => segment.trim()).filter(Boolean);
+  let currentValue = value;
+  for (const segment of segments) {
+    if (currentValue === undefined || currentValue === null) return '';
+    if (Array.isArray(currentValue)) {
+      const index = Number(segment);
+      if (!Number.isInteger(index) || index < 0 || index >= currentValue.length) return '';
+      currentValue = currentValue[index];
+      continue;
+    }
+    if (typeof currentValue === 'object') {
+      currentValue = currentValue[segment];
+      continue;
+    }
+    return '';
+  }
+  return currentValue === undefined || currentValue === null ? '' : currentValue;
+}
+function formatCell(value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(value);
+}
+function normalizeRows(value) {
+  if (Array.isArray(value)) return value;
+  if (!value || typeof value !== 'object') return [];
+  for (const key of ['rows', 'items', 'results', 'data', 'records']) {
+    if (Array.isArray(value[key])) return value[key];
+  }
+  return [value];
+}
+function readColumnConfig(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  const path = typeof value.path === 'string' ? value.path.trim() : '';
+  const header = typeof value.header === 'string' && value.header.trim() ? value.header.trim() : path;
+  return path && header ? [{ header, path }] : [];
+}
+function ensureSerializable(value) {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) throw new Error('Code node result must be JSON serializable.');
+  return JSON.parse(serialized);
+}
+function createHelpers() {
+  return {
+    pick(value, path) {
+      return readColumn(value, path);
+    },
+    toRows(items, columns) {
+      const sourceRows = normalizeRows(items);
+      const normalizedColumns = Array.isArray(columns) ? columns.flatMap(readColumnConfig) : [];
+      if (normalizedColumns.length === 0) return sourceRows;
+      return [
+        normalizedColumns.map((column) => column.header),
+        ...sourceRows.map((item) => normalizedColumns.map((column) => formatCell(readColumn(item, column.path))))
+      ];
+    }
+  };
+}
+function executeQiuWorkflowCode(source, input) {
+  const runner = new Function('input', 'helpers', [
+    '"use strict";',
+    'const require = undefined;',
+    'const process = undefined;',
+    'const window = undefined;',
+    'const document = undefined;',
+    'const fetch = undefined;',
+    source
+  ].join('\\n'));
+  const result = runner(ensureSerializable(input), createHelpers());
+  if (result === undefined) throw new Error('Code node script must return a JSON value.');
+  if (result && typeof result === 'object' && typeof result.then === 'function') {
+    throw new Error('Code node script must be synchronous.');
+  }
+  return ensureSerializable(result);
+}
+`;
+}
+
+function createWorkflowRuntimeCodeHelpers() {
+  return {
+    pick(value: unknown, path: string) {
+      return readWorkflowRuntimeTableColumnValue(value, path);
+    },
+    toRows(items: unknown, columns: unknown) {
+      const sourceRows = normalizeWorkflowRuntimeTableSourceRows(items);
+      const normalizedColumns = Array.isArray(columns)
+        ? columns.flatMap(readWorkflowRuntimeTableColumn)
+        : [];
+      if (normalizedColumns.length === 0) {
+        return sourceRows;
+      }
+
+      return [
+        normalizedColumns.map((column) => column.header),
+        ...sourceRows.map((item) =>
+          normalizedColumns.map((column) =>
+            formatWorkflowRuntimeTableCell(readWorkflowRuntimeTableColumnValue(item, column.path))
+          )
+        )
+      ];
+    }
+  };
+}
+
+function ensureWorkflowRuntimeJsonSerializable(value: unknown): WorkflowRuntimeValue {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) {
+    throw new Error('Code node result must be JSON serializable.');
+  }
+  return JSON.parse(serialized) as WorkflowRuntimeValue;
+}
+
 function readWorkflowRuntimeAssignments(
   node: WorkflowGraphNode,
   pool: WorkflowVariablePool
 ): Array<{ name: string; value: unknown }> {
+  const tableAssignment = readWorkflowRuntimeTableMappingAssignment(node, pool);
   const assignments = Array.isArray(node.config?.assignments)
     ? node.config.assignments.flatMap((item) => readWorkflowRuntimeAssignment(item, pool))
     : [];
@@ -2151,8 +2571,8 @@ function readWorkflowRuntimeAssignments(
       )
     : [];
 
-  if (assignments.length > 0 || values.length > 0) {
-    return [...assignments, ...values];
+  if (tableAssignment || assignments.length > 0 || values.length > 0) {
+    return [...(tableAssignment ? [tableAssignment] : []), ...assignments, ...values];
   }
 
   const fallbackValue = resolveWorkflowRuntimeConfigValue(
@@ -2160,6 +2580,115 @@ function readWorkflowRuntimeAssignments(
     pool
   );
   return (node.outputVariables ?? []).map((name) => ({ name, value: fallbackValue }));
+}
+
+function readWorkflowRuntimeTableMappingAssignment(
+  node: WorkflowGraphNode,
+  pool: WorkflowVariablePool
+): { name: string; value: unknown } | undefined {
+  const mapping = node.config?.tableMapping;
+  if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping)) {
+    return undefined;
+  }
+
+  const record = mapping as Record<string, unknown>;
+  const sourceRef = typeof record.sourceRef === 'string' ? record.sourceRef.trim() : '';
+  const outputVariable = typeof record.outputVariable === 'string' && record.outputVariable.trim()
+    ? record.outputVariable.trim()
+    : node.outputVariables?.[0] ?? `${node.id}.rows`;
+  const columns = Array.isArray(record.columns)
+    ? record.columns.flatMap(readWorkflowRuntimeTableColumn)
+    : [];
+
+  if (!sourceRef || !outputVariable || columns.length === 0) {
+    return undefined;
+  }
+
+  const sourceValue = pool.get(sourceRef);
+  const sourceRows = normalizeWorkflowRuntimeTableSourceRows(sourceValue);
+  const rows = sourceRows.length > 0 && sourceRows.every(Array.isArray)
+    ? sourceRows as unknown[][]
+    : [
+        columns.map((column) => column.header),
+        ...sourceRows.map((item) =>
+          columns.map((column) => formatWorkflowRuntimeTableCell(readWorkflowRuntimeTableColumnValue(item, column.path)))
+        )
+      ];
+
+  return {
+    name: outputVariable,
+    value: rows
+  };
+}
+
+function readWorkflowRuntimeTableColumn(value: unknown): Array<{ header: string; path: string }> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return [];
+  }
+
+  const record = value as Record<string, unknown>;
+  const path = typeof record.path === 'string' ? record.path.trim() : '';
+  const header = typeof record.header === 'string' && record.header.trim()
+    ? record.header.trim()
+    : path;
+
+  return path && header ? [{ header, path }] : [];
+}
+
+function normalizeWorkflowRuntimeTableSourceRows(value: unknown): unknown[] {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (!value || typeof value !== 'object') {
+    return [];
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const key of ['rows', 'items', 'results', 'data', 'records']) {
+    const nestedValue = record[key];
+    if (Array.isArray(nestedValue)) {
+      return nestedValue;
+    }
+  }
+
+  return [record];
+}
+
+function readWorkflowRuntimeTableColumnValue(value: unknown, path: string): unknown {
+  const segments = path.split('.').map((segment) => segment.trim()).filter(Boolean);
+  let currentValue = value;
+
+  for (const segment of segments) {
+    if (currentValue === undefined || currentValue === null) {
+      return '';
+    }
+
+    if (Array.isArray(currentValue)) {
+      const index = Number(segment);
+      if (!Number.isInteger(index) || index < 0 || index >= currentValue.length) {
+        return '';
+      }
+      currentValue = currentValue[index];
+      continue;
+    }
+
+    if (typeof currentValue === 'object') {
+      currentValue = (currentValue as Record<string, unknown>)[segment];
+      continue;
+    }
+
+    return '';
+  }
+
+  return currentValue ?? '';
+}
+
+function formatWorkflowRuntimeTableCell(value: unknown): string {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(value);
 }
 
 function readWorkflowRuntimeAssignment(
@@ -2209,11 +2738,14 @@ async function invokeWorkflowRuntimeModelNode(input: {
 }> {
   const profile = selectWorkflowRuntimeModelProfile(input.node, input.profiles);
   const variables = resolveWorkflowVariableRefs(input.pool, input.node.inputVariables, getWorkflowRuntimeFallbackInputRefs(input.pool));
+  const outputMode = readWorkflowRuntimeModelOutputMode(input.node);
   const messages = buildWorkflowRuntimeModelMessages({
     task: input.task,
     node: input.node,
     variables,
-    knowledgeSources: input.binding.availableKnowledgeSources
+    knowledgeSources: input.binding.availableKnowledgeSources,
+    outputMode,
+    schema: readWorkflowRuntimeModelSchema(input.node)
   });
   const response = await input.modelInvoker({
     profile,
@@ -2221,11 +2753,16 @@ async function invokeWorkflowRuntimeModelNode(input: {
     timeoutMs: 45_000
   });
   const parsedJson = parseWorkflowRuntimeJson(response.content);
+  if (outputMode === 'json' && parsedJson === undefined) {
+    throw new Error(`Model node "${input.node.name}" expected JSON output, but the response could not be parsed.`);
+  }
   const outputVariables = writeWorkflowNodeOutputs({
     pool: input.pool,
     node: input.node,
     text: response.content,
-    json: parsedJson
+    json: parsedJson,
+    result: outputMode === 'json' ? (parsedJson as WorkflowRuntimeValue) : response.content,
+    ...(outputMode === 'json' ? { outputValue: parsedJson as WorkflowRuntimeValue } : {})
   });
   input.pool.set('runtime.previous_text', response.content);
   input.pool.set('runtime.last_model_node', input.node.id);
@@ -2660,10 +3197,22 @@ function buildWorkflowRuntimeModelMessages(input: {
   node: WorkflowGraphNode;
   variables: Array<{ ref: string; value: WorkflowRuntimeValue }>;
   knowledgeSources: DesktopKnowledgeSourceSummary[];
+  outputMode: WorkflowRuntimeModelOutputMode;
+  schema?: unknown;
 }): DesktopModelChatMessage[] {
   const knowledgeContext = input.knowledgeSources
     .map((source) => formatKnowledgeSourceForPrompt(source))
     .join('\n---\n');
+  const schemaText = input.schema === undefined || input.schema === null
+    ? ''
+    : JSON.stringify(input.schema, null, 2);
+  const outputInstruction = input.outputMode === 'json'
+    ? [
+        'Return valid JSON only.',
+        'Do not add markdown fences, comments, explanations, or prose outside JSON.',
+        schemaText ? `Expected JSON shape:\n${schemaText}` : 'Use a stable JSON object or array that matches the node instruction.'
+      ].join('\n')
+    : 'Return the node output directly in Chinese unless the node instruction asks for structured JSON.';
 
   return [
     {
@@ -2673,7 +3222,7 @@ function buildWorkflowRuntimeModelMessages(input: {
         `Role: ${input.task.roleName}`,
         `Node: ${input.node.name} (${input.node.type})`,
         'Execute only this node. Do not invent completed tool or file operations.',
-        'Return the node output directly in Chinese unless the node instruction asks for structured JSON.'
+        outputInstruction
       ].join('\n')
     },
     {
@@ -2683,10 +3232,20 @@ function buildWorkflowRuntimeModelMessages(input: {
         `Task input: ${input.task.input}`,
         `Node instruction: ${input.node.instruction ?? 'Use the task input and produce the next useful result.'}`,
         `Input variables:\n${renderWorkflowVariableRefsForPrompt(input.variables)}`,
-        `Knowledge context:\n${knowledgeContext || 'none'}`
+        `Knowledge context:\n${knowledgeContext || 'none'}`,
+        input.outputMode === 'json' ? `JSON output requirement:\n${outputInstruction}` : ''
       ].join('\n\n')
     }
   ];
+}
+
+function readWorkflowRuntimeModelOutputMode(node: WorkflowGraphNode): WorkflowRuntimeModelOutputMode {
+  if (node.type === 'parameter_extractor') return 'json';
+  return node.config?.outputMode === 'json' || node.config?.responseFormat === 'json' ? 'json' : 'text';
+}
+
+function readWorkflowRuntimeModelSchema(node: WorkflowGraphNode): unknown {
+  return node.config?.schema ?? node.config?.jsonSchema ?? node.config?.parameters;
 }
 
 function buildWorkflowRuntimeToolRequest(

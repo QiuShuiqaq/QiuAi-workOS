@@ -8,7 +8,11 @@ import {
   DatabaseOutlined,
   DownOutlined,
   FileAddOutlined,
+  FileExcelOutlined,
+  FileImageOutlined,
+  FilePdfOutlined,
   FileTextOutlined,
+  FileWordOutlined,
   FolderOpenOutlined,
   GlobalOutlined,
   DownloadOutlined,
@@ -894,6 +898,7 @@ export default function App() {
   const [isTestingModel, setIsTestingModel] = useState(false);
   const [isPullingProviderModels, setIsPullingProviderModels] = useState(false);
   const [localActionNotice, setLocalActionNotice] = useState('');
+  const [savingArtifactId, setSavingArtifactId] = useState('');
   const [roleTemplateNotice, setRoleTemplateNotice] = useState('');
   const [isLoadingRoleTemplates, setIsLoadingRoleTemplates] = useState(false);
   const [authorizedRoleTemplateCatalog, setAuthorizedRoleTemplateCatalog] =
@@ -1156,6 +1161,28 @@ export default function App() {
       await window.qiuDesktop.openLocalPath(targetPath);
     } catch (error) {
       setLocalActionNotice(`打开本地路径失败：${error instanceof Error ? error.message : 'unknown error'}`);
+    }
+  }
+
+  async function saveArtifactAs(artifact: DesktopTaskDetail['artifacts'][number]) {
+    if (!artifact.localPath || !window.qiuDesktop) {
+      return;
+    }
+
+    setLocalActionNotice('');
+    setSavingArtifactId(artifact.id);
+    try {
+      const result = await window.qiuDesktop.saveArtifactAs({
+        sourcePath: artifact.localPath,
+        suggestedFileName: getArtifactFileName(artifact)
+      });
+      if (!result.canceled) {
+        message.success('结果文件已保存');
+      }
+    } catch (error) {
+      setLocalActionNotice(`保存结果文件失败：${error instanceof Error ? error.message : 'unknown error'}`);
+    } finally {
+      setSavingArtifactId('');
     }
   }
 
@@ -2224,37 +2251,40 @@ export default function App() {
                     <div className="chat-bubble assistant-bubble artifact-bubble">
                       <Typography.Text strong>结果已生成</Typography.Text>
                       <div className="chat-artifact-grid">
-                        {conversationArtifacts.map((artifact) => (
+                        {conversationArtifacts.map((artifact) => {
+                          const fileName = getArtifactFileName(artifact);
+                          return (
                           <div key={artifact.id} className="chat-artifact-card">
-                            <Space align="start" size={10}>
-                              <FolderOpenOutlined className="list-icon" />
-                              <Space direction="vertical" size={4}>
-                                <Space size={6} wrap>
-                                  <Typography.Text strong>{artifact.title}</Typography.Text>
-                                  <Tag>{artifact.type}</Tag>
-                                </Space>
-                                <Typography.Paragraph type="secondary" ellipsis={{ rows: 2 }} style={{ margin: 0 }}>
-                                  {formatArtifactPreview(artifact)}
-                                </Typography.Paragraph>
-                                {artifact.localPath ? (
-                                  <Typography.Text type="secondary" ellipsis>
-                                    {artifact.localPath}
-                                  </Typography.Text>
-                                ) : null}
-                                {artifact.localPath ? (
-                                  <Button
-                                    size="small"
-                                    type="primary"
-                                    icon={<FolderOpenOutlined />}
-                                    onClick={() => void openLocalPath(artifact.localPath)}
-                                  >
-                                    打开文件
-                                  </Button>
-                                ) : null}
-                              </Space>
-                            </Space>
+                            <div className={`artifact-file-icon ${getArtifactToneClass(artifact)}`}>
+                              {renderArtifactFileIcon(artifact)}
+                            </div>
+                            <div className="artifact-file-main">
+                              <div className="artifact-file-title-row">
+                                <Typography.Text strong ellipsis title={fileName}>
+                                  {fileName}
+                                </Typography.Text>
+                                <Tag className="artifact-file-type">{getArtifactTypeLabel(artifact)}</Tag>
+                              </div>
+                              <Typography.Text type="secondary" className="artifact-file-meta">
+                                {formatArtifactMeta(artifact)}
+                              </Typography.Text>
+                            </div>
+                            {artifact.localPath ? (
+                              <Button
+                                size="small"
+                                className="artifact-download-button"
+                                icon={<DownloadOutlined />}
+                                loading={savingArtifactId === artifact.id}
+                                title="Save file"
+                                aria-label="Save file"
+                                onClick={() => void saveArtifactAs(artifact)}
+                              />
+                            ) : (
+                              <Tag color="warning">缓存已过期</Tag>
+                            )}
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                       {localActionNotice ? (
                         <Typography.Text type="warning">{localActionNotice}</Typography.Text>
@@ -4805,16 +4835,54 @@ function isUserDeliverableArtifact(artifact: DesktopTaskDetail['artifacts'][numb
   return artifact.type !== 'report';
 }
 
-function formatArtifactPreview(artifact: DesktopTaskDetail['artifacts'][number]) {
-  if (artifact.localPath) {
-    return `已生成本地文件：${artifact.title}`;
-  }
-
-  return artifact.content;
-}
-
 function countUserDeliverableArtifacts(task: DesktopTaskDetail) {
   return task.artifacts.filter(isUserDeliverableArtifact).length;
+}
+
+function getArtifactFileName(artifact: DesktopTaskDetail['artifacts'][number]) {
+  const source = artifact.localPath?.trim() || artifact.title.trim();
+  const normalizedSource = source.replace(/\\/g, '/');
+  const fileName = normalizedSource.split('/').filter(Boolean).at(-1)?.trim();
+  return fileName || artifact.title || 'result-file';
+}
+
+function getArtifactExtension(artifact: DesktopTaskDetail['artifacts'][number]) {
+  const fileName = getArtifactFileName(artifact);
+  return fileName.match(/\.([a-zA-Z0-9]+)$/)?.[1]?.toLowerCase() ?? '';
+}
+
+function getArtifactTypeLabel(artifact: DesktopTaskDetail['artifacts'][number]) {
+  const extension = getArtifactExtension(artifact);
+  if (extension) {
+    return extension.toUpperCase();
+  }
+
+  return artifact.type.toUpperCase();
+}
+
+function getArtifactToneClass(artifact: DesktopTaskDetail['artifacts'][number]) {
+  const extension = getArtifactExtension(artifact);
+  if (['xlsx', 'xls', 'csv'].includes(extension)) return 'excel';
+  if (['doc', 'docx'].includes(extension)) return 'word';
+  if (extension === 'pdf') return 'pdf';
+  if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'].includes(extension)) return 'image';
+  if (['ppt', 'pptx'].includes(extension)) return 'ppt';
+  return 'file';
+}
+
+function renderArtifactFileIcon(artifact: DesktopTaskDetail['artifacts'][number]): ReactNode {
+  const tone = getArtifactToneClass(artifact);
+  if (tone === 'excel') return <FileExcelOutlined />;
+  if (tone === 'word') return <FileWordOutlined />;
+  if (tone === 'pdf') return <FilePdfOutlined />;
+  if (tone === 'image') return <FileImageOutlined />;
+  return <FileTextOutlined />;
+}
+
+function formatArtifactMeta(artifact: DesktopTaskDetail['artifacts'][number]) {
+  const createdAt = Date.parse(artifact.createdAt);
+  const createdLabel = Number.isFinite(createdAt) ? formatDate(artifact.createdAt) : '刚刚生成';
+  return `${getArtifactTypeLabel(artifact)} · ${createdLabel} · 本地缓存 30 天`;
 }
 
 function createChatTaskTitle(input: string) {
@@ -5116,7 +5184,7 @@ function executionEventMessage(log: DesktopTaskDetail['executionLogs'][number]) 
     TOOL_RESULT_RETURNED_TO_MODEL: formatToolLogMessage(log.message, '工具结果已交回模型整理'),
     ARTIFACT_CREATED: '结果文件和执行报告已准备好。',
     ARTIFACT_FILE_WRITTEN: formatPathLogMessage(log.message, '已写入本地结果文件'),
-    TASK_COMPLETED: '任务已完成，可以查看结果或打开文件。'
+    TASK_COMPLETED: '任务已完成，可以查看结果并保存文件。'
   };
 
   return messages[log.eventType] ?? workflowExecutionEventMessage(log) ?? log.message;

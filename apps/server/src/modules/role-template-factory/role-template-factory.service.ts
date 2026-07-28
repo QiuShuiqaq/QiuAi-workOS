@@ -894,6 +894,25 @@ export class RoleTemplateFactoryService {
       warnings.push('LLM node has no instruction.');
     }
 
+    if (node.type === 'code') {
+      const code = typeof node.config?.code === 'string' ? node.config.code.trim() : '';
+      const outputVariable = typeof node.config?.outputVariable === 'string'
+        ? node.config.outputVariable.trim()
+        : node.outputVariables?.[0]?.trim();
+      const timeoutMs = typeof node.config?.timeoutMs === 'number' ? node.config.timeoutMs : 0;
+      if (!code) {
+        warnings.push('Code node has no script.');
+      }
+      if (!outputVariable) {
+        warnings.push('Code node has no output variable.');
+      }
+      if (!timeoutMs) {
+        warnings.push('Code node has no timeoutMs.');
+      } else if (timeoutMs > 10000) {
+        warnings.push('Code node timeoutMs must not exceed 10000.');
+      }
+    }
+
     return warnings;
   }
 
@@ -926,6 +945,8 @@ export class RoleTemplateFactoryService {
         return variables || this.describeNodeConfig(node.config) || 'Reads workflow state for branch selection.';
       case 'assign':
         return this.describeNodeConfig(node.config) || variables || 'Assigns workflow variables from config.';
+      case 'code':
+        return this.describeNodeConfig(node.config) || variables || 'Transforms JSON or table values with restricted code.';
       case 'template':
         return this.describeNodeConfig(node.config) || variables || 'Renders a template from workflow variables.';
       case 'artifact':
@@ -956,6 +977,8 @@ export class RoleTemplateFactoryService {
         return targetText || 'Chooses the next branch.';
       case 'assign':
         return variables || 'Writes assigned workflow variables.';
+      case 'code':
+        return variables || 'Writes transformed JSON or table variables.';
       case 'template':
         return variables || 'Writes rendered template text.';
       case 'artifact':

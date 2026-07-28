@@ -7,6 +7,7 @@ export type RoleWorkflowGraphNodeType =
   | 'reasoning'
   | 'llm'
   | 'assign'
+  | 'code'
   | 'template'
   | 'tool'
   | 'condition'

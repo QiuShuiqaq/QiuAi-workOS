@@ -755,10 +755,87 @@ body,
 }
 
 .chat-artifact-card {
-  padding: 12px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  max-width: 560px;
+  padding: 10px 12px;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #fff;
+}
+
+.artifact-file-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 8px;
+  color: #4b5563;
+  background: #f3f4f6;
+  font-size: 18px;
+}
+
+.artifact-file-icon.excel {
+  color: #15803d;
+  background: #dcfce7;
+}
+
+.artifact-file-icon.word {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.artifact-file-icon.pdf {
+  color: #dc2626;
+  background: #fee2e2;
+}
+
+.artifact-file-icon.image {
+  color: #7c3aed;
+  background: #ede9fe;
+}
+
+.artifact-file-icon.ppt {
+  color: #c2410c;
+  background: #ffedd5;
+}
+
+.artifact-file-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.artifact-file-title-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.artifact-file-type {
+  margin-inline-end: 0;
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.artifact-file-meta {
+  display: block;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-download-button {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
 }
 
 .chat-empty-state {
