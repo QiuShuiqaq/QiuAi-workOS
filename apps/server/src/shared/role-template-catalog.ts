@@ -715,7 +715,16 @@ function defaultWorkflowSteps(template: BaseServerRoleTemplateCatalogEntry): Ser
 function allowedPlanCodesFrom(planCode: string): string[] {
   switch (planCode) {
     case 'PERSONAL_FREE':
-      return ['PERSONAL_FREE'];
+      return [
+        'PERSONAL_FREE',
+        'ENTERPRISE_BASIC_MONTHLY',
+        'ENTERPRISE_BASIC_ANNUAL',
+        'ENTERPRISE_STANDARD_MONTHLY',
+        'ENTERPRISE_STANDARD_ANNUAL',
+        'ENTERPRISE_PRO_MONTHLY',
+        'ENTERPRISE_PRO_ANNUAL',
+        'ENTERPRISE_CUSTOM'
+      ];
     case 'ENTERPRISE_BASIC_MONTHLY':
     case 'ENTERPRISE_BASIC_ANNUAL':
       return [
@@ -930,7 +939,7 @@ const baseServerRoleTemplateCatalog: BaseServerRoleTemplateCatalogEntry[] = [
     industry: '办公与知识管理',
     scenario: '文档归类、信息提取、归档检查',
     description: '处理企业本地文件和资料，把零散文档整理为结构化摘要、归档建议和待办清单。',
-    recommendedPlanCode: 'ENTERPRISE_STANDARD_MONTHLY',
+    recommendedPlanCode: 'PERSONAL_FREE',
     businessGoal: '减少文档查找和重复整理时间，让企业资料能被后续数字员工稳定复用。',
     knowledgeSources: ['文件命名规范', '归档目录规则', '部门资料说明', '历史项目文档'],
     tools: ['office-document', 'local-filesystem'],
@@ -1540,8 +1549,30 @@ const baseServerRoleTemplateCatalog: BaseServerRoleTemplateCatalogEntry[] = [
   }
 ];
 
+const productionRoleTemplateIds = [
+  'template_enterprise_researcher',
+  'template_document_organizer',
+  'template_spreadsheet_analyst',
+  'template_customer_support_agent',
+  'template_video_quality_editor'
+] as const;
+
+const productionRoleTemplateIdSet = new Set<string>(productionRoleTemplateIds);
+
+function requireBaseRoleTemplate(templateId: string): BaseServerRoleTemplateCatalogEntry {
+  const template = baseServerRoleTemplateCatalog.find((item) => item.templateId === templateId);
+  if (!template) {
+    throw new Error(`Missing production role template: ${templateId}`);
+  }
+  return template;
+}
+
+export const retiredServerRoleTemplateIds = baseServerRoleTemplateCatalog
+  .map((template) => template.templateId)
+  .filter((templateId) => !productionRoleTemplateIdSet.has(templateId));
+
 export const serverRoleTemplateCatalog: ServerRoleTemplateCatalogEntry[] =
-  baseServerRoleTemplateCatalog.map(completeCatalogEntry);
+  productionRoleTemplateIds.map((templateId) => completeCatalogEntry(requireBaseRoleTemplate(templateId)));
 
 export const serverRoleTemplateCatalogById = new Map(
   serverRoleTemplateCatalog.map((template) => [template.templateId, template] as const)

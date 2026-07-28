@@ -1,7 +1,10 @@
 ﻿import { PrismaClient } from '@prisma/client';
 
 import { hashPassword } from '../src/shared/auth/password-hash';
-import { serverRoleTemplateCatalog } from '../src/shared/role-template-catalog';
+import {
+  retiredServerRoleTemplateIds,
+  serverRoleTemplateCatalog
+} from '../src/shared/role-template-catalog';
 
 const prisma = new PrismaClient();
 
@@ -637,6 +640,22 @@ async function seedBilling() {
 
 async function seedRoleTemplates() {
   const publishedAt = new Date('2026-07-24T00:00:00.000Z');
+
+  if (retiredServerRoleTemplateIds.length > 0) {
+    await prisma.roleTemplate.updateMany({
+      where: {
+        id: {
+          in: retiredServerRoleTemplateIds
+        },
+        status: {
+          not: 'DELETED'
+        }
+      },
+      data: {
+        status: 'DELETED'
+      }
+    });
+  }
 
   for (const template of roleTemplates) {
     const existingTemplate = await prisma.roleTemplate.findUnique({

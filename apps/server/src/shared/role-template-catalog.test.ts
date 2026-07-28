@@ -1,22 +1,30 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { serverRoleTemplateCatalog } from './role-template-catalog';
+import {
+  retiredServerRoleTemplateIds,
+  serverRoleTemplateCatalog
+} from './role-template-catalog';
 
-test('server role template catalog is rich and publishable', () => {
-  assert.ok(serverRoleTemplateCatalog.length >= 30);
+test('server role template catalog is focused and production-oriented', () => {
+  const productionTemplateExpectations = [
+    ['template_enterprise_researcher', 'docx'],
+    ['template_document_organizer', 'xlsx'],
+    ['template_spreadsheet_analyst', 'xlsx'],
+    ['template_customer_support_agent', 'docx'],
+    ['template_video_quality_editor', 'mp4']
+  ] as const;
+
+  assert.deepEqual(
+    serverRoleTemplateCatalog.map((template) => template.templateId),
+    productionTemplateExpectations.map(([templateId]) => templateId)
+  );
+  assert.ok(retiredServerRoleTemplateIds.length >= 1);
+  assert.ok(retiredServerRoleTemplateIds.includes('template_case_ops'));
 
   const ids = new Set(serverRoleTemplateCatalog.map((template) => template.templateId));
   assert.equal(ids.size, serverRoleTemplateCatalog.length);
   const templateById = new Map(serverRoleTemplateCatalog.map((template) => [template.templateId, template] as const));
-  const productionTemplateExpectations = [
-    ['template_customer_support_agent', 'docx'],
-    ['template_proposal_specialist', 'pptx'],
-    ['template_enterprise_researcher', 'docx'],
-    ['template_spreadsheet_analyst', 'xlsx'],
-    ['template_document_organizer', 'xlsx'],
-    ['template_video_quality_editor', 'mp4']
-  ] as const;
 
   for (const [templateId, artifactType] of productionTemplateExpectations) {
     const template = templateById.get(templateId);
