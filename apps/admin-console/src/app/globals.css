@@ -16,7 +16,7 @@ a {
 
 .workflow-builder-shell {
   display: grid;
-  grid-template-columns: 216px minmax(0, 1fr) 360px;
+  grid-template-columns: 216px minmax(0, 1fr) 384px;
   gap: 0;
   min-height: 760px;
   border-top: 1px solid #edf1f7;
@@ -65,9 +65,46 @@ a {
 }
 
 .workflow-config-panel {
+  height: 760px;
   max-height: 760px;
   border-left: 1px solid #edf1f7;
+  background: #f8fafc;
   overflow: auto;
+}
+
+.workflow-config-panel .ant-space {
+  width: 100%;
+}
+
+.workflow-config-panel .ant-input,
+.workflow-config-panel .ant-input-sm,
+.workflow-config-panel .ant-input-number,
+.workflow-config-panel .ant-input-number-input,
+.workflow-config-panel .ant-select-selection-item,
+.workflow-config-panel .ant-select-selection-placeholder {
+  font-size: 13px;
+}
+
+.workflow-config-panel .ant-input,
+.workflow-config-panel .ant-input-sm,
+.workflow-config-panel .ant-select-single .ant-select-selector,
+.workflow-config-panel .ant-input-number {
+  min-height: 34px;
+}
+
+.workflow-config-panel textarea.ant-input,
+.workflow-config-panel textarea.ant-input-sm {
+  min-height: auto;
+  line-height: 1.55;
+}
+
+.workflow-config-panel .ant-select-single .ant-select-selector {
+  align-items: center;
+}
+
+.ant-select-dropdown .ant-select-item {
+  min-height: 34px;
+  font-size: 13px;
 }
 
 .workflow-node-palette {
@@ -340,6 +377,7 @@ a {
 .workflow-config-panel-header {
   padding-bottom: 12px;
   border-bottom: 1px solid #edf1f7;
+  background: #f8fafc;
 }
 
 .workflow-config-panel-title-row {
@@ -384,16 +422,50 @@ a {
 
 .workflow-config-section,
 .workflow-variable-reference {
-  padding: 10px;
+  padding: 12px;
   border: 1px solid #edf1f7;
   border-radius: 8px;
-  background: #fbfcff;
+  background: #fff;
+}
+
+.workflow-config-section {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
 }
 
 .workflow-config-section-desc {
   display: block;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.workflow-variable-reference.compact {
+  padding: 10px 12px;
+}
+
+.workflow-variable-reference-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.workflow-variable-help-button {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1677ff;
+}
+
+.workflow-variable-popover {
+  display: flex;
+  width: 360px;
+  max-width: min(360px, calc(100vw - 48px));
+  flex-direction: column;
+  gap: 8px;
 }
 
 .workflow-variable-tags {
@@ -414,12 +486,59 @@ a {
   background: #fff;
 }
 
+.workflow-variable-current.compact {
+  padding: 0;
+  border: 0;
+}
+
 .workflow-variable-list {
   display: flex;
-  max-height: 248px;
+  max-height: 300px;
   flex-direction: column;
   gap: 6px;
   overflow: auto;
+}
+
+.workflow-advanced-settings {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.workflow-advanced-settings summary {
+  display: flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 12px;
+  color: #334155;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  list-style: none;
+}
+
+.workflow-advanced-settings summary::-webkit-details-marker {
+  display: none;
+}
+
+.workflow-advanced-settings summary::after {
+  margin-left: auto;
+  color: #94a3b8;
+  content: "+";
+  font-size: 16px;
+  line-height: 1;
+}
+
+.workflow-advanced-settings[open] summary {
+  border-bottom: 1px solid #edf1f7;
+}
+
+.workflow-advanced-settings[open] summary::after {
+  content: "-";
+}
+
+.workflow-advanced-settings > .ant-space {
+  padding: 10px;
 }
 
 .workflow-variable-row {

@@ -4,6 +4,7 @@ import {
   AppstoreAddOutlined,
   ArrowLeftOutlined,
   DeleteOutlined,
+  InfoCircleOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   RocketOutlined,
@@ -34,6 +35,7 @@ import Form from 'antd/es/form';
 import Input from 'antd/es/input';
 import InputNumber from 'antd/es/input-number';
 import Modal from 'antd/es/modal';
+import Popover from 'antd/es/popover';
 import Select from 'antd/es/select';
 import Space from 'antd/es/space';
 import Tag from 'antd/es/tag';
@@ -1516,73 +1518,86 @@ function WorkflowVariableReferencePanel({
   const variableByValue = new Map(variables.map((variable) => [variable.value, variable]));
   const selectedInputs = selectedNode.inputVariables ?? [];
   const selectedOutputs = selectedNode.outputVariables ?? [];
-  const visibleVariables = variables.slice(0, 18);
+  const visibleVariables = variables.slice(0, 24);
+  const variableReferenceContent = (
+    <div className="workflow-variable-popover">
+      <Typography.Text strong>变量说明</Typography.Text>
+      <Typography.Text type="secondary" className="workflow-config-section-desc">
+        变量是节点之间传递数据的引用。文件、图片、视频只传路径或引用，执行时由对应工具读取。
+      </Typography.Text>
+      <div className="workflow-variable-list">
+        {visibleVariables.map((variable) => (
+          <div key={variable.value} className="workflow-variable-row">
+            <div className="workflow-variable-row-main">
+              <Typography.Text ellipsis className="workflow-variable-name">
+                {variable.value}
+              </Typography.Text>
+              <Typography.Text type="secondary" ellipsis className="workflow-variable-label">
+                {variable.source} · {variable.label}
+              </Typography.Text>
+            </div>
+            <WorkflowVariableTypeBadge type={variable.type} />
+          </div>
+        ))}
+      </div>
+      {variables.length > visibleVariables.length ? (
+        <Typography.Text type="secondary" className="workflow-config-section-desc">
+          已显示前 {visibleVariables.length} 个变量，其余可在输入框中搜索。
+        </Typography.Text>
+      ) : null}
+    </div>
+  );
 
   return (
-    <div className="workflow-variable-reference">
-      <Space direction="vertical" size={10} style={{ width: '100%' }}>
-        <Space align="center" style={{ width: '100%', justifyContent: 'space-between' }}>
+    <div className="workflow-variable-reference compact">
+      <div className="workflow-variable-reference-head">
+        <div>
           <Typography.Text strong>变量</Typography.Text>
           <Typography.Text type="secondary" className="workflow-config-section-desc">
-            传值用引用，不传大文件内容
+            当前节点的输入和输出
           </Typography.Text>
-        </Space>
-
-        <div className="workflow-variable-current">
-          <Typography.Text type="secondary">当前节点输入</Typography.Text>
-          <div className="workflow-variable-tags compact">
-            {selectedInputs.length ? (
-              selectedInputs.map((value) => {
-                const variable = variableByValue.get(value);
-                return (
-                  <Tag key={value} color={variable ? workflowVariableTypeColors[variable.type] : undefined}>
-                    {value}
-                  </Tag>
-                );
-              })
-            ) : (
-              <Tag>无</Tag>
-            )}
-          </div>
-          <Typography.Text type="secondary">当前节点输出</Typography.Text>
-          <div className="workflow-variable-tags compact">
-            {selectedOutputs.length ? (
-              selectedOutputs.map((value) => {
-                const variable = variableByValue.get(value);
-                return (
-                  <Tag key={value} color={variable ? workflowVariableTypeColors[variable.type] : undefined}>
-                    {value}
-                  </Tag>
-                );
-              })
-            ) : (
-              <Tag>无</Tag>
-            )}
-          </div>
         </div>
-
-        <div className="workflow-variable-list">
-          {visibleVariables.map((variable) => (
-            <div key={variable.value} className="workflow-variable-row">
-              <div className="workflow-variable-row-main">
-                <Typography.Text ellipsis className="workflow-variable-name">
-                  {variable.value}
-                </Typography.Text>
-                <Typography.Text type="secondary" ellipsis className="workflow-variable-label">
-                  {variable.source} · {variable.label}
-                </Typography.Text>
-              </div>
-              <WorkflowVariableTypeBadge type={variable.type} />
-            </div>
-          ))}
+        <Popover placement="leftTop" trigger="hover" content={variableReferenceContent}>
+          <Button
+            size="small"
+            type="text"
+            className="workflow-variable-help-button"
+            icon={<InfoCircleOutlined />}
+          />
+        </Popover>
+      </div>
+      <div className="workflow-variable-current compact">
+        <Typography.Text type="secondary">输入</Typography.Text>
+        <div className="workflow-variable-tags compact">
+          {selectedInputs.length ? (
+            selectedInputs.map((value) => {
+              const variable = variableByValue.get(value);
+              return (
+                <Tag key={value} color={variable ? workflowVariableTypeColors[variable.type] : undefined}>
+                  {value}
+                </Tag>
+              );
+            })
+          ) : (
+            <Tag>无</Tag>
+          )}
         </div>
-
-        {variables.length > visibleVariables.length ? (
-          <Typography.Text type="secondary" className="workflow-config-section-desc">
-            已显示前 {visibleVariables.length} 个变量，其余可在输入框中搜索。
-          </Typography.Text>
-        ) : null}
-      </Space>
+        <Typography.Text type="secondary">输出</Typography.Text>
+        <div className="workflow-variable-tags compact">
+          {selectedOutputs.length ? (
+            selectedOutputs.map((value) => {
+              const variable = variableByValue.get(value);
+              return (
+                <Tag key={value} color={variable ? workflowVariableTypeColors[variable.type] : undefined}>
+                  {value}
+                </Tag>
+              );
+            })
+          ) : (
+            <Tag>无</Tag>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -3143,55 +3158,58 @@ function WorkflowReactFlowEditor({
                 />
               </WorkflowConfigSection>
             ) : null}
-            <WorkflowConfigSection
-              title="输入输出"
-              description="输入变量决定节点能读什么；输出变量决定后续节点怎么引用结果。"
-            >
+            <details className="workflow-advanced-settings">
+              <summary>高级设置</summary>
               <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                <Select
-                  size="small"
-                  mode="tags"
-                  value={selectedNode.inputVariables ?? []}
-                  placeholder="输入变量，例如 start.text / start.files / 上一步输出"
-                  options={variableSelectOptions}
-                  optionFilterProp="label"
-                  tokenSeparators={[',']}
-                  onChange={(inputVariables) => updateNode(selectedNode.id, { inputVariables })}
-                />
-                <Select
-                  size="small"
-                  mode="tags"
-                  value={selectedNode.outputVariables ?? []}
-                  placeholder="输出变量，例如 analyze.json / final_video"
-                  options={variableSelectOptions}
-                  optionFilterProp="label"
-                  tokenSeparators={[',']}
-                  onChange={(outputVariables) => {
-                    if (selectedNode.type === 'code') {
-                      updateCodeNodeConfig(selectedNode, { outputVariable: outputVariables[0] ?? `${selectedNode.id}.json` });
-                      return;
-                    }
-                    updateNode(selectedNode.id, { outputVariables });
-                  }}
-                />
+                <WorkflowConfigSection
+                  title="输入输出"
+                  description="输入变量决定节点能读什么；输出变量决定后续节点怎么引用结果。"
+                >
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    <Select
+                      size="small"
+                      mode="tags"
+                      value={selectedNode.inputVariables ?? []}
+                      placeholder="输入变量，例如 start.text / start.files / 上一步输出"
+                      options={variableSelectOptions}
+                      optionFilterProp="label"
+                      tokenSeparators={[',']}
+                      onChange={(inputVariables) => updateNode(selectedNode.id, { inputVariables })}
+                    />
+                    <Select
+                      size="small"
+                      mode="tags"
+                      value={selectedNode.outputVariables ?? []}
+                      placeholder="输出变量，例如 analyze.json / final_video"
+                      options={variableSelectOptions}
+                      optionFilterProp="label"
+                      tokenSeparators={[',']}
+                      onChange={(outputVariables) => {
+                        if (selectedNode.type === 'code') {
+                          updateCodeNodeConfig(selectedNode, { outputVariable: outputVariables[0] ?? `${selectedNode.id}.json` });
+                          return;
+                        }
+                        updateNode(selectedNode.id, { outputVariables });
+                      }}
+                    />
+                  </Space>
+                </WorkflowConfigSection>
+                <WorkflowConfigSection
+                  title="人工确认"
+                  description="高风险工具、写文件、发请求等节点可以要求用户确认后再执行。"
+                >
+                  <Select
+                    size="small"
+                    value={selectedNode.requiresApproval ? 'true' : 'false'}
+                    options={[
+                      { value: 'false', label: '无需人工确认' },
+                      { value: 'true', label: '需要人工确认' }
+                    ]}
+                    onChange={(value) => updateNode(selectedNode.id, { requiresApproval: value === 'true' })}
+                  />
+                </WorkflowConfigSection>
               </Space>
-            </WorkflowConfigSection>
-            {selectedNode.type === 'approval' || selectedNode.requiresApproval ? (
-              <WorkflowConfigSection
-                title="人工确认"
-                description="高风险工具、写文件、发请求等节点可以要求用户确认后再执行。"
-              >
-                <Select
-                  size="small"
-                  value={selectedNode.requiresApproval ? 'true' : 'false'}
-                  options={[
-                    { value: 'false', label: '无需人工确认' },
-                    { value: 'true', label: '需要人工确认' }
-                  ]}
-                  onChange={(value) => updateNode(selectedNode.id, { requiresApproval: value === 'true' })}
-                />
-              </WorkflowConfigSection>
-            ) : null}
+            </details>
             {selectedNode.type === 'tool' || selectedNode.type === 'artifact' ? (
               <WorkflowConfigSection
                 title={selectedNode.type === 'artifact' ? '产物写入参数' : '工具参数'}
