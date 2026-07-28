@@ -195,6 +195,18 @@ export function renderWorkflowVariableRefsForPrompt(
   return truncateWorkflowText(rendered || 'none', maxChars);
 }
 
+export function renderWorkflowVariableRefsForArtifact(
+  variables: Array<{ ref: string; value: WorkflowRuntimeValue }>,
+  maxChars = 80_000
+): string {
+  const rendered = variables
+    .map(({ value }) => renderWorkflowRuntimeValue(value).trim())
+    .filter(Boolean)
+    .join('\n\n');
+
+  return truncateWorkflowText(rendered || '', maxChars);
+}
+
 export function writeWorkflowNodeOutputs(input: {
   pool: WorkflowVariablePool;
   node: WorkflowGraphNode;

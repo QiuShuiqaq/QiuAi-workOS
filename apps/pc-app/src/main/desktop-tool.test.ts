@@ -181,6 +181,48 @@ assert.equal(docxExtractResult.ok, true);
 assert.match(String(docxExtractResult.output?.text), /Customer Follow-up Plan/);
 assert.match(String(docxExtractResult.output?.text), /Call customer owner/);
 
+const structuredDocxResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'office-document',
+  action: 'office.write_docx_document',
+  input: {
+    title: 'AI Pilot Review',
+    folder: 'documents',
+    fileName: 'ai-pilot-review',
+    document: {
+      title: 'AI Pilot Review',
+      sections: [
+        {
+          heading: '执行摘要',
+          paragraphs: ['本轮试点目标明确，适合进入客户访谈阶段。'],
+          bullets: ['确认预算边界', '整理关键角色'],
+          table: {
+            headers: ['指标', '结论'],
+            rows: [
+              ['需求清晰度', '高'],
+              ['落地风险', '中']
+            ]
+          }
+        }
+      ]
+    }
+  }
+});
+
+assert.equal(structuredDocxResult.ok, true);
+const structuredDocxExtractResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'office-document',
+  action: 'document.extract_text',
+  input: {
+    path: String(structuredDocxResult.output?.localPath)
+  }
+});
+
+assert.equal(structuredDocxExtractResult.ok, true);
+assert.match(String(structuredDocxExtractResult.output?.text), /执行摘要/);
+assert.match(String(structuredDocxExtractResult.output?.text), /需求清晰度/);
+
 const spreadsheetResult = await invokeDesktopTool(tempDir, {
   workspaceId,
   toolId: 'office-document',
@@ -230,6 +272,80 @@ const xlsxExtractResult = await invokeDesktopTool(tempDir, {
 assert.equal(xlsxExtractResult.ok, true);
 assert.match(String(xlsxExtractResult.output?.text), /Acme/);
 assert.match(String(xlsxExtractResult.output?.text), /92/);
+
+const markdownTableXlsxResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'office-document',
+  action: 'spreadsheet.write_xlsx',
+  input: {
+    title: '线索评分表',
+    folder: 'sheets',
+    fileName: 'lead-score-markdown-xlsx',
+    content: [
+      'Variable: deliverable_content',
+      '## 线索评分表',
+      '| 客户 | 分数 | 建议 |',
+      '| --- | --- | --- |',
+      '| Acme | 92 | 优先跟进 |',
+      '| Beta | 76 | 补充资料 |'
+    ].join('\n')
+  }
+});
+
+assert.equal(markdownTableXlsxResult.ok, true);
+const markdownTableXlsxExtractResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'office-document',
+  action: 'document.extract_text',
+  input: {
+    path: String(markdownTableXlsxResult.output?.localPath)
+  }
+});
+
+assert.equal(markdownTableXlsxExtractResult.ok, true);
+assert.doesNotMatch(String(markdownTableXlsxExtractResult.output?.text), /Variable: deliverable_content/);
+assert.match(String(markdownTableXlsxExtractResult.output?.text), /优先跟进/);
+assert.match(String(markdownTableXlsxExtractResult.output?.text), /补充资料/);
+
+const multiSheetXlsxResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'office-document',
+  action: 'spreadsheet.write_xlsx',
+  input: {
+    folder: 'sheets',
+    fileName: 'multi-sheet-xlsx',
+    sheets: [
+      {
+        name: '线索',
+        rows: [
+          ['客户', '状态'],
+          ['Alpha', '跟进中']
+        ]
+      },
+      {
+        name: '预算',
+        rows: [
+          ['项目', '金额'],
+          ['实施预算', 200000]
+        ]
+      }
+    ]
+  }
+});
+
+assert.equal(multiSheetXlsxResult.ok, true);
+const multiSheetXlsxExtractResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'office-document',
+  action: 'document.extract_text',
+  input: {
+    path: String(multiSheetXlsxResult.output?.localPath)
+  }
+});
+
+assert.equal(multiSheetXlsxExtractResult.ok, true);
+assert.match(String(multiSheetXlsxExtractResult.output?.text), /Alpha/);
+assert.match(String(multiSheetXlsxExtractResult.output?.text), /实施预算/);
 
 const pptxResult = await invokeDesktopTool(tempDir, {
   workspaceId,

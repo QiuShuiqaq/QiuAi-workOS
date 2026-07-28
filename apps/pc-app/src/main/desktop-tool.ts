@@ -836,7 +836,8 @@ async function writeOfficeDocxDocument(
   const content = readString(request.input.content, '');
   const folder = readString(request.input.folder, 'documents');
   const fileName = readString(request.input.fileName, title);
-  const buffer = await buildDocxBuffer(title, content);
+  const document = normalizeOfficeDocumentPayload(request.input, title, content);
+  const buffer = await buildDocxBuffer(document);
 
   return writeToolAssetBinaryFile(userDataPath, request, {
     category: 'office',
@@ -870,12 +871,11 @@ async function writeSpreadsheetXlsx(
   userDataPath: string,
   request: DesktopToolInvocationRequest
 ): Promise<DesktopToolInvocationResult> {
+  const title = readString(request.input.title, readString(request.input.fileName, 'Sheet1'));
   const folder = readString(request.input.folder, 'spreadsheets');
   const fileName = readString(request.input.fileName, 'sheet');
-  const rows = Array.isArray(request.input.rows)
-    ? request.input.rows
-    : [['Content'], [readString(request.input.content, '')]];
-  const buffer = await buildXlsxBuffer(rows);
+  const sheets = normalizeSpreadsheetWorkbookSheets(request.input, title);
+  const buffer = await buildXlsxBuffer(sheets);
 
   return writeToolAssetBinaryFile(userDataPath, request, {
     category: 'office',
@@ -1003,7 +1003,169 @@ function writeToolAssetBinaryFile(
   };
 }
 
-async function buildDocxBuffer(title: string, content: string): Promise<Buffer> {
+interface OfficeDocumentPayload {
+  title: string;
+  sections: OfficeDocumentSection[];
+}
+
+interface OfficeDocumentSection {
+  heading?: string;
+  paragraphs: string[];
+  bullets: string[];
+  tables: SpreadsheetTable[];
+}
+
+interface SpreadsheetTable {
+  headers: string[];
+  rows: string[][];
+}
+
+interface SpreadsheetWorkbookSheet {
+  name: string;
+  rows: string[][];
+}
+
+function normalizeOfficeDocumentPayload(
+  input: Record<string, unknown>,
+  title: string,
+  content: string
+): OfficeDocumentPayload {
+  const documentFromInput = normalizeOfficeDocumentRecord(input.document, title);
+  if (documentFromInput) {
+    return documentFromInput;
+  }
+
+  const sectionsFromInput = normalizeOfficeDocumentSections(input.sections);
+  if (sectionsFromInput.length > 0) {
+    return {
+      title,
+      sections: sectionsFromInput
+    };
+  }
+
+  return parseOfficeDocumentFromContent(title, content);
+}
+
+function normalizeOfficeDocumentRecord(value: unknown, fallbackTitle: string): OfficeDocumentPayload | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const title = readString(record.title, fallbackTitle);
+  const sections = normalizeOfficeDocumentSections(record.sections);
+  if (sections.length === 0) {
+    return undefined;
+  }
+
+  return { title, sections };
+}
+
+function normalizeOfficeDocumentSections(value: unknown): OfficeDocumentSection[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const sections: OfficeDocumentSection[] = [];
+
+  for (const item of value) {
+    if (typeof item === 'string') {
+      const paragraph = sanitizeOfficeArtifactContent(item).trim();
+      if (paragraph) {
+        sections.push({ paragraphs: [paragraph], bullets: [], tables: [] });
+      }
+      continue;
+    }
+
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      continue;
+    }
+
+    const record = item as Record<string, unknown>;
+    const paragraphs = normalizeStringArray(record.paragraphs ?? record.content);
+    const bullets = normalizeStringArray(record.bullets);
+    const table = normalizeSpreadsheetTable(record.table);
+    const tables = Array.isArray(record.tables)
+      ? record.tables.map(normalizeSpreadsheetTable).filter((entry): entry is SpreadsheetTable => Boolean(entry))
+      : [];
+
+    if (table) {
+      tables.unshift(table);
+    }
+
+    if (!record.heading && paragraphs.length === 0 && bullets.length === 0 && tables.length === 0) {
+      continue;
+    }
+
+    sections.push({
+      heading: typeof record.heading === 'string' ? stripMarkdownDecorations(record.heading).trim() : undefined,
+      paragraphs,
+      bullets,
+      tables
+    });
+  }
+
+  return sections.filter(
+    (section) => section.heading || section.paragraphs.length > 0 || section.bullets.length > 0 || section.tables.length > 0
+  );
+}
+
+function parseOfficeDocumentFromContent(title: string, content: string): OfficeDocumentPayload {
+  const normalizedContent = sanitizeOfficeArtifactContent(content);
+  const lines = normalizedContent.split('\n');
+  const sections: OfficeDocumentSection[] = [];
+  let current: OfficeDocumentSection = { paragraphs: [], bullets: [], tables: [] };
+
+  const flushCurrent = () => {
+    if (current.heading || current.paragraphs.length > 0 || current.bullets.length > 0 || current.tables.length > 0) {
+      sections.push(current);
+    }
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    if (/^#{1,6}\s+/.test(trimmed)) {
+      flushCurrent();
+      current = {
+        heading: stripMarkdownDecorations(trimmed),
+        paragraphs: [],
+        bullets: [],
+        tables: []
+      };
+      continue;
+    }
+
+    const table = parseMarkdownTableAt(lines, index);
+    if (table) {
+      current.tables.push({ headers: table.headers, rows: table.rows });
+      index = table.nextIndex - 1;
+      continue;
+    }
+
+    if (/^\s*(?:[-*+]|\d+\.)\s+/.test(line)) {
+      current.bullets.push(stripMarkdownDecorations(line));
+      continue;
+    }
+
+    current.paragraphs.push(stripMarkdownDecorations(line));
+  }
+
+  flushCurrent();
+
+  return {
+    title,
+    sections: sections.length > 0
+      ? sections
+      : [{ paragraphs: [normalizedContent.trim() || '任务已完成，但没有可写入的正文。'], bullets: [], tables: [] }]
+  };
+}
+
+async function buildDocxBuffer(document: OfficeDocumentPayload): Promise<Buffer> {
   const zip = new JSZip();
   zip.file(
     '[Content_Types].xml',
@@ -1025,38 +1187,231 @@ async function buildDocxBuffer(title: string, content: string): Promise<Buffer> 
       '</Relationships>'
     ].join('')
   );
-  zip.file('word/document.xml', buildDocxDocumentXml(title, content));
+  zip.file('word/document.xml', buildDocxDocumentXml(document));
 
   return await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
 
-function buildDocxDocumentXml(title: string, content: string): string {
-  const paragraphs = [title, '', ...content.replace(/\r\n/g, '\n').split('\n')]
-    .map((line) => formatDocxParagraph(stripMarkdownPrefix(line)))
-    .join('');
+function buildDocxDocumentXml(document: OfficeDocumentPayload): string {
+  const body = [
+    formatDocxParagraph(document.title, { bold: true }),
+    '<w:p/>',
+    ...document.sections.flatMap((section) => formatDocxSection(section))
+  ].join('');
 
   return [
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
     '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">',
     '<w:body>',
-    paragraphs,
+    body,
     '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr>',
     '</w:body>',
     '</w:document>'
   ].join('');
 }
 
-function formatDocxParagraph(text: string): string {
+function formatDocxSection(section: OfficeDocumentSection): string[] {
+  return [
+    section.heading ? formatDocxParagraph(section.heading, { bold: true }) : '',
+    ...section.paragraphs.map((paragraph) => formatDocxParagraph(paragraph)),
+    ...section.bullets.map((bullet) => formatDocxParagraph(`- ${bullet}`)),
+    ...section.tables.map(formatDocxTable),
+    '<w:p/>'
+  ].filter(Boolean);
+}
+
+function formatDocxParagraph(text: string, options?: { bold?: boolean }): string {
   if (!text.trim()) {
     return '<w:p/>';
   }
 
-  return `<w:p><w:r><w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`;
+  const runProperties = options?.bold ? '<w:rPr><w:b/></w:rPr>' : '';
+  return `<w:p><w:r>${runProperties}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`;
 }
 
-async function buildXlsxBuffer(rows: unknown[]): Promise<Buffer> {
-  const normalizedRows = normalizeSpreadsheetRows(rows);
+function formatDocxTable(table: SpreadsheetTable): string {
+  const rows = table.headers.length > 0 ? [table.headers, ...table.rows] : table.rows;
+  if (rows.length === 0) {
+    return '';
+  }
+
+  const tableRows = rows
+    .map((row, rowIndex) => {
+      const cells = row
+        .map((cell) => [
+          '<w:tc>',
+          '<w:tcPr><w:tcW w:w="2400" w:type="dxa"/></w:tcPr>',
+          formatDocxParagraph(cell, { bold: rowIndex === 0 && table.headers.length > 0 }),
+          '</w:tc>'
+        ].join(''))
+        .join('');
+      return `<w:tr>${cells}</w:tr>`;
+    })
+    .join('');
+
+  return [
+    '<w:tbl>',
+    '<w:tblPr><w:tblBorders>',
+    '<w:top w:val="single" w:sz="4" w:space="0" w:color="D1D5DB"/>',
+    '<w:left w:val="single" w:sz="4" w:space="0" w:color="D1D5DB"/>',
+    '<w:bottom w:val="single" w:sz="4" w:space="0" w:color="D1D5DB"/>',
+    '<w:right w:val="single" w:sz="4" w:space="0" w:color="D1D5DB"/>',
+    '<w:insideH w:val="single" w:sz="4" w:space="0" w:color="D1D5DB"/>',
+    '<w:insideV w:val="single" w:sz="4" w:space="0" w:color="D1D5DB"/>',
+    '</w:tblBorders></w:tblPr>',
+    tableRows,
+    '</w:tbl>'
+  ].join('');
+}
+
+function normalizeSpreadsheetWorkbookSheets(
+  input: Record<string, unknown>,
+  title: string
+): SpreadsheetWorkbookSheet[] {
+  const sheets = normalizeSpreadsheetSheets(input.sheets);
+  if (sheets.length > 0) {
+    return normalizeSpreadsheetSheetNames(sheets);
+  }
+
+  if (Array.isArray(input.rows)) {
+    return normalizeSpreadsheetSheetNames([{ name: 'Sheet1', rows: normalizeSpreadsheetRows(input.rows) }]);
+  }
+
+  const content = sanitizeOfficeArtifactContent(readString(input.content, ''));
+  const jsonSheets = parseSpreadsheetSheetsFromJsonContent(content);
+  if (jsonSheets.length > 0) {
+    return normalizeSpreadsheetSheetNames(jsonSheets);
+  }
+
+  return normalizeSpreadsheetSheetNames(parseSpreadsheetSheetsFromContent(title, content));
+}
+
+function normalizeSpreadsheetSheets(value: unknown): SpreadsheetWorkbookSheet[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item, index) => {
+      if (Array.isArray(item)) {
+        return {
+          name: `Sheet ${index + 1}`,
+          rows: normalizeSpreadsheetRows(item)
+        };
+      }
+
+      if (!item || typeof item !== 'object') {
+        return undefined;
+      }
+
+      const record = item as Record<string, unknown>;
+      const rows = Array.isArray(record.rows) ? normalizeSpreadsheetRows(record.rows) : [];
+      if (rows.length === 0) {
+        return undefined;
+      }
+
+      return {
+        name: readString(record.name, `Sheet ${index + 1}`),
+        rows
+      };
+    })
+    .filter((sheet): sheet is SpreadsheetWorkbookSheet => Boolean(sheet));
+}
+
+function parseSpreadsheetSheetsFromJsonContent(content: string): SpreadsheetWorkbookSheet[] {
+  const parsed = parseJson(stripMarkdownCodeFence(content.trim()));
+  if (!parsed || typeof parsed !== 'object') {
+    return [];
+  }
+
+  if (Array.isArray(parsed)) {
+    return [{ name: 'Sheet1', rows: normalizeSpreadsheetRows(parsed) }];
+  }
+
+  const record = parsed as Record<string, unknown>;
+  const sheets = normalizeSpreadsheetSheets(record.sheets);
+  if (sheets.length > 0) {
+    return sheets;
+  }
+
+  if (Array.isArray(record.rows)) {
+    return [{ name: readString(record.name, 'Sheet1'), rows: normalizeSpreadsheetRows(record.rows) }];
+  }
+
+  return [];
+}
+
+function parseSpreadsheetSheetsFromContent(title: string, content: string): SpreadsheetWorkbookSheet[] {
+  const lines = content.split('\n');
+  const sheets: SpreadsheetWorkbookSheet[] = [];
+  let currentHeading = title;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const trimmed = lines[index]?.trim() ?? '';
+    if (/^#{1,6}\s+/.test(trimmed)) {
+      currentHeading = stripMarkdownDecorations(trimmed);
+      continue;
+    }
+
+    const table = parseMarkdownTableAt(lines, index);
+    if (!table) {
+      continue;
+    }
+
+    sheets.push({
+      name: currentHeading || `表格 ${sheets.length + 1}`,
+      rows: [table.headers, ...table.rows]
+    });
+    index = table.nextIndex - 1;
+  }
+
+  if (sheets.length > 0) {
+    return sheets;
+  }
+
+  return [
+    {
+      name: '内容摘要',
+      rows: buildSpreadsheetRowsFromText(title, content)
+    }
+  ];
+}
+
+function buildSpreadsheetRowsFromText(title: string, content: string): string[][] {
+  const rows: string[][] = [['章节', '类型', '内容']];
+  let section = title || '正文';
+
+  for (const rawLine of content.split('\n')) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+
+    if (/^#{1,6}\s+/.test(line)) {
+      section = stripMarkdownDecorations(line);
+      continue;
+    }
+
+    if (/^\s*(?:[-*+]|\d+\.)\s+/.test(rawLine)) {
+      rows.push([section, '要点', stripMarkdownDecorations(rawLine)]);
+      continue;
+    }
+
+    rows.push([section, '正文', stripMarkdownDecorations(rawLine)]);
+  }
+
+  return rows.length > 1 ? rows : [['标题', '内容'], [title, content.trim() || '任务已完成，但没有可写入的正文。']];
+}
+
+async function buildXlsxBuffer(sheets: SpreadsheetWorkbookSheet[]): Promise<Buffer> {
+  const normalizedSheets = normalizeSpreadsheetSheetNames(sheets);
   const zip = new JSZip();
+  const worksheetOverrides = normalizedSheets
+    .map((_sheet, index) => {
+      const sheetNumber = index + 1;
+      return `<Override PartName="/xl/worksheets/sheet${sheetNumber}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`;
+    })
+    .join('');
   zip.file(
     '[Content_Types].xml',
     [
@@ -1065,7 +1420,7 @@ async function buildXlsxBuffer(rows: unknown[]): Promise<Buffer> {
       '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
       '<Default Extension="xml" ContentType="application/xml"/>',
       '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>',
-      '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>',
+      worksheetOverrides,
       '</Types>'
     ].join('')
   );
@@ -1083,7 +1438,14 @@ async function buildXlsxBuffer(rows: unknown[]): Promise<Buffer> {
     [
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
       '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
-      '<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>',
+      '<sheets>',
+      normalizedSheets
+        .map((sheet, index) => {
+          const sheetNumber = index + 1;
+          return `<sheet name="${escapeXml(sheet.name)}" sheetId="${sheetNumber}" r:id="rId${sheetNumber}"/>`;
+        })
+        .join(''),
+      '</sheets>',
       '</workbook>'
     ].join('')
   );
@@ -1092,16 +1454,34 @@ async function buildXlsxBuffer(rows: unknown[]): Promise<Buffer> {
     [
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
       '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
-      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>',
+      normalizedSheets
+        .map((_sheet, index) => {
+          const sheetNumber = index + 1;
+          return `<Relationship Id="rId${sheetNumber}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${sheetNumber}.xml"/>`;
+        })
+        .join(''),
       '</Relationships>'
     ].join('')
   );
-  zip.file('xl/worksheets/sheet1.xml', buildXlsxWorksheetXml(normalizedRows));
+  normalizedSheets.forEach((sheet, index) => {
+    zip.file(`xl/worksheets/sheet${index + 1}.xml`, buildXlsxWorksheetXml(sheet.rows));
+  });
 
   return await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
 
 function normalizeSpreadsheetRows(rows: unknown[]): string[][] {
+  if (rows.every((row) => row && typeof row === 'object' && !Array.isArray(row))) {
+    const records = rows as Array<Record<string, unknown>>;
+    const headers = [...new Set(records.flatMap((record) => Object.keys(record)))];
+    if (headers.length > 0) {
+      return [
+        headers,
+        ...records.map((record) => headers.map((header) => formatSpreadsheetCellValue(record[header])))
+      ];
+    }
+  }
+
   const normalizedRows = rows
     .map((row) => {
       if (Array.isArray(row)) {
@@ -1113,6 +1493,35 @@ function normalizeSpreadsheetRows(rows: unknown[]): string[][] {
     .filter((row) => row.length > 0);
 
   return normalizedRows.length > 0 ? normalizedRows : [['Content'], ['']];
+}
+
+function normalizeSpreadsheetSheetNames(sheets: SpreadsheetWorkbookSheet[]): SpreadsheetWorkbookSheet[] {
+  const sourceSheets = sheets.length > 0 ? sheets : [{ name: 'Sheet1', rows: [['Content'], ['']] }];
+  const usedNames = new Set<string>();
+
+  return sourceSheets.map((sheet, index) => ({
+    name: normalizeSpreadsheetSheetName(sheet.name, index, usedNames),
+    rows: sheet.rows.length > 0 ? sheet.rows : [['Content'], ['']]
+  }));
+}
+
+function normalizeSpreadsheetSheetName(name: string, index: number, usedNames: Set<string>): string {
+  const baseName = name
+    .replace(/[\[\]:*?/\\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 31) || `Sheet ${index + 1}`;
+  let candidate = baseName;
+  let suffix = 2;
+
+  while (usedNames.has(candidate)) {
+    const suffixText = ` ${suffix}`;
+    candidate = `${baseName.slice(0, Math.max(1, 31 - suffixText.length))}${suffixText}`;
+    suffix += 1;
+  }
+
+  usedNames.add(candidate);
+  return candidate;
 }
 
 function buildXlsxWorksheetXml(rows: string[][]): string {
@@ -1157,7 +1566,7 @@ function formatSpreadsheetCellValue(value: unknown): string {
   }
 
   if (typeof value === 'string') {
-    return value;
+    return sanitizeOfficeArtifactContent(value);
   }
 
   if (typeof value === 'number' || typeof value === 'boolean') {
@@ -1165,6 +1574,93 @@ function formatSpreadsheetCellValue(value: unknown): string {
   }
 
   return JSON.stringify(value);
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  const values = Array.isArray(value) ? value : typeof value === 'string' ? value.split(/\r?\n/) : [];
+  return values
+    .map((item) => sanitizeOfficeArtifactContent(String(item)).trim())
+    .filter(Boolean)
+    .map(stripMarkdownDecorations);
+}
+
+function normalizeSpreadsheetTable(value: unknown): SpreadsheetTable | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const headers = normalizeStringArray(record.headers);
+  const rows = Array.isArray(record.rows) ? normalizeSpreadsheetRows(record.rows) : [];
+  if (headers.length === 0 && rows.length === 0) {
+    return undefined;
+  }
+
+  return { headers, rows };
+}
+
+function parseMarkdownTableAt(
+  lines: string[],
+  startIndex: number
+): { headers: string[]; rows: string[][]; nextIndex: number } | undefined {
+  const headerLine = lines[startIndex] ?? '';
+  const separatorLine = lines[startIndex + 1] ?? '';
+  if (!isMarkdownTableRow(headerLine) || !isMarkdownTableSeparator(separatorLine)) {
+    return undefined;
+  }
+
+  const headers = parseMarkdownTableRow(headerLine);
+  const rows: string[][] = [];
+  let nextIndex = startIndex + 2;
+
+  while (nextIndex < lines.length && isMarkdownTableRow(lines[nextIndex] ?? '')) {
+    const row = parseMarkdownTableRow(lines[nextIndex] ?? '');
+    if (row.length > 0) {
+      rows.push(row);
+    }
+    nextIndex += 1;
+  }
+
+  if (headers.length === 0 || rows.length === 0) {
+    return undefined;
+  }
+
+  return { headers, rows, nextIndex };
+}
+
+function isMarkdownTableRow(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.includes('|') && !isMarkdownTableSeparator(trimmed);
+}
+
+function isMarkdownTableSeparator(line: string): boolean {
+  const cells = parseMarkdownTableRow(line);
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
+}
+
+function parseMarkdownTableRow(line: string): string[] {
+  const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '');
+  return trimmed
+    .split('|')
+    .map((cell) => stripMarkdownDecorations(cell).trim())
+    .filter((cell, index, cells) => cell.length > 0 || index < cells.length - 1);
+}
+
+function sanitizeOfficeArtifactContent(value: string): string {
+  return value
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .filter((line) => !/^Variable:\s*[a-zA-Z0-9_.-]+\s*$/.test(line.trim()))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function stripMarkdownCodeFence(value: string): string {
+  return value
+    .replace(/^```(?:json|JSON)?\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim();
 }
 
 interface PresentationSlide {
@@ -1492,6 +1988,14 @@ function buildPptxThemeXml(): string {
 
 function stripMarkdownPrefix(line: string): string {
   return line.replace(/^\s{0,3}(#{1,6}|[-*+]|\d+\.)\s+/, '').trimEnd();
+}
+
+function stripMarkdownDecorations(value: string): string {
+  return stripMarkdownPrefix(value)
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .trim();
 }
 
 function escapeXml(value: string): string {

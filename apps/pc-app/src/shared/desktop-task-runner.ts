@@ -37,6 +37,7 @@ import {
   getWorkflowRuntimeValueType,
   isWorkflowFileValue,
   previewWorkflowRuntimeValue,
+  renderWorkflowVariableRefsForArtifact,
   renderWorkflowVariableRefsForPrompt,
   resolveWorkflowVariableRefs,
   writeWorkflowNodeOutputs,
@@ -2584,7 +2585,7 @@ function renderWorkflowArtifactContentFromVariables(
     }
   }
 
-  return renderWorkflowVariableRefsForPrompt(variables, 80_000);
+  return renderWorkflowVariableRefsForArtifact(variables, 80_000);
 }
 
 function completeWorkflowRuntimeConditionNode(input: {
@@ -3845,9 +3846,10 @@ function buildWorkflowFallbackArtifactToolRequest(input: {
       toolId: 'office-document',
       action: 'spreadsheet.write_xlsx',
       input: {
+        title,
         folder: 'spreadsheets',
         fileName,
-        rows: [['标题', '内容'], [input.task.title, content]]
+        content
       }
     };
   }

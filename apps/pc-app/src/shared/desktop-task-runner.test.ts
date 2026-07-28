@@ -859,6 +859,94 @@ assert.ok(
   )
 );
 
+let workflowCleanXlsxArtifactToolCallCount = 0;
+const workflowCleanXlsxArtifactTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-clean-xlsx-artifact-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Create lead scoring table',
+    input: '整理线索评分表。',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    toolIds: ['office-document'],
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'prepare_content',
+          type: 'assign',
+          name: 'Prepare deliverable content',
+          config: {
+            values: {
+              deliverable_content: [
+                '## 线索评分表',
+                '| 客户 | 分数 | 建议 |',
+                '| --- | --- | --- |',
+                '| Acme | 92 | 优先跟进 |'
+              ].join('\n'),
+              quality_review: '自检通过：字段完整。'
+            }
+          }
+        },
+        {
+          id: 'write_table',
+          type: 'artifact',
+          name: 'Write lead scoring table',
+          toolId: 'office-document',
+          artifactType: 'xlsx',
+          inputVariables: ['deliverable_content', 'quality_review']
+        }
+      ],
+      edges: [
+        { id: 'start-prepare', sourceNodeId: 'start', targetNodeId: 'prepare_content', condition: { type: 'always' } },
+        { id: 'prepare-write', sourceNodeId: 'prepare_content', targetNodeId: 'write_table', condition: { type: 'always' } }
+      ]
+    }
+  },
+  workspaceId: 'workspace-workflow-clean-xlsx-artifact',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['office-document'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async () => {
+    throw new Error('Artifact node with explicit variables should not invoke model.');
+  },
+  desktopToolInvoker: async (request) => {
+    workflowCleanXlsxArtifactToolCallCount += 1;
+    assert.equal(request.toolId, 'office-document');
+    assert.equal(request.action, 'spreadsheet.write_xlsx');
+    assert.match(String(request.input.content), /线索评分表/);
+    assert.match(String(request.input.content), /自检通过/);
+    assert.doesNotMatch(String(request.input.content), /Variable: deliverable_content/);
+    assert.doesNotMatch(String(request.input.content), /Variable: quality_review/);
+    assert.equal(request.input.rows, undefined);
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\spreadsheets\\lead-score.xlsx'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:05.910Z'
+});
+
+assert.equal(workflowCleanXlsxArtifactToolCallCount, 1);
+assert.equal(workflowCleanXlsxArtifactTask.task.state, 'completed');
+assert.equal(
+  workflowCleanXlsxArtifactTask.task.artifacts[0]?.localPath,
+  'C:\\QiuAI\\workspace\\spreadsheets\\lead-score.xlsx'
+);
+
 let workflowPptxArtifactToolCallCount = 0;
 const workflowPptxArtifactTask = await runDesktopTask({
   task: createMockTaskDetail({
