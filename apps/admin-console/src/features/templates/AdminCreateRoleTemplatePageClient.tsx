@@ -42,7 +42,16 @@ import Tag from 'antd/es/tag';
 import Typography from 'antd/es/typography';
 import message from 'antd/es/message';
 import { useRouter } from 'next/navigation';
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  type DragEvent as ReactDragEvent,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react';
 import {
   Background,
   Controls,
@@ -57,7 +66,8 @@ import {
   type EdgeChange,
   type Node as FlowNode,
   type NodeChange,
-  type NodeProps
+  type NodeProps,
+  type ReactFlowInstance
 } from '@xyflow/react';
 
 import { createBrowserApiClient } from '../../shared/api/browser-api';
@@ -83,6 +93,19 @@ type WorkflowModelOutputMode = 'text' | 'json';
 type WorkflowCanvasPosition = { x: number; y: number };
 type WorkflowSelection = { type: 'node' | 'edge'; id: string };
 type WorkflowConfigPanelTab = 'settings' | 'lastRun';
+type WorkflowNodePickerMode = 'free' | 'after' | 'before' | 'edge';
+type WorkflowContextMenu =
+  | { open: false }
+  | {
+      open: true;
+      type: 'pane' | 'node' | 'edge';
+      x: number;
+      y: number;
+      flowPosition?: WorkflowCanvasPosition;
+      nodeId?: string;
+      edgeId?: string;
+    };
+type WorkflowContextEvent = MouseEvent | ReactMouseEvent<Element>;
 type WorkflowTableColumnConfig = { header: string; path: string };
 type WorkflowCodePreviewResult = {
   status: 'passed' | 'failed';
@@ -99,6 +122,9 @@ type WorkflowFlowNodeData = {
   statusLabel: string;
   statusClass: 'ready' | 'warning' | 'failed';
   warnings: string[];
+  reachable: boolean;
+  onInsertBefore?: (nodeId: string) => void;
+  onInsertAfter?: (nodeId: string) => void;
 } & Record<string, unknown>;
 type WorkflowFlowNode = FlowNode<WorkflowFlowNodeData, 'workflowNode'>;
 type WorkflowFlowEdge = FlowEdge<{ conditionLabel: string }>;
@@ -447,6 +473,75 @@ function createWorkflowEdgeId(sourceNodeId: string, targetNodeId: string, edges:
   }
 
   return candidate;
+}
+
+function getWorkflowReachableNodeIds(graph: RoleWorkflowGraph) {
+  const nodeIds = new Set(graph.nodes.map((node) => node.id));
+  const reachableNodeIds = new Set<string>();
+  const edgesBySource = new Map<string, WorkflowEdge[]>();
+
+  for (const edge of graph.edges) {
+    if (!nodeIds.has(edge.sourceNodeId) || !nodeIds.has(edge.targetNodeId)) continue;
+    edgesBySource.set(edge.sourceNodeId, [...(edgesBySource.get(edge.sourceNodeId) ?? []), edge]);
+  }
+
+  const queue = nodeIds.has(graph.entryNodeId) ? [graph.entryNodeId] : [];
+  while (queue.length) {
+    const nodeId = queue.shift();
+    if (!nodeId || reachableNodeIds.has(nodeId)) continue;
+    reachableNodeIds.add(nodeId);
+    for (const edge of edgesBySource.get(nodeId) ?? []) {
+      if (!reachableNodeIds.has(edge.targetNodeId)) {
+        queue.push(edge.targetNodeId);
+      }
+    }
+  }
+
+  return reachableNodeIds;
+}
+
+function getWorkflowExecutableNodes(graph: RoleWorkflowGraph) {
+  const reachableNodeIds = getWorkflowReachableNodeIds(graph);
+  return graph.nodes.filter((node) => reachableNodeIds.has(node.id));
+}
+
+function getWorkflowDetachedNodes(graph: RoleWorkflowGraph) {
+  const reachableNodeIds = getWorkflowReachableNodeIds(graph);
+  return graph.nodes.filter((node) => node.id !== graph.entryNodeId && !reachableNodeIds.has(node.id));
+}
+
+function wouldCreateWorkflowCycle(edges: WorkflowEdge[], sourceNodeId: string, targetNodeId: string) {
+  const edgesBySource = new Map<string, string[]>();
+  for (const edge of edges) {
+    edgesBySource.set(edge.sourceNodeId, [...(edgesBySource.get(edge.sourceNodeId) ?? []), edge.targetNodeId]);
+  }
+
+  const queue = [targetNodeId];
+  const visited = new Set<string>();
+  while (queue.length) {
+    const nodeId = queue.shift();
+    if (!nodeId || visited.has(nodeId)) continue;
+    if (nodeId === sourceNodeId) return true;
+    visited.add(nodeId);
+    queue.push(...(edgesBySource.get(nodeId) ?? []));
+  }
+
+  return false;
+}
+
+function validateWorkflowConnection(graph: RoleWorkflowGraph, sourceNodeId?: string | null, targetNodeId?: string | null) {
+  if (!sourceNodeId || !targetNodeId) return '请从节点右侧圆点拖到另一个节点左侧圆点';
+  if (sourceNodeId === targetNodeId) return '不能把节点连接到自己';
+  if (targetNodeId === graph.entryNodeId) return '开始节点只能作为流程入口，不能作为连线终点';
+  if (!graph.nodes.some((node) => node.id === sourceNodeId)) return '起点节点不存在';
+  if (!graph.nodes.some((node) => node.id === targetNodeId)) return '终点节点不存在';
+  if (graph.edges.some((edge) => edge.sourceNodeId === sourceNodeId && edge.targetNodeId === targetNodeId)) {
+    return '这条连线已经存在';
+  }
+  if (wouldCreateWorkflowCycle(graph.edges, sourceNodeId, targetNodeId)) {
+    return '这条连线会形成循环，请使用循环节点表达重复逻辑';
+  }
+  return undefined;
 }
 
 function createCanvasNode(
@@ -856,7 +951,7 @@ function formatWorkflowVariableToken(value: string, mode: 'template' | 'path' = 
 
 function readWorkflowGraphToolIds(graph: RoleWorkflowGraph): string[] {
   return uniqueTags(
-    graph.nodes.flatMap((node) => [
+    getWorkflowExecutableNodes(graph).flatMap((node) => [
       node.toolId,
       ...(Array.isArray(node.config?.toolIds) ? node.config.toolIds : [])
     ]).filter((toolId): toolId is string => typeof toolId === 'string')
@@ -864,18 +959,19 @@ function readWorkflowGraphToolIds(graph: RoleWorkflowGraph): string[] {
 }
 
 function deriveWorkflowKnowledgeSources(graph: RoleWorkflowGraph): string[] {
-  const sources = graph.nodes.flatMap((node) => {
+  const executableNodes = getWorkflowExecutableNodes(graph);
+  const sources = executableNodes.flatMap((node) => {
     if (node.type !== 'knowledge') return [];
     const configSources = Array.isArray(node.config?.sources) ? node.config.sources : [];
     return configSources.filter((source): source is string => typeof source === 'string');
   });
 
-  return uniqueTags(sources.length ? sources : graph.nodes.some((node) => node.type === 'knowledge') ? ['workspace_library'] : []);
+  return uniqueTags(sources.length ? sources : executableNodes.some((node) => node.type === 'knowledge') ? ['workspace_library'] : []);
 }
 
 function deriveWorkflowModelProfileIds(graph: RoleWorkflowGraph): string[] {
   return uniqueTags(
-    graph.nodes
+    getWorkflowExecutableNodes(graph)
       .filter((node) => node.type === 'llm' || node.type === 'reasoning' || node.type === 'parameter_extractor')
       .map((node) => node.modelProfileId ?? 'qiu-general-default')
   );
@@ -883,14 +979,14 @@ function deriveWorkflowModelProfileIds(graph: RoleWorkflowGraph): string[] {
 
 function deriveWorkflowArtifactTypes(graph: RoleWorkflowGraph): string[] {
   return uniqueTags(
-    graph.nodes
+    getWorkflowExecutableNodes(graph)
       .filter((node) => node.type === 'artifact')
       .map((node) => node.artifactType ?? 'docx')
   );
 }
 
 function deriveWorkflowSkills(graph: RoleWorkflowGraph): Array<{ code: string; name: string; summary: string }> {
-  const skillNodes = graph.nodes.filter((node) =>
+  const skillNodes = getWorkflowExecutableNodes(graph).filter((node) =>
     node.type === 'llm' ||
     node.type === 'reasoning' ||
     node.type === 'parameter_extractor' ||
@@ -910,34 +1006,36 @@ function deriveWorkflowSkills(graph: RoleWorkflowGraph): Array<{ code: string; n
 }
 
 function deriveWorkflowCapabilitySummary(graph: RoleWorkflowGraph): WorkflowCapabilitySummary {
-  const incomingTargets = new Set(graph.edges.map((edge) => edge.targetNodeId));
-  const outgoingSources = new Set(graph.edges.map((edge) => edge.sourceNodeId));
-  const orphanNodes = graph.nodes.filter(
-    (node) =>
-      node.id !== graph.entryNodeId &&
-      !incomingTargets.has(node.id) &&
-      !outgoingSources.has(node.id)
-  );
-  const hasOutputNode = graph.nodes.some((node) => node.type === 'output');
+  const executableNodes = getWorkflowExecutableNodes(graph);
+  const executableBusinessNodes = executableNodes.filter((node) => node.id !== graph.entryNodeId);
+  const detachedNodes = getWorkflowDetachedNodes(graph);
+  const executableNodeIds = new Set(executableNodes.map((node) => node.id));
+  const executableEdgeCount = graph.edges.filter(
+    (edge) => executableNodeIds.has(edge.sourceNodeId) && executableNodeIds.has(edge.targetNodeId)
+  ).length;
+  const hasOutputNode = executableNodes.some((node) => node.type === 'output');
 
   return {
     modelProfileIds: deriveWorkflowModelProfileIds(graph),
     toolIds: readWorkflowGraphToolIds(graph),
     knowledgeSources: deriveWorkflowKnowledgeSources(graph),
     artifactTypes: deriveWorkflowArtifactTypes(graph),
-    approvalRequired: graph.nodes.some((node) => node.requiresApproval || node.type === 'approval'),
-    nodeCount: graph.nodes.length,
-    edgeCount: graph.edges.length,
+    approvalRequired: executableNodes.some((node) => node.requiresApproval || node.type === 'approval'),
+    nodeCount: executableBusinessNodes.length,
+    edgeCount: executableEdgeCount,
     warnings: [
       ...(!hasOutputNode ? ['缺少输出节点，PC 端可能无法明确展示最终结果。'] : []),
-      ...(orphanNodes.length ? [`存在 ${orphanNodes.length} 个孤立节点，请确认是否需要连线。`] : [])
+      ...(detachedNodes.length ? [`有 ${detachedNodes.length} 个未接入节点，不会在 PC 端运行。`] : [])
     ]
   };
 }
 
 function deriveWorkflowNodeWarningCount(graph: RoleWorkflowGraph) {
   const variableOptions = deriveWorkflowVariableOptions(graph);
-  return graph.nodes.reduce((total, node) => total + workflowNodeWarnings(node, variableOptions).length, 0);
+  const reachableNodeIds = getWorkflowReachableNodeIds(graph);
+  return graph.nodes
+    .filter((node) => reachableNodeIds.has(node.id))
+    .reduce((total, node) => total + workflowNodeWarnings(node, variableOptions).length, 0);
 }
 
 function deriveWorkflowTraceSummary(result: TemplateTestResult | null) {
@@ -964,27 +1062,10 @@ function normalizeConditionValue(value: unknown) {
   return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
-function rebuildLinearEdges(graph: RoleWorkflowGraph): RoleWorkflowGraph {
-  const edges: WorkflowEdge[] = [];
-  for (let index = 0; index < graph.nodes.length - 1; index += 1) {
-    const sourceNodeId = graph.nodes[index]?.id;
-    const targetNodeId = graph.nodes[index + 1]?.id;
-    if (!sourceNodeId || !targetNodeId) continue;
-    edges.push({
-      id: createWorkflowEdgeId(sourceNodeId, targetNodeId, edges),
-      sourceNodeId,
-      targetNodeId,
-      condition: { type: 'always' }
-    });
-  }
-
-  return { ...graph, edges };
-}
-
 function deriveWorkflowStepsFromGraph(graph: RoleWorkflowGraph): RoleWorkflowGraphSourceStep[] {
   const steps: RoleWorkflowGraphSourceStep[] = [];
   let order = 0;
-  for (const node of graph.nodes) {
+  for (const node of getWorkflowExecutableNodes(graph)) {
     if (node.id === graph.entryNodeId) {
       continue;
     }
@@ -1176,6 +1257,27 @@ function createWorkflowGraph(preset: WorkflowPreset): RoleWorkflowGraph {
   };
 }
 
+function createBlankWorkflowGraph(): RoleWorkflowGraph {
+  return {
+    version: '1.0.0',
+    entryNodeId: 'start',
+    nodes: [
+      {
+        id: 'start',
+        type: 'start',
+        name: '开始',
+        description: '工作流入口。'
+      }
+    ],
+    edges: [],
+    runtimePolicy: {
+      maxNodeExecutions: 64,
+      maxLoopIterations: 8,
+      requireApprovalBeforeTools: false
+    }
+  };
+}
+
 function normalizeWorkflowGraphForCanvas(graph: RoleWorkflowGraph): RoleWorkflowGraph {
   return {
     ...graph,
@@ -1308,14 +1410,22 @@ function workflowTraceStatusLabel(status: WorkflowNodeTrace['status']) {
 function toWorkflowFlowNodes(
   graph: RoleWorkflowGraph,
   testGraphTrace?: AdminRoleTemplateTestGraphTrace,
-  variableOptions?: WorkflowVariableOption[]
+  variableOptions?: WorkflowVariableOption[],
+  actions?: {
+    onInsertBefore?: (nodeId: string) => void;
+    onInsertAfter?: (nodeId: string) => void;
+  }
 ): WorkflowFlowNode[] {
   const traceByNodeId = new Map((testGraphTrace?.nodes ?? []).map((trace) => [trace.nodeId, trace]));
+  const reachableNodeIds = getWorkflowReachableNodeIds(graph);
   return graph.nodes.map((node, index) => {
     const warnings = workflowNodeWarnings(node, variableOptions);
     const trace = traceByNodeId.get(node.id);
+    const reachable = reachableNodeIds.has(node.id);
     const statusClass =
-      trace?.status === 'failed'
+      !reachable
+        ? 'warning'
+        : trace?.status === 'failed'
         ? 'failed'
         : trace?.status === 'warning' || warnings.length
           ? 'warning'
@@ -1335,9 +1445,12 @@ function toWorkflowFlowNodes(
         meta: workflowNodeMeta(node),
         details: workflowNodeDetails(node),
         tone: nodeTone(node.type),
-        statusLabel: trace ? workflowTraceStatusLabel(trace.status) : warnings.length ? '需配置' : '就绪',
+        statusLabel: !reachable ? '未接入' : trace ? workflowTraceStatusLabel(trace.status) : warnings.length ? '需配置' : '就绪',
         statusClass,
-        warnings
+        warnings: reachable ? warnings : ['未接入主流程，运行时不会执行'],
+        reachable,
+        onInsertBefore: actions?.onInsertBefore,
+        onInsertAfter: actions?.onInsertAfter
       }
     };
   });
@@ -1363,10 +1476,21 @@ function toWorkflowFlowEdges(graph: RoleWorkflowGraph): WorkflowFlowEdge[] {
   }));
 }
 
-function WorkflowFlowNodeCard({ data, selected }: NodeProps<WorkflowFlowNode>) {
+function WorkflowFlowNodeCard({ id, data, selected }: NodeProps<WorkflowFlowNode>) {
   return (
-    <div className={`workflow-flow-node tone-${data.tone}${selected ? ' selected' : ''}`}>
+    <div className={`workflow-flow-node tone-${data.tone}${selected ? ' selected' : ''}${data.reachable ? '' : ' detached'}`}>
       <Handle type="target" position={Position.Left} className="workflow-flow-handle" />
+      <button
+        type="button"
+        className="workflow-node-insert-button before"
+        aria-label={`在 ${data.title} 前面添加节点`}
+        onClick={(event) => {
+          event.stopPropagation();
+          data.onInsertBefore?.(id);
+        }}
+      >
+        +
+      </button>
       <div className="workflow-flow-node-header">
         <span className="workflow-flow-node-type-wrap">
           <span className="workflow-flow-node-dot" />
@@ -1394,6 +1518,17 @@ function WorkflowFlowNodeCard({ data, selected }: NodeProps<WorkflowFlowNode>) {
           ))}
         </div>
       ) : null}
+      <button
+        type="button"
+        className="workflow-node-insert-button after"
+        aria-label={`在 ${data.title} 后面添加节点`}
+        onClick={(event) => {
+          event.stopPropagation();
+          data.onInsertAfter?.(id);
+        }}
+      >
+        +
+      </button>
       <Handle type="source" position={Position.Right} className="workflow-flow-handle" />
     </div>
   );
@@ -2021,9 +2156,15 @@ function WorkflowReactFlowEditor({
   const [configPanelTab, setConfigPanelTab] = useState<WorkflowConfigPanelTab>('settings');
   const [nodePicker, setNodePicker] = useState<{
     open: boolean;
+    mode: WorkflowNodePickerMode;
     sourceNodeId?: string;
+    targetNodeId?: string;
     edgeId?: string;
-  }>({ open: false });
+    position?: WorkflowCanvasPosition;
+  }>({ open: false, mode: 'free' });
+  const canvasShellRef = useRef<HTMLElement | null>(null);
+  const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<WorkflowFlowNode, WorkflowFlowEdge> | null>(null);
+  const [contextMenu, setContextMenu] = useState<WorkflowContextMenu>({ open: false });
   const [runningCodePreviewNodeId, setRunningCodePreviewNodeId] = useState<string | null>(null);
   const [codePreviewResults, setCodePreviewResults] = useState<Record<string, WorkflowCodePreviewResult>>({});
   const serverToolOptions = useMemo(
@@ -2104,7 +2245,11 @@ function WorkflowReactFlowEditor({
     [variableOptions]
   );
   const flowNodes = useMemo(
-    () => toWorkflowFlowNodes(graph, testGraphTrace, variableOptions),
+    () =>
+      toWorkflowFlowNodes(graph, testGraphTrace, variableOptions, {
+        onInsertBefore: openNodePickerBefore,
+        onInsertAfter: openNodePickerAfter
+      }),
     [graph, testGraphTrace, variableOptions]
   );
   const flowEdges = useMemo(() => toWorkflowFlowEdges(graph), [graph]);
@@ -2234,19 +2379,16 @@ function WorkflowReactFlowEditor({
 
   const handleConnect = useCallback(
     (connection: Connection) => {
-      if (!connection.source || !connection.target || connection.source === connection.target) {
-        message.warning('连线的起点和终点不能相同');
-        return;
-      }
-      if (graph.edges.some((edge) => edge.sourceNodeId === connection.source && edge.targetNodeId === connection.target)) {
-        message.warning('这条连线已经存在');
+      const error = validateWorkflowConnection(graph, connection.source, connection.target);
+      if (error) {
+        message.warning(error);
         return;
       }
 
       const edge: WorkflowEdge = {
-        id: createWorkflowEdgeId(connection.source, connection.target, graph.edges),
-        sourceNodeId: connection.source,
-        targetNodeId: connection.target,
+        id: createWorkflowEdgeId(connection.source!, connection.target!, graph.edges),
+        sourceNodeId: connection.source!,
+        targetNodeId: connection.target!,
         condition: { type: 'always' }
       };
       onChange({ ...graph, edges: [...graph.edges, edge] });
@@ -2255,73 +2397,179 @@ function WorkflowReactFlowEditor({
     [graph, onChange]
   );
 
-  function openNodePicker(options?: { sourceNodeId?: string; edgeId?: string }) {
+  function closeContextMenu() {
+    setContextMenu({ open: false });
+  }
+
+  function readCanvasRelativePosition(event: { clientX: number; clientY: number }) {
+    const rect = canvasShellRef.current?.getBoundingClientRect();
+    return {
+      x: Math.max(8, Math.round(event.clientX - (rect?.left ?? 0))),
+      y: Math.max(8, Math.round(event.clientY - (rect?.top ?? 0)))
+    };
+  }
+
+  function toFlowPosition(event: { clientX: number; clientY: number }): WorkflowCanvasPosition | undefined {
+    return flowInstance?.screenToFlowPosition({
+      x: event.clientX,
+      y: event.clientY
+    });
+  }
+
+  function openNodePicker(options?: {
+    mode?: WorkflowNodePickerMode;
+    sourceNodeId?: string;
+    targetNodeId?: string;
+    edgeId?: string;
+    position?: WorkflowCanvasPosition;
+  }) {
     setNodePicker({
       open: true,
-      sourceNodeId: options?.sourceNodeId ?? selectedNode?.id ?? graph.entryNodeId,
-      edgeId: options?.edgeId
+      mode: options?.mode ?? 'free',
+      sourceNodeId: options?.sourceNodeId,
+      targetNodeId: options?.targetNodeId,
+      edgeId: options?.edgeId,
+      position: options?.position
+    });
+    closeContextMenu();
+  }
+
+  function openNodePickerAfter(nodeId: string) {
+    const sourcePosition = nodePositions.get(nodeId);
+    openNodePicker({
+      mode: 'after',
+      sourceNodeId: nodeId,
+      position: sourcePosition ? { x: sourcePosition.x + 260, y: sourcePosition.y } : undefined
+    });
+  }
+
+  function openNodePickerBefore(nodeId: string) {
+    if (nodeId === graph.entryNodeId) {
+      message.warning('开始节点前面不能再添加节点');
+      return;
+    }
+    const incomingEdge = graph.edges.find((edge) => edge.targetNodeId === nodeId);
+    const targetPosition = nodePositions.get(nodeId);
+    openNodePicker({
+      mode: incomingEdge ? 'edge' : 'before',
+      edgeId: incomingEdge?.id,
+      targetNodeId: nodeId,
+      position: targetPosition ? { x: targetPosition.x - 260, y: targetPosition.y } : undefined
     });
   }
 
   function closeNodePicker() {
-    setNodePicker({ open: false });
+    setNodePicker({ open: false, mode: 'free' });
   }
 
-  function addNode(type: WorkflowNodeType, options?: { sourceNodeId?: string; edgeId?: string }) {
+  function createNodeAt(type: WorkflowNodeType, position?: WorkflowCanvasPosition) {
+    const node = createCanvasNode(type, graph.nodes, {
+      defaultToolId: serverToolOptions[0]?.value,
+      getDefaultToolActionTemplate: getDefaultToolActionTemplateForCanvas,
+      getDefaultArtifactActionTemplate: getDefaultArtifactActionTemplateForCanvas
+    });
+    return writeWorkflowNodeCanvasPosition(node, position ?? {
+      x: 140 + (graph.nodes.length % 3) * 36,
+      y: 180 + (graph.nodes.length % 4) * 36
+    });
+  }
+
+  function addNode(
+    type: WorkflowNodeType,
+    options?: {
+      mode?: WorkflowNodePickerMode;
+      sourceNodeId?: string;
+      targetNodeId?: string;
+      edgeId?: string;
+      position?: WorkflowCanvasPosition;
+    }
+  ) {
+    const mode = options?.mode ?? nodePicker.mode;
     const edgeId = options?.edgeId ?? nodePicker.edgeId;
     const edgeToInsert = edgeId
       ? graph.edges.find((edge) => edge.id === edgeId)
       : undefined;
-    const sourceNodeId =
-      edgeToInsert?.sourceNodeId ?? options?.sourceNodeId ?? nodePicker.sourceNodeId ?? selectedNode?.id ?? graph.entryNodeId;
-    const sourcePosition = nodePositions.get(sourceNodeId);
-    const targetPosition = edgeToInsert ? nodePositions.get(edgeToInsert.targetNodeId) : undefined;
-    const node = writeWorkflowNodeCanvasPosition(createCanvasNode(type, graph.nodes, {
-      defaultToolId: serverToolOptions[0]?.value,
-      getDefaultToolActionTemplate: getDefaultToolActionTemplateForCanvas,
-      getDefaultArtifactActionTemplate: getDefaultArtifactActionTemplateForCanvas
-    }), {
-      x: targetPosition ? Math.round(((sourcePosition?.x ?? 80) + targetPosition.x) / 2) : (sourcePosition?.x ?? 80) + 260,
-      y: targetPosition ? Math.round(((sourcePosition?.y ?? 180) + targetPosition.y) / 2) + 80 : Math.max(80, sourcePosition?.y ?? 180)
-    });
-    const selectedNodeIndex = graph.nodes.findIndex((item) => item.id === sourceNodeId);
-    const insertIndex = selectedNodeIndex >= 0 ? selectedNodeIndex + 1 : graph.nodes.length;
+    const sourceNodeId = edgeToInsert?.sourceNodeId ?? options?.sourceNodeId ?? nodePicker.sourceNodeId;
+    const targetNodeId = edgeToInsert?.targetNodeId ?? options?.targetNodeId ?? nodePicker.targetNodeId;
+    const sourcePosition = sourceNodeId ? nodePositions.get(sourceNodeId) : undefined;
+    const targetPosition = targetNodeId ? nodePositions.get(targetNodeId) : undefined;
+    const fallbackPosition =
+      options?.position ?? nodePicker.position ??
+      (edgeToInsert && sourcePosition && targetPosition
+        ? {
+            x: Math.round((sourcePosition.x + targetPosition.x) / 2),
+            y: Math.round((sourcePosition.y + targetPosition.y) / 2) + 80
+          }
+        : sourcePosition && mode === 'after'
+          ? { x: sourcePosition.x + 260, y: sourcePosition.y }
+          : targetPosition && mode === 'before'
+            ? { x: targetPosition.x - 260, y: targetPosition.y }
+            : undefined);
+    const node = createNodeAt(type, fallbackPosition);
+    const sourceNodeIndex = sourceNodeId ? graph.nodes.findIndex((item) => item.id === sourceNodeId) : -1;
+    const targetNodeIndex = targetNodeId ? graph.nodes.findIndex((item) => item.id === targetNodeId) : -1;
+    const insertIndex =
+      sourceNodeIndex >= 0
+        ? sourceNodeIndex + 1
+        : targetNodeIndex >= 0
+          ? targetNodeIndex
+          : graph.nodes.length;
     const nodes = [
       ...graph.nodes.slice(0, insertIndex),
       node,
       ...graph.nodes.slice(insertIndex)
     ];
 
-    const edges: WorkflowEdge[] = edgeToInsert
-      ? [
-          ...graph.edges.filter((edge) => edge.id !== edgeToInsert.id),
-          {
-            id: createWorkflowEdgeId(edgeToInsert.sourceNodeId, node.id, graph.edges),
-            sourceNodeId: edgeToInsert.sourceNodeId,
-            targetNodeId: node.id,
-            condition: edgeToInsert.condition ?? { type: 'always' as const }
-          },
-          {
-            id: createWorkflowEdgeId(node.id, edgeToInsert.targetNodeId, graph.edges),
-            sourceNodeId: node.id,
-            targetNodeId: edgeToInsert.targetNodeId,
-            condition: { type: 'always' as const }
-          }
-        ]
-      : graph.edges.some((edge) => edge.sourceNodeId === sourceNodeId && edge.targetNodeId === node.id)
-        ? graph.edges
-        : [
-            ...graph.edges,
-            {
-              id: createWorkflowEdgeId(sourceNodeId, node.id, graph.edges),
-              sourceNodeId,
-              targetNodeId: node.id,
-              condition: { type: 'always' as const }
-            }
-          ];
-    onChange({ ...graph, nodes, edges });
+    let edges: WorkflowEdge[] = graph.edges;
+    if (edgeToInsert) {
+      edges = [
+        ...graph.edges.filter((edge) => edge.id !== edgeToInsert.id),
+        {
+          id: createWorkflowEdgeId(edgeToInsert.sourceNodeId, node.id, graph.edges),
+          sourceNodeId: edgeToInsert.sourceNodeId,
+          targetNodeId: node.id,
+          condition: edgeToInsert.condition ?? { type: 'always' as const }
+        },
+        {
+          id: createWorkflowEdgeId(node.id, edgeToInsert.targetNodeId, graph.edges),
+          sourceNodeId: node.id,
+          targetNodeId: edgeToInsert.targetNodeId,
+          condition: { type: 'always' as const }
+        }
+      ];
+    } else if (mode === 'after' && sourceNodeId) {
+      edges = [
+        ...graph.edges,
+        {
+          id: createWorkflowEdgeId(sourceNodeId, node.id, graph.edges),
+          sourceNodeId,
+          targetNodeId: node.id,
+          condition: { type: 'always' as const }
+        }
+      ];
+    } else if (mode === 'before' && targetNodeId) {
+      const error = validateWorkflowConnection({ ...graph, nodes }, node.id, targetNodeId);
+      if (error) {
+        message.warning(error);
+        return;
+      }
+      edges = [
+        ...graph.edges,
+        {
+          id: createWorkflowEdgeId(node.id, targetNodeId, graph.edges),
+          sourceNodeId: node.id,
+          targetNodeId,
+          condition: { type: 'always' as const }
+        }
+      ];
+    }
+
+    const nextGraph = { ...graph, nodes, edges };
+    const nodeIsReachable = getWorkflowReachableNodeIds(nextGraph).has(node.id);
+    onChange(nextGraph);
     setSelection({ type: 'node', id: node.id });
     closeNodePicker();
+    message.success(nodeIsReachable ? '已添加并接入主流程' : '已添加未接入节点，连到主流程后才会运行');
   }
 
   function deleteNode(nodeId: string) {
@@ -2346,17 +2594,32 @@ function WorkflowReactFlowEditor({
   }
 
   function resetLinearEdges() {
-    const nodes = [...graph.nodes].sort((left, right) => {
-      if (left.id === graph.entryNodeId) return -1;
-      if (right.id === graph.entryNodeId) return 1;
-      const leftPosition = nodePositions.get(left.id) ?? { x: 0, y: 0 };
-      const rightPosition = nodePositions.get(right.id) ?? { x: 0, y: 0 };
-      return leftPosition.x === rightPosition.x
-        ? leftPosition.y - rightPosition.y
-        : leftPosition.x - rightPosition.x;
+    const reachableNodeIds = getWorkflowReachableNodeIds(graph);
+    const executableNodes = graph.nodes.filter((node) => reachableNodeIds.has(node.id));
+    const detachedNodes = graph.nodes.filter((node) => !reachableNodeIds.has(node.id));
+    const nextPositions = new Map<string, WorkflowCanvasPosition>();
+
+    executableNodes.forEach((node, index) => {
+      nextPositions.set(node.id, {
+        x: 90 + index * 280,
+        y: 170 + (index % 2) * 110
+      });
     });
-    onChange(rebuildLinearEdges({ ...graph, nodes }));
-    message.success('已按画布从左到右重建连线');
+    detachedNodes.forEach((node, index) => {
+      nextPositions.set(node.id, {
+        x: 120 + (index % 3) * 280,
+        y: 460 + Math.floor(index / 3) * 140
+      });
+    });
+
+    onChange({
+      ...graph,
+      nodes: graph.nodes.map((node) => {
+        const position = nextPositions.get(node.id);
+        return position ? writeWorkflowNodeCanvasPosition(node, position) : node;
+      })
+    });
+    message.success('已整理节点位置，连线保持不变');
   }
 
   function updateToolNodeToolId(node: RoleWorkflowGraphNode, toolId?: string) {
@@ -2585,6 +2848,136 @@ function WorkflowReactFlowEditor({
     });
   }
 
+  function updateSelectedEdgeEndpoint(patch: Partial<Pick<WorkflowEdge, 'sourceNodeId' | 'targetNodeId'>>) {
+    if (!selectedEdge) return;
+    const sourceNodeId = patch.sourceNodeId ?? selectedEdge.sourceNodeId;
+    const targetNodeId = patch.targetNodeId ?? selectedEdge.targetNodeId;
+    const otherEdges = graph.edges.filter((edge) => edge.id !== selectedEdge.id);
+    const error = validateWorkflowConnection({ ...graph, edges: otherEdges }, sourceNodeId, targetNodeId);
+    if (error) {
+      message.warning(error);
+      return;
+    }
+    updateEdge(selectedEdge.id, patch);
+  }
+
+  function handlePaletteDragStart(event: ReactDragEvent<HTMLElement>, nodeType: WorkflowNodeType) {
+    event.dataTransfer.setData('application/qiuai-workflow-node', nodeType);
+    event.dataTransfer.effectAllowed = 'copy';
+  }
+
+  function handleCanvasDragOver(event: ReactDragEvent<HTMLElement>) {
+    if (!event.dataTransfer.types.includes('application/qiuai-workflow-node')) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  }
+
+  function handleCanvasDrop(event: ReactDragEvent<HTMLElement>) {
+    const nodeType = event.dataTransfer.getData('application/qiuai-workflow-node') as WorkflowNodeType;
+    if (!nodeType) return;
+    event.preventDefault();
+    addNode(nodeType, {
+      mode: 'free',
+      position: toFlowPosition(event)
+    });
+  }
+
+  function openPaneContextMenu(event: WorkflowContextEvent) {
+    event.preventDefault();
+    const position = readCanvasRelativePosition(event);
+    setContextMenu({
+      open: true,
+      type: 'pane',
+      x: position.x,
+      y: position.y,
+      flowPosition: toFlowPosition(event)
+    });
+  }
+
+  function openNodeContextMenu(event: WorkflowContextEvent, nodeId: string) {
+    event.preventDefault();
+    const position = readCanvasRelativePosition(event);
+    setSelection({ type: 'node', id: nodeId });
+    setContextMenu({
+      open: true,
+      type: 'node',
+      x: position.x,
+      y: position.y,
+      nodeId
+    });
+  }
+
+  function openEdgeContextMenu(event: WorkflowContextEvent, edgeId: string) {
+    event.preventDefault();
+    const position = readCanvasRelativePosition(event);
+    setSelection({ type: 'edge', id: edgeId });
+    setContextMenu({
+      open: true,
+      type: 'edge',
+      x: position.x,
+      y: position.y,
+      edgeId
+    });
+  }
+
+  function duplicateNode(nodeId: string) {
+    const sourceNode = graph.nodes.find((node) => node.id === nodeId);
+    if (!sourceNode) return;
+    const sourcePosition = nodePositions.get(nodeId) ?? { x: 120, y: 180 };
+    const nextNodeId = createWorkflowNodeId(sourceNode.type, graph.nodes);
+    const rebaseOutputVariable = (value: string) =>
+      value.startsWith(`${sourceNode.id}.`) ? `${nextNodeId}${value.slice(sourceNode.id.length)}` : value;
+    const sourceConfig = sourceNode.config ?? {};
+    const rebasedConfig = {
+      ...sourceConfig,
+      ...(typeof sourceConfig.outputVariable === 'string'
+        ? { outputVariable: rebaseOutputVariable(sourceConfig.outputVariable) }
+        : {}),
+      ...(Array.isArray(sourceConfig.assignments)
+        ? {
+            assignments: sourceConfig.assignments.map((assignment) =>
+              assignment && typeof assignment === 'object' && !Array.isArray(assignment)
+                ? {
+                    ...assignment,
+                    name: typeof assignment.name === 'string' ? rebaseOutputVariable(assignment.name) : assignment.name
+                  }
+                : assignment
+            )
+          }
+        : {})
+    };
+    const node = writeWorkflowNodeCanvasPosition(
+      {
+        ...sourceNode,
+        id: nextNodeId,
+        name: `${sourceNode.name} 副本`,
+        outputVariables: sourceNode.outputVariables?.map(rebaseOutputVariable),
+        config: rebasedConfig
+      },
+      {
+        x: sourcePosition.x + 40,
+        y: sourcePosition.y + 120
+      }
+    );
+    onChange({ ...graph, nodes: [...graph.nodes, node] });
+    setSelection({ type: 'node', id: node.id });
+    closeContextMenu();
+    message.success('已复制为未接入节点');
+  }
+
+  const nodePickerTitle =
+    nodePicker.mode === 'edge'
+      ? '在线中插入节点'
+      : nodePicker.mode === 'before'
+        ? '在前面添加节点'
+        : nodePicker.mode === 'after'
+          ? '在后面添加节点'
+          : '添加未接入节点';
+  const nodePickerDescription =
+    nodePicker.mode === 'free'
+      ? '未接入节点只作为画布草稿保存，不会在 PC 端运行。连线后才会进入主流程。'
+      : '选择节点后会自动接入当前位置，你仍然可以拖动节点调整布局。';
+
   return (
     <div className="workflow-builder-shell">
       <aside className="workflow-node-palette">
@@ -2592,10 +2985,15 @@ function WorkflowReactFlowEditor({
           <div>
             <div className="workflow-pane-title">节点库</div>
             <Typography.Text type="secondary" className="workflow-pane-subtitle">
-              选中节点后添加下一步
+              拖到画布生成未接入节点
             </Typography.Text>
           </div>
-          <Button size="small" type="primary" icon={<AppstoreAddOutlined />} onClick={() => openNodePicker()}>
+          <Button
+            size="small"
+            type="primary"
+            icon={<AppstoreAddOutlined />}
+            onClick={() => openNodePicker({ mode: 'free' })}
+          >
             添加
           </Button>
         </div>
@@ -2608,7 +3006,9 @@ function WorkflowReactFlowEditor({
                   key={`${group.title}-${node.value}`}
                   block
                   className={`workflow-palette-button tone-${nodeTone(node.value)}`}
-                  onClick={() => addNode(node.value, { sourceNodeId: selectedNode?.id ?? graph.entryNodeId })}
+                  draggable
+                  onDragStart={(event) => handlePaletteDragStart(event, node.value)}
+                  onClick={() => addNode(node.value, { mode: 'free' })}
                 >
                   <span>{node.label}</span>
                   <span className="workflow-palette-hint">{node.hint}</span>
@@ -2619,18 +3019,23 @@ function WorkflowReactFlowEditor({
         </Space>
       </aside>
 
-      <section className="workflow-canvas-shell">
+      <section
+        ref={canvasShellRef}
+        className="workflow-canvas-shell"
+        onDragOver={handleCanvasDragOver}
+        onDrop={handleCanvasDrop}
+      >
         <div className="workflow-canvas-toolbar">
           <Space>
             <Button size="small" onClick={resetLinearEdges}>
-              自动整理连线
+              整理布局
             </Button>
-            <Button size="small" onClick={() => openNodePicker()} icon={<PlusOutlined />}>
-              添加节点
+            <Button size="small" onClick={() => openNodePicker({ mode: 'free' })} icon={<PlusOutlined />}>
+              添加未接入节点
             </Button>
           </Space>
           <Typography.Text type="secondary">
-            拖动节点调整布局，拖出右侧圆点创建连线，右键画布空白处也可添加节点。
+            拖入节点不会自动运行；从节点右侧圆点连线后才会进入流程。
           </Typography.Text>
         </div>
         <ReactFlowProvider>
@@ -2639,15 +3044,22 @@ function WorkflowReactFlowEditor({
             nodes={flowNodes}
             edges={flowEdges}
             nodeTypes={workflowNodeTypes}
+            onInit={setFlowInstance}
             onNodesChange={handleNodesChange}
             onEdgesChange={handleEdgesChange}
             onConnect={handleConnect}
-            onNodeClick={(_, node) => setSelection({ type: 'node', id: node.id })}
-            onEdgeClick={(_, edge) => setSelection({ type: 'edge', id: edge.id })}
-            onPaneContextMenu={(event) => {
-              event.preventDefault();
-              openNodePicker();
+            onNodeClick={(_, node) => {
+              closeContextMenu();
+              setSelection({ type: 'node', id: node.id });
             }}
+            onEdgeClick={(_, edge) => {
+              closeContextMenu();
+              setSelection({ type: 'edge', id: edge.id });
+            }}
+            onPaneClick={closeContextMenu}
+            onPaneContextMenu={openPaneContextMenu}
+            onNodeContextMenu={(event, node) => openNodeContextMenu(event, node.id)}
+            onEdgeContextMenu={(event, edge) => openEdgeContextMenu(event, edge.id)}
             fitView
             fitViewOptions={{ padding: 0.2 }}
             minZoom={0.25}
@@ -2674,6 +3086,78 @@ function WorkflowReactFlowEditor({
             />
           </ReactFlow>
         </ReactFlowProvider>
+        {contextMenu.open ? (
+          <div
+            className="workflow-context-menu"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {contextMenu.type === 'pane' ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    openNodePicker({
+                      mode: 'free',
+                      position: contextMenu.flowPosition
+                    })
+                  }
+                >
+                  添加未接入节点
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetLinearEdges();
+                    closeContextMenu();
+                  }}
+                >
+                  整理布局
+                </button>
+              </>
+            ) : null}
+            {contextMenu.type === 'node' && contextMenu.nodeId ? (
+              <>
+                <button type="button" onClick={() => openNodePickerBefore(contextMenu.nodeId!)}>
+                  在前面添加节点
+                </button>
+                <button type="button" onClick={() => openNodePickerAfter(contextMenu.nodeId!)}>
+                  在后面添加节点
+                </button>
+                <button type="button" onClick={() => duplicateNode(contextMenu.nodeId!)}>
+                  复制为未接入节点
+                </button>
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={() => {
+                    deleteNode(contextMenu.nodeId!);
+                    closeContextMenu();
+                  }}
+                >
+                  删除节点
+                </button>
+              </>
+            ) : null}
+            {contextMenu.type === 'edge' && contextMenu.edgeId ? (
+              <>
+                <button type="button" onClick={() => openNodePicker({ mode: 'edge', edgeId: contextMenu.edgeId })}>
+                  在线中插入节点
+                </button>
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={() => {
+                    deleteEdge(contextMenu.edgeId!);
+                    closeContextMenu();
+                  }}
+                >
+                  删除连线
+                </button>
+              </>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       <aside className="workflow-config-panel">
@@ -3349,13 +3833,13 @@ function WorkflowReactFlowEditor({
                   size="small"
                   value={selectedEdge.sourceNodeId}
                   options={nodeOptions}
-                  onChange={(sourceNodeId) => updateEdge(selectedEdge.id, { sourceNodeId })}
+                  onChange={(sourceNodeId) => updateSelectedEdgeEndpoint({ sourceNodeId })}
                 />
                 <Select
                   size="small"
                   value={selectedEdge.targetNodeId}
                   options={nodeOptions}
-                  onChange={(targetNodeId) => updateEdge(selectedEdge.id, { targetNodeId })}
+                  onChange={(targetNodeId) => updateSelectedEdgeEndpoint({ targetNodeId })}
                 />
               </Space>
             </WorkflowConfigSection>
@@ -3428,7 +3912,7 @@ function WorkflowReactFlowEditor({
             <Button danger size="small" icon={<DeleteOutlined />} onClick={() => deleteEdge(selectedEdge.id)}>
               删除连线
             </Button>
-            <Button size="small" icon={<PlusOutlined />} onClick={() => openNodePicker({ edgeId: selectedEdge.id })}>
+            <Button size="small" icon={<PlusOutlined />} onClick={() => openNodePicker({ mode: 'edge', edgeId: selectedEdge.id })}>
               在连线中插入节点
             </Button>
           </Space>
@@ -3440,13 +3924,14 @@ function WorkflowReactFlowEditor({
       </aside>
 
       <Modal
-        title="添加节点"
+        title={nodePickerTitle}
         open={nodePicker.open}
         width={720}
         footer={null}
         onCancel={closeNodePicker}
       >
         <div className="workflow-node-picker">
+          <Alert showIcon type="info" message={nodePickerDescription} />
           {workflowNodeCatalogGroups.map((group) => (
             <section key={group.title} className="workflow-node-picker-group">
               <Space direction="vertical" size={4}>
@@ -3573,6 +4058,7 @@ export function AdminCreateRoleTemplatePageClient({
   const [settingsOpen, setSettingsOpen] = useState(!templateId);
   const [testOpen, setTestOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [presetPickerOpen, setPresetPickerOpen] = useState(false);
   const editingTemplate = useMemo(
     () => templates.find((template) => template.id === templateId),
     [templateId, templates]
@@ -3581,7 +4067,7 @@ export function AdminCreateRoleTemplatePageClient({
   const watchedIndustry = Form.useWatch('industry', form);
   const persistedTemplateId = savedTemplateId ?? editingTemplate?.id;
   const initialGraph = useMemo(
-    () => normalizeWorkflowGraphForCanvas(editingTemplate?.workflowGraph ?? createWorkflowGraph(inferInitialPreset(editingTemplate))),
+    () => normalizeWorkflowGraphForCanvas(editingTemplate?.workflowGraph ?? createBlankWorkflowGraph()),
     [editingTemplate]
   );
   const [editableGraph, setEditableGraph] = useState<RoleWorkflowGraph>(initialGraph);
@@ -3682,6 +4168,14 @@ export function AdminCreateRoleTemplatePageClient({
     setTestInput(editingTemplate?.sampleInputs[0] ?? editingTemplate?.businessGoal ?? '');
     setTestResult(null);
   }, [editingTemplate]);
+
+  function applyWorkflowPreset(preset: WorkflowPreset) {
+    setEditableGraph(normalizeWorkflowGraphForCanvas(createWorkflowGraph(preset)));
+    form.setFieldValue('workflowPreset', preset);
+    setPresetPickerOpen(false);
+    setTestResult(null);
+    message.success('已应用模板，可以继续拖拽节点调整');
+  }
 
   async function persistTemplateDraft(
     apiClient: ReturnType<typeof createBrowserApiClient>,
@@ -3846,18 +4340,9 @@ export function AdminCreateRoleTemplatePageClient({
                   <Tag>未试运行</Tag>
                 )}
                 <Tag color="blue">手动保存</Tag>
-                <Typography.Text type="secondary">预设</Typography.Text>
-                <Form.Item name="workflowPreset" noStyle rules={[{ required: true }]}>
-                  <Select
-                    disabled={Boolean(persistedTemplateId)}
-                    style={{ width: 168 }}
-                    options={workflowPresetOptions.map((option) => ({
-                      value: option.value,
-                      label: option.label
-                    }))}
-                    onChange={(preset) => setEditableGraph(normalizeWorkflowGraphForCanvas(createWorkflowGraph(preset)))}
-                  />
-                </Form.Item>
+                <Button size="small" icon={<AppstoreAddOutlined />} onClick={() => setPresetPickerOpen(true)}>
+                  选择模板
+                </Button>
               </Space>
             </div>
 
@@ -3879,6 +4364,37 @@ export function AdminCreateRoleTemplatePageClient({
               toolCatalog={toolCatalog}
             />
           </section>
+
+          <Modal
+            title="选择模板"
+            open={presetPickerOpen}
+            width={720}
+            footer={null}
+            onCancel={() => setPresetPickerOpen(false)}
+          >
+            <Space direction="vertical" size={14} style={{ width: '100%' }}>
+              <Alert
+                showIcon
+                type="info"
+                message="模板只在你主动选择时应用"
+                description="应用模板会替换当前画布。新建数字员工默认从空白画布开始，你也可以直接拖拽节点自己搭建。"
+              />
+              <div className="workflow-preset-picker-grid">
+                {workflowPresetOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className="workflow-preset-picker-option"
+                    onClick={() => applyWorkflowPreset(option.value)}
+                  >
+                    <span>{option.label}</span>
+                    <small>{option.description}</small>
+                    <b>使用这个模板</b>
+                  </button>
+                ))}
+              </div>
+            </Space>
+          </Modal>
 
           <Drawer
             title="员工设置"
