@@ -28,19 +28,19 @@ ALTER TABLE "desktop_agreement_acceptances"
   ON DELETE SET NULL
   ON UPDATE CASCADE;
 
-CREATE UNIQUE INDEX "desktop_agreement_acceptances_agreement_key_agreement_version_content_hash_runtime_id_key"
+CREATE UNIQUE INDEX "desktop_agreement_acceptances_unique_runtime_agreement_idx"
   ON "desktop_agreement_acceptances"("agreement_key", "agreement_version", "content_hash", "runtime_id");
 
-CREATE INDEX "desktop_agreement_acceptances_agreement_key_agreement_version_content_hash_idx"
+CREATE INDEX "desktop_agreement_acceptances_agreement_lookup_idx"
   ON "desktop_agreement_acceptances"("agreement_key", "agreement_version", "content_hash");
 
-CREATE INDEX "desktop_agreement_acceptances_runtime_id_device_id_idx"
+CREATE INDEX "desktop_agreement_acceptances_runtime_device_idx"
   ON "desktop_agreement_acceptances"("runtime_id", "device_id");
 
-CREATE INDEX "desktop_agreement_acceptances_workspace_id_idx"
+CREATE INDEX "desktop_agreement_acceptances_workspace_idx"
   ON "desktop_agreement_acceptances"("workspace_id");
 
-CREATE INDEX "desktop_agreement_acceptances_desktop_device_id_idx"
+CREATE INDEX "desktop_agreement_acceptances_desktop_device_idx"
   ON "desktop_agreement_acceptances"("desktop_device_id");
 
 CREATE INDEX "desktop_agreement_acceptances_accepted_at_idx"
