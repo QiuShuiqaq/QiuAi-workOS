@@ -125,7 +125,7 @@ import {
   type WorkflowGraphArtifactType
 } from '../shared/desktop-workflow-graph';
 
-type SectionKey = 'workbench' | 'roles' | 'models' | 'tools' | 'knowledge' | 'settings';
+type SectionKey = 'workbench' | 'roles' | 'logs' | 'models' | 'tools' | 'knowledge' | 'settings';
 type AccountModalKey = 'enterprise' | 'help' | 'release' | 'download' | 'logout';
 type DesktopThemePreference = 'light' | 'system';
 type DesktopDensityPreference = 'comfortable' | 'compact';
@@ -224,6 +224,7 @@ interface KnowledgeBindingCatalogEntry {
 const sectionItems: Array<{ key: SectionKey; icon: ReactNode; label: string }> = [
   { key: 'workbench', icon: <ControlOutlined />, label: '对话' },
   { key: 'roles', icon: <RobotOutlined />, label: '数字员工' },
+  { key: 'logs', icon: <FileTextOutlined />, label: '日志' },
   { key: 'models', icon: <ApiOutlined />, label: '模型' },
   { key: 'tools', icon: <ToolOutlined />, label: '工具' },
   { key: 'knowledge', icon: <DatabaseOutlined />, label: '知识库' },
@@ -1694,6 +1695,7 @@ export default function App() {
                 >
                   {selectedSection === 'workbench' ? renderWorkbench() : null}
                   {selectedSection === 'roles' ? renderRoles() : null}
+                  {selectedSection === 'logs' ? renderLogs() : null}
                   {selectedSection === 'models' ? renderModels() : null}
                   {selectedSection === 'tools' ? renderTools() : null}
                   {selectedSection === 'knowledge' ? renderKnowledge() : null}
@@ -2331,26 +2333,33 @@ export default function App() {
 
                     {conversationTask.executionLogs.length > 0 ? (
                       <div className="process-step-list">
-                        {conversationTask.executionLogs.map((log) => {
-                          const workflowNodeDetail = readWorkflowNodeLogDetail(log);
-                          return (
-                            <div key={log.id} className={`process-step ${log.level}`}>
-                              <span className="process-dot" />
-                              <Space direction="vertical" size={6}>
-                                <Space size={8} wrap>
-                                  <Typography.Text strong>{executionEventLabel(log.eventType)}</Typography.Text>
-                                  <Typography.Text type="secondary">{formatDate(log.createdAt)}</Typography.Text>
-                                </Space>
-                                <Typography.Text type="secondary">{executionEventMessage(log)}</Typography.Text>
-                                {workflowNodeDetail ? renderWorkflowNodeLogDetail(workflowNodeDetail) : null}
+                        {selectConversationVisibleLogs(conversationTask).map((log) => (
+                          <div key={log.id} className={`process-step ${log.level}`}>
+                            <span className="process-dot" />
+                            <Space direction="vertical" size={4}>
+                              <Space size={8} wrap>
+                                <Typography.Text strong>{executionEventLabel(log.eventType)}</Typography.Text>
+                                <Typography.Text type="secondary">{formatDate(log.createdAt)}</Typography.Text>
                               </Space>
-                            </div>
-                          );
-                        })}
+                              <Typography.Text type="secondary">{userFriendlyExecutionMessage(log)}</Typography.Text>
+                            </Space>
+                          </div>
+                        ))}
+                        <Button
+                          size="small"
+                          icon={<FileTextOutlined />}
+                          className="process-log-link"
+                          onClick={() => {
+                            setSelectedTaskId(conversationTask.taskId);
+                            navigateToSection('logs');
+                          }}
+                        >
+                          查看详细日志
+                        </Button>
                       </div>
                     ) : (
                       <Typography.Text type="secondary">
-                        任务已进入对话，点击“开始执行”后会在这里展示模型调用、工具调用和产物生成过程。
+                        任务已进入对话，点击“开始执行”后会展示关键进度；完整节点输入输出会记录到“日志”。
                       </Typography.Text>
                     )}
                   </div>
@@ -2614,6 +2623,128 @@ export default function App() {
     );
   }
 
+  function renderLogs() {
+    const selectedLogTask =
+      selectedTaskId && selectedTaskId !== newTaskSelectionId
+        ? taskDetails.find((task) => task.taskId === selectedTaskId) ?? taskDetails[0]
+        : taskDetails[0];
+    const logStats = buildTaskLogStats(taskDetails);
+
+    return (
+      <div className="logs-page">
+        <Flex align="center" justify="space-between" gap={16} wrap="wrap" className="catalog-page-header">
+          <div>
+            <Typography.Title level={2} className="page-title">
+              日志
+            </Typography.Title>
+            <Typography.Text type="secondary">
+              查看所有任务的执行细节、节点输入输出、工具调用和失败原因。
+            </Typography.Text>
+          </div>
+          <Space size={8} wrap>
+            <Tag color="default">全部 {taskDetails.length}</Tag>
+            <Tag color="red">失败 {logStats.failed}</Tag>
+            <Tag color="geekblue">运行中 {logStats.running}</Tag>
+            <Tag color="green">成功 {logStats.completed}</Tag>
+          </Space>
+        </Flex>
+
+        <div className="logs-layout">
+          <aside className="logs-task-list" aria-label="任务日志列表">
+            {taskDetails.length > 0 ? (
+              taskDetails.map((task) => (
+                <button
+                  key={task.taskId}
+                  type="button"
+                  className={selectedLogTask?.taskId === task.taskId ? 'logs-task-item selected' : 'logs-task-item'}
+                  onClick={() => setSelectedTaskId(task.taskId)}
+                >
+                  <span className="logs-task-title">{task.title}</span>
+                  <span className="logs-task-meta">
+                    <Tag color={taskStateColor(task.state)}>{taskStateLabel(task.state)}</Tag>
+                    <span>{formatShortTime(task.updatedAt)}</span>
+                    <span>{task.roleName}</span>
+                  </span>
+                </button>
+              ))
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无任务日志" />
+            )}
+          </aside>
+
+          <section className="logs-detail-panel">
+            {selectedLogTask ? (
+              <>
+                <Flex align="flex-start" justify="space-between" gap={12} wrap="wrap" className="logs-detail-header">
+                  <Space direction="vertical" size={4}>
+                    <Space size={8} wrap>
+                      <Typography.Text strong>{selectedLogTask.title}</Typography.Text>
+                      <Tag color={taskStateColor(selectedLogTask.state)}>{taskStateLabel(selectedLogTask.state)}</Tag>
+                    </Space>
+                    <Typography.Text type="secondary">
+                      {selectedLogTask.roleName} · {formatDateTime(selectedLogTask.updatedAt)} · 产物 {countUserDeliverableArtifacts(selectedLogTask)}
+                    </Typography.Text>
+                  </Space>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      activateRole(selectedLogTask.roleCode);
+                      setSelectedTaskId(selectedLogTask.taskId);
+                      navigateToSection('workbench');
+                    }}
+                  >
+                    回到对话
+                  </Button>
+                </Flex>
+
+                <div className="logs-timeline">
+                  {selectedLogTask.executionLogs.length > 0 ? (
+                    selectedLogTask.executionLogs.map((log) => {
+                      const workflowNodeDetail = readWorkflowNodeLogDetail(log);
+                      const friendlyMessage = userFriendlyExecutionMessage(log);
+                      const rawMessage = log.message.trim();
+                      return (
+                        <div key={log.id} className={`log-entry ${log.level}`}>
+                          <span className="log-entry-dot" />
+                          <div className="log-entry-body">
+                            <Flex align="center" justify="space-between" gap={8} wrap="wrap">
+                              <Space size={8} wrap>
+                                <Typography.Text strong>{executionEventLabel(log.eventType)}</Typography.Text>
+                                <Tag color={logLevelColor(log.level)}>{logLevelLabel(log.level)}</Tag>
+                              </Space>
+                              <Typography.Text type="secondary">{formatDateTime(log.createdAt)}</Typography.Text>
+                            </Flex>
+                            <Typography.Text className="log-friendly-message">{friendlyMessage}</Typography.Text>
+                            {rawMessage && rawMessage !== friendlyMessage ? (
+                              <details className="log-raw-details">
+                                <summary>原始日志</summary>
+                                <pre>{rawMessage}</pre>
+                              </details>
+                            ) : null}
+                            {workflowNodeDetail ? (
+                              <details className="log-raw-details">
+                                <summary>节点输入输出</summary>
+                                {renderWorkflowNodeLogDetail(workflowNodeDetail)}
+                              </details>
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该任务暂无执行日志" />
+                  )}
+                </div>
+              </>
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择左侧任务查看详细日志" />
+            )}
+          </section>
+        </div>
+      </div>
+    );
+  }
+
   function renderRoles() {
     const roleConfigTemplate = roleConfigRoleCode
       ? desktopRoleTemplateByRoleCode.get(roleConfigRoleCode)
@@ -2693,6 +2824,13 @@ export default function App() {
               const installed = installedRoleCodes.has(template.roleCode);
               const active = runtimeState.localRuntime.activeRoleCode === template.roleCode;
               const summary = installedRoleSummaries.find((item) => item.roleCode === template.roleCode);
+              const installedRolePackage = runtimeState.rolePackages.find(
+                (rolePackage) => rolePackage.roleCode === template.roleCode
+              );
+              const readiness = installedRolePackage
+                ? buildRoleRuntimeReadiness(runtimeState, installedRolePackage)
+                : undefined;
+              const hasTemplateUpdate = isInstalledRoleTemplateOutdated(template, installedRolePackage);
               const fileContract = buildRoleFileContractSummary(template);
 
               return (
@@ -2706,6 +2844,12 @@ export default function App() {
                         <Tag color={active ? 'green' : installed ? 'blue' : 'default'}>
                           {active ? '当前' : installed ? '已安装' : '可安装'}
                         </Tag>
+                        {readiness ? (
+                          <Tooltip title={readiness.issueText}>
+                            <Tag color={readiness.color}>{readiness.label}</Tag>
+                          </Tooltip>
+                        ) : null}
+                        {hasTemplateUpdate ? <Tag color="orange">有新版</Tag> : null}
                         <Tag>{roleTemplateCategory(template)}</Tag>
                       </Space>
                     </Flex>
@@ -2759,6 +2903,11 @@ export default function App() {
                           安装
                         </Button>
                       )}
+                      {installed && hasTemplateUpdate ? (
+                        <Button size="small" type="primary" ghost onClick={() => updateInstalledRole(template)}>
+                          更新
+                        </Button>
+                      ) : null}
                       <Button size="small" onClick={() => openRoleConfig(template.roleCode, installed ? 'configure' : 'install')}>
                         配置
                       </Button>
@@ -3909,6 +4058,21 @@ export default function App() {
     });
   }
 
+  function updateInstalledRole(template: DesktopRoleTemplate) {
+    const existingRole = runtimeState.rolePackages.find((rolePackage) => rolePackage.roleCode === template.roleCode);
+    if (!existingRole) {
+      openRoleConfig(template.roleCode, 'install');
+      return;
+    }
+
+    installRole(template, {
+      modelProfileIds: template.modelProfileIds,
+      toolIds: template.toolIds,
+      knowledgeSources: existingRole.requiredKnowledgeSources
+    });
+    message.success(`${template.name} 已更新到 ${template.version}。`);
+  }
+
   function confirmUninstallRole(roleCode: string) {
     const rolePackage = runtimeState.rolePackages.find((item) => item.roleCode === roleCode);
     if (!rolePackage) {
@@ -4486,6 +4650,12 @@ export default function App() {
       message.warning('该数字员工已被服务端删除，不能继续执行。');
       return undefined;
     }
+    const latestTemplate = desktopRoleTemplates.find((template) => template.roleCode === roleCode);
+    if (latestTemplate && isInstalledRoleTemplateOutdated(latestTemplate, rolePackage)) {
+      message.warning('该数字员工有新版可用，请先在“数字员工”页面更新后再运行。');
+      navigateToSection('roles');
+      return undefined;
+    }
 
     const preparedRolePackage: RolePackageManifest = {
       ...rolePackage,
@@ -4512,20 +4682,32 @@ export default function App() {
       preparedModelProfiles
     );
 
-    if (!firstUnreadyModel) {
-      return preparedState;
+    if (firstUnreadyModel) {
+      setRuntimeState(preparedState);
+      setSelectedModelId(firstUnreadyModel.profile.id);
+      setModelConfigOpen(true);
+      setModelTestNotice(
+        firstUnreadyModel.issue === 'disabled'
+          ? '这个数字员工需要先启用指定模型，并确认 API Key 已填写。'
+          : '这个数字员工需要先填写指定模型的 API Key，并测试连接。'
+      );
+      navigateToSection('models');
+      return undefined;
     }
 
-    setRuntimeState(preparedState);
-    setSelectedModelId(firstUnreadyModel.profile.id);
-    setModelConfigOpen(true);
-    setModelTestNotice(
-      firstUnreadyModel.issue === 'disabled'
-        ? '这个数字员工需要先启用指定模型，并确认 API Key 已填写。'
-        : '这个数字员工需要先填写指定模型的 API Key，并测试连接。'
-    );
-    navigateToSection('models');
-    return undefined;
+    const runtimeReadiness = buildRoleRuntimeReadiness(preparedState, preparedRolePackage);
+    if (!runtimeReadiness.ready) {
+      setRuntimeState(preparedState);
+      message.warning(runtimeReadiness.issueText || '该数字员工运行所需配置不完整。');
+      navigateToSection(
+        runtimeReadiness.missingToolIds.length > 0 || runtimeReadiness.disabledToolIds.length > 0
+          ? 'tools'
+          : 'models'
+      );
+      return undefined;
+    }
+
+    return preparedState;
   }
 
   function createTask(values: TaskFormValues & { attachments?: ComposerAttachment[] }) {
@@ -4952,6 +5134,10 @@ function sectionMeta(section: SectionKey) {
     roles: {
       title: '数字员工',
       description: '安装和配置可用员工。'
+    },
+    logs: {
+      title: '日志',
+      description: '查看任务执行细节和排错信息。'
     },
     models: {
       title: '模型',
@@ -5421,6 +5607,84 @@ function executionEventMessage(log: DesktopTaskDetail['executionLogs'][number]) 
   return messages[log.eventType] ?? workflowExecutionEventMessage(log) ?? log.message;
 }
 
+function selectConversationVisibleLogs(task: DesktopTaskDetail): DesktopTaskDetail['executionLogs'] {
+  const importantEventTypes = new Set([
+    'WORKOS_TASK_RUN_STARTED',
+    'LOCAL_RUN_STARTED',
+    'WORKFLOW_RUNTIME_FILE_CONTEXT_EXTRACTED',
+    'WORKFLOW_RUNTIME_KNOWLEDGE_RETRIEVED',
+    'WORKFLOW_RUNTIME_MODEL_INVOKED',
+    'WORKFLOW_RUNTIME_TOOL_INVOKED',
+    'WORKFLOW_RUNTIME_ARTIFACT_WRITTEN',
+    'WORKFLOW_ARTIFACT_FALLBACK_CREATED',
+    'TASK_COMPLETED'
+  ]);
+  const visibleLogs = task.executionLogs.filter((log) => {
+    if (log.level === 'error' || log.level === 'warning') {
+      return true;
+    }
+    if (importantEventTypes.has(log.eventType)) {
+      return true;
+    }
+    if (log.eventType === 'WORKFLOW_RUNTIME_NODE_COMPLETED') {
+      const detail = readWorkflowNodeLogDetail(log);
+      return detail?.type === 'artifact' || detail?.type === 'output';
+    }
+    return false;
+  });
+
+  return visibleLogs.length > 0 ? visibleLogs.slice(-8) : task.executionLogs.slice(-5);
+}
+
+function userFriendlyExecutionMessage(log: DesktopTaskDetail['executionLogs'][number]) {
+  if (log.level === 'error' || /FAILED|ERROR/i.test(log.eventType)) {
+    return userFriendlyErrorMessage(log.message);
+  }
+
+  return executionEventMessage(log);
+}
+
+function userFriendlyErrorMessage(message: string) {
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes('timeout') || normalized.includes('aborted due to timeout')) {
+    return '模型响应超时，本次任务未完成。你可以稍后重试，或在模型配置中换用响应更快的模型。';
+  }
+
+  if (normalized.includes('api key') || normalized.includes('model api key') || normalized.includes('missing key')) {
+    return '模型 API Key 未配置或不可用。请先检查模型配置，再重新运行任务。';
+  }
+
+  if (normalized.includes('tool input path is required') || normalized.includes('path is required')) {
+    return '缺少要读取的文件路径。请重新上传文件，或检查该数字员工的读取文件节点配置。';
+  }
+
+  if (normalized.includes('web search endpoint is not configured')) {
+    return '网页搜索服务未配置。请到工具页面检查网页搜索能力后再运行。';
+  }
+
+  if (normalized.includes('eperm') || normalized.includes('operation not permitted')) {
+    return '当前保存位置没有写入权限。请换一个文件夹保存，或检查系统权限。';
+  }
+
+  if (normalized.includes('not configured') || normalized.includes('requires') || normalized.includes('missing')) {
+    return '运行所需配置不完整。请检查模型、工具或数字员工配置后重试。';
+  }
+
+  return '任务执行失败。你可以查看详细日志，确认失败节点和原始错误信息。';
+}
+
+function buildTaskLogStats(tasks: DesktopTaskDetail[]) {
+  return tasks.reduce(
+    (stats, task) => ({
+      completed: stats.completed + (task.state === 'completed' ? 1 : 0),
+      failed: stats.failed + (task.state === 'failed' ? 1 : 0),
+      running: stats.running + (task.state === 'running' ? 1 : 0)
+    }),
+    { completed: 0, failed: 0, running: 0 }
+  );
+}
+
 function workflowExecutionEventLabel(eventType: string) {
   const labels: Record<string, string> = {
     WORKFLOW_GRAPH_LOADED: '加载工作流',
@@ -5566,6 +5830,15 @@ interface RoleFileContractSummary {
   outputDetail: string;
 }
 
+interface RoleRuntimeReadinessSummary {
+  ready: boolean;
+  label: string;
+  color: string;
+  issueText: string;
+  missingToolIds: string[];
+  disabledToolIds: string[];
+}
+
 function buildRoleFileContractSummary(
   rolePackage: Pick<RolePackageManifest, 'workflowGraph' | 'dependencyManifest' | 'outputFormat' | 'toolIds'> & {
     name?: string;
@@ -5646,6 +5919,73 @@ function buildRoleFileContractSummary(
     outputLabels,
     outputDetail: outputLabels.join(' / ')
   };
+}
+
+function buildRoleRuntimeReadiness(
+  state: DesktopRuntimeState,
+  rolePackage: RolePackageManifest
+): RoleRuntimeReadinessSummary {
+  const preparedRolePackage = {
+    ...rolePackage,
+    modelProfileIds: readRequiredModelProfileIdsForRolePackage(rolePackage)
+  };
+  const preparedModelProfiles = ensureModelProfilesForRolePackage(
+    state.modelProfiles,
+    preparedRolePackage
+  );
+  const modelReadiness = getRoleModelRuntimeRequirementStatuses(
+    preparedModelProfiles,
+    state.localRuntime.enabledModelProfileIds,
+    preparedRolePackage,
+    {
+      roleCode: preparedRolePackage.roleCode,
+      credentials: state.modelCredentials,
+      roleBindings: state.roleModelCredentialBindings
+    }
+  );
+  const unreadyModelCount = modelReadiness.filter((requirement) => !requirement.ready).length;
+  const knownToolIds = new Set(state.tools.map((tool) => tool.id));
+  const enabledToolIds = new Set(state.localRuntime.enabledToolIds);
+  const missingToolIds = preparedRolePackage.toolIds.filter((toolId) => !knownToolIds.has(toolId));
+  const disabledToolIds = preparedRolePackage.toolIds.filter(
+    (toolId) => knownToolIds.has(toolId) && !enabledToolIds.has(toolId)
+  );
+  const issues = [
+    unreadyModelCount > 0 ? `${unreadyModelCount} 个模型未配置` : '',
+    missingToolIds.length > 0 ? `缺少工具：${missingToolIds.join('、')}` : '',
+    disabledToolIds.length > 0 ? `未启用工具：${disabledToolIds.join('、')}` : ''
+  ].filter(Boolean);
+
+  if (issues.length > 0) {
+    return {
+      ready: false,
+      label: unreadyModelCount > 0 ? '待配置' : '缺少工具',
+      color: 'orange',
+      issueText: issues.join('；'),
+      missingToolIds,
+      disabledToolIds
+    };
+  }
+
+  return {
+    ready: true,
+    label: '可运行',
+    color: 'green',
+    issueText: '模型和工具已就绪。',
+    missingToolIds,
+    disabledToolIds
+  };
+}
+
+function isInstalledRoleTemplateOutdated(
+  template: DesktopRoleTemplate,
+  installedRolePackage: RolePackageManifest | undefined
+) {
+  if (!installedRolePackage) {
+    return false;
+  }
+
+  return (installedRolePackage.templateVersion ?? installedRolePackage.version) !== template.version;
 }
 
 function collectRoleInputFormat(target: Set<string>, value: string | undefined) {
@@ -6212,6 +6552,18 @@ function logLevelColor(level: DesktopTaskDetail['executionLogs'][number]['level'
   }
 
   return 'blue';
+}
+
+function logLevelLabel(level: DesktopTaskDetail['executionLogs'][number]['level']) {
+  if (level === 'error') {
+    return '错误';
+  }
+
+  if (level === 'warning') {
+    return '警告';
+  }
+
+  return '信息';
 }
 
 function completeTaskDetail(detail: DesktopTaskDetail, completedAt: string): DesktopTaskDetail {
