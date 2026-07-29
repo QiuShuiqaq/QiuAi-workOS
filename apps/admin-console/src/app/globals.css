@@ -82,14 +82,14 @@ a {
 .workflow-config-panel .ant-input-number-input,
 .workflow-config-panel .ant-select-selection-item,
 .workflow-config-panel .ant-select-selection-placeholder {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .workflow-config-panel .ant-input,
 .workflow-config-panel .ant-input-sm,
 .workflow-config-panel .ant-select-single .ant-select-selector,
 .workflow-config-panel .ant-input-number {
-  min-height: 34px;
+  min-height: 38px;
 }
 
 .workflow-config-panel textarea.ant-input,
@@ -103,8 +103,8 @@ a {
 }
 
 .ant-select-dropdown .ant-select-item {
-  min-height: 34px;
-  font-size: 13px;
+  min-height: 38px;
+  font-size: 14px;
 }
 
 .workflow-node-palette {

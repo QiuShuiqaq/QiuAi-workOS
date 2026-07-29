@@ -26,8 +26,15 @@ export type ModelCapability =
   | 'video_text'
   | 'embedding'
   | 'rerank'
+  | 'long_context'
+  | 'vision_understanding'
+  | 'video_understanding'
   | 'text_to_image'
   | 'image_to_image'
+  | 'image_generation'
+  | 'video_generation'
+  | 'text_to_video'
+  | 'image_to_video'
   | 'audio_to_text'
   | 'text_to_audio';
 
@@ -173,8 +180,15 @@ export function validateModelProfile(input: unknown): ModelProfile {
       'video_text',
       'embedding',
       'rerank',
+      'long_context',
+      'vision_understanding',
+      'video_understanding',
       'text_to_image',
       'image_to_image',
+      'image_generation',
+      'video_generation',
+      'text_to_video',
+      'image_to_video',
       'audio_to_text',
       'text_to_audio'
     ]) as ModelCapability[],

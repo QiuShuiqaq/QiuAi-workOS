@@ -711,8 +711,15 @@ function isModelCapability(value: unknown): value is ModelCapability {
     value === 'video_text' ||
     value === 'embedding' ||
     value === 'rerank' ||
+    value === 'long_context' ||
+    value === 'vision_understanding' ||
+    value === 'video_understanding' ||
     value === 'text_to_image' ||
     value === 'image_to_image' ||
+    value === 'image_generation' ||
+    value === 'video_generation' ||
+    value === 'text_to_video' ||
+    value === 'image_to_video' ||
     value === 'audio_to_text' ||
     value === 'text_to_audio'
   );

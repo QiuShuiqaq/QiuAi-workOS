@@ -92,6 +92,16 @@ type WorkflowEdge = RoleWorkflowGraph['edges'][number];
 type WorkflowEdgeConditionType = NonNullable<WorkflowEdge['condition']>['type'];
 type ToolConfigFieldType = 'text' | 'number' | 'textarea' | 'boolean';
 type WorkflowModelOutputMode = 'text' | 'json';
+type WorkflowLlmTaskType =
+  | 'text'
+  | 'reasoning'
+  | 'long_document'
+  | 'vision'
+  | 'video_understanding'
+  | 'image_generation'
+  | 'video_generation'
+  | 'embedding'
+  | 'rerank';
 type WorkflowCanvasPosition = { x: number; y: number };
 type WorkflowSelection = { type: 'node' | 'edge'; id: string };
 type WorkflowConfigPanelTab = 'settings' | 'lastRun';
@@ -229,22 +239,39 @@ const workflowPresetOptions: Array<{ value: WorkflowPreset; label: string; descr
 ];
 
 const workflowNodeTypeOptions: Array<{ value: WorkflowNodeType; label: string }> = [
-  { value: 'input', label: '输入' },
-  { value: 'parameter_extractor', label: '参数提取' },
-  { value: 'list', label: '列表处理' },
+  { value: 'input', label: '接收输入' },
+  { value: 'parameter_extractor', label: '结构提取' },
+  { value: 'list', label: '列表筛选' },
   { value: 'knowledge', label: '知识库' },
-  { value: 'llm', label: 'LLM' },
+  { value: 'reasoning', label: 'LLM 推理' },
+  { value: 'llm', label: 'LLM 大模型' },
+  { value: 'assign', label: '变量整理' },
+  { value: 'code', label: '数据处理' },
+  { value: 'template', label: '文本模板' },
   { value: 'tool', label: '工具' },
-  { value: 'condition', label: '条件' },
-  { value: 'iteration', label: '迭代' },
-  { value: 'loop', label: '循环' },
-  { value: 'aggregator', label: '变量聚合' },
-  { value: 'code', label: '代码转换' },
-  { value: 'template', label: '模板' },
-  { value: 'assign', label: '变量赋值' },
-  { value: 'artifact', label: '产物' },
-  { value: 'approval', label: '审批' },
-  { value: 'output', label: '输出' }
+  { value: 'condition', label: '条件分支' },
+  { value: 'iteration', label: '批处理' },
+  { value: 'loop', label: '循环控制' },
+  { value: 'aggregator', label: '结果合并' },
+  { value: 'artifact', label: '产物生成' },
+  { value: 'approval', label: '人工确认' },
+  { value: 'output', label: '返回结果' }
+];
+
+const workflowAuthoringNodeTypes: WorkflowNodeType[] = [
+  'input',
+  'knowledge',
+  'llm',
+  'tool',
+  'condition',
+  'list',
+  'iteration',
+  'loop',
+  'aggregator',
+  'code',
+  'artifact',
+  'approval',
+  'output'
 ];
 
 const workflowNodeCatalogGroups: Array<{
@@ -253,42 +280,40 @@ const workflowNodeCatalogGroups: Array<{
   nodes: Array<{ value: WorkflowNodeType; label: string; hint: string }>;
 }> = [
   {
-    title: 'AI',
-    description: '模型生成、分析、任务拆解',
+    title: '常用主链路',
+    description: '大多数数字员工先用这些节点搭出主流程。',
     nodes: [
-      { value: 'parameter_extractor', label: '参数提取', hint: '从自然语言中提取结构化参数' },
-      { value: 'llm', label: 'LLM', hint: '调用模型生成、总结或分析' },
-      { value: 'condition', label: '条件判断', hint: '根据变量结果进入不同分支' }
+      { value: 'input', label: '接收输入', hint: '接收用户任务和拖入附件' },
+      { value: 'llm', label: 'LLM 大模型', hint: '文本、推理、多模态都在这里配置' },
+      { value: 'tool', label: '工具', hint: '搜索、读文件、OCR、视频等真实动作' },
+      { value: 'artifact', label: '产物生成', hint: '生成 Word、表格、PDF、图片或视频' },
+      { value: 'output', label: '返回结果', hint: '把结果和产物交给用户' }
     ]
   },
   {
-    title: '数据',
-    description: '接收输入、读取知识',
+    title: '数据与知识',
+    description: '整理输入、读取知识、把数据变成后续节点能用的格式。',
     nodes: [
-      { value: 'input', label: '输入', hint: '声明用户任务和附件输入' },
-      { value: 'list', label: '列表处理', hint: '筛选、排序和整理文件或数组' },
-      { value: 'iteration', label: '迭代', hint: '逐个处理数组里的每一项' },
-      { value: 'aggregator', label: '变量聚合', hint: '合并多个分支或变量结果' },
-      { value: 'code', label: '代码转换', hint: '用受限 JS 清洗 JSON、计算字段或生成 rows' },
-      { value: 'template', label: '内容模板', hint: '把变量拼成稳定格式' },
-      { value: 'assign', label: '变量赋值', hint: '设置固定值或复制变量' },
-      { value: 'knowledge', label: '知识库', hint: '读取企业或本地知识' }
+      { value: 'knowledge', label: '知识库', hint: '读取企业知识库或本地知识' },
+      { value: 'list', label: '列表筛选', hint: '从附件或数组里筛选处理对象' },
+      { value: 'iteration', label: '批处理', hint: '逐个处理文件、表格行或列表项' },
+      { value: 'aggregator', label: '结果合并', hint: '合并分支、批处理或多个变量' }
     ]
   },
   {
-    title: '工具',
-    description: '执行外部动作',
+    title: '转换与规则',
+    description: '处理字段、格式、表格和固定文本规则。',
     nodes: [
-      { value: 'tool', label: '工具调用', hint: '网页搜索、Office、MCP、HTTP 等' },
-      { value: 'artifact', label: '生成产物', hint: '生成 Word、表格、PPT、PDF、MP4 等文件' }
+      { value: 'code', label: '数据处理', hint: '整理变量、拼接文本、清洗 JSON 或生成 rows' }
     ]
   },
   {
-    title: '交付',
-    description: '确认和输出',
+    title: '流程控制',
+    description: '复杂任务需要分支、循环或人工确认时使用。',
     nodes: [
-      { value: 'approval', label: '人工确认', hint: '高风险步骤前让用户确认' },
-      { value: 'output', label: '输出结果', hint: '定义最终展示和下载内容' }
+      { value: 'condition', label: '条件分支', hint: '根据变量结果走不同路径' },
+      { value: 'loop', label: '循环控制', hint: '限制重复执行次数和退出条件' },
+      { value: 'approval', label: '人工确认', hint: '高风险步骤前让用户确认' }
     ]
   }
 ];
@@ -338,6 +363,78 @@ const conditionTypeOptions: Array<{ value: WorkflowEdgeConditionType; label: str
 const modelOutputModeOptions: Array<{ value: WorkflowModelOutputMode; label: string }> = [
   { value: 'text', label: '文本' },
   { value: 'json', label: 'JSON 结构化数据' }
+];
+
+const llmTaskTypeOptions: Array<{
+  value: WorkflowLlmTaskType;
+  label: string;
+  description: string;
+  requiredCapabilities: string[];
+  defaultOutputMode: WorkflowModelOutputMode;
+}> = [
+  {
+    value: 'text',
+    label: '文本生成',
+    description: '总结、改写、起草、问答等通用文本任务。',
+    requiredCapabilities: ['text', 'text_generation'],
+    defaultOutputMode: 'text'
+  },
+  {
+    value: 'reasoning',
+    label: '深度推理',
+    description: '复杂分析、规划、判断、评分和多步骤推理。',
+    requiredCapabilities: ['reasoning', 'reasoning_text'],
+    defaultOutputMode: 'text'
+  },
+  {
+    value: 'long_document',
+    label: '长文档理解',
+    description: '读取长文本、长文档、合同、技术资料后输出结论。',
+    requiredCapabilities: ['long_context', 'document', 'file'],
+    defaultOutputMode: 'text'
+  },
+  {
+    value: 'vision',
+    label: '图片理解',
+    description: '把图片或截图交给模型，输出文字说明或 JSON。',
+    requiredCapabilities: ['vision', 'vision_understanding', 'vision_text', 'image'],
+    defaultOutputMode: 'text'
+  },
+  {
+    value: 'video_understanding',
+    label: '视频理解',
+    description: '把视频地址或视频片段交给模型，输出分析、评分或剪辑建议。',
+    requiredCapabilities: ['video', 'video_understanding', 'video_text'],
+    defaultOutputMode: 'json'
+  },
+  {
+    value: 'image_generation',
+    label: '生成图片',
+    description: '根据文本或参考图生成图片素材。',
+    requiredCapabilities: ['image_generation', 'text_to_image', 'image_editing'],
+    defaultOutputMode: 'json'
+  },
+  {
+    value: 'video_generation',
+    label: '生成视频',
+    description: '根据文本或参考图生成视频素材。',
+    requiredCapabilities: ['video_generation', 'text_to_video', 'image_to_video'],
+    defaultOutputMode: 'json'
+  },
+  {
+    value: 'embedding',
+    label: '向量化 embedding',
+    description: '把文本转成向量，用于检索、召回和相似度计算。',
+    requiredCapabilities: ['embedding'],
+    defaultOutputMode: 'json'
+  },
+  {
+    value: 'rerank',
+    label: '重排 rerank',
+    description: '给候选文本列表重新排序，输出分数和排序结果。',
+    requiredCapabilities: ['rerank'],
+    defaultOutputMode: 'json'
+  }
 ];
 
 const workflowVariableTypeLabels: Record<WorkflowVariableType, string> = {
@@ -422,6 +519,15 @@ const variableRuntimeRefByAssetKey: Record<string, string> = {
   artifact_file: 'artifact_file'
 };
 
+const modelAvailabilityStatusLabels: Record<string, string> = {
+  verified: '已验证',
+  provider_documented: '供应商公开',
+  requires_manual_model_id: '需确认模型ID',
+  experimental: '实验',
+  deprecated: '已废弃',
+  placeholder: '占位'
+};
+
 const legacyWorkflowNodeNameTranslations: Record<string, string> = {
   Start: '开始',
   'Receive task': '接收任务',
@@ -435,19 +541,19 @@ const legacyWorkflowNodeNameTranslations: Record<string, string> = {
 const defaultNodeNames: Record<WorkflowNodeType, string> = {
   start: '开始',
   input: '接收输入',
-  parameter_extractor: '提取参数',
-  list: '整理列表',
+  parameter_extractor: '结构提取',
+  list: '列表筛选',
   knowledge: '读取知识',
-  reasoning: '分析推理',
-  llm: 'LLM 生成',
-  assign: '变量赋值',
-  code: '代码转换',
-  template: '套用模板',
-  tool: '调用工具',
-  condition: '条件判断',
-  iteration: '逐项处理',
-  loop: '循环优化',
-  aggregator: '聚合结果',
+  reasoning: 'LLM 推理',
+  llm: 'LLM 大模型',
+  assign: '变量整理',
+  code: '数据处理',
+  template: '文本模板',
+  tool: '工具',
+  condition: '条件分支',
+  iteration: '批处理',
+  loop: '循环控制',
+  aggregator: '结果合并',
   artifact: '生成产物',
   approval: '人工确认',
   output: '返回结果'
@@ -609,6 +715,11 @@ function createCanvasNode(
                       ].join('\n'),
                       outputVariable: `${id}.json`,
                       timeoutMs: 2_000
+                    }
+                : type === 'llm' || type === 'reasoning'
+                  ? {
+                      llmTaskType: type === 'reasoning' ? 'reasoning' : 'text',
+                      outputMode: 'text'
                     }
                 : (type === 'tool' || type === 'artifact') && toolActionTemplate
                   ? {
@@ -836,6 +947,10 @@ function isModelNodeType(type: WorkflowNodeType) {
   return type === 'llm' || type === 'reasoning' || type === 'parameter_extractor';
 }
 
+function isDataProcessingNodeType(type: WorkflowNodeType) {
+  return type === 'assign' || type === 'template' || type === 'code';
+}
+
 function readAssetSchemaString(asset: AssetDefinitionDetail | undefined, key: string): string | undefined {
   const value = asset?.schema[key];
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
@@ -893,17 +1008,66 @@ function buildAssetVariableOptions(assets: AssetDefinitionDetail[]): WorkflowVar
     });
 }
 
-function buildModelAssetOptions(assets: AssetDefinitionDetail[]) {
-  const assetOptions = assets.map((asset) => {
+function readWorkflowLlmTaskType(node: RoleWorkflowGraphNode): WorkflowLlmTaskType {
+  const value = readWorkflowConfigString(node.config, 'llmTaskType');
+  if (llmTaskTypeOptions.some((option) => option.value === value)) {
+    return value as WorkflowLlmTaskType;
+  }
+  if (node.type === 'reasoning') return 'reasoning';
+  if (node.type === 'parameter_extractor') return 'text';
+  return 'text';
+}
+
+function readWorkflowLlmTaskOption(taskType: WorkflowLlmTaskType) {
+  return llmTaskTypeOptions.find((option) => option.value === taskType) ?? llmTaskTypeOptions[0];
+}
+
+function normalizeModelCapability(value: string) {
+  return value.trim().toLowerCase().replace(/[-\s]+/g, '_');
+}
+
+function modelAssetSupportsLlmTask(asset: AssetDefinitionDetail, taskType: WorkflowLlmTaskType) {
+  const taskOption = readWorkflowLlmTaskOption(taskType);
+  const capabilities = [
+    ...readAssetSchemaStringArray(asset, 'capabilities'),
+    ...readAssetSchemaStringArray(asset, 'inputTypes'),
+    ...readAssetSchemaStringArray(asset, 'outputTypes')
+  ].map(normalizeModelCapability);
+  if (capabilities.length === 0) return true;
+  if (taskType === 'text') {
+    return capabilities.some((capability) => ['text', 'text_generation', 'chat'].includes(capability));
+  }
+  return taskOption.requiredCapabilities
+    .map(normalizeModelCapability)
+    .some((capability) => capabilities.includes(capability));
+}
+
+function fallbackModelOptionSupportsLlmTask(option: { value: string }, taskType: WorkflowLlmTaskType) {
+  if (taskType === 'text' || taskType === 'long_document') {
+    return !option.value.includes('vision') && !option.value.includes('reasoning');
+  }
+  if (taskType === 'reasoning') return option.value.includes('reasoning') || option.value.includes('deepseek');
+  if (taskType === 'vision') return option.value.includes('vision') || option.value.includes('gpt-4o');
+  return option.value === 'custom-model';
+}
+
+function buildModelAssetOptions(assets: AssetDefinitionDetail[], taskType?: WorkflowLlmTaskType) {
+  const filteredAssets = taskType ? assets.filter((asset) => modelAssetSupportsLlmTask(asset, taskType)) : assets;
+  const assetOptions = filteredAssets.map((asset) => {
     const providerId = readAssetSchemaString(asset, 'providerId') ?? asset.category;
     const modelId = readAssetSchemaString(asset, 'modelId') ?? asset.key;
+    const availabilityStatus = readAssetSchemaString(asset, 'availabilityStatus');
+    const statusLabel = availabilityStatus && availabilityStatus !== 'verified'
+      ? ` / ${modelAvailabilityStatusLabels[availabilityStatus] ?? availabilityStatus}`
+      : '';
     return {
       value: asset.key,
-      label: `${asset.name} / ${providerId} / ${modelId}`
+      label: `${asset.name} / ${providerId} / ${modelId}${statusLabel}`
     };
   });
   const fallbackOptions = modelProfileOptions.filter(
-    (option) => !assets.some((asset) => asset.key === option.value)
+    (option) => !assets.some((asset) => asset.key === option.value) &&
+      (!taskType || fallbackModelOptionSupportsLlmTask(option, taskType))
   );
   return [...assetOptions, ...fallbackOptions];
 }
@@ -964,8 +1128,10 @@ function inferWorkflowNodeOutputType(node: RoleWorkflowGraphNode, variableName: 
   if (node.type === 'list') return 'asset[]';
   if (node.type === 'iteration') return 'asset';
   if (node.type === 'condition') return 'boolean';
-  if ((node.type === 'llm' || node.type === 'reasoning') && readWorkflowModelOutputMode(node) === 'json') {
-    return 'json';
+  if (node.type === 'llm' || node.type === 'reasoning') {
+    const taskType = readWorkflowLlmTaskType(node);
+    if (taskType === 'image_generation' || taskType === 'video_generation') return 'asset';
+    if (taskType === 'embedding' || taskType === 'rerank' || readWorkflowModelOutputMode(node) === 'json') return 'json';
   }
   if (node.type === 'knowledge' || node.type === 'llm' || node.type === 'reasoning' || node.type === 'template' || node.type === 'output') {
     return 'text';
@@ -987,8 +1153,13 @@ function getWorkflowNodeDefaultOutputVariables(node: RoleWorkflowGraphNode): str
     if (outputType === 'table') return [`${node.id}.table`];
     if (outputType === 'json') return [`${node.id}.json`];
   }
-  if ((node.type === 'llm' || node.type === 'reasoning') && readWorkflowModelOutputMode(node) === 'json') {
-    return [`${node.id}.json`];
+  if (node.type === 'llm' || node.type === 'reasoning') {
+    const taskType = readWorkflowLlmTaskType(node);
+    if (taskType === 'image_generation') return [`${node.id}.image`];
+    if (taskType === 'video_generation') return [`${node.id}.video`];
+    if (taskType === 'embedding') return [`${node.id}.embedding`];
+    if (taskType === 'rerank') return [`${node.id}.scores`];
+    if (readWorkflowModelOutputMode(node) === 'json') return [`${node.id}.json`];
   }
   if (node.type === 'condition') return [`${node.id}.matched`];
   if (node.type === 'aggregator' || node.type === 'assign' || node.type === 'code') return [`${node.id}.json`];
@@ -1411,6 +1582,12 @@ function nodeTone(type: RoleWorkflowGraphNode['type']) {
 
 function workflowNodeTypeLabel(type: RoleWorkflowGraphNode['type']) {
   return workflowNodeTypeOptions.find((option) => option.value === type)?.label ?? type;
+}
+
+function buildWorkflowNodeTypeSelectOptions(currentType: WorkflowNodeType) {
+  const visibleTypes = new Set<WorkflowNodeType>(workflowAuthoringNodeTypes);
+  visibleTypes.add(currentType);
+  return workflowNodeTypeOptions.filter((option) => visibleTypes.has(option.value));
 }
 
 function traceStatusTone(status: 'passed' | 'warning' | 'failed') {
@@ -2239,15 +2416,20 @@ function WorkflowNodeLastRunPanel({
 }
 
 function workflowNodeConfigDescription(node: RoleWorkflowGraphNode) {
-  if (node.type === 'parameter_extractor') return '把自然语言任务变成 JSON 参数，适合提取时长、格式、评分标准、输出要求。';
-  if (node.type === 'list') return '从附件或上游数组里筛选一批对象，例如只取视频、图片或表格。';
-  if (node.type === 'iteration') return '取列表中的当前项，适合一条条处理多个文件。';
-  if (node.type === 'aggregator') return '把多个节点输出合并成一个对象或数组，供后续节点统一使用。';
-  if (node.type === 'code') return '运行受限 JS 处理 JSON、表格和业务规则。输入变量会注入到 input 对象。';
-  if (node.type === 'tool') return '调用本地或网络工具。工具参数支持 {{变量}} 模板和 $变量 引用。';
-  if (node.type === 'artifact') return '生成真实可下载产物。这里的写入动作和参数会被 PC 端执行。';
-  if (node.type === 'output') return '整理最终回复，通常放在流程最后，用于告诉用户结果和下载位置。';
-  if (node.type === 'condition') return '配置分支条件；复杂判断可先用 LLM/参数提取节点生成分类结果，再在连线上判断。';
+  if (node.type === 'parameter_extractor') return '把用户任务提取成固定字段，例如时间、格式、数量、评分标准。';
+  if (node.type === 'list') return '从附件或上游数组里筛出要处理的对象，例如只保留视频、图片或表格。';
+  if (node.type === 'iteration') return '按顺序一条条处理列表里的文件、表格行或业务对象。';
+  if (node.type === 'aggregator') return '把多个分支或批处理结果合成一个结果，方便后续继续使用。';
+  if (node.type === 'assign') return '把变量整理成稳定名称，或把 JSON 数组映射成表格 rows。';
+  if (node.type === 'template') return '用变量拼出固定文本，适合生成标题、摘要、提示词片段或工具参数。';
+  if (node.type === 'code') return '做字段清洗、简单计算、JSON 转换和表格 rows 生成。';
+  if (node.type === 'tool') return '调用具体工具完成真实动作，例如搜索、读写文件、OCR、视频处理或 MCP。';
+  if (node.type === 'artifact') return '生成真实可下载文件，格式和写入规则由这个节点决定。';
+  if (node.type === 'output') return '整理最终回复，只负责告诉用户结果、说明和下载位置。';
+  if (node.type === 'condition') return '根据变量结果选择下一条线，适合通过/不通过、A 类/B 类这类分支。';
+  if (node.type === 'loop') return '控制重复执行的次数和退出条件，避免流程失控。';
+  if (node.type === 'knowledge') return '读取企业知识库、本地知识或服务端摘要，作为后续节点参考。';
+  if (node.type === 'llm' || node.type === 'reasoning') return '调用一个大模型完成生成、分析、推理或结构化输出。';
   return '配置节点名称、执行说明、输入变量和输出变量。';
 }
 
@@ -2306,10 +2488,7 @@ function WorkflowReactFlowEditor({
     () => assets.filter((asset) => asset.type === 'ARTIFACT_TEMPLATE' && asset.status === 'ACTIVE'),
     [assets]
   );
-  const modelAssetOptions = useMemo(
-    () => buildModelAssetOptions(modelAssets),
-    [modelAssets]
-  );
+  const modelAssetOptions = useMemo(() => buildModelAssetOptions(modelAssets), [modelAssets]);
   const toolActionAssetOptions = useMemo(
     () => buildToolActionAssetOptions(toolActionAssets),
     [toolActionAssets]
@@ -2438,6 +2617,14 @@ function WorkflowReactFlowEditor({
     selectedNode && isModelNodeType(selectedNode.type)
       ? readWorkflowConfigString(selectedNode.config, 'modelAssetKey') ?? selectedNode.modelProfileId
       : undefined;
+  const selectedLlmTaskType =
+    selectedNode && isModelNodeType(selectedNode.type)
+      ? readWorkflowLlmTaskType(selectedNode)
+      : undefined;
+  const selectedModelAssetOptions = useMemo(
+    () => buildModelAssetOptions(modelAssets, selectedLlmTaskType),
+    [modelAssets, selectedLlmTaskType]
+  );
   const selectedToolActionAssetKey =
     selectedNode && (selectedNode.type === 'tool' || selectedNode.type === 'artifact')
       ? readWorkflowConfigString(selectedNode.config, 'toolActionAssetKey') ?? readWorkflowConfigString(selectedNode.config, 'action')
@@ -2727,7 +2914,7 @@ function WorkflowReactFlowEditor({
     onChange(nextGraph);
     setSelection({ type: 'node', id: node.id });
     closeNodePicker();
-    message.success(nodeIsReachable ? '已添加并接入主流程' : '已添加未接入节点，连到主流程后才会运行');
+    message.success(nodeIsReachable ? '已添加并接入主流程' : '已添加自由节点，连到主流程后才会运行');
   }
 
   function deleteNode(nodeId: string) {
@@ -2956,6 +3143,55 @@ function WorkflowReactFlowEditor({
     });
   }
 
+  function updateDataProcessingMode(node: RoleWorkflowGraphNode, type: 'assign' | 'template' | 'code') {
+    if (type === 'assign') {
+      const outputVariable = node.outputVariables?.[0] ?? `${node.id}.value`;
+      updateNode(node.id, {
+        type,
+        name: node.name === defaultNodeNames[node.type] ? defaultNodeNames[type] : node.name,
+        outputVariables: [outputVariable],
+        config: {
+          assignments: [
+            {
+              name: outputVariable,
+              value: '$runtime.previous_text'
+            }
+          ]
+        }
+      });
+      return;
+    }
+
+    if (type === 'template') {
+      updateNode(node.id, {
+        type,
+        name: node.name === defaultNodeNames[node.type] ? defaultNodeNames[type] : node.name,
+        outputVariables: [`${node.id}.text`],
+        config: {
+          template: '{{runtime.previous_text}}'
+        }
+      });
+      return;
+    }
+
+    updateNode(node.id, {
+      type,
+      name: node.name === defaultNodeNames[node.type] ? defaultNodeNames[type] : node.name,
+      outputVariables: [`${node.id}.json`],
+      config: {
+        code: [
+          'const text = input.runtime?.previous_text || input.start?.text || "";',
+          'return {',
+          '  text,',
+          "  rows: [['项目', '内容'], ['输入', text]]",
+          '};'
+        ].join('\n'),
+        outputVariable: `${node.id}.json`,
+        timeoutMs: 2_000
+      }
+    });
+  }
+
   function updateAssignNodeConfig(node: RoleWorkflowGraphNode, name: string, value: string) {
     const nextName = name.trim();
     updateNode(node.id, {
@@ -3079,6 +3315,27 @@ function WorkflowReactFlowEditor({
         node.type === 'llm' || node.type === 'reasoning' || node.type === 'parameter_extractor'
           ? [`${node.id}.${outputMode === 'json' ? 'json' : 'text'}`]
           : node.outputVariables
+    });
+  }
+
+  function updateLlmTaskType(node: RoleWorkflowGraphNode, taskType: WorkflowLlmTaskType) {
+    const taskOption = readWorkflowLlmTaskOption(taskType);
+    const nextOutputMode = taskOption.defaultOutputMode;
+    const schema = readWorkflowModelSchema(node);
+    const nextNode: RoleWorkflowGraphNode = {
+      ...node,
+      config: {
+        ...(node.config ?? {}),
+        llmTaskType: taskType,
+        outputMode: nextOutputMode,
+        ...(nextOutputMode === 'json' && (!schema || (typeof schema === 'object' && Object.keys(schema).length === 0))
+          ? { schema: defaultWorkflowModelSchema(node) }
+          : {})
+      }
+    };
+    updateNode(node.id, {
+      config: nextNode.config,
+      outputVariables: getWorkflowNodeDefaultOutputVariables(nextNode)
     });
   }
 
@@ -3229,7 +3486,7 @@ function WorkflowReactFlowEditor({
     onChange({ ...graph, nodes: [...graph.nodes, node] });
     setSelection({ type: 'node', id: node.id });
     closeContextMenu();
-    message.success('已复制为未接入节点');
+    message.success('已复制为自由节点');
   }
 
   const nodePickerTitle =
@@ -3239,10 +3496,10 @@ function WorkflowReactFlowEditor({
         ? '在前面添加节点'
         : nodePicker.mode === 'after'
           ? '在后面添加节点'
-          : '添加未接入节点';
+          : '添加自由节点';
   const nodePickerDescription =
     nodePicker.mode === 'free'
-      ? '未接入节点只作为画布草稿保存，不会在 PC 端运行。连线后才会进入主流程。'
+      ? '自由节点会先放在画布上，连线后才会进入主流程并在 PC 端运行。'
       : '选择节点后会自动接入当前位置，你仍然可以拖动节点调整布局。';
 
   return (
@@ -3252,7 +3509,7 @@ function WorkflowReactFlowEditor({
           <div>
             <div className="workflow-pane-title">节点库</div>
             <Typography.Text type="secondary" className="workflow-pane-subtitle">
-              拖到画布生成未接入节点
+              拖到画布生成自由节点
             </Typography.Text>
           </div>
           <Button
@@ -3298,7 +3555,7 @@ function WorkflowReactFlowEditor({
               整理布局
             </Button>
             <Button size="small" onClick={() => openNodePicker({ mode: 'free' })} icon={<PlusOutlined />}>
-              添加未接入节点
+              添加节点
             </Button>
           </Space>
           <Typography.Text type="secondary">
@@ -3370,7 +3627,7 @@ function WorkflowReactFlowEditor({
                     })
                   }
                 >
-                  添加未接入节点
+                  添加自由节点
                 </button>
                 <button
                   type="button"
@@ -3392,7 +3649,7 @@ function WorkflowReactFlowEditor({
                   在后面添加节点
                 </button>
                 <button type="button" onClick={() => duplicateNode(contextMenu.nodeId!)}>
-                  复制为未接入节点
+                  复制为自由节点
                 </button>
                 <button
                   type="button"
@@ -3487,7 +3744,7 @@ function WorkflowReactFlowEditor({
                   size="small"
                   value={selectedNode.type}
                   disabled={selectedNode.id === graph.entryNodeId}
-                  options={workflowNodeTypeOptions}
+                  options={buildWorkflowNodeTypeSelectOptions(selectedNode.type)}
                   onChange={(type) => {
                     const nextArtifactType = type === 'artifact' ? selectedNode.artifactType ?? 'docx' : selectedNode.artifactType;
                     const nextToolId =
@@ -3637,9 +3894,26 @@ function WorkflowReactFlowEditor({
                 />
               </WorkflowConfigSection>
             ) : null}
+            {isDataProcessingNodeType(selectedNode.type) ? (
+              <WorkflowConfigSection
+                title="处理方式"
+                description="一个数据处理节点可以做变量整理、文本拼接或代码转换。常规场景优先用变量整理和文本模板。"
+              >
+                <Select
+                  size="small"
+                  value={selectedNode.type}
+                  options={[
+                    { value: 'assign', label: '变量整理 / 固定值、复制变量、表格映射' },
+                    { value: 'template', label: '文本模板 / 用变量拼成稳定文本' },
+                    { value: 'code', label: '代码转换 / 清洗 JSON、计算字段、生成 rows' }
+                  ]}
+                  onChange={(type) => updateDataProcessingMode(selectedNode, type)}
+                />
+              </WorkflowConfigSection>
+            ) : null}
             {selectedNode.type === 'assign' && selectedAssignConfig ? (
               <WorkflowConfigSection
-                title="变量赋值"
+                title="变量整理"
                 description="把固定值或上游变量写成一个稳定变量，后续节点直接引用这个变量。"
               >
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
@@ -3787,17 +4061,27 @@ function WorkflowReactFlowEditor({
             ) : null}
             {selectedNode.type === 'llm' || selectedNode.type === 'reasoning' || selectedNode.type === 'parameter_extractor' ? (
               <WorkflowConfigSection
-                title="模型"
-                description="模板里指定模型；PC 端安装员工时再配置对应 API Key。"
+                title="LLM 大模型"
+                description="先选任务类型，再选模型。系统会按模型资产能力过滤不匹配的模型。"
               >
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Select
+                    size="small"
+                    value={selectedLlmTaskType}
+                    disabled={selectedNode.type === 'parameter_extractor'}
+                    options={llmTaskTypeOptions.map((option) => ({
+                      value: option.value,
+                      label: `${option.label} / ${option.description}`
+                    }))}
+                    onChange={(taskType) => updateLlmTaskType(selectedNode, taskType)}
+                  />
                   <Select
                     size="small"
                     allowClear
                     showSearch
                     value={selectedModelAssetKey}
                     placeholder="从模型库选择具体模型"
-                    options={modelAssetOptions}
+                    options={selectedModelAssetOptions.length ? selectedModelAssetOptions : modelAssetOptions}
                     optionFilterProp="label"
                     onChange={(assetKey) => updateModelNodeAsset(selectedNode, assetKey)}
                   />
@@ -3854,12 +4138,11 @@ function WorkflowReactFlowEditor({
             ) : null}
             {selectedNode.type === 'tool' || selectedNode.type === 'artifact' ? (
               <WorkflowConfigSection
-                title={selectedNode.type === 'artifact' ? '写入工具' : '调用工具'}
-                description="选择这个节点实际调用的工具，例如文档、表格、网页搜索、视频处理或 MCP。"
+                title={selectedNode.type === 'artifact' ? '产物写入动作' : '工具动作'}
+                description="选择要执行的具体动作。工具包会由动作自动带出，通常不需要手动改。"
               >
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
                   <Select
-                    size="small"
                     allowClear
                     showSearch
                     value={selectedToolActionAssetKey}
@@ -3868,14 +4151,9 @@ function WorkflowReactFlowEditor({
                     optionFilterProp="label"
                     onChange={(assetKey) => updateToolNodeActionAsset(selectedNode, assetKey)}
                   />
-                  <Select
-                    size="small"
-                    allowClear
-                    value={selectedNode.toolId}
-                    placeholder="工具包"
-                    options={serverToolOptions}
-                    onChange={(toolId) => updateToolNodeToolId(selectedNode, toolId)}
-                  />
+                  <Typography.Text type="secondary" className="workflow-config-section-desc">
+                    工具包：{selectedNode.toolId ?? '未选择'}
+                  </Typography.Text>
                 </Space>
               </WorkflowConfigSection>
             ) : null}

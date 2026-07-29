@@ -11,8 +11,15 @@ export const modelCapabilityOptions: Array<{
   { value: 'video_text', label: '视频理解', description: '视频或视频帧输入，文本输出' },
   { value: 'embedding', label: '文本向量', description: '知识库检索、语义匹配' },
   { value: 'rerank', label: '重排模型', description: '检索结果重排' },
+  { value: 'long_context', label: '长上下文', description: '长文档、长上下文输入，文本或 JSON 输出' },
+  { value: 'vision_understanding', label: '多模态理解', description: '图片、文档或多模态输入，文本输出' },
+  { value: 'video_understanding', label: '视频理解', description: '视频输入，文本或 JSON 输出' },
   { value: 'text_to_image', label: '文生图', description: '文本输入，图片输出' },
   { value: 'image_to_image', label: '图生图', description: '图片输入，图片输出' },
+  { value: 'image_generation', label: '生成图片', description: '文本或参考图输入，图片输出' },
+  { value: 'video_generation', label: '生成视频', description: '文本或参考图输入，视频输出' },
+  { value: 'text_to_video', label: '文生视频', description: '文本输入，视频输出' },
+  { value: 'image_to_video', label: '图生视频', description: '图片输入，视频输出' },
   { value: 'audio_to_text', label: '语音转文字', description: '音频输入，文本输出' },
   { value: 'text_to_audio', label: '文本转语音', description: '文本输入，音频输出' }
 ];
@@ -20,6 +27,10 @@ export const modelCapabilityOptions: Array<{
 export function defaultCapabilitiesForPurpose(purpose: ModelPurpose): ModelCapability[] {
   if (purpose === 'reasoning') {
     return ['reasoning_text', 'text'];
+  }
+
+  if (purpose === 'document') {
+    return ['long_context', 'text'];
   }
 
   if (purpose === 'vision') {
@@ -60,11 +71,21 @@ export function purposeForModelCapabilities(
     return 'embeddings';
   }
 
+  if (normalized.includes('long_context')) {
+    return 'document';
+  }
+
   if (
     normalized.includes('vision_text') ||
     normalized.includes('video_text') ||
     normalized.includes('text_to_image') ||
-    normalized.includes('image_to_image')
+    normalized.includes('image_to_image') ||
+    normalized.includes('vision_understanding') ||
+    normalized.includes('video_understanding') ||
+    normalized.includes('image_generation') ||
+    normalized.includes('video_generation') ||
+    normalized.includes('text_to_video') ||
+    normalized.includes('image_to_video')
   ) {
     return 'vision';
   }
@@ -102,6 +123,10 @@ export function inferModelCapabilitiesFromName(
     return ['rerank'];
   }
 
+  if (matchesAny(normalizedName, ['long', '128k', '200k', '1m', 'context', 'document', 'doc'])) {
+    return ['long_context', 'text'];
+  }
+
   if (matchesAny(normalizedName, ['whisper', 'asr', 'speech-to-text', 'audio-transcription'])) {
     return ['audio_to_text'];
   }
@@ -114,16 +139,20 @@ export function inferModelCapabilitiesFromName(
     return ['image_to_image'];
   }
 
-  if (matchesAny(normalizedName, ['dall-e', 'imagen', 'flux', 'stable-diffusion', 'wanx', 'text-to-image', 'cogview'])) {
-    return ['text_to_image'];
+  if (matchesAny(normalizedName, ['dall-e', 'imagen', 'flux', 'stable-diffusion', 'wanx', 'text-to-image', 'cogview', 'seedream', 'midjourney', 'nano-banana'])) {
+    return ['image_generation', 'text_to_image'];
+  }
+
+  if (matchesAny(normalizedName, ['veo', 'kling', 'pika', 'hailuo', 'runway', 'sora', 'seedance', 'text-to-video', 'image-to-video'])) {
+    return ['video_generation', 'text_to_video', 'image_to_video'];
   }
 
   if (matchesAny(normalizedName, ['video', 'videounderstanding'])) {
-    return ['video_text', 'vision_text', 'text'];
+    return ['video_understanding', 'video_text', 'vision_text', 'text'];
   }
 
   if (matchesAny(normalizedName, ['vision', 'vl', 'gpt-4o', 'gemini', 'qwen-vl', 'glm-4v', 'minimax-vl'])) {
-    return ['vision_text', 'text'];
+    return ['vision_understanding', 'vision_text', 'text'];
   }
 
   if (

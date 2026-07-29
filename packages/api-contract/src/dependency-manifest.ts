@@ -19,6 +19,9 @@ export interface RoleTemplateDependencyModelAsset {
   inputTypes: string[];
   outputTypes: string[];
   credentialFields: string[];
+  apiStyle?: 'openai_compatible' | 'provider_native' | 'azure_openai' | 'custom' | string;
+  availabilityStatus?: 'verified' | 'provider_documented' | 'requires_manual_model_id' | 'experimental' | 'deprecated' | 'placeholder' | string;
+  supportsModelList?: boolean;
   required: boolean;
   nodeIds: string[];
 }

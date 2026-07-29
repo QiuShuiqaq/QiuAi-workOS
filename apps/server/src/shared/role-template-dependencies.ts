@@ -22,6 +22,9 @@ export interface ServerRoleTemplateDependencyManifest {
     inputTypes: string[];
     outputTypes: string[];
     credentialFields: string[];
+    apiStyle?: string;
+    availabilityStatus?: string;
+    supportsModelList?: boolean;
     required: boolean;
     nodeIds: string[];
   }>;
@@ -220,6 +223,9 @@ function upsertModelAsset(
       ...(current?.credentialFields ?? []),
       ...readSchemaStringArray(asset, 'credentialFields')
     ]),
+    apiStyle: current?.apiStyle ?? readSchemaString(asset, 'apiStyle'),
+    availabilityStatus: current?.availabilityStatus ?? readSchemaString(asset, 'availabilityStatus'),
+    supportsModelList: current?.supportsModelList ?? readSchemaBoolean(asset, 'supportsModelList'),
     required: true,
     nodeIds: uniqueStrings([...(current?.nodeIds ?? []), node.id])
   });
@@ -415,6 +421,12 @@ function readSchemaStringArray(asset: RoleTemplateDependencyAsset | undefined, k
   const value = schema?.[key];
   if (!Array.isArray(value)) return [];
   return uniqueStrings(value.filter((item): item is string => typeof item === 'string'));
+}
+
+function readSchemaBoolean(asset: RoleTemplateDependencyAsset | undefined, key: string): boolean | undefined {
+  const schema = readRecord(asset?.schema);
+  const value = schema?.[key];
+  return typeof value === 'boolean' ? value : undefined;
 }
 
 function readToolPortTypes(asset: RoleTemplateDependencyAsset | undefined, key: 'input' | 'output'): string[] {

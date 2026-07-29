@@ -45,16 +45,53 @@ const variableAssets: ServerAssetDefinitionSeed[] = [
 ];
 
 const modelAssets: ServerAssetDefinitionSeed[] = [
-  model('deepseek-v4-flash', 'DeepSeek V4 Flash', 'deepseek', 'deepseek-v4-flash', ['text'], ['text'], ['文档整理', '内容生成', '通用问答']),
-  model('deepseek-v4-pro', 'DeepSeek V4 Pro', 'deepseek', 'deepseek-v4-pro', ['reasoning', 'text'], ['text'], ['复杂分析', '多步骤推理']),
-  model('deepseek-chat', 'DeepSeek Chat', 'deepseek', 'deepseek-chat', ['text'], ['text'], ['通用文本任务']),
-  model('deepseek-reasoner', 'DeepSeek Reasoner', 'deepseek', 'deepseek-reasoner', ['reasoning', 'text'], ['text'], ['深度推理']),
-  model('qwen-plus', '通义千问 Plus', 'qwen', 'qwen-plus', ['text'], ['text'], ['中文文档', '企业知识问答']),
-  model('qwen-vl-max', '通义千问 VL Max', 'qwen', 'qwen-vl-max', ['vision', 'text'], ['text'], ['图片理解', '图文分析']),
-  model('doubao-pro', '豆包 Pro', 'doubao', 'doubao-pro', ['text'], ['text'], ['长文处理', '内容生成']),
-  model('doubao-vision', '豆包视觉模型', 'doubao', 'doubao-vision', ['vision', 'text'], ['text'], ['图片理解']),
-  model('kimi-k2', 'Kimi K2', 'moonshot', 'kimi-k2', ['text', 'reasoning'], ['text'], ['长上下文分析']),
-  model('glm-4-plus', 'GLM-4 Plus', 'zhipu', 'glm-4-plus', ['text'], ['text'], ['通用文本任务'])
+  model(2000, 'deepseek-v4-flash', 'DeepSeek V4 Flash', 'deepseek', 'deepseek-v4-flash', ['text'], ['text'], ['text', 'text_generation'], ['文档整理', '内容生成', '通用问答'], { availabilityStatus: 'verified' }),
+  model(2010, 'deepseek-v4-pro', 'DeepSeek V4 Pro', 'deepseek', 'deepseek-v4-pro', ['text'], ['text'], ['reasoning', 'reasoning_text', 'text'], ['复杂分析', '多步骤推理'], { availabilityStatus: 'verified' }),
+  model(2020, 'deepseek-chat', 'DeepSeek Chat', 'deepseek', 'deepseek-chat', ['text'], ['text'], ['text', 'text_generation'], ['通用文本任务'], { availabilityStatus: 'verified' }),
+  model(2030, 'deepseek-reasoner', 'DeepSeek Reasoner', 'deepseek', 'deepseek-reasoner', ['text'], ['text'], ['reasoning', 'reasoning_text', 'text'], ['深度推理'], { availabilityStatus: 'verified' }),
+  model(2040, 'openai-gpt-4o', 'OpenAI GPT-4o', 'openai', 'gpt-4o', ['text', 'image'], ['text', 'json'], ['text', 'vision', 'vision_understanding'], ['图文分析', '通用办公'], { availabilityStatus: 'provider_documented' }),
+  model(2050, 'openai-gpt-4o-mini', 'OpenAI GPT-4o mini', 'openai', 'gpt-4o-mini', ['text', 'image'], ['text', 'json'], ['text', 'vision', 'vision_understanding'], ['轻量图文任务'], { availabilityStatus: 'provider_documented' }),
+  model(2060, 'openai-o4-mini', 'OpenAI o4-mini', 'openai', 'o4-mini', ['text'], ['text', 'json'], ['reasoning', 'reasoning_text'], ['复杂推理', '规划'], { availabilityStatus: 'provider_documented' }),
+  model(2070, 'openai-gpt-image-1', 'OpenAI GPT Image 1', 'openai', 'gpt-image-1', ['text', 'image'], ['image'], ['image_generation', 'text_to_image', 'image_editing'], ['生成图片', '改图'], { availabilityStatus: 'provider_documented', apiStyle: 'provider_native' }),
+  model(2080, 'openai-gpt-image-2', 'OpenAI GPT Image 2', 'openai', 'gpt-image-2', ['text', 'image'], ['image'], ['image_generation', 'text_to_image', 'image_editing'], ['生成图片', '改图'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
+  model(2090, 'openai-text-embedding-3-small', 'OpenAI Text Embedding 3 Small', 'openai', 'text-embedding-3-small', ['text'], ['embedding'], ['embedding'], ['知识库向量化', '检索'], { availabilityStatus: 'provider_documented', apiStyle: 'provider_native' }),
+  model(2100, 'openai-text-embedding-3-large', 'OpenAI Text Embedding 3 Large', 'openai', 'text-embedding-3-large', ['text'], ['embedding'], ['embedding'], ['高质量向量化'], { availabilityStatus: 'provider_documented', apiStyle: 'provider_native' }),
+  model(2110, 'anthropic-claude-opus-4-6', 'Claude Opus 4.6', 'anthropic', 'claude-opus-4.6', ['text', 'image'], ['text', 'json'], ['reasoning', 'long_context', 'vision'], ['复杂推理', '长文档', '图文分析'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
+  model(2120, 'anthropic-claude-sonnet-4-5', 'Claude Sonnet 4.5', 'anthropic', 'claude-sonnet-4.5', ['text', 'image'], ['text', 'json'], ['reasoning', 'long_context', 'vision'], ['企业通用分析', '代码和文档'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
+  model(2130, 'anthropic-claude-haiku-4-5', 'Claude Haiku 4.5', 'anthropic', 'claude-haiku-4.5', ['text', 'image'], ['text', 'json'], ['text', 'vision'], ['快速图文处理'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
+  model(2140, 'google-gemini-2-5-pro', 'Gemini 2.5 Pro', 'google', 'gemini-2.5-pro', ['text', 'image', 'video'], ['text', 'json'], ['reasoning', 'long_context', 'vision', 'video_understanding'], ['长文档', '图片理解', '视频理解'], { availabilityStatus: 'provider_documented', apiStyle: 'provider_native' }),
+  model(2150, 'google-gemini-2-5-flash', 'Gemini 2.5 Flash', 'google', 'gemini-2.5-flash', ['text', 'image', 'video'], ['text', 'json'], ['text', 'vision', 'video_understanding'], ['轻量多模态分析'], { availabilityStatus: 'provider_documented', apiStyle: 'provider_native' }),
+  model(2160, 'google-gemini-3-pro', 'Gemini 3 Pro', 'google', 'gemini-3-pro', ['text', 'image', 'video'], ['text', 'json'], ['reasoning', 'long_context', 'vision', 'video_understanding'], ['复杂多模态'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
+  model(2170, 'google-nano-banana-2', 'Nano Banana 2', 'google', 'nano-banana-2', ['text', 'image'], ['image'], ['image_generation', 'text_to_image', 'image_editing'], ['生成图片', '编辑图片'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
+  model(2180, 'google-imagen-4', 'Imagen 4', 'google', 'imagen-4', ['text'], ['image'], ['image_generation', 'text_to_image'], ['生成图片'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
+  model(2190, 'google-veo-3', 'Veo 3', 'google', 'veo-3', ['text', 'image'], ['video'], ['video_generation', 'text_to_video', 'image_to_video'], ['生成视频'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
+  model(2200, 'qwen-plus', '通义千问 Plus', 'qwen', 'qwen-plus', ['text'], ['text'], ['text', 'text_generation'], ['中文文档', '企业知识问答'], { availabilityStatus: 'provider_documented' }),
+  model(2210, 'qwen-max', '通义千问 Max', 'qwen', 'qwen-max', ['text'], ['text', 'json'], ['reasoning', 'text'], ['高质量中文分析'], { availabilityStatus: 'provider_documented' }),
+  model(2220, 'qwen-long', '通义千问 Long', 'qwen', 'qwen-long', ['text', 'file'], ['text', 'json'], ['long_context', 'document', 'text'], ['长文档理解'], { availabilityStatus: 'provider_documented' }),
+  model(2230, 'qwen-vl-max', '通义千问 VL Max', 'qwen', 'qwen-vl-max', ['text', 'image'], ['text', 'json'], ['vision', 'vision_understanding', 'text'], ['图片理解', '图文分析'], { availabilityStatus: 'provider_documented' }),
+  model(2240, 'qwen-image', '通义千问 Image', 'qwen', 'qwen-image', ['text', 'image'], ['image'], ['image_generation', 'text_to_image', 'image_editing'], ['生成图片', '改图'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
+  model(2250, 'wanx-video', '通义万相视频', 'qwen', 'wanx-video', ['text', 'image'], ['video'], ['video_generation', 'text_to_video', 'image_to_video'], ['生成视频'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
+  model(2260, 'doubao-pro', '豆包 Pro', 'doubao', 'doubao-pro', ['text'], ['text'], ['text', 'long_context'], ['长文处理', '内容生成'], { availabilityStatus: 'requires_manual_model_id' }),
+  model(2270, 'doubao-vision', '豆包视觉模型', 'doubao', 'doubao-vision', ['text', 'image'], ['text', 'json'], ['vision', 'vision_understanding'], ['图片理解'], { availabilityStatus: 'requires_manual_model_id' }),
+  model(2280, 'doubao-seedream', '豆包 Seedream', 'doubao', 'seedream', ['text', 'image'], ['image'], ['image_generation', 'text_to_image', 'image_editing'], ['生成图片', '改图'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
+  model(2290, 'bytedance-seedance-2-0', 'Seedance 2.0', 'doubao', 'seedance-2.0', ['text', 'image'], ['video'], ['video_generation', 'text_to_video', 'image_to_video'], ['生成视频'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
+  model(2300, 'kimi-k2', 'Kimi K2', 'moonshot', 'kimi-k2', ['text'], ['text', 'json'], ['text', 'reasoning', 'long_context'], ['长上下文分析'], { availabilityStatus: 'requires_manual_model_id' }),
+  model(2310, 'moonshot-v1-128k', 'Moonshot v1 128k', 'moonshot', 'moonshot-v1-128k', ['text'], ['text', 'json'], ['long_context', 'document', 'text'], ['超长文档'], { availabilityStatus: 'provider_documented' }),
+  model(2320, 'glm-4-plus', 'GLM-4 Plus', 'zhipu', 'glm-4-plus', ['text'], ['text', 'json'], ['text', 'reasoning'], ['通用文本任务'], { availabilityStatus: 'provider_documented' }),
+  model(2330, 'glm-4v-plus', 'GLM-4V Plus', 'zhipu', 'glm-4v-plus', ['text', 'image'], ['text', 'json'], ['vision', 'vision_understanding'], ['图片理解'], { availabilityStatus: 'provider_documented' }),
+  model(2340, 'baidu-ernie-4', '文心 ERNIE 4', 'baidu', 'ernie-4.0', ['text'], ['text', 'json'], ['text', 'reasoning'], ['中文办公', '企业分析'], { availabilityStatus: 'provider_documented', apiStyle: 'provider_native' }),
+  model(2350, 'minimax-text-01', 'MiniMax Text 01', 'minimax', 'text-01', ['text'], ['text', 'json'], ['text', 'long_context'], ['长文本生成'], { availabilityStatus: 'requires_manual_model_id' }),
+  model(2360, 'minimax-image-01', 'MiniMax Image 01', 'minimax', 'image-01', ['text', 'image'], ['image'], ['image_generation', 'text_to_image', 'image_editing'], ['生成图片'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
+  model(2370, 'minimax-hailuo-2-3', 'MiniMax Hailuo 2.3', 'minimax', 'hailuo-2.3', ['text', 'image'], ['video'], ['video_generation', 'text_to_video', 'image_to_video'], ['生成视频'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
+  model(2380, 'cohere-rerank', 'Cohere Rerank', 'cohere', 'rerank', ['text'], ['scores'], ['rerank'], ['搜索结果重排', '知识库重排'], { availabilityStatus: 'provider_documented', apiStyle: 'provider_native' }),
+  model(2390, 'cohere-embed', 'Cohere Embed', 'cohere', 'embed', ['text'], ['embedding'], ['embedding'], ['向量化'], { availabilityStatus: 'provider_documented', apiStyle: 'provider_native' }),
+  model(2400, 'bge-m3', 'BGE-M3', 'custom', 'bge-m3', ['text'], ['embedding'], ['embedding'], ['本地/私有向量模型'], { availabilityStatus: 'requires_manual_model_id' }),
+  model(2410, 'jina-reranker', 'Jina Reranker', 'jina', 'jina-reranker', ['text'], ['scores'], ['rerank'], ['重排'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
+  model(2420, 'runway-gen-4', 'Runway Gen-4', 'runway', 'gen-4', ['text', 'image'], ['video'], ['video_generation', 'text_to_video', 'image_to_video'], ['生成视频'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
+  model(2430, 'luma-ray-2', 'Luma Ray 2', 'luma', 'ray-2', ['text', 'image'], ['video'], ['video_generation', 'text_to_video', 'image_to_video'], ['生成视频'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
+  model(2440, 'kling-2-1', '可灵 2.1', 'kling', 'kling-2.1', ['text', 'image'], ['video'], ['video_generation', 'text_to_video', 'image_to_video'], ['生成视频'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
+  model(2450, 'pika-2-2', 'Pika 2.2', 'pika', 'pika-2.2', ['text', 'image'], ['video'], ['video_generation', 'text_to_video', 'image_to_video'], ['生成视频'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
+  model(2460, 'custom-openai-compatible', '自定义 OpenAI 兼容模型', 'custom', 'custom-model', ['text'], ['text', 'json'], ['text', 'reasoning', 'long_context'], ['企业私有网关', '中转服务'], { availabilityStatus: 'requires_manual_model_id' })
 ];
 
 const artifactTemplateAssets: ServerAssetDefinitionSeed[] = [
@@ -145,14 +182,22 @@ function variable(
 }
 
 function model(
+  sortOrder: number,
   key: string,
   name: string,
   providerId: string,
   modelId: string,
-  capabilities: string[],
+  inputTypes: string[],
   outputTypes: string[],
-  recommendedUseCases: string[]
+  capabilities: string[],
+  recommendedUseCases: string[],
+  options?: {
+    availabilityStatus?: 'verified' | 'provider_documented' | 'requires_manual_model_id' | 'experimental' | 'deprecated' | 'placeholder';
+    apiStyle?: 'openai_compatible' | 'provider_native' | 'azure_openai' | 'custom';
+  }
 ): ServerAssetDefinitionSeed {
+  const apiStyle = options?.apiStyle ?? 'openai_compatible';
+  const availabilityStatus = options?.availabilityStatus ?? 'provider_documented';
   return {
     type: 'MODEL',
     key,
@@ -167,17 +212,22 @@ function model(
       providerName: providerId,
       modelId,
       capabilities,
-      inputTypes: capabilities.includes('vision') ? ['text', 'image'] : ['text'],
+      inputTypes,
       outputTypes,
+      apiStyle,
+      endpointRequired: true,
       credentialFields: ['apiKey', 'apiBaseUrl'],
+      supportsModelList: apiStyle === 'openai_compatible',
+      availabilityStatus,
       recommendedUseCases
     },
     defaults: {
       temperature: capabilities.includes('reasoning') ? 0.3 : 0.7,
-      maxTokens: 4000
+      maxTokens: capabilities.includes('long_context') ? 8192 : 4000,
+      timeoutSeconds: outputTypes.includes('video') ? 300 : outputTypes.includes('image') ? 120 : 45
     },
-    tags: [providerId, ...capabilities],
-    sortOrder: 2000
+    tags: [providerId, ...inputTypes, ...outputTypes, ...capabilities, availabilityStatus],
+    sortOrder
   };
 }
 
