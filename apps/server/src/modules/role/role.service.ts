@@ -11,7 +11,7 @@ import { EntitlementService } from '../entitlement/entitlement.service';
 
 const workflowStepTypeSet = new Set<string>([
   'input',
-  'reasoning',
+  'llm',
   'knowledge',
   'tool',
   'approval',

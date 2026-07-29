@@ -92,7 +92,7 @@ export interface DesktopAuthorizedRoleSkillSummary {
 
 export type DesktopAuthorizedRoleTemplateStepType =
   | 'input'
-  | 'reasoning'
+  | 'llm'
   | 'knowledge'
   | 'tool'
   | 'approval'

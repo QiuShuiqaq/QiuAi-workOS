@@ -9,7 +9,7 @@ export interface RoleSkillSummary {
 
 export type RoleTemplateStepType =
   | 'input'
-  | 'reasoning'
+  | 'llm'
   | 'knowledge'
   | 'tool'
   | 'approval'

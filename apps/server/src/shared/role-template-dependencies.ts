@@ -349,7 +349,7 @@ function upsertNodeTemplate(
 }
 
 function isModelNode(node: ServerRoleWorkflowGraphNode): boolean {
-  return node.type === 'llm' || node.type === 'reasoning' || node.type === 'parameter_extractor';
+  return node.type === 'llm';
 }
 
 function readVariableAssetName(

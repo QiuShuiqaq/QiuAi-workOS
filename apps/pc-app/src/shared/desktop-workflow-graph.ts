@@ -7,14 +7,10 @@ import type {
 export type WorkflowGraphNodeType =
   | 'start'
   | 'input'
-  | 'parameter_extractor'
   | 'list'
   | 'knowledge'
-  | 'reasoning'
   | 'llm'
-  | 'assign'
-  | 'code'
-  | 'template'
+  | 'data'
   | 'tool'
   | 'condition'
   | 'iteration'
@@ -130,14 +126,10 @@ const maxWorkflowPromptNodes = 24;
 const workflowGraphNodeTypes: WorkflowGraphNodeType[] = [
   'start',
   'input',
-  'parameter_extractor',
   'list',
   'knowledge',
-  'reasoning',
   'llm',
-  'assign',
-  'code',
-  'template',
+  'data',
   'tool',
   'condition',
   'iteration',
@@ -706,6 +698,7 @@ function parseWorkflowGraphNode(value: unknown): WorkflowGraphNode | undefined {
   if (!record || !id || !type) {
     return undefined;
   }
+  const config = normalizeWorkflowGraphNodeConfig(type, readRecord(record.config));
 
   return {
     id,
@@ -719,8 +712,32 @@ function parseWorkflowGraphNode(value: unknown): WorkflowGraphNode | undefined {
     inputVariables: readStringArray(record.inputVariables),
     outputVariables: readStringArray(record.outputVariables),
     requiresApproval: typeof record.requiresApproval === 'boolean' ? record.requiresApproval : undefined,
-    config: readRecord(record.config)
+    config
   };
+}
+
+function normalizeWorkflowGraphNodeConfig(
+  type: WorkflowGraphNodeType,
+  config: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  const nextConfig = { ...(config ?? {}) };
+
+  if (type === 'data') {
+    return {
+      ...nextConfig,
+      dataMode: readWorkflowDataMode(nextConfig.dataMode)
+    };
+  }
+
+  if (type === 'llm') {
+    return {
+      ...nextConfig,
+      llmTaskType: readTrimmedString(nextConfig.llmTaskType) ?? 'text',
+      outputMode: readTrimmedString(nextConfig.outputMode) ?? 'text'
+    };
+  }
+
+  return config;
 }
 
 function parseWorkflowGraphEdge(value: unknown): WorkflowGraphEdge | undefined {
@@ -813,6 +830,11 @@ function readWorkflowGraphNodeType(value: unknown): WorkflowGraphNodeType | unde
   return typeof value === 'string' && workflowGraphNodeTypes.includes(value as WorkflowGraphNodeType)
     ? (value as WorkflowGraphNodeType)
     : undefined;
+}
+
+function readWorkflowDataMode(value: unknown): 'assign' | 'template' | 'code' {
+  const mode = readTrimmedString(value);
+  return mode === 'template' || mode === 'code' ? mode : 'assign';
 }
 
 function readWorkflowGraphArtifactType(value: unknown): WorkflowGraphArtifactType | undefined {

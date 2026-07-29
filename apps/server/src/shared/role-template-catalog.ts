@@ -8,7 +8,7 @@ export interface ServerRoleSkill {
 
 export type ServerRoleTemplateStepType =
   | 'input'
-  | 'reasoning'
+  | 'llm'
   | 'knowledge'
   | 'tool'
   | 'approval'
@@ -363,6 +363,19 @@ type OfficeProductionWorkflowArtifactType = Extract<
   'docx' | 'xlsx' | 'pptx' | 'pdf' | 'markdown'
 >;
 
+function officeArtifactAction(artifactType: OfficeProductionWorkflowArtifactType): string {
+  switch (artifactType) {
+    case 'xlsx':
+      return 'spreadsheet.write_xlsx';
+    case 'pptx':
+      return 'presentation.write_pptx';
+    case 'docx':
+      return 'office.write_docx_document';
+    default:
+      return 'office.write_markdown_document';
+  }
+}
+
 function graphEdge(sourceNodeId: string, targetNodeId: string): ServerRoleWorkflowGraph['edges'][number] {
   return {
     id: `${sourceNodeId}__${targetNodeId}`,
@@ -399,13 +412,15 @@ function buildOfficeProductionWorkflowGraph(input: {
     },
     {
       id: 'extract_parameters',
-      type: 'parameter_extractor',
+      type: 'llm',
       name: '提取任务参数',
       instruction: '把用户任务整理成结构化参数，字段缺失时返回 null，不要编造附件或外部信息。',
       modelProfileId: 'qiu-general-default',
       inputVariables: ['start.text', 'start.files'],
       outputVariables: ['task_parameters'],
       config: {
+        llmTaskType: 'structured_extraction',
+        outputMode: 'json',
         schema: input.parameterSchema
       }
     },
@@ -414,7 +429,7 @@ function buildOfficeProductionWorkflowGraph(input: {
       type: 'knowledge',
       name: '读取知识',
       instruction: '优先读取企业知识、本地知识和已配置资料，只提取与本次任务直接相关的内容。',
-      inputVariables: ['start.text', 'extract_parameters.text'],
+      inputVariables: ['start.text', 'task_parameters'],
       outputVariables: ['knowledge_context']
     },
     {
@@ -426,6 +441,11 @@ function buildOfficeProductionWorkflowGraph(input: {
       inputVariables: ['start.files'],
       outputVariables: ['attachment_text'],
       config: {
+        action: 'document.extract_text',
+        input: {
+          path: '$start.files.0.localPath',
+          maxChars: 40000
+        },
         maxChars: 40000
       }
     },
@@ -437,7 +457,7 @@ function buildOfficeProductionWorkflowGraph(input: {
             name: '联网检索',
             instruction: '根据任务参数检索公开资料，输出来源标题、链接和摘要。需要 PC 端已配置网页搜索服务。',
             toolId: 'web-search',
-            inputVariables: ['start.text', 'extract_parameters.text'],
+            inputVariables: ['start.text', 'task_parameters'],
             outputVariables: ['web_context'],
             config: {
               action: 'web.search',
@@ -457,7 +477,7 @@ function buildOfficeProductionWorkflowGraph(input: {
       modelProfileId: 'qiu-reasoning-default',
       inputVariables: [
         'start.text',
-        'extract_parameters.text',
+        'task_parameters',
         'gather_context.text',
         'read_attachments.text',
         input.includeWebSearch ? 'web_research.text' : undefined
@@ -490,7 +510,10 @@ function buildOfficeProductionWorkflowGraph(input: {
       toolId: 'office-document',
       artifactType: input.artifactType,
       inputVariables: ['deliverable_content', 'quality_review'],
-      outputVariables: ['deliverable_file']
+      outputVariables: ['deliverable_file'],
+      config: {
+        action: officeArtifactAction(input.artifactType)
+      }
     },
     {
       id: 'final_output',
@@ -682,7 +705,7 @@ function defaultWorkflowSteps(template: BaseServerRoleTemplateCatalogEntry): Ser
     {
       id: 'analyze_plan',
       order: 3,
-      type: 'reasoning',
+      type: 'llm',
       name: '分析与计划',
       instruction: `围绕业务目标拆解任务，选择匹配技能：${template.skills.map((item) => item.name).join('、')}。`
     },
@@ -1504,7 +1527,7 @@ const baseServerRoleTemplateCatalog: BaseServerRoleTemplateCatalogEntry[] = [
       {
         id: 'analyze_video',
         order: 4,
-        type: 'reasoning',
+        type: 'llm',
         name: '视频理解与评分',
         instruction: '调用多模态模型输出 summary、score、qualityIssues、cutPlan、editNotes 和 finalRecommendation。'
       },
@@ -1549,18 +1572,604 @@ const baseServerRoleTemplateCatalog: BaseServerRoleTemplateCatalogEntry[] = [
   }
 ];
 
-const productionRoleTemplateIds = [
-  'template_enterprise_researcher',
-  'template_document_organizer',
-  'template_spreadsheet_analyst',
-  'template_customer_support_agent',
-  'template_video_quality_editor'
-] as const;
+type DesignedOfficeRoleTemplateInput = {
+  templateId: string;
+  name: string;
+  industry: string;
+  scenario: string;
+  description: string;
+  plan?: string;
+  businessGoal: string;
+  knowledgeSources: string[];
+  tools?: string[];
+  skills: ServerRoleSkill[];
+  sampleInputs: string[];
+  outputFormat: string;
+  approvalPolicy: string;
+  artifactType?: OfficeProductionWorkflowArtifactType;
+  includeWebSearch?: boolean;
+  parameterSchema?: Record<string, unknown>;
+  analysisInstruction?: string;
+  draftInstruction?: string;
+  qualityInstruction?: string;
+  finalInstruction?: string;
+};
+
+function createOfficeRoleTemplate(input: DesignedOfficeRoleTemplateInput): BaseServerRoleTemplateCatalogEntry {
+  const tools = input.tools ?? [
+    ...(input.includeWebSearch ? ['web-search'] : []),
+    'office-document',
+    'local-filesystem'
+  ];
+  const artifactType = input.artifactType ?? 'docx';
+
+  return {
+    templateId: input.templateId,
+    version: '1.0.0',
+    name: `AI ${input.name}`,
+    industry: input.industry,
+    scenario: input.scenario,
+    description: input.description,
+    recommendedPlanCode: input.plan ?? 'ENTERPRISE_BASIC_MONTHLY',
+    businessGoal: input.businessGoal,
+    knowledgeSources: input.knowledgeSources,
+    tools,
+    skills: input.skills,
+    sampleInputs: input.sampleInputs,
+    outputFormat: input.outputFormat,
+    workflowGraph: buildOfficeProductionWorkflowGraph({
+      artifactType,
+      parameterSchema: input.parameterSchema ?? {
+        taskGoal: '用户希望完成的业务目标',
+        inputMaterials: '用户输入或附件资料',
+        outputAudience: '产物读者或使用对象',
+        constraints: '格式、篇幅、口径、禁区或人工确认要求',
+        expectedArtifact: `期望输出 ${artifactType} 文件`
+      },
+      analysisInstruction:
+        input.analysisInstruction ??
+        `围绕「${input.scenario}」读取附件和企业知识库，提炼事实、任务边界、缺失信息、风险点和处理计划。不要编造没有依据的企业资料。`,
+      draftInstruction:
+        input.draftInstruction ??
+        `生成可直接交付的「${input.name}」产物，结构清晰、口径正式，只保留与任务相关的内容；需要人工确认的内容单独列出，不写入为确定结论。`,
+      qualityInstruction:
+        input.qualityInstruction ??
+        '检查是否存在编造事实、越权承诺、输出格式不适合落地、缺少人工确认项的问题，并把最终内容修订到可交付状态。',
+      finalInstruction:
+        input.finalInstruction ??
+        '返回生成文件位置、核心结论、需要人工确认的问题和下一步建议。',
+      includeWebSearch: input.includeWebSearch ?? tools.includes('web-search')
+    }),
+    approvalPolicy: input.approvalPolicy
+  };
+}
+
+const freeBasicRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
+  createOfficeRoleTemplate({
+    templateId: 'basic_document_organizer_v1',
+    name: '文档整理专员',
+    industry: '免费基础 / 办公文档',
+    scenario: '读取文档、提炼核心内容、整理成正式 Word',
+    description: '把用户上传的 txt、docx、pdf 等资料整理成简洁正式的 Word 文档，适合日常办公文档清理。',
+    plan: 'PERSONAL_FREE',
+    businessGoal: '让个人和企业用户都能稳定完成文档整理、摘要提炼和正式化表达。',
+    knowledgeSources: ['用户附件', '本地知识文件', '文档格式规范'],
+    tools: ['office-document', 'local-filesystem'],
+    skills: [
+      additionalSkills.documentExtraction,
+      skills.draftGeneration,
+      additionalSkills.archiveChecklist
+    ],
+    sampleInputs: [
+      '请把这份产品技术文档整理成一份简洁正式的 Word 文档，保留核心内容。',
+      '请根据我上传的材料生成一份结构清晰的说明文档，不要额外发挥。'
+    ],
+    outputFormat: '正式 Word 文档，包含标题、摘要、分级正文、必要清单和人工确认项。',
+    artifactType: 'docx',
+    analysisInstruction:
+      '读取附件全文，识别主题、章节、核心事实、必须保留的参数、可压缩的冗余内容和不能擅自补充的信息。',
+    draftInstruction:
+      '生成简洁正式的 Word 正文。只保留附件中的核心内容，不额外发挥；不要把用户指令写入产物；后续建议只在确有原文依据时保留。',
+    qualityInstruction:
+      '检查标题、摘要和正文是否重复；删除没有原文依据的建议；确保正文适合直接写入 Word。',
+    finalInstruction: '返回 Word 文件位置、整理范围、保留的核心内容和需要用户确认的缺失信息。',
+    approvalPolicy: '涉及正式对外发布、合同、法律、医疗、财务内容时需要用户自行确认。'
+  }),
+  createOfficeRoleTemplate({
+    templateId: 'basic_spreadsheet_organizer_v1',
+    name: '表格整理专员',
+    industry: '免费基础 / 表格办公',
+    scenario: '读取表格、清洗字段、汇总成规范 Excel',
+    description: '把 Excel、CSV 或文本表格整理为结构化清单、汇总表和异常提示。',
+    plan: 'PERSONAL_FREE',
+    businessGoal: '帮助用户把杂乱表格快速整理为可筛选、可复查、可交付的 Excel。',
+    knowledgeSources: ['用户附件', '本地表格样例', '字段口径说明'],
+    tools: ['office-document', 'local-filesystem'],
+    skills: [
+      additionalSkills.spreadsheetAnalysis,
+      additionalSkills.dataCleaningPlan,
+      additionalSkills.metricDashboardBrief
+    ],
+    sampleInputs: [
+      '请整理这份客户名单，去掉重复项，补充分类并生成 Excel。',
+      '请从这个文本里提取关键字段，整理成一张结构清晰的表格。'
+    ],
+    outputFormat: 'Excel 文件，包含整理后明细、异常项、字段说明和下一步处理建议。',
+    artifactType: 'xlsx',
+    analysisInstruction:
+      '读取表格或文本，识别字段、重复项、缺失值、异常值、分类维度和用户要求的汇总口径。',
+    draftInstruction:
+      '生成适合写入 Excel 的结构化结果。必须包含整理后明细、异常项、字段说明、可选汇总表；无法确认的数据标记为空或待确认。',
+    qualityInstruction:
+      '检查每一列是否有明确含义，避免把自然语言长段落塞进单元格；缺失和异常必须单独列出。',
+    finalInstruction: '返回 Excel 文件位置、整理行数、发现的异常和建议用户确认的字段。',
+    approvalPolicy: '涉及财务、客户隐私和对外披露数据时需要用户自行确认。'
+  }),
+  createOfficeRoleTemplate({
+    templateId: 'basic_meeting_minutes_v1',
+    name: '会议纪要专员',
+    industry: '免费基础 / 会议办公',
+    scenario: '会议记录整理、决议提取、待办拆解',
+    description: '根据会议录音转写文本、聊天记录或用户笔记整理会议纪要和行动清单。',
+    plan: 'PERSONAL_FREE',
+    businessGoal: '让用户快速从会议记录中得到结论、责任人、截止时间和后续动作。',
+    knowledgeSources: ['会议记录', '项目资料', '本地团队术语'],
+    tools: ['office-document', 'local-filesystem'],
+    skills: [skills.meetingSummary, skills.taskDelegation, skills.scheduleCoordination],
+    sampleInputs: [
+      '请把这段会议记录整理成正式纪要，包含决议和待办。',
+      '请根据这份讨论记录提取责任人、截止日期、风险和下次会议议题。'
+    ],
+    outputFormat: 'Word 会议纪要，包含会议背景、核心结论、决议、待办表和风险提醒。',
+    artifactType: 'docx',
+    analysisInstruction:
+      '从会议材料中提取参会背景、主题、事实、争议、明确决议、待办事项、责任人、截止时间和待确认问题。',
+    draftInstruction:
+      '生成正式会议纪要。必须区分“已决议”和“待确认”；没有明确责任人或日期时标记待补充。',
+    qualityInstruction:
+      '检查是否把讨论意见误写为决议；检查待办是否可执行、是否包含责任人和截止时间。',
+    finalInstruction: '返回 Word 文件位置、会议结论、待办数量和需要补充确认的信息。',
+    approvalPolicy: '正式发给客户、管理层或作为项目依据前需要会议负责人确认。'
+  }),
+  createOfficeRoleTemplate({
+    templateId: 'basic_translation_polish_v1',
+    name: '翻译润色专员',
+    industry: '免费基础 / 文案语言',
+    scenario: '中英互译、正式润色、表达优化',
+    description: '对用户输入或附件内容做翻译、润色、正式化和语气调整，输出可直接使用的文档。',
+    plan: 'PERSONAL_FREE',
+    businessGoal: '降低日常跨语言沟通和文案润色成本，提升表达清晰度和正式度。',
+    knowledgeSources: ['用户附件', '术语表', '品牌表达规范'],
+    tools: ['office-document', 'local-filesystem'],
+    skills: [
+      skill('translation', '翻译', '保留原意完成中英互译或指定语言翻译。'),
+      skill('polishing', '润色', '调整语气、结构和用词，让表达更自然正式。'),
+      skill('terminology_check', '术语检查', '保持专有名词、品牌名和技术术语一致。')
+    ],
+    sampleInputs: [
+      '请把这份中文说明翻译成正式英文，保留技术术语。',
+      '请把这段商务邮件润色得更专业、简洁、礼貌。'
+    ],
+    outputFormat: 'Word 文档，包含润色/翻译后的正文、术语说明和需要确认的歧义点。',
+    artifactType: 'docx',
+    analysisInstruction:
+      '识别源语言、目标语言、语气、受众、术语和可能存在歧义的句子；保留 deepseek 等专有名词原样。',
+    draftInstruction:
+      '输出自然、准确、正式的翻译或润色正文；不要扩写事实；专有名词保持一致。',
+    qualityInstruction:
+      '检查是否遗漏原文信息、是否改变事实含义、是否存在术语不一致和过度润色。',
+    finalInstruction: '返回 Word 文件位置、处理语言、术语处理说明和需要用户确认的歧义点。',
+    approvalPolicy: '合同、法律、医疗、财务、对外公告类内容正式使用前需要人工复核。'
+  })
+];
+
+const salesRoleSkills = [
+  skill('customer_profile', '客户画像', '整理客户行业、角色、痛点、预算、决策链和采购阶段。'),
+  skill('sales_proposal', '销售方案', '把企业产品资料转成面向目标行业的方案、卖点和价值表达。'),
+  skill('followup_playbook', '跟进话术', '生成开场、异议处理、推进成交和复盘动作。')
+];
+
+type SalesRoleTemplateDefinition = {
+  id: string;
+  name: string;
+  industry: string;
+  focus: string;
+  plan?: string;
+  artifactType?: OfficeProductionWorkflowArtifactType;
+};
+
+function createSalesRoleTemplate(input: SalesRoleTemplateDefinition): BaseServerRoleTemplateCatalogEntry {
+  const artifactType = input.artifactType ?? 'docx';
+
+  return createOfficeRoleTemplate({
+    templateId: `sales_${input.id}_v1`,
+    name: input.name,
+    industry: `销售增长 / ${input.industry}`,
+    scenario: `${input.focus}客户画像、需求挖掘、方案话术和跟进计划`,
+    description: `面向${input.focus}场景，结合企业知识库、产品资料和客户资料，辅助销售完成客户分析、卖点匹配、沟通话术和下一步推进。`,
+    plan: input.plan ?? 'ENTERPRISE_BASIC_MONTHLY',
+    businessGoal: `提升${input.focus}销售准备效率，降低销售话术和方案输出的不稳定性，帮助销售更快形成可执行跟进动作。`,
+    knowledgeSources: [
+      '企业知识库',
+      '产品资料',
+      '销售话术库',
+      '客户画像',
+      `${input.focus}行业资料`,
+      '历史成交案例'
+    ],
+    tools: ['web-search', 'office-document', 'local-filesystem'],
+    skills: salesRoleSkills,
+    sampleInputs: [
+      `请作为${input.name}，根据这个客户背景和我司产品资料，生成一份拜访准备和跟进话术。`,
+      `请帮我分析一个${input.focus}客户的需求、可能异议、方案切入点和下一步推进计划。`
+    ],
+    outputFormat:
+      artifactType === 'xlsx'
+        ? 'Excel 销售跟进表，包含客户画像、需求、异议、卖点匹配、报价线索、下一步动作和负责人。'
+        : 'Word 销售方案/拜访准备，包含客户画像、痛点、卖点匹配、话术、异议处理、风险和下一步动作。',
+    artifactType,
+    includeWebSearch: true,
+    parameterSchema: {
+      customerProfile: '客户名称、行业、规模、角色、当前背景',
+      productScope: '可销售产品、服务或方案范围',
+      salesStage: '初次触达、需求沟通、报价、谈判、复购等阶段',
+      painPoints: '客户已表达或推断的痛点',
+      objections: '客户异议、风险、预算、竞品或决策阻碍',
+      expectedNextAction: '本次希望生成的销售动作或产物'
+    },
+    analysisInstruction: [
+      `你是${input.name}，面向${input.focus}销售场景。`,
+      '必须优先结合企业知识库里的产品资料、案例、价格政策、服务边界和销售话术。',
+      '可以使用网页搜索补充客户或行业公开背景，但不能把未验证信息当成确定事实。',
+      '输出分析时要区分客户已知信息、合理推断、待确认问题和不能承诺事项。'
+    ].join('\n'),
+    draftInstruction: [
+      `生成一份${input.name}可直接使用的销售交付内容。`,
+      '必须包含：客户画像、核心痛点、需求判断、我司产品/服务匹配、差异化卖点、沟通话术、异议处理、下一步跟进计划、需要人工确认的报价/承诺事项。',
+      '内容要服务于真实成交推进，不要写成泛泛营销文章。'
+    ].join('\n'),
+    qualityInstruction:
+      '检查是否有越权承诺、价格/交付/效果保证、行业合规风险、缺少企业知识依据的问题；不确定内容必须标记为待确认。',
+    finalInstruction:
+      '返回生成文件位置、最重要的客户切入点、建议下一步动作、需要人工确认的报价/承诺/合规事项。',
+    approvalPolicy: '正式对外发送报价、合同、交付周期、效果承诺和敏感行业表述前必须由销售负责人确认。'
+  });
+}
+
+const salesRoleTemplateDefinitions: SalesRoleTemplateDefinition[] = [
+  { id: 'general_sales', name: '通用销售专员', industry: '通用销售', focus: '通用产品与服务' },
+  { id: 'key_account_sales', name: '大客户销售专员', industry: '通用销售', focus: '大客户和复杂决策链' },
+  { id: 'phone_sales', name: '电话销售专员', industry: '通用销售', focus: '电话外呼和初筛线索' },
+  { id: 'private_domain_sales', name: '私域销售专员', industry: '通用销售', focus: '微信私域和社群转化' },
+  { id: 'channel_recruitment_sales', name: '渠道招商销售专员', industry: '通用销售', focus: '代理商、加盟商和渠道招商' },
+  { id: 'pre_sales_solution', name: '售前方案专员', industry: '通用销售', focus: '售前方案和客户演示' },
+  { id: 'sales_quote', name: '销售报价专员', industry: '通用销售', focus: '报价单和报价说明', artifactType: 'xlsx' },
+  { id: 'sales_followup_review', name: '销售跟进复盘专员', industry: '通用销售', focus: '沟通记录复盘和下一步推进', artifactType: 'xlsx' },
+
+  { id: 'saas_sales', name: 'SaaS 销售专员', industry: '软件与企业服务', focus: 'SaaS 软件订阅' },
+  { id: 'ai_product_sales', name: 'AI 产品销售专员', industry: '软件与企业服务', focus: 'AI 软件、智能体和自动化产品' },
+  { id: 'enterprise_it_sales', name: '企业信息化销售专员', industry: '软件与企业服务', focus: '企业信息化项目' },
+  { id: 'erp_crm_oa_sales', name: 'ERP/CRM/OA 销售专员', industry: '软件与企业服务', focus: 'ERP、CRM、OA 管理软件' },
+  { id: 'cybersecurity_sales', name: '网络安全销售专员', industry: '软件与企业服务', focus: '网络安全产品和服务' },
+  { id: 'cloud_service_sales', name: '云服务销售专员', industry: '软件与企业服务', focus: '云计算、云主机和云迁移' },
+  { id: 'data_service_sales', name: '数据服务销售专员', industry: '软件与企业服务', focus: '数据平台、数据治理和数据服务' },
+
+  { id: 'education_sales', name: '教育销售专员', industry: '教育培训', focus: '教育培训课程和服务' },
+  { id: 'course_consultant', name: '课程顾问专员', industry: '教育培训', focus: '课程咨询和转化' },
+  { id: 'vocational_education_sales', name: '职业教育销售专员', industry: '教育培训', focus: '职业教育和技能培训' },
+  { id: 'school_enterprise_sales', name: '校企合作销售专员', industry: '教育培训', focus: '校企合作和校园项目' },
+  { id: 'enterprise_training_sales', name: '企业培训销售专员', industry: '教育培训', focus: '企业内训和人才发展项目' },
+
+  { id: 'medical_device_sales', name: '医疗器械销售专员', industry: '医疗健康', focus: '医疗器械和设备', plan: 'ENTERPRISE_STANDARD_MONTHLY' },
+  { id: 'pharma_sales', name: '医药销售专员', industry: '医疗健康', focus: '医药产品和院外服务', plan: 'ENTERPRISE_STANDARD_MONTHLY' },
+  { id: 'dental_consulting_sales', name: '口腔咨询销售专员', industry: '医疗健康', focus: '口腔门诊咨询和转化', plan: 'ENTERPRISE_STANDARD_MONTHLY' },
+  { id: 'medical_beauty_sales', name: '医美咨询销售专员', industry: '医疗健康', focus: '医美咨询和方案转化', plan: 'ENTERPRISE_STANDARD_MONTHLY' },
+  { id: 'health_check_sales', name: '体检健康管理销售专员', industry: '医疗健康', focus: '体检套餐和健康管理服务' },
+  { id: 'eldercare_sales', name: '养老护理服务销售专员', industry: '医疗健康', focus: '养老护理和康养服务' },
+
+  { id: 'ecommerce_sales', name: '电商销售专员', industry: '电商零售', focus: '电商商品和店铺转化' },
+  { id: 'live_commerce_sales', name: '直播带货销售专员', industry: '电商零售', focus: '直播间转化和主播话术' },
+  { id: 'private_ecommerce_sales', name: '私域电商销售专员', industry: '电商零售', focus: '私域电商复购和转化' },
+  { id: 'beauty_personal_care_sales', name: '美妆个护销售专员', industry: '电商零售', focus: '美妆个护商品' },
+  { id: 'maternal_baby_sales', name: '母婴用品销售专员', industry: '电商零售', focus: '母婴用品和亲子消费' },
+  { id: 'home_appliance_sales', name: '家居家电销售专员', industry: '电商零售', focus: '家居家电和耐用品' },
+  { id: 'food_beverage_channel_sales', name: '食品饮料渠道销售专员', industry: '电商零售', focus: '食品饮料渠道和经销' },
+
+  { id: 'industrial_goods_sales', name: '工业品销售专员', industry: '制造工业', focus: '工业品和生产耗材' },
+  { id: 'machinery_sales', name: '机械设备销售专员', industry: '制造工业', focus: '机械设备和产线设备' },
+  { id: 'automation_equipment_sales', name: '自动化设备销售专员', industry: '制造工业', focus: '自动化设备和智能制造' },
+  { id: 'electronic_component_sales', name: '电子元器件销售专员', industry: '制造工业', focus: '电子元器件和供应链' },
+  { id: 'instrument_sales', name: '仪器仪表销售专员', industry: '制造工业', focus: '仪器仪表和检测设备' },
+  { id: 'chemical_raw_material_sales', name: '化工原料销售专员', industry: '制造工业', focus: '化工原料和工业材料' },
+  { id: 'new_material_sales', name: '新材料销售专员', industry: '制造工业', focus: '新材料和材料解决方案' },
+  { id: 'packaging_printing_sales', name: '包装印刷销售专员', industry: '制造工业', focus: '包装印刷和定制生产' },
+
+  { id: 'building_materials_sales', name: '建材销售专员', industry: '建筑地产', focus: '建材和工程材料' },
+  { id: 'home_decoration_sales', name: '装修家装销售专员', industry: '建筑地产', focus: '装修家装和设计服务' },
+  { id: 'real_estate_sales', name: '房产销售专员', industry: '建筑地产', focus: '住宅和商业地产销售' },
+  { id: 'commercial_office_recruitment_sales', name: '商办招商销售专员', industry: '建筑地产', focus: '商业办公招商' },
+  { id: 'property_service_sales', name: '物业服务销售专员', industry: '建筑地产', focus: '物业服务和园区服务' },
+  { id: 'engineering_project_sales', name: '工程项目销售专员', industry: '建筑地产', focus: '工程项目和施工服务' },
+  { id: 'park_recruitment_sales', name: '园区招商销售专员', industry: '建筑地产', focus: '产业园区招商' },
+
+  { id: 'auto_sales', name: '汽车销售专员', industry: '汽车能源', focus: '乘用车销售和置换' },
+  { id: 'commercial_vehicle_sales', name: '商用车销售专员', industry: '汽车能源', focus: '商用车和车队采购' },
+  { id: 'construction_machinery_sales', name: '工程机械销售专员', industry: '汽车能源', focus: '工程机械和租赁销售' },
+  { id: 'solar_sales', name: '新能源光伏销售专员', industry: '汽车能源', focus: '光伏和新能源项目' },
+  { id: 'energy_storage_sales', name: '储能销售专员', industry: '汽车能源', focus: '储能系统和能源管理' },
+  { id: 'charging_pile_sales', name: '充电桩销售专员', industry: '汽车能源', focus: '充电桩和充电站建设' },
+
+  { id: 'tax_service_sales', name: '财税服务销售专员', industry: '财税法务咨询', focus: '财税代理、筹划和合规服务' },
+  { id: 'legal_service_sales', name: '法律服务销售专员', industry: '财税法务咨询', focus: '法律咨询和企业法律服务' },
+  { id: 'consulting_service_sales', name: '企业咨询销售专员', industry: '财税法务咨询', focus: '管理咨询和战略咨询' },
+  { id: 'hr_service_sales', name: '人力资源服务销售专员', industry: '财税法务咨询', focus: '招聘外包、人事代理和灵活用工' },
+  { id: 'ip_service_sales', name: '知识产权销售专员', industry: '财税法务咨询', focus: '商标、专利和知识产权服务' },
+  { id: 'certification_testing_sales', name: '认证检测销售专员', industry: '财税法务咨询', focus: '认证、检测和资质服务' },
+
+  { id: 'restaurant_franchise_sales', name: '餐饮加盟招商专员', industry: '本地生活', focus: '餐饮加盟和品牌招商' },
+  { id: 'hotel_tourism_sales', name: '酒店文旅销售专员', industry: '本地生活', focus: '酒店、文旅和团建产品' },
+  { id: 'event_sales', name: '会展活动销售专员', industry: '本地生活', focus: '会展、活动和会议服务' },
+  { id: 'beauty_store_sales', name: '美业门店销售专员', industry: '本地生活', focus: '美业门店项目和会员转化' },
+  { id: 'fitness_coach_sales', name: '健身私教销售专员', industry: '本地生活', focus: '健身私教和会员续费' },
+  { id: 'photo_wedding_sales', name: '摄影婚庆销售专员', industry: '本地生活', focus: '摄影、婚庆和活动套餐' },
+
+  { id: 'logistics_supply_chain_sales', name: '物流供应链销售专员', industry: '物流外贸', focus: '物流供应链服务' },
+  { id: 'cross_border_ecommerce_sales', name: '跨境电商销售专员', industry: '物流外贸', focus: '跨境电商产品和服务' },
+  { id: 'foreign_trade_sales', name: '外贸销售专员', industry: '物流外贸', focus: '外贸客户开发和跟单' },
+  { id: 'freight_forwarding_sales', name: '货代销售专员', industry: '物流外贸', focus: '国际货代和运输服务' },
+  { id: 'warehousing_service_sales', name: '仓储服务销售专员', industry: '物流外贸', focus: '仓储、云仓和履约服务' },
+
+  { id: 'agricultural_input_sales', name: '农资销售专员', industry: '农业食品', focus: '种子、肥料、农药和农资服务' },
+  { id: 'agricultural_product_channel_sales', name: '农产品渠道销售专员', industry: '农业食品', focus: '农产品渠道和批发销售' },
+  { id: 'food_processing_sales', name: '食品加工销售专员', industry: '农业食品', focus: '食品加工产品和代工服务' },
+  { id: 'fresh_supply_chain_sales', name: '生鲜供应链销售专员', industry: '农业食品', focus: '生鲜供应链和冷链服务' },
+
+  { id: 'government_project_sales', name: '政企项目销售专员', industry: '政企项目', focus: '政企项目和招投标销售', plan: 'ENTERPRISE_STANDARD_MONTHLY' },
+  { id: 'security_system_sales', name: '安防销售专员', industry: '政企项目', focus: '安防系统和监控项目' },
+  { id: 'fire_safety_sales', name: '消防销售专员', industry: '政企项目', focus: '消防设备和消防工程' },
+  { id: 'smart_park_sales', name: '智慧园区销售专员', industry: '政企项目', focus: '智慧园区和数字化项目' },
+  { id: 'environmental_service_sales', name: '环保服务销售专员', industry: '政企项目', focus: '环保治理和环保服务' }
+];
+
+const enterpriseSalesRoleTemplates = salesRoleTemplateDefinitions.map(createSalesRoleTemplate);
+
+const enterpriseCoreRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
+  createOfficeRoleTemplate({
+    templateId: 'core_enterprise_researcher_v1',
+    name: '企业调研专员',
+    industry: '企业职能 / 市场调研',
+    scenario: '企业调研、行业简报、竞品对比',
+    description: '围绕目标公司、行业或竞品进行资料检索、企业知识结合和可引用报告输出。',
+    plan: 'ENTERPRISE_BASIC_MONTHLY',
+    businessGoal: '帮助销售、市场和管理者快速完成客户背景调查、行业判断和竞品分析。',
+    knowledgeSources: ['企业知识库', '客户画像', '历史调研报告', '引用规范'],
+    tools: ['web-search', 'office-document', 'local-filesystem'],
+    skills: [additionalSkills.companyResearch, additionalSkills.industryBriefing, additionalSkills.competitorComparison],
+    sampleInputs: [
+      '请调研这家目标企业的业务、客户、近期动态和潜在合作切入点。',
+      '请做一份行业简报，包含趋势、机会、风险、竞品和可引用来源。'
+    ],
+    outputFormat: 'Word 调研报告，包含执行摘要、来源列表、竞品矩阵、机会风险和下一步行动。',
+    includeWebSearch: true,
+    approvalPolicy: '对外引用、投资判断、战略结论和客户承诺必须由负责人复核。'
+  }),
+  createOfficeRoleTemplate({
+    templateId: 'core_customer_support_agent_v1',
+    name: '通用客服专员',
+    industry: '企业职能 / 客户服务',
+    scenario: '客户意图分流、回复草拟、知识库补全',
+    description: '结合企业知识库、售后政策和历史工单，整理客户问题、生成回复建议和知识库补全项。',
+    businessGoal: '降低客服重复回复成本，提高问题分流、升级和知识库沉淀效率。',
+    knowledgeSources: ['企业知识库', '客服话术库', '售后政策', '产品 FAQ', '历史工单'],
+    skills: [additionalSkills.customerIntentTriage, additionalSkills.supportReplyDrafting, additionalSkills.knowledgeBaseImprovement],
+    sampleInputs: [
+      '请整理这批客服聊天记录，按咨询、售后、退款、投诉和高风险情绪分组。',
+      '请根据这 20 条高频问题，生成客服回复模板和需要补充到知识库的条目。'
+    ],
+    outputFormat: 'Word 客服处理文档，包含问题分流、建议回复、升级条件和知识库补全清单。',
+    approvalPolicy: '涉及退款、赔偿、承诺、投诉升级和敏感客户时必须人工确认。'
+  }),
+  createOfficeRoleTemplate({
+    templateId: 'core_after_sales_ticket_v1',
+    name: '售后工单整理专员',
+    industry: '企业职能 / 客户服务',
+    scenario: '售后问题归类、工单优先级、处理建议',
+    description: '把客户售后记录整理为工单、问题类型、优先级、责任建议和待补充信息。',
+    businessGoal: '让售后负责人更快判断问题优先级、责任边界和下一步处理动作。',
+    knowledgeSources: ['企业知识库', '售后政策', '质保规则', '历史工单', '升级流程'],
+    skills: [additionalSkills.orderIssueTriage, additionalSkills.customerIntentTriage, additionalSkills.supportReplyDrafting],
+    sampleInputs: [
+      '请把这批售后聊天记录整理成工单表，标记优先级、问题类型和处理建议。',
+      '请根据这些客户反馈识别高风险投诉、退款诉求和需要升级的问题。'
+    ],
+    outputFormat: 'Excel 工单表，包含客户、问题类型、优先级、建议回复、负责人和截止时间。',
+    artifactType: 'xlsx',
+    approvalPolicy: '涉及赔付、退款、召回、投诉升级和责任认定时必须人工确认。'
+  }),
+  createOfficeRoleTemplate({
+    templateId: 'core_contract_review_v1',
+    name: '合同审核专员',
+    industry: '企业职能 / 法务合规',
+    scenario: '合同条款提取、风险点识别、修改建议',
+    description: '读取合同或协议，提取付款、交付、违约、保密、终止等关键条款并输出风险提示。',
+    plan: 'ENTERPRISE_STANDARD_MONTHLY',
+    businessGoal: '减少法务初筛时间，帮助业务负责人提前发现合同风险和待确认条款。',
+    knowledgeSources: ['企业知识库', '合同模板', '风险条款清单', '审批规范'],
+    skills: [skills.clauseExtraction, skills.riskSummary, skills.approvalNote],
+    sampleInputs: [
+      '请审核这份采购合同，重点看付款、交付、违约责任和终止条款。',
+      '请把这份协议里的高风险条款整理成风险清单和修改建议。'
+    ],
+    outputFormat: 'Word 合同初审报告，包含关键条款、风险等级、修改建议和人工确认项。',
+    approvalPolicy: '不得替代正式法律意见；所有合同结论必须经过法务或负责人确认。'
+  }),
+  createOfficeRoleTemplate({
+    templateId: 'core_recruiting_v1',
+    name: '招聘简历筛选专员',
+    industry: '企业职能 / 人力资源',
+    scenario: '简历筛选、岗位匹配、候选人排序',
+    description: '批量读取简历和岗位要求，输出候选人评分、匹配理由、风险和面试建议。',
+    plan: 'ENTERPRISE_BASIC_MONTHLY',
+    businessGoal: '提升招聘初筛效率，让候选人比较更结构化、更容易复核。',
+    knowledgeSources: ['企业知识库', '岗位 JD', '能力模型', '面试评价标准'],
+    skills: [skills.resumeScreening, skills.interviewSummary, skills.candidateRanking],
+    sampleInputs: [
+      '请根据这个岗位 JD 筛选这批简历，输出候选人排序和推荐理由。',
+      '请整理这些面试记录，生成候选人优劣势和录用建议。'
+    ],
+    outputFormat: 'Excel 候选人排序表，包含评分、匹配点、风险、面试问题和建议动作。',
+    artifactType: 'xlsx',
+    approvalPolicy: '涉及录用、薪资、淘汰和敏感个人信息处理时必须人工确认。'
+  }),
+  createOfficeRoleTemplate({
+    templateId: 'core_employee_policy_v1',
+    name: '员工制度专员',
+    industry: '企业职能 / 行政人事',
+    scenario: '制度草拟、通知公告、流程说明',
+    description: '根据企业要求和知识库资料生成制度、通知、公告、SOP 和流程说明。',
+    businessGoal: '帮助中小企业快速形成规范、清晰、可复核的内部管理文档。',
+    knowledgeSources: ['企业知识库', '员工手册', '制度模板', '流程规范'],
+    skills: [
+      skill('policy_drafting', '制度草拟', '生成内部制度、公告、通知和流程文档。'),
+      additionalSkills.documentExtraction,
+      additionalSkills.archiveChecklist
+    ],
+    sampleInputs: [
+      '请帮我写一份员工请假制度，正式一点，适合公司内部发布。',
+      '请根据这些流程说明整理一份员工入职 SOP。'
+    ],
+    outputFormat: 'Word 制度文档，包含适用范围、规则、流程、责任和执行注意事项。',
+    approvalPolicy: '正式发布制度、处罚条款、薪酬福利和劳动关系内容前必须由负责人确认。'
+  }),
+  createOfficeRoleTemplate({
+    templateId: 'core_reimbursement_v1',
+    name: '报销票据整理专员',
+    industry: '企业职能 / 财务',
+    scenario: '票据提取、报销审核、费用归类',
+    description: '整理发票、报销单和费用明细，输出报销清单、异常项和需要补充的材料。',
+    plan: 'ENTERPRISE_STANDARD_MONTHLY',
+    businessGoal: '减少财务票据整理和报销初审时间，提高费用归类一致性。',
+    knowledgeSources: ['企业知识库', '报销制度', '费用科目', '票据规范'],
+    skills: [skills.invoiceExtraction, skills.reimbursementReview, skills.reportReconciliation],
+    sampleInputs: [
+      '请整理这些报销票据，生成费用明细、异常项和缺失材料。',
+      '请按公司报销制度检查这份报销单是否合规。'
+    ],
+    outputFormat: 'Excel 报销整理表，包含费用科目、金额、票据状态、异常项和补充材料。',
+    artifactType: 'xlsx',
+    approvalPolicy: '涉及付款、税务、报销通过和异常费用认定时必须由财务确认。'
+  }),
+  createOfficeRoleTemplate({
+    templateId: 'core_receivables_followup_v1',
+    name: '应收账款提醒专员',
+    industry: '企业职能 / 财务',
+    scenario: '账期整理、催款提醒、客户清单',
+    description: '根据应收账款表和客户记录整理逾期情况、催款优先级和沟通文案。',
+    plan: 'ENTERPRISE_STANDARD_MONTHLY',
+    businessGoal: '帮助财务和销售及时发现逾期账款，形成更清晰的催收动作。',
+    knowledgeSources: ['企业知识库', '客户合同', '账期规则', '历史回款记录'],
+    skills: [
+      skill('receivables_analysis', '应收分析', '识别账龄、逾期金额、风险客户和责任人。'),
+      skills.outreachDrafting,
+      skills.nextActionPlanning
+    ],
+    sampleInputs: [
+      '请根据这份应收账款表生成逾期客户清单、催款优先级和沟通话术。',
+      '请整理本月需要提醒回款的客户，按风险和金额排序。'
+    ],
+    outputFormat: 'Excel 应收跟进表，包含客户、金额、账龄、风险、负责人、催款建议。',
+    artifactType: 'xlsx',
+    approvalPolicy: '涉及正式催收、停服、法律动作和客户信用判断时必须由负责人确认。'
+  }),
+  createOfficeRoleTemplate({
+    templateId: 'core_ecommerce_copywriter_v1',
+    name: '电商商品文案专员',
+    industry: '企业职能 / 电商运营',
+    scenario: '商品标题、卖点、详情页文案、活动话术',
+    description: '根据商品资料、用户评价和平台要求生成商品文案、卖点和活动话术。',
+    businessGoal: '提升商品上架、活动准备和客服转化文案效率。',
+    knowledgeSources: ['企业知识库', '商品资料', '品牌话术', '平台规则', '历史爆款文案'],
+    skills: [additionalSkills.catalogOptimization, skills.draftGeneration, skills.publishingReview],
+    sampleInputs: [
+      '请根据这个商品资料生成电商标题、五个卖点和详情页文案。',
+      '请把这些用户评价整理成可用于详情页的卖点和 FAQ。'
+    ],
+    outputFormat: 'Word 商品文案，包含标题、卖点、详情页结构、FAQ、活动话术和风险提醒。',
+    approvalPolicy: '涉及功效承诺、医疗健康、价格权益和平台敏感词时必须人工确认。'
+  }),
+  createOfficeRoleTemplate({
+    templateId: 'core_requirement_analyst_v1',
+    name: '需求分析专员',
+    industry: '企业职能 / 项目交付',
+    scenario: '客户需求整理、范围边界、验收标准',
+    description: '把客户描述、会议记录和附件资料整理成需求文档、范围边界和验收标准。',
+    plan: 'ENTERPRISE_BASIC_MONTHLY',
+    businessGoal: '让项目团队更快拿到清晰、可确认、可执行的需求输入。',
+    knowledgeSources: ['企业知识库', '客户资料', '项目模板', '验收标准'],
+    skills: [additionalSkills.productRequirementDrafting, additionalSkills.acceptanceCriteria, additionalSkills.projectPlanning],
+    sampleInputs: [
+      '请把这段客户沟通记录整理成需求文档，包含范围、边界和验收标准。',
+      '请根据这些材料生成一份项目需求分析和待确认问题清单。'
+    ],
+    outputFormat: 'Word 需求文档，包含背景、目标、范围、功能点、验收标准、风险和待确认问题。',
+    approvalPolicy: '进入报价、排期和研发实施前必须由客户或项目负责人确认。'
+  }),
+  createOfficeRoleTemplate({
+    templateId: 'core_project_proposal_v1',
+    name: '项目方案专员',
+    industry: '企业职能 / 项目交付',
+    scenario: '项目方案、实施计划、交付清单',
+    description: '根据客户需求和企业能力资料生成项目方案、交付范围、里程碑和验收标准。',
+    plan: 'ENTERPRISE_STANDARD_MONTHLY',
+    businessGoal: '提高售前和交付方案输出速度，统一项目边界和交付口径。',
+    knowledgeSources: ['企业知识库', '产品资料', '成功案例', '交付标准'],
+    skills: [additionalSkills.proposalStructuring, additionalSkills.valueProposition, additionalSkills.deliveryPlan],
+    sampleInputs: [
+      '请根据客户访谈记录，生成一版项目方案和实施计划。',
+      '请把这些产品资料整理成面向客户的项目交付方案。'
+    ],
+    outputFormat: 'Word 项目方案，包含客户背景、目标、方案、里程碑、交付物、风险和验收。',
+    approvalPolicy: '正式对外发送方案、报价、工期和承诺前必须由负责人确认。'
+  }),
+  createOfficeRoleTemplate({
+    templateId: 'core_procurement_assistant_v1',
+    name: '采购助理',
+    industry: '企业职能 / 采购供应链',
+    scenario: '供应商调研、报价对比、采购清单生成',
+    description: '整理供应商资料、报价单和采购需求，输出对比分析、风险和推荐方案。',
+    plan: 'ENTERPRISE_STANDARD_MONTHLY',
+    businessGoal: '提升供应商筛选和报价对比效率，降低采购决策遗漏风险。',
+    knowledgeSources: ['企业知识库', '采购制度', '供应商库', '报价单', '合同模板'],
+    tools: ['web-search', 'office-document', 'local-filesystem'],
+    skills: [additionalSkills.supplierResearch, additionalSkills.quoteComparison, additionalSkills.purchaseChecklist],
+    sampleInputs: [
+      '请对比这三份供应商报价，输出价格、交期、付款、风险和推荐方案。',
+      '请根据采购需求生成供应商调研清单、验收标准和合同注意点。'
+    ],
+    outputFormat: 'Excel 供应商对比表，包含报价、交期、付款、风险、验收标准和推荐结论。',
+    artifactType: 'xlsx',
+    includeWebSearch: true,
+    approvalPolicy: '涉及最终供应商选择、付款条件和合同条款时必须由采购负责人确认。'
+  })
+];
+
+const designedServerRoleTemplateCatalog: BaseServerRoleTemplateCatalogEntry[] = [
+  ...freeBasicRoleTemplates,
+  ...enterpriseCoreRoleTemplates,
+  ...enterpriseSalesRoleTemplates
+];
+
+const allServerRoleTemplateCatalogCandidates: BaseServerRoleTemplateCatalogEntry[] = [
+  ...baseServerRoleTemplateCatalog,
+  ...designedServerRoleTemplateCatalog
+];
+
+const productionRoleTemplateIds = designedServerRoleTemplateCatalog.map((template) => template.templateId);
 
 const productionRoleTemplateIdSet = new Set<string>(productionRoleTemplateIds);
 
 function requireBaseRoleTemplate(templateId: string): BaseServerRoleTemplateCatalogEntry {
-  const template = baseServerRoleTemplateCatalog.find((item) => item.templateId === templateId);
+  const template = allServerRoleTemplateCatalogCandidates.find((item) => item.templateId === templateId);
   if (!template) {
     throw new Error(`Missing production role template: ${templateId}`);
   }

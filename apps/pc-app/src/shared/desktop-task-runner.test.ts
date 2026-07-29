@@ -730,10 +730,11 @@ const workflowVariableTransformTask = await runDesktopTask({
         { id: 'start', type: 'start', name: 'Start' },
         {
           id: 'assign_context',
-          type: 'assign',
+          type: 'data',
           name: 'Assign customer context',
           outputVariables: ['customer_name', 'customer_goal'],
           config: {
+            dataMode: 'assign',
             assignments: [
               { name: 'customer_name', from: 'start.customer' },
               { name: 'customer_goal', from: 'start.goal' }
@@ -742,11 +743,12 @@ const workflowVariableTransformTask = await runDesktopTask({
         },
         {
           id: 'render_brief',
-          type: 'template',
+          type: 'data',
           name: 'Render customer brief',
           inputVariables: ['customer_name', 'customer_goal'],
           outputVariables: ['customer_brief'],
           config: {
+            dataMode: 'template',
             template: 'Customer: {{customer_name}}\\nGoal: {{customer_goal}}'
           }
         },
@@ -1109,9 +1111,10 @@ const workflowCleanXlsxArtifactTask = await runDesktopTask({
         { id: 'start', type: 'start', name: 'Start' },
         {
           id: 'prepare_content',
-          type: 'assign',
+          type: 'data',
           name: 'Prepare deliverable content',
           config: {
+            dataMode: 'assign',
             values: {
               deliverable_content: [
                 '## 线索评分表',
@@ -1197,9 +1200,10 @@ const workflowStructuredRowsXlsxTask = await runDesktopTask({
         { id: 'start', type: 'start', name: 'Start' },
         {
           id: 'prepare_rows',
-          type: 'assign',
+          type: 'data',
           name: 'Prepare rows',
           config: {
+            dataMode: 'assign',
             values: {
               lead_rows: [
                 ['客户', '分数', '建议'],
@@ -1313,11 +1317,12 @@ const workflowJsonToRowsXlsxTask = await runDesktopTask({
         },
         {
           id: 'build_rows',
-          type: 'assign',
+          type: 'data',
           name: 'Build spreadsheet rows',
           inputVariables: ['lead_payload.items'],
           outputVariables: ['lead_rows'],
           config: {
+            dataMode: 'assign',
             tableMapping: {
               sourceRef: 'lead_payload.items',
               outputVariable: 'lead_rows',
@@ -1441,11 +1446,12 @@ const workflowCodeRowsXlsxTask = await runDesktopTask({
         },
         {
           id: 'build_rows_with_code',
-          type: 'code',
+          type: 'data',
           name: 'Build rows with code',
           inputVariables: ['lead_payload'],
           outputVariables: ['lead_rows'],
           config: {
+            dataMode: 'code',
             outputVariable: 'lead_rows',
             code: [
               'const items = Array.isArray(input.lead_payload.items) ? input.lead_payload.items : [];',
@@ -1550,11 +1556,12 @@ const blockedCodeNodeTask = await runDesktopTask({
         { id: 'start', type: 'start', name: 'Start' },
         {
           id: 'unsafe_code',
-          type: 'code',
+          type: 'data',
           name: 'Unsafe code',
           inputVariables: ['start.text'],
           outputVariables: ['unsafe_result'],
           config: {
+            dataMode: 'code',
             outputVariable: 'unsafe_result',
             code: 'return process.env;'
           }
@@ -1606,11 +1613,12 @@ const timedOutCodeNodeTask = await runDesktopTask({
         { id: 'start', type: 'start', name: 'Start' },
         {
           id: 'slow_code',
-          type: 'code',
+          type: 'data',
           name: 'Slow code',
           inputVariables: ['start.text'],
           outputVariables: ['slow_result'],
           config: {
+            dataMode: 'code',
             outputVariable: 'slow_result',
             timeoutMs: 100,
             code: 'while (true) {}'
@@ -2166,10 +2174,18 @@ const workflowStructureTask = await runDesktopTask({
         { id: 'start', type: 'start', name: 'Start' },
         {
           id: 'extract_params',
-          type: 'parameter_extractor',
+          type: 'llm',
           name: 'Extract video task parameters',
           instruction: 'Extract targetDuration and priority fields.',
           modelProfileId: 'qiu-general-default',
+          config: {
+            llmTaskType: 'structured_extraction',
+            outputMode: 'json',
+            schema: {
+              targetDuration: 'number',
+              priority: 'string[]'
+            }
+          },
           outputVariables: ['video_params']
         },
         {

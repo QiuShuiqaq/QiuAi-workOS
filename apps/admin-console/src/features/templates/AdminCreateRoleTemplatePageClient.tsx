@@ -95,6 +95,7 @@ type WorkflowModelOutputMode = 'text' | 'json';
 type WorkflowLlmTaskType =
   | 'text'
   | 'reasoning'
+  | 'structured_extraction'
   | 'long_document'
   | 'vision'
   | 'video_understanding'
@@ -102,6 +103,7 @@ type WorkflowLlmTaskType =
   | 'video_generation'
   | 'embedding'
   | 'rerank';
+type WorkflowDataMode = 'assign' | 'template' | 'code';
 type WorkflowCanvasPosition = { x: number; y: number };
 type WorkflowSelection = { type: 'node' | 'edge'; id: string };
 type WorkflowConfigPanelTab = 'settings' | 'lastRun';
@@ -240,14 +242,10 @@ const workflowPresetOptions: Array<{ value: WorkflowPreset; label: string; descr
 
 const workflowNodeTypeOptions: Array<{ value: WorkflowNodeType; label: string }> = [
   { value: 'input', label: '接收输入' },
-  { value: 'parameter_extractor', label: '结构提取' },
   { value: 'list', label: '列表筛选' },
   { value: 'knowledge', label: '知识库' },
-  { value: 'reasoning', label: 'LLM 推理' },
   { value: 'llm', label: 'LLM 大模型' },
-  { value: 'assign', label: '变量整理' },
-  { value: 'code', label: '数据处理' },
-  { value: 'template', label: '文本模板' },
+  { value: 'data', label: '数据处理' },
   { value: 'tool', label: '工具' },
   { value: 'condition', label: '条件分支' },
   { value: 'iteration', label: '批处理' },
@@ -268,7 +266,7 @@ const workflowAuthoringNodeTypes: WorkflowNodeType[] = [
   'iteration',
   'loop',
   'aggregator',
-  'code',
+  'data',
   'artifact',
   'approval',
   'output'
@@ -304,7 +302,7 @@ const workflowNodeCatalogGroups: Array<{
     title: '转换与规则',
     description: '处理字段、格式、表格和固定文本规则。',
     nodes: [
-      { value: 'code', label: '数据处理', hint: '整理变量、拼接文本、清洗 JSON 或生成 rows' }
+      { value: 'data', label: '数据处理', hint: '整理变量、拼接文本、清洗 JSON 或生成 rows' }
     ]
   },
   {
@@ -385,6 +383,13 @@ const llmTaskTypeOptions: Array<{
     description: '复杂分析、规划、判断、评分和多步骤推理。',
     requiredCapabilities: ['reasoning', 'reasoning_text'],
     defaultOutputMode: 'text'
+  },
+  {
+    value: 'structured_extraction',
+    label: '结构提取',
+    description: '把自然语言、文档或工具结果提取成稳定 JSON 字段。',
+    requiredCapabilities: ['text', 'text_generation', 'reasoning'],
+    defaultOutputMode: 'json'
   },
   {
     value: 'long_document',
@@ -541,14 +546,10 @@ const legacyWorkflowNodeNameTranslations: Record<string, string> = {
 const defaultNodeNames: Record<WorkflowNodeType, string> = {
   start: '开始',
   input: '接收输入',
-  parameter_extractor: '结构提取',
   list: '列表筛选',
   knowledge: '读取知识',
-  reasoning: 'LLM 推理',
   llm: 'LLM 大模型',
-  assign: '变量整理',
-  code: '数据处理',
-  template: '文本模板',
+  data: '数据处理',
   tool: '工具',
   condition: '条件分支',
   iteration: '批处理',
@@ -681,18 +682,8 @@ function createCanvasNode(
     : type === 'tool'
       ? toolActionTemplate?.toolId ?? options?.defaultToolId
       : undefined;
-  const modelOutputMode: WorkflowModelOutputMode = type === 'parameter_extractor' ? 'json' : 'text';
   const defaultConfig =
-    type === 'parameter_extractor'
-      ? {
-          outputMode: 'json',
-          schema: {
-            targetDuration: 'number',
-            outputFormat: 'string',
-            priority: 'string[]'
-          }
-        }
-      : type === 'list'
+    type === 'list'
         ? { sourceRef: 'start.files', kind: '', limit: 50 }
         : type === 'iteration'
           ? { sourceRef: 'list.items' }
@@ -700,25 +691,14 @@ function createCanvasNode(
             ? { maxIterations: 3 }
                 : type === 'aggregator'
                   ? { mode: 'object' }
-                : type === 'template'
-                  ? { template: '{{runtime.previous_text}}' }
-                : type === 'assign'
-                  ? { assignments: [{ name: `${id}.value`, value: '$runtime.previous_text' }] }
-                : type === 'code'
+                : type === 'data'
                   ? {
-                      code: [
-                        'const text = input.runtime?.previous_text || input.start?.text || "";',
-                        'return {',
-                        '  text,',
-                        "  rows: [['项目', '内容'], ['输入', text]]",
-                        '};'
-                      ].join('\n'),
-                      outputVariable: `${id}.json`,
-                      timeoutMs: 2_000
+                      dataMode: 'assign',
+                      assignments: [{ name: `${id}.value`, value: '$runtime.previous_text' }]
                     }
-                : type === 'llm' || type === 'reasoning'
+                : type === 'llm'
                   ? {
-                      llmTaskType: type === 'reasoning' ? 'reasoning' : 'text',
+                      llmTaskType: 'text',
                       outputMode: 'text'
                     }
                 : (type === 'tool' || type === 'artifact') && toolActionTemplate
@@ -735,9 +715,7 @@ function createCanvasNode(
     instruction:
       type === 'condition'
         ? '根据输入变量或上一个节点输出选择下一条连线。'
-        : type === 'parameter_extractor'
-          ? '把用户任务或上游文本提取为结构化参数。'
-          : type === 'list'
+        : type === 'list'
             ? '从文件或数组变量中筛选出后续要处理的列表。'
             : type === 'iteration'
               ? '从数组中取出当前项，供后续节点逐个处理。'
@@ -745,15 +723,13 @@ function createCanvasNode(
                 ? '把多个变量或分支结果合并成一个结果。'
                 : type === 'loop'
                   ? '控制循环次数和继续条件。'
-                  : type === 'code'
-                    ? '运行受限 JavaScript，把输入变量转换成结构化 JSON 或表格 rows。'
         : type === 'tool'
           ? '调用指定工具完成当前步骤。'
           : type === 'artifact'
             ? '把最终内容生成可下载产物。'
             : '按节点目标处理任务，并把结果写入输出变量。',
     toolId,
-    modelProfileId: type === 'llm' || type === 'reasoning' || type === 'parameter_extractor' ? 'qiu-general-default' : undefined,
+    modelProfileId: type === 'llm' ? 'qiu-general-default' : undefined,
     artifactType,
     inputVariables:
       type === 'input'
@@ -768,14 +744,10 @@ function createCanvasNode(
         ? [`${id}.items`]
         : type === 'iteration'
           ? [`${id}.current`]
-          : type === 'assign'
+          : type === 'data'
             ? [`${id}.value`]
-          : type === 'code'
-            ? [`${id}.json`]
-          : type === 'parameter_extractor'
-            ? [`${id}.json`]
-            : type === 'llm' || type === 'reasoning'
-              ? [`${id}.${modelOutputMode === 'json' ? 'json' : 'text'}`]
+            : type === 'llm'
+              ? [`${id}.text`]
               : [`${id}.text`],
     requiresApproval: type === 'approval',
     config: defaultConfig
@@ -810,19 +782,11 @@ function buildToolNodeConfig(node: RoleWorkflowGraphNode, patch: Record<string, 
 }
 
 function readWorkflowModelOutputMode(node: RoleWorkflowGraphNode): WorkflowModelOutputMode {
-  if (node.type === 'parameter_extractor') return 'json';
+  if (readWorkflowConfigString(node.config, 'llmTaskType') === 'structured_extraction') return 'json';
   return node.config?.outputMode === 'json' ? 'json' : 'text';
 }
 
 function defaultWorkflowModelSchema(node: RoleWorkflowGraphNode): Record<string, unknown> {
-  if (node.type === 'parameter_extractor') {
-    return {
-      target: 'string',
-      constraints: 'string[]',
-      outputFormat: 'string'
-    };
-  }
-
   return {
     summary: 'string',
     items: 'array',
@@ -944,11 +908,19 @@ function workflowVariableTypeClass(type: WorkflowVariableType) {
 }
 
 function isModelNodeType(type: WorkflowNodeType) {
-  return type === 'llm' || type === 'reasoning' || type === 'parameter_extractor';
+  return type === 'llm';
 }
 
 function isDataProcessingNodeType(type: WorkflowNodeType) {
-  return type === 'assign' || type === 'template' || type === 'code';
+  return type === 'data';
+}
+
+function readWorkflowDataMode(node: RoleWorkflowGraphNode): WorkflowDataMode {
+  const value = readWorkflowConfigString(node.config, 'dataMode');
+  if (value === 'assign' || value === 'template' || value === 'code') {
+    return value;
+  }
+  return 'assign';
 }
 
 function readAssetSchemaString(asset: AssetDefinitionDetail | undefined, key: string): string | undefined {
@@ -1013,8 +985,6 @@ function readWorkflowLlmTaskType(node: RoleWorkflowGraphNode): WorkflowLlmTaskTy
   if (llmTaskTypeOptions.some((option) => option.value === value)) {
     return value as WorkflowLlmTaskType;
   }
-  if (node.type === 'reasoning') return 'reasoning';
-  if (node.type === 'parameter_extractor') return 'text';
   return 'text';
 }
 
@@ -1124,16 +1094,17 @@ function inferWorkflowNodeOutputType(node: RoleWorkflowGraphNode, variableName: 
 
   if (node.type === 'artifact') return 'artifact';
   if (node.type === 'tool') return inferWorkflowToolOutputType(node);
-  if (node.type === 'parameter_extractor' || node.type === 'aggregator' || node.type === 'assign' || node.type === 'code') return 'json';
+  if (node.type === 'aggregator') return 'json';
+  if (node.type === 'data') return readWorkflowDataMode(node) === 'template' ? 'text' : 'json';
   if (node.type === 'list') return 'asset[]';
   if (node.type === 'iteration') return 'asset';
   if (node.type === 'condition') return 'boolean';
-  if (node.type === 'llm' || node.type === 'reasoning') {
+  if (node.type === 'llm') {
     const taskType = readWorkflowLlmTaskType(node);
     if (taskType === 'image_generation' || taskType === 'video_generation') return 'asset';
     if (taskType === 'embedding' || taskType === 'rerank' || readWorkflowModelOutputMode(node) === 'json') return 'json';
   }
-  if (node.type === 'knowledge' || node.type === 'llm' || node.type === 'reasoning' || node.type === 'template' || node.type === 'output') {
+  if (node.type === 'knowledge' || node.type === 'llm' || node.type === 'output') {
     return 'text';
   }
   return byName;
@@ -1142,7 +1113,12 @@ function inferWorkflowNodeOutputType(node: RoleWorkflowGraphNode, variableName: 
 function getWorkflowNodeDefaultOutputVariables(node: RoleWorkflowGraphNode): string[] {
   if (node.type === 'start') return [];
   if (node.type === 'artifact') return [`${node.id}.file`];
-  if (node.type === 'parameter_extractor') return [`${node.id}.json`];
+  if (node.type === 'data') {
+    const mode = readWorkflowDataMode(node);
+    if (mode === 'template') return [`${node.id}.text`];
+    if (mode === 'code') return [`${node.id}.json`];
+    return [readWorkflowAssignConfig(node).name || `${node.id}.value`];
+  }
   if (node.type === 'list') return [`${node.id}.items`];
   if (node.type === 'iteration') return [`${node.id}.current`];
   if (node.type === 'tool') {
@@ -1153,7 +1129,7 @@ function getWorkflowNodeDefaultOutputVariables(node: RoleWorkflowGraphNode): str
     if (outputType === 'table') return [`${node.id}.table`];
     if (outputType === 'json') return [`${node.id}.json`];
   }
-  if (node.type === 'llm' || node.type === 'reasoning') {
+  if (node.type === 'llm') {
     const taskType = readWorkflowLlmTaskType(node);
     if (taskType === 'image_generation') return [`${node.id}.image`];
     if (taskType === 'video_generation') return [`${node.id}.video`];
@@ -1162,7 +1138,7 @@ function getWorkflowNodeDefaultOutputVariables(node: RoleWorkflowGraphNode): str
     if (readWorkflowModelOutputMode(node) === 'json') return [`${node.id}.json`];
   }
   if (node.type === 'condition') return [`${node.id}.matched`];
-  if (node.type === 'aggregator' || node.type === 'assign' || node.type === 'code') return [`${node.id}.json`];
+  if (node.type === 'aggregator') return [`${node.id}.json`];
   return [`${node.id}.text`];
 }
 
@@ -1256,7 +1232,7 @@ function deriveWorkflowKnowledgeSources(graph: RoleWorkflowGraph): string[] {
 function deriveWorkflowModelProfileIds(graph: RoleWorkflowGraph): string[] {
   return uniqueTags(
     getWorkflowExecutableNodes(graph)
-      .filter((node) => node.type === 'llm' || node.type === 'reasoning' || node.type === 'parameter_extractor')
+      .filter((node) => isModelNodeType(node.type))
       .map((node) => node.modelProfileId ?? 'qiu-general-default')
   );
 }
@@ -1272,8 +1248,7 @@ function deriveWorkflowArtifactTypes(graph: RoleWorkflowGraph): string[] {
 function deriveWorkflowSkills(graph: RoleWorkflowGraph): Array<{ code: string; name: string; summary: string }> {
   const skillNodes = getWorkflowExecutableNodes(graph).filter((node) =>
     node.type === 'llm' ||
-    node.type === 'reasoning' ||
-    node.type === 'parameter_extractor' ||
+    node.type === 'data' ||
     node.type === 'list' ||
     node.type === 'iteration' ||
     node.type === 'aggregator' ||
@@ -1356,9 +1331,7 @@ function deriveWorkflowStepsFromGraph(graph: RoleWorkflowGraph): RoleWorkflowGra
 
     const mappedType =
       node.type === 'llm'
-        ? 'reasoning'
-        : node.type === 'parameter_extractor'
-          ? 'reasoning'
+        ? 'llm'
         : node.type === 'artifact'
           ? 'tool'
           : node.type === 'approval' ||
@@ -1416,7 +1389,7 @@ function createWorkflowSteps(preset: WorkflowPreset): RoleWorkflowGraphSourceSte
       {
         id: 'analyze_content',
         order: 3,
-        type: 'reasoning',
+        type: 'llm',
         name: '分析内容',
         instruction: '结合任务目标分析附件内容，提炼结论、风险和下一步动作。'
       },
@@ -1465,7 +1438,7 @@ function createWorkflowSteps(preset: WorkflowPreset): RoleWorkflowGraphSourceSte
       {
         id: 'draft_report',
         order: 4,
-        type: 'reasoning',
+        type: 'llm',
         name: '生成调研报告',
         instruction: '形成结构化调研报告，包含结论、证据、风险和建议。'
       },
@@ -1497,7 +1470,7 @@ function createWorkflowSteps(preset: WorkflowPreset): RoleWorkflowGraphSourceSte
     {
       id: 'draft_result',
       order: 3,
-      type: 'reasoning',
+      type: 'llm',
       name: '分析生成',
       instruction: '完成任务分析，生成可直接交付的初稿。'
     },
@@ -1531,7 +1504,7 @@ function createWorkflowGraph(preset: WorkflowPreset): RoleWorkflowGraph {
   return {
     ...graph,
     nodes: graph.nodes.map((node) =>
-      node.type === 'llm' || node.type === 'reasoning'
+      node.type === 'llm'
         ? {
             ...node,
             modelProfileId: node.modelProfileId ?? 'qiu-general-default'
@@ -1562,20 +1535,51 @@ function createBlankWorkflowGraph(): RoleWorkflowGraph {
   };
 }
 
+function normalizeWorkflowNodeForNewSurface(node: RoleWorkflowGraphNode): RoleWorkflowGraphNode {
+  const translatedName = legacyWorkflowNodeNameTranslations[node.name] ?? node.name;
+  const config = { ...(node.config ?? {}) };
+
+  if (node.type === 'data') {
+    return {
+      ...node,
+      name: translatedName,
+      config: {
+        ...config,
+        dataMode: readWorkflowDataMode(node)
+      }
+    };
+  }
+
+  if (node.type === 'llm') {
+    return {
+      ...node,
+      name: translatedName,
+      modelProfileId: node.modelProfileId ?? 'qiu-general-default',
+      config: {
+        ...config,
+        llmTaskType: readWorkflowLlmTaskType(node),
+        outputMode: readWorkflowModelOutputMode(node)
+      }
+    };
+  }
+
+  return {
+    ...node,
+    name: translatedName
+  };
+}
+
 function normalizeWorkflowGraphForCanvas(graph: RoleWorkflowGraph): RoleWorkflowGraph {
   return {
     ...graph,
-    nodes: graph.nodes.map((node) => ({
-      ...node,
-      name: legacyWorkflowNodeNameTranslations[node.name] ?? node.name
-    }))
+    nodes: graph.nodes.map(normalizeWorkflowNodeForNewSurface)
   };
 }
 
 function nodeTone(type: RoleWorkflowGraphNode['type']) {
-  if (type === 'llm' || type === 'reasoning' || type === 'parameter_extractor') return 'blue';
+  if (type === 'llm') return 'blue';
   if (type === 'tool' || type === 'artifact') return 'purple';
-  if (type === 'knowledge' || type === 'list' || type === 'iteration' || type === 'aggregator') return 'green';
+  if (type === 'knowledge' || type === 'list' || type === 'iteration' || type === 'aggregator' || type === 'data') return 'green';
   if (type === 'output') return 'gold';
   return 'default';
 }
@@ -1597,7 +1601,7 @@ function traceStatusTone(status: 'passed' | 'warning' | 'failed') {
 }
 
 function workflowNodeMeta(node: RoleWorkflowGraphNode) {
-  return node.toolId ?? node.artifactType ?? node.modelProfileId ?? node.id;
+  return node.toolId ?? node.artifactType ?? node.modelProfileId ?? (node.type === 'data' ? readWorkflowDataMode(node) : node.id);
 }
 
 function workflowNodeDetails(node: RoleWorkflowGraphNode) {
@@ -1617,7 +1621,7 @@ function workflowNodeWarnings(node: RoleWorkflowGraphNode, variableOptions?: Wor
     ? new Map(variableOptions.map((variable) => [variable.value, variable.type]))
     : undefined;
 
-  if (node.type === 'llm' || node.type === 'reasoning' || node.type === 'parameter_extractor') {
+  if (node.type === 'llm') {
     if (!node.modelProfileId) warnings.push('未选模型');
     if (!instruction) warnings.push('缺少提示词');
     if (readWorkflowModelOutputMode(node) === 'json') {
@@ -1633,7 +1637,7 @@ function workflowNodeWarnings(node: RoleWorkflowGraphNode, variableOptions?: Wor
     if (!action) warnings.push('未选动作');
   }
 
-  if (node.type === 'assign') {
+  if (node.type === 'data' && readWorkflowDataMode(node) === 'assign') {
     const assignConfig = readWorkflowAssignConfig(node);
     if (!assignConfig.name.trim()) warnings.push('未设置变量名');
     if (!assignConfig.value.trim()) warnings.push('未设置变量值');
@@ -1645,7 +1649,7 @@ function workflowNodeWarnings(node: RoleWorkflowGraphNode, variableOptions?: Wor
     }
   }
 
-  if (node.type === 'code') {
+  if (node.type === 'data' && readWorkflowDataMode(node) === 'code') {
     const code = typeof node.config?.code === 'string' ? node.config.code.trim() : '';
     const outputVariable = typeof node.config?.outputVariable === 'string'
       ? node.config.outputVariable.trim()
@@ -1655,6 +1659,11 @@ function workflowNodeWarnings(node: RoleWorkflowGraphNode, variableOptions?: Wor
     if (!outputVariable) warnings.push('未设置输出变量');
     if (!timeoutMs) warnings.push('未设置超时');
     if (timeoutMs > 10_000) warnings.push('超时不能超过 10000ms');
+  }
+
+  if (node.type === 'data' && readWorkflowDataMode(node) === 'template') {
+    const template = typeof node.config?.template === 'string' ? node.config.template.trim() : '';
+    if (!template) warnings.push('未设置模板内容');
   }
 
   if (node.type === 'artifact') {
@@ -2416,20 +2425,17 @@ function WorkflowNodeLastRunPanel({
 }
 
 function workflowNodeConfigDescription(node: RoleWorkflowGraphNode) {
-  if (node.type === 'parameter_extractor') return '把用户任务提取成固定字段，例如时间、格式、数量、评分标准。';
   if (node.type === 'list') return '从附件或上游数组里筛出要处理的对象，例如只保留视频、图片或表格。';
   if (node.type === 'iteration') return '按顺序一条条处理列表里的文件、表格行或业务对象。';
   if (node.type === 'aggregator') return '把多个分支或批处理结果合成一个结果，方便后续继续使用。';
-  if (node.type === 'assign') return '把变量整理成稳定名称，或把 JSON 数组映射成表格 rows。';
-  if (node.type === 'template') return '用变量拼出固定文本，适合生成标题、摘要、提示词片段或工具参数。';
-  if (node.type === 'code') return '做字段清洗、简单计算、JSON 转换和表格 rows 生成。';
+  if (node.type === 'data') return '把变量整理成固定字段、文本片段或结构化结果，供后续工具、模型和产物节点使用。';
   if (node.type === 'tool') return '调用具体工具完成真实动作，例如搜索、读写文件、OCR、视频处理或 MCP。';
   if (node.type === 'artifact') return '生成真实可下载文件，格式和写入规则由这个节点决定。';
   if (node.type === 'output') return '整理最终回复，只负责告诉用户结果、说明和下载位置。';
   if (node.type === 'condition') return '根据变量结果选择下一条线，适合通过/不通过、A 类/B 类这类分支。';
   if (node.type === 'loop') return '控制重复执行的次数和退出条件，避免流程失控。';
   if (node.type === 'knowledge') return '读取企业知识库、本地知识或服务端摘要，作为后续节点参考。';
-  if (node.type === 'llm' || node.type === 'reasoning') return '调用一个大模型完成生成、分析、推理或结构化输出。';
+  if (node.type === 'llm') return '调用一个大模型完成生成、分析、推理或结构化输出。';
   return '配置节点名称、执行说明、输入变量和输出变量。';
 }
 
@@ -2598,19 +2604,22 @@ function WorkflowReactFlowEditor({
   const selectedNodeTrace = selectedNode
     ? testGraphTrace?.nodes.find((node) => node.nodeId === selectedNode.id)
     : undefined;
-  const selectedAssignConfig = selectedNode?.type === 'assign'
+  const selectedDataMode = selectedNode && isDataProcessingNodeType(selectedNode.type)
+    ? readWorkflowDataMode(selectedNode)
+    : undefined;
+  const selectedAssignConfig = selectedNode && isDataProcessingNodeType(selectedNode.type) && selectedDataMode === 'assign'
     ? readWorkflowAssignConfig(selectedNode)
     : undefined;
-  const selectedAssignTableMapping = selectedNode?.type === 'assign'
+  const selectedAssignTableMapping = selectedNode && isDataProcessingNodeType(selectedNode.type) && selectedDataMode === 'assign'
     ? readWorkflowAssignTableMappingConfig(selectedNode)
     : undefined;
   const selectedArtifactTableSourceRef = selectedNode?.type === 'artifact'
     ? readArtifactTableSourceRef(selectedNode)
     : undefined;
-  const selectedCodePreviewInput = selectedNode?.type === 'code'
+  const selectedCodePreviewInput = selectedNode && isDataProcessingNodeType(selectedNode.type) && selectedDataMode === 'code'
     ? buildWorkflowCodePreviewInput(selectedNode, variableOptions)
     : undefined;
-  const selectedCodePreviewResult = selectedNode?.type === 'code'
+  const selectedCodePreviewResult = selectedNode && isDataProcessingNodeType(selectedNode.type) && selectedDataMode === 'code'
     ? codePreviewResults[selectedNode.id]
     : undefined;
   const selectedModelAssetKey =
@@ -3143,14 +3152,15 @@ function WorkflowReactFlowEditor({
     });
   }
 
-  function updateDataProcessingMode(node: RoleWorkflowGraphNode, type: 'assign' | 'template' | 'code') {
-    if (type === 'assign') {
+  function updateDataProcessingMode(node: RoleWorkflowGraphNode, mode: WorkflowDataMode) {
+    if (mode === 'assign') {
       const outputVariable = node.outputVariables?.[0] ?? `${node.id}.value`;
       updateNode(node.id, {
-        type,
-        name: node.name === defaultNodeNames[node.type] ? defaultNodeNames[type] : node.name,
+        type: 'data',
+        name: node.name === defaultNodeNames[node.type] ? defaultNodeNames.data : node.name,
         outputVariables: [outputVariable],
         config: {
+          dataMode: mode,
           assignments: [
             {
               name: outputVariable,
@@ -3162,12 +3172,13 @@ function WorkflowReactFlowEditor({
       return;
     }
 
-    if (type === 'template') {
+    if (mode === 'template') {
       updateNode(node.id, {
-        type,
-        name: node.name === defaultNodeNames[node.type] ? defaultNodeNames[type] : node.name,
+        type: 'data',
+        name: node.name === defaultNodeNames[node.type] ? defaultNodeNames.data : node.name,
         outputVariables: [`${node.id}.text`],
         config: {
+          dataMode: mode,
           template: '{{runtime.previous_text}}'
         }
       });
@@ -3175,10 +3186,11 @@ function WorkflowReactFlowEditor({
     }
 
     updateNode(node.id, {
-      type,
-      name: node.name === defaultNodeNames[node.type] ? defaultNodeNames[type] : node.name,
+      type: 'data',
+      name: node.name === defaultNodeNames[node.type] ? defaultNodeNames.data : node.name,
       outputVariables: [`${node.id}.json`],
       config: {
+        dataMode: mode,
         code: [
           'const text = input.runtime?.previous_text || input.start?.text || "";',
           'return {',
@@ -3312,9 +3324,7 @@ function WorkflowReactFlowEditor({
     updateNode(node.id, {
       config: nextConfig,
       outputVariables:
-        node.type === 'llm' || node.type === 'reasoning' || node.type === 'parameter_extractor'
-          ? [`${node.id}.${outputMode === 'json' ? 'json' : 'text'}`]
-          : node.outputVariables
+        node.type === 'llm' ? [`${node.id}.${outputMode === 'json' ? 'json' : 'text'}`] : node.outputVariables
     });
   }
 
@@ -3765,9 +3775,7 @@ function WorkflowReactFlowEditor({
                       type,
                       toolId: nextToolTemplate?.toolId ?? nextToolId,
                       modelProfileId:
-                        type === 'llm' || type === 'reasoning' || type === 'parameter_extractor'
-                          ? selectedNode.modelProfileId ?? 'qiu-general-default'
-                          : selectedNode.modelProfileId,
+                        type === 'llm' ? selectedNode.modelProfileId ?? 'qiu-general-default' : selectedNode.modelProfileId,
                       artifactType: nextArtifactType,
                       requiresApproval: type === 'approval' ? true : selectedNode.requiresApproval,
                       config:
@@ -3776,6 +3784,22 @@ function WorkflowReactFlowEditor({
                               action: nextToolTemplate?.value,
                               input: nextToolTemplate?.defaults ?? selectedNode.config?.input ?? {}
                             })
+                          : type === 'data'
+                            ? {
+                                dataMode: 'assign',
+                                assignments: [
+                                  {
+                                    name: selectedNode.outputVariables?.[0] ?? `${selectedNode.id}.value`,
+                                    value: '$runtime.previous_text'
+                                  }
+                                ]
+                              }
+                            : type === 'llm'
+                              ? {
+                                  ...(selectedNode.config ?? {}),
+                                  llmTaskType: readWorkflowLlmTaskType(selectedNode),
+                                  outputMode: readWorkflowModelOutputMode(selectedNode)
+                                }
                           : selectedNode.config
                     });
                   }}
@@ -3789,25 +3813,6 @@ function WorkflowReactFlowEditor({
               </Space>
             </WorkflowConfigSection>
             <WorkflowVariableReferencePanel variables={variableOptions} selectedNode={selectedNode} />
-            {selectedNode.type === 'parameter_extractor' ? (
-              <WorkflowConfigSection
-                title="提取规则"
-                description="写清楚要从用户任务里提取哪些字段，输出会成为后续节点可引用的 JSON。"
-              >
-                <Input.TextArea
-                  rows={5}
-                  value={stringifyJsonConfigValue(selectedNode.config?.schema ?? {})}
-                  placeholder='{"targetDuration":"number","outputFormat":"string"}'
-                  onChange={(event) =>
-                    updateNodeConfigField(
-                      selectedNode,
-                      'schema',
-                      parseJsonConfigValue(event.target.value, selectedNode.config?.schema ?? {})
-                    )
-                  }
-                />
-              </WorkflowConfigSection>
-            ) : null}
             {selectedNode.type === 'list' ? (
               <WorkflowConfigSection
                 title="列表筛选"
@@ -3901,17 +3906,17 @@ function WorkflowReactFlowEditor({
               >
                 <Select
                   size="small"
-                  value={selectedNode.type}
+                  value={selectedDataMode}
                   options={[
                     { value: 'assign', label: '变量整理 / 固定值、复制变量、表格映射' },
                     { value: 'template', label: '文本模板 / 用变量拼成稳定文本' },
                     { value: 'code', label: '代码转换 / 清洗 JSON、计算字段、生成 rows' }
                   ]}
-                  onChange={(type) => updateDataProcessingMode(selectedNode, type)}
+                  onChange={(mode) => updateDataProcessingMode(selectedNode, mode)}
                 />
               </WorkflowConfigSection>
             ) : null}
-            {selectedNode.type === 'assign' && selectedAssignConfig ? (
+            {selectedAssignConfig ? (
               <WorkflowConfigSection
                 title="变量整理"
                 description="把固定值或上游变量写成一个稳定变量，后续节点直接引用这个变量。"
@@ -3943,7 +3948,7 @@ function WorkflowReactFlowEditor({
                 </Space>
               </WorkflowConfigSection>
             ) : null}
-            {selectedNode.type === 'assign' && selectedAssignTableMapping ? (
+            {selectedAssignTableMapping ? (
               <WorkflowConfigSection
                 title="生成表格 rows"
                 description="把上游 JSON 数组映射成 Excel/CSV 可直接写入的二维表格。字段路径支持 customer.name 这类嵌套路径。"
@@ -3975,7 +3980,7 @@ function WorkflowReactFlowEditor({
                 </Space>
               </WorkflowConfigSection>
             ) : null}
-            {selectedNode.type === 'code' ? (
+            {isDataProcessingNodeType(selectedNode.type) && selectedDataMode === 'code' ? (
               <WorkflowConfigSection
                 title="代码转换"
                 description="只用于同步 JSON 转换。脚本里可读取 input 和 helpers，最后 return 一个 JSON 可序列化结果。"
@@ -4046,7 +4051,7 @@ function WorkflowReactFlowEditor({
                 </Space>
               </WorkflowConfigSection>
             ) : null}
-            {selectedNode.type === 'template' ? (
+            {isDataProcessingNodeType(selectedNode.type) && selectedDataMode === 'template' ? (
               <WorkflowConfigSection
                 title="模板内容"
                 description="用 {{变量}} 拼接文本，适合固定格式报告、提示词片段或工具入参。"
@@ -4059,7 +4064,7 @@ function WorkflowReactFlowEditor({
                 />
               </WorkflowConfigSection>
             ) : null}
-            {selectedNode.type === 'llm' || selectedNode.type === 'reasoning' || selectedNode.type === 'parameter_extractor' ? (
+            {selectedNode.type === 'llm' ? (
               <WorkflowConfigSection
                 title="LLM 大模型"
                 description="先选任务类型，再选模型。系统会按模型资产能力过滤不匹配的模型。"
@@ -4068,7 +4073,6 @@ function WorkflowReactFlowEditor({
                   <Select
                     size="small"
                     value={selectedLlmTaskType}
-                    disabled={selectedNode.type === 'parameter_extractor'}
                     options={llmTaskTypeOptions.map((option) => ({
                       value: option.value,
                       label: `${option.label} / ${option.description}`
@@ -4088,11 +4092,10 @@ function WorkflowReactFlowEditor({
                   <Select
                     size="small"
                     value={readWorkflowModelOutputMode(selectedNode)}
-                    disabled={selectedNode.type === 'parameter_extractor'}
                     options={modelOutputModeOptions}
                     onChange={(outputMode) => updateModelOutputMode(selectedNode, outputMode)}
                   />
-                  {readWorkflowModelOutputMode(selectedNode) === 'json' && selectedNode.type !== 'parameter_extractor' ? (
+                  {readWorkflowModelOutputMode(selectedNode) === 'json' ? (
                     <Input.TextArea
                       rows={5}
                       value={stringifyJsonConfigValue(readWorkflowModelSchema(selectedNode))}
@@ -4239,7 +4242,7 @@ function WorkflowReactFlowEditor({
                       optionFilterProp="label"
                       tokenSeparators={[',']}
                       onChange={(outputVariables) => {
-                        if (selectedNode.type === 'code') {
+                        if (isDataProcessingNodeType(selectedNode.type) && readWorkflowDataMode(selectedNode) === 'code') {
                           updateCodeNodeConfig(selectedNode, { outputVariable: outputVariables[0] ?? `${selectedNode.id}.json` });
                           return;
                         }
@@ -4534,7 +4537,8 @@ function buildPayload(
   values: CreateRoleTemplateFormValues,
   workflowGraph: RoleWorkflowGraph
 ): CreateAdminRoleTemplateRequest {
-  const workflowSteps = deriveWorkflowStepsFromGraph(workflowGraph);
+  const normalizedWorkflowGraph = normalizeWorkflowGraphForCanvas(workflowGraph);
+  const workflowSteps = deriveWorkflowStepsFromGraph(normalizedWorkflowGraph);
   const inferredTools = workflowSteps.flatMap((step) => step.toolIds ?? []);
 
   return {
@@ -4546,11 +4550,11 @@ function buildPayload(
     description: values.description.trim(),
     recommendedPlanCode: values.recommendedPlanCode,
     businessGoal: values.businessGoal.trim(),
-    knowledgeSources: deriveWorkflowKnowledgeSources(workflowGraph),
-    tools: uniqueTags([...inferredTools, ...readWorkflowGraphToolIds(workflowGraph)]),
-    skills: deriveWorkflowSkills(workflowGraph),
+    knowledgeSources: deriveWorkflowKnowledgeSources(normalizedWorkflowGraph),
+    tools: uniqueTags([...inferredTools, ...readWorkflowGraphToolIds(normalizedWorkflowGraph)]),
+    skills: deriveWorkflowSkills(normalizedWorkflowGraph),
     workflowSteps,
-    workflowGraph,
+    workflowGraph: normalizedWorkflowGraph,
     sampleInputs: uniqueTags(values.sampleInputs),
     outputFormat: values.outputFormat?.trim(),
     approvalPolicy: values.approvalPolicy.trim(),
@@ -4564,7 +4568,8 @@ function buildUpdatePayload(
   values: CreateRoleTemplateFormValues,
   workflowGraph: RoleWorkflowGraph
 ): UpdateAdminRoleTemplateRequest {
-  const workflowSteps = deriveWorkflowStepsFromGraph(workflowGraph);
+  const normalizedWorkflowGraph = normalizeWorkflowGraphForCanvas(workflowGraph);
+  const workflowSteps = deriveWorkflowStepsFromGraph(normalizedWorkflowGraph);
   const inferredTools = workflowSteps.flatMap((step) => step.toolIds ?? []);
 
   return {
@@ -4575,11 +4580,11 @@ function buildUpdatePayload(
     description: values.description.trim(),
     recommendedPlanCode: values.recommendedPlanCode,
     businessGoal: values.businessGoal.trim(),
-    knowledgeSources: deriveWorkflowKnowledgeSources(workflowGraph),
-    tools: uniqueTags([...inferredTools, ...readWorkflowGraphToolIds(workflowGraph)]),
-    skills: deriveWorkflowSkills(workflowGraph),
+    knowledgeSources: deriveWorkflowKnowledgeSources(normalizedWorkflowGraph),
+    tools: uniqueTags([...inferredTools, ...readWorkflowGraphToolIds(normalizedWorkflowGraph)]),
+    skills: deriveWorkflowSkills(normalizedWorkflowGraph),
     workflowSteps,
-    workflowGraph,
+    workflowGraph: normalizedWorkflowGraph,
     sampleInputs: uniqueTags(values.sampleInputs),
     outputFormat: values.outputFormat?.trim(),
     approvalPolicy: values.approvalPolicy.trim(),

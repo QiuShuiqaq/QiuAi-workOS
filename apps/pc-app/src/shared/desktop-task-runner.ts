@@ -1351,25 +1351,18 @@ async function executeWorkflowRuntimeNode(input: {
     case 'start':
     case 'input':
       return completeWorkflowRuntimeInputNode(input);
-    case 'parameter_extractor':
-      return invokeWorkflowRuntimeParameterExtractorNode(input);
     case 'list':
       return completeWorkflowRuntimeListNode(input);
     case 'knowledge':
       return completeWorkflowRuntimeKnowledgeNode(input);
-    case 'assign':
-      return completeWorkflowRuntimeAssignNode(input);
-    case 'code':
-      return completeWorkflowRuntimeCodeNode(input);
-    case 'template':
-      return completeWorkflowRuntimeTemplateNode(input);
+    case 'data':
+      return completeWorkflowRuntimeDataNode(input);
     case 'iteration':
       return completeWorkflowRuntimeIterationNode(input);
     case 'loop':
       return completeWorkflowRuntimeLoopNode(input);
     case 'aggregator':
       return completeWorkflowRuntimeAggregatorNode(input);
-    case 'reasoning':
     case 'llm':
     case 'output':
       return invokeWorkflowRuntimeModelNode(input);
@@ -1384,6 +1377,31 @@ async function executeWorkflowRuntimeNode(input: {
     default:
       return invokeWorkflowRuntimeModelNode(input);
   }
+}
+
+function completeWorkflowRuntimeDataNode(input: {
+  node: WorkflowGraphNode;
+  pool: WorkflowVariablePool;
+  currentResponse: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+}): Promise<{
+  response: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  logs: DesktopExecutionLogEntry[];
+  usedToolIds: string[];
+  generatedArtifacts: DesktopArtifactSummary[];
+  inputVariables: string[];
+  outputVariables: string[];
+  message: string;
+}> {
+  const mode = readWorkflowRuntimeDataMode(input.node);
+  if (mode === 'template') {
+    return completeWorkflowRuntimeTemplateNode(input);
+  }
+  if (mode === 'code') {
+    return completeWorkflowRuntimeCodeNode(input);
+  }
+  return completeWorkflowRuntimeAssignNode(input);
 }
 
 function completeWorkflowRuntimeInputNode(input: {
@@ -1427,86 +1445,6 @@ function completeWorkflowRuntimeInputNode(input: {
     outputVariables,
     message: 'Task input initialized.'
   });
-}
-
-async function invokeWorkflowRuntimeParameterExtractorNode(input: {
-  task: DesktopTaskDetail;
-  node: WorkflowGraphNode;
-  pool: WorkflowVariablePool;
-  binding: ResolvedRuntimeBinding;
-  rolePackage?: RolePackageManifest;
-  profiles: ModelProfile[];
-  modelInvoker: DesktopModelInvoker;
-  createdAt: string;
-  currentResponse: DesktopModelChatResponse;
-  primaryProfile: ModelProfile;
-}): Promise<{
-  response: DesktopModelChatResponse;
-  primaryProfile: ModelProfile;
-  logs: DesktopExecutionLogEntry[];
-  usedToolIds: string[];
-  generatedArtifacts: DesktopArtifactSummary[];
-  inputVariables: string[];
-  outputVariables: string[];
-  message: string;
-}> {
-  const profile = selectWorkflowRuntimeModelProfile(input.node, input.profiles, input.rolePackage);
-  const variables = resolveWorkflowVariableRefs(input.pool, input.node.inputVariables, getWorkflowRuntimeFallbackInputRefs(input.pool));
-  const schema = input.node.config?.schema ?? input.node.config?.parameters ?? {};
-  const response = await input.modelInvoker({
-    profile,
-    messages: [
-      {
-        role: 'system',
-        content: [
-          'You are a QiuAI WorkOS parameter extraction node.',
-          'Return JSON only. Do not add markdown fences or explanations.',
-          'If a value is missing, return null for that field.'
-        ].join('\n')
-      },
-      {
-        role: 'user',
-        content: [
-          `Task: ${input.task.input}`,
-          `Node: ${input.node.name} (${input.node.type})`,
-          `Node instruction: ${input.node.instruction ?? 'Extract structured parameters from the task and variables.'}`,
-          `Expected schema or fields:\n${JSON.stringify(schema, null, 2)}`,
-          `Input variables:\n${renderWorkflowVariableRefsForPrompt(variables)}`
-        ].join('\n\n')
-      }
-    ],
-    timeoutMs: 45_000
-  });
-  const parsedJson = parseWorkflowRuntimeJson(response.content) ?? {};
-  const outputVariables = writeWorkflowNodeOutputs({
-    pool: input.pool,
-    node: input.node,
-    text: response.content,
-    json: parsedJson,
-    result: parsedJson as WorkflowRuntimeValue,
-    outputValue: parsedJson as WorkflowRuntimeValue
-  });
-  input.pool.set('runtime.previous_text', response.content);
-
-  return {
-    response: mergeWorkflowRuntimeResponses(input.currentResponse, response),
-    primaryProfile: profile,
-    logs: [
-      createLog(
-        input.task.taskId,
-        'info',
-        'WORKFLOW_RUNTIME_PARAMETERS_EXTRACTED',
-        `Workflow parameter extractor invoked: ${input.node.name}.`,
-        input.createdAt,
-        sanitizeLogSuffix(input.node.id)
-      )
-    ],
-    usedToolIds: [],
-    generatedArtifacts: [],
-    inputVariables: variables.map((variable) => variable.ref),
-    outputVariables,
-    message: 'Structured parameters extracted.'
-  };
 }
 
 function completeWorkflowRuntimeListNode(input: {
@@ -3679,12 +3617,17 @@ function buildWorkflowRuntimeModelMessages(input: {
 }
 
 function readWorkflowRuntimeModelOutputMode(node: WorkflowGraphNode): WorkflowRuntimeModelOutputMode {
-  if (node.type === 'parameter_extractor') return 'json';
+  if (readWorkflowRuntimeString(node.config?.llmTaskType) === 'structured_extraction') return 'json';
   return node.config?.outputMode === 'json' || node.config?.responseFormat === 'json' ? 'json' : 'text';
 }
 
 function readWorkflowRuntimeModelSchema(node: WorkflowGraphNode): unknown {
   return node.config?.schema ?? node.config?.jsonSchema ?? node.config?.parameters;
+}
+
+function readWorkflowRuntimeDataMode(node: WorkflowGraphNode): 'assign' | 'template' | 'code' {
+  const mode = readWorkflowRuntimeString(node.config?.dataMode);
+  return mode === 'template' || mode === 'code' ? mode : 'assign';
 }
 
 function buildWorkflowRuntimeToolRequest(

@@ -616,7 +616,7 @@ function isRoleWorkflowStep(value: unknown): boolean {
     Number.isInteger(record.order) &&
     record.order > 0 &&
     (record.type === 'input' ||
-      record.type === 'reasoning' ||
+      record.type === 'llm' ||
       record.type === 'knowledge' ||
       record.type === 'tool' ||
       record.type === 'approval' ||

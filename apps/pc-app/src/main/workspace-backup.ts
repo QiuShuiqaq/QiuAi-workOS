@@ -484,7 +484,7 @@ function validateDesktopRoleWorkflowStep(value: unknown): DesktopRoleWorkflowSte
     order: requireInteger(record.order, 'roleWorkflowStep.order'),
     type: requireEnum(record.type, 'roleWorkflowStep.type', [
       'input',
-      'reasoning',
+      'llm',
       'knowledge',
       'tool',
       'approval',

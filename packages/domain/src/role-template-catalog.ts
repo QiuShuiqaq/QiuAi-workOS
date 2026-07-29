@@ -16,7 +16,7 @@ export interface RoleSkill {
 
 export type RoleTemplateWorkflowStepType =
   | 'input'
-  | 'reasoning'
+  | 'llm'
   | 'knowledge'
   | 'tool'
   | 'approval'

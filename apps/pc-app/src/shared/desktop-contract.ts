@@ -271,7 +271,7 @@ export interface DesktopRoleSkillSummary {
 
 export type DesktopRoleWorkflowStepType =
   | 'input'
-  | 'reasoning'
+  | 'llm'
   | 'knowledge'
   | 'tool'
   | 'approval'

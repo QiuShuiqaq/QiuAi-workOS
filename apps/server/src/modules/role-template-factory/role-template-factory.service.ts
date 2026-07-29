@@ -54,7 +54,7 @@ const planCodes = [
 ] as const;
 
 const planCodeSet = new Set<string>(planCodes);
-const workflowStepTypes = ['input', 'reasoning', 'knowledge', 'tool', 'approval', 'output'] as const;
+const workflowStepTypes = ['input', 'llm', 'knowledge', 'tool', 'approval', 'output'] as const;
 const workflowStepTypeSet = new Set<string>(workflowStepTypes);
 
 type RoleTemplateDate = Date | string;
@@ -964,22 +964,36 @@ export class RoleTemplateFactoryService {
       warnings.push('LLM node has no instruction.');
     }
 
-    if (node.type === 'code') {
+    if (node.type === 'data' && this.getWorkflowDataMode(node) === 'template') {
+      const template = typeof node.config?.template === 'string' ? node.config.template.trim() : '';
+      if (!template) {
+        warnings.push('Data node template mode has no template.');
+      }
+    }
+
+    if (node.type === 'data' && this.getWorkflowDataMode(node) === 'assign') {
+      const assignments = Array.isArray(node.config?.assignments) ? node.config.assignments : [];
+      if (assignments.length === 0) {
+        warnings.push('Data node assign mode has no assignments.');
+      }
+    }
+
+    if (node.type === 'data' && this.getWorkflowDataMode(node) === 'code') {
       const code = typeof node.config?.code === 'string' ? node.config.code.trim() : '';
       const outputVariable = typeof node.config?.outputVariable === 'string'
         ? node.config.outputVariable.trim()
         : node.outputVariables?.[0]?.trim();
       const timeoutMs = typeof node.config?.timeoutMs === 'number' ? node.config.timeoutMs : 0;
       if (!code) {
-        warnings.push('Code node has no script.');
+        warnings.push('Data node code mode has no script.');
       }
       if (!outputVariable) {
-        warnings.push('Code node has no output variable.');
+        warnings.push('Data node code mode has no output variable.');
       }
       if (!timeoutMs) {
-        warnings.push('Code node has no timeoutMs.');
+        warnings.push('Data node code mode has no timeoutMs.');
       } else if (timeoutMs > 10000) {
-        warnings.push('Code node timeoutMs must not exceed 10000.');
+        warnings.push('Data node code mode timeoutMs must not exceed 10000.');
       }
     }
 
@@ -989,6 +1003,11 @@ export class RoleTemplateFactoryService {
   private getWorkflowNodeToolActionId(node: ServerRoleWorkflowGraphNode): string | undefined {
     const action = typeof node.config?.action === 'string' ? node.config.action.trim() : '';
     return action || undefined;
+  }
+
+  private getWorkflowDataMode(node: ServerRoleWorkflowGraphNode): 'assign' | 'template' | 'code' {
+    const mode = typeof node.config?.dataMode === 'string' ? node.config.dataMode.trim() : '';
+    return mode === 'template' || mode === 'code' ? mode : 'assign';
   }
 
   private getTemplateWorkflowGraphForInspection(template: RoleTemplateRecord): ServerRoleWorkflowGraph | undefined {
@@ -1044,12 +1063,8 @@ export class RoleTemplateFactoryService {
         ].filter(Boolean).join(' ');
       case 'condition':
         return variables || this.describeNodeConfig(node.config) || 'Reads workflow state for branch selection.';
-      case 'assign':
-        return this.describeNodeConfig(node.config) || variables || 'Assigns workflow variables from config.';
-      case 'code':
-        return this.describeNodeConfig(node.config) || variables || 'Transforms JSON or table values with restricted code.';
-      case 'template':
-        return this.describeNodeConfig(node.config) || variables || 'Renders a template from workflow variables.';
+      case 'data':
+        return this.describeNodeConfig(node.config) || variables || `Processes workflow data with ${this.getWorkflowDataMode(node)} mode.`;
       case 'artifact':
         return [
           variables,
@@ -1076,12 +1091,8 @@ export class RoleTemplateFactoryService {
         return variables || 'Prepares tool result for later nodes.';
       case 'condition':
         return targetText || 'Chooses the next branch.';
-      case 'assign':
-        return variables || 'Writes assigned workflow variables.';
-      case 'code':
-        return variables || 'Writes transformed JSON or table variables.';
-      case 'template':
-        return variables || 'Writes rendered template text.';
+      case 'data':
+        return variables || `Writes ${this.getWorkflowDataMode(node)} mode result.`;
       case 'artifact':
         return variables || `Generates local ${node.artifactType ?? 'artifact'} deliverable.`;
       case 'output':

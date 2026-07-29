@@ -1,14 +1,10 @@
 export type RoleWorkflowGraphNodeType =
   | 'start'
   | 'input'
-  | 'parameter_extractor'
   | 'list'
   | 'knowledge'
-  | 'reasoning'
   | 'llm'
-  | 'assign'
-  | 'code'
-  | 'template'
+  | 'data'
   | 'tool'
   | 'condition'
   | 'iteration'
@@ -102,7 +98,7 @@ export interface RoleWorkflowGraph {
 export interface RoleWorkflowGraphSourceStep {
   id: string;
   order: number;
-  type: 'input' | 'reasoning' | 'knowledge' | 'tool' | 'approval' | 'output';
+  type: 'input' | 'llm' | 'knowledge' | 'tool' | 'approval' | 'output';
   name: string;
   instruction: string;
   toolIds?: string[];

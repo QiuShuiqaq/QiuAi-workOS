@@ -49,7 +49,7 @@ export interface DesktopAuthorizedRoleTemplateSummary {
   workflowSteps: Array<{
     id: string;
     order: number;
-    type: 'input' | 'reasoning' | 'knowledge' | 'tool' | 'approval' | 'output';
+    type: 'input' | 'llm' | 'knowledge' | 'tool' | 'approval' | 'output';
     name: string;
     instruction: string;
     toolIds?: string[];

@@ -1,14 +1,10 @@
 export type ServerRoleWorkflowGraphNodeType =
   | 'start'
   | 'input'
-  | 'parameter_extractor'
   | 'list'
   | 'knowledge'
-  | 'reasoning'
   | 'llm'
-  | 'assign'
-  | 'code'
-  | 'template'
+  | 'data'
   | 'tool'
   | 'condition'
   | 'iteration'
@@ -102,7 +98,7 @@ export interface ServerRoleWorkflowGraph {
 export interface WorkflowStepLike {
   id: string;
   order: number;
-  type: 'input' | 'reasoning' | 'knowledge' | 'tool' | 'approval' | 'output';
+  type: 'input' | 'llm' | 'knowledge' | 'tool' | 'approval' | 'output';
   name: string;
   instruction: string;
   toolIds?: string[];
@@ -112,14 +108,10 @@ export interface WorkflowStepLike {
 const nodeTypes = new Set<string>([
   'start',
   'input',
-  'parameter_extractor',
   'list',
   'knowledge',
-  'reasoning',
   'llm',
-  'assign',
-  'code',
-  'template',
+  'data',
   'tool',
   'condition',
   'iteration',
@@ -364,6 +356,7 @@ function normalizeNodes(value: unknown): ServerRoleWorkflowGraphNode[] {
     if (!nodeTypes.has(type)) {
       throw new Error(`Workflow graph node type is invalid: ${type}.`);
     }
+    const config = normalizeNodeConfig(type, optionalRecord(item.config));
 
     const artifactType = optionalText(item.artifactType);
     if (artifactType && !artifactTypes.has(artifactType)) {
@@ -382,9 +375,33 @@ function normalizeNodes(value: unknown): ServerRoleWorkflowGraphNode[] {
       inputVariables: normalizeStringArray(item.inputVariables),
       outputVariables: normalizeStringArray(item.outputVariables),
       requiresApproval: optionalBoolean(item.requiresApproval),
-      config: optionalRecord(item.config)
+      config
     };
   });
+}
+
+function normalizeNodeConfig(
+  type: string,
+  config: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  const nextConfig = { ...(config ?? {}) };
+
+  if (type === 'data') {
+    return {
+      ...nextConfig,
+      dataMode: readDataMode(nextConfig.dataMode)
+    };
+  }
+
+  if (type === 'llm') {
+    return {
+      ...nextConfig,
+      llmTaskType: readConfigString(nextConfig.llmTaskType) ?? 'text',
+      outputMode: readConfigString(nextConfig.outputMode) ?? 'text'
+    };
+  }
+
+  return config;
 }
 
 function normalizeEdges(
@@ -446,6 +463,15 @@ function normalizeCondition(value: unknown): ServerRoleWorkflowGraphEdgeConditio
     value: value.value,
     expression: optionalText(value.expression)
   };
+}
+
+function readDataMode(value: unknown): 'assign' | 'template' | 'code' {
+  const mode = readConfigString(value);
+  return mode === 'template' || mode === 'code' ? mode : 'assign';
+}
+
+function readConfigString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 function normalizeVariables(value: unknown): ServerRoleWorkflowGraphVariable[] | undefined {

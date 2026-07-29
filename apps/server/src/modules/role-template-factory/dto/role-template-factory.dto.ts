@@ -31,8 +31,8 @@ export class AdminRoleTemplateWorkflowStepDto {
   @ApiProperty({ example: 1 })
   order!: number;
 
-  @ApiProperty({ enum: ['input', 'reasoning', 'knowledge', 'tool', 'approval', 'output'] })
-  type!: 'input' | 'reasoning' | 'knowledge' | 'tool' | 'approval' | 'output';
+  @ApiProperty({ enum: ['input', 'llm', 'knowledge', 'tool', 'approval', 'output'] })
+  type!: 'input' | 'llm' | 'knowledge' | 'tool' | 'approval' | 'output';
 
   @ApiProperty({ example: '接收任务' })
   name!: string;
@@ -159,9 +159,9 @@ export class AdminRoleTemplateWorkflowStepInputDto {
   @Min(1)
   order!: number;
 
-  @ApiProperty({ enum: ['input', 'reasoning', 'knowledge', 'tool', 'approval', 'output'] })
-  @IsIn(['input', 'reasoning', 'knowledge', 'tool', 'approval', 'output'])
-  type!: 'input' | 'reasoning' | 'knowledge' | 'tool' | 'approval' | 'output';
+  @ApiProperty({ enum: ['input', 'llm', 'knowledge', 'tool', 'approval', 'output'] })
+  @IsIn(['input', 'llm', 'knowledge', 'tool', 'approval', 'output'])
+  type!: 'input' | 'llm' | 'knowledge' | 'tool' | 'approval' | 'output';
 
   @ApiProperty({ example: '接收任务' })
   @IsString()

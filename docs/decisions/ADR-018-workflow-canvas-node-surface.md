@@ -1,7 +1,7 @@
 # ADR-018: Workflow canvas compact node surface
 
 ## Status
-Accepted
+Accepted. Transitional compatibility notes are superseded by ADR-019.
 
 ## Date
 2026-07-29
@@ -86,4 +86,3 @@ Later slices should:
   `数据处理` authoring experience.
 - Keep large media and documents flowing through local asset references, not raw node payloads.
 - Keep PC execution behavior aligned with admin test behavior.
-

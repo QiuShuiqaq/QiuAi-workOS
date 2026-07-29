@@ -7,26 +7,36 @@ import {
 } from './role-template-catalog';
 
 test('server role template catalog is focused and production-oriented', () => {
-  const productionTemplateExpectations = [
-    ['template_enterprise_researcher', 'docx'],
-    ['template_document_organizer', 'xlsx'],
-    ['template_spreadsheet_analyst', 'xlsx'],
-    ['template_customer_support_agent', 'docx'],
-    ['template_video_quality_editor', 'mp4']
-  ] as const;
+  const freeTemplateIds = [
+    'basic_document_organizer_v1',
+    'basic_spreadsheet_organizer_v1',
+    'basic_meeting_minutes_v1',
+    'basic_translation_polish_v1'
+  ];
 
-  assert.deepEqual(
-    serverRoleTemplateCatalog.map((template) => template.templateId),
-    productionTemplateExpectations.map(([templateId]) => templateId)
-  );
+  assert.deepEqual(serverRoleTemplateCatalog.slice(0, 4).map((template) => template.templateId), freeTemplateIds);
+  assert.ok(serverRoleTemplateCatalog.length >= 80);
   assert.ok(retiredServerRoleTemplateIds.length >= 1);
   assert.ok(retiredServerRoleTemplateIds.includes('template_case_ops'));
+  assert.ok(retiredServerRoleTemplateIds.includes('template_video_quality_editor'));
 
   const ids = new Set(serverRoleTemplateCatalog.map((template) => template.templateId));
   assert.equal(ids.size, serverRoleTemplateCatalog.length);
   const templateById = new Map(serverRoleTemplateCatalog.map((template) => [template.templateId, template] as const));
 
-  for (const [templateId, artifactType] of productionTemplateExpectations) {
+  const artifactExpectations = [
+    ['basic_document_organizer_v1', 'docx'],
+    ['basic_spreadsheet_organizer_v1', 'xlsx'],
+    ['basic_meeting_minutes_v1', 'docx'],
+    ['core_after_sales_ticket_v1', 'xlsx'],
+    ['core_reimbursement_v1', 'xlsx'],
+    ['sales_sales_quote_v1', 'xlsx'],
+    ['sales_saas_sales_v1', 'docx'],
+    ['sales_medical_device_sales_v1', 'docx'],
+    ['sales_government_project_sales_v1', 'docx']
+  ] as const;
+
+  for (const [templateId, artifactType] of artifactExpectations) {
     const template = templateById.get(templateId);
     assert.ok(template, `${templateId} must exist`);
     assert.equal(
@@ -35,7 +45,7 @@ test('server role template catalog is focused and production-oriented', () => {
       `${templateId} must generate the intended artifact type`
     );
     assert.ok(
-      template.workflowGraph.nodes.some((node) => node.type === 'parameter_extractor') ||
+      template.workflowGraph.nodes.some((node) => node.type === 'llm') ||
         template.workflowGraph.nodes.some((node) => node.type === 'list'),
       `${templateId} must do structured input preparation before drafting`
     );
@@ -44,6 +54,13 @@ test('server role template catalog is focused and production-oriented', () => {
       `${templateId} must include at least one LLM work node`
     );
   }
+
+  const salesTemplates = serverRoleTemplateCatalog.filter((template) => template.templateId.startsWith('sales_'));
+  assert.ok(salesTemplates.length >= 70);
+  assert.ok(salesTemplates.some((template) => template.industry.includes('软件与企业服务')));
+  assert.ok(salesTemplates.some((template) => template.industry.includes('医疗健康')));
+  assert.ok(salesTemplates.some((template) => template.industry.includes('制造工业')));
+  assert.ok(salesTemplates.some((template) => template.industry.includes('政企项目')));
 
   for (const template of serverRoleTemplateCatalog) {
     assert.ok(template.name.trim(), `${template.templateId} must have a name`);
@@ -75,6 +92,24 @@ test('server role template catalog is focused and production-oriented', () => {
     assert.ok(template.outputFormat.trim(), `${template.templateId} must define an output format`);
     assert.ok(template.allowedPlanCodes.length >= 1, `${template.templateId} must define plan visibility`);
 
+    if (freeTemplateIds.includes(template.templateId)) {
+      assert.equal(template.recommendedPlanCode, 'PERSONAL_FREE', `${template.templateId} must be free`);
+      assert.ok(template.allowedPlanCodes.includes('PERSONAL_FREE'), `${template.templateId} must be installable for free`);
+    } else {
+      assert.ok(
+        !template.allowedPlanCodes.includes('PERSONAL_FREE'),
+        `${template.templateId} enterprise template must not be visible to free users`
+      );
+      assert.ok(
+        template.knowledgeSources.some((source) => source.includes('企业知识库')),
+        `${template.templateId} enterprise template must bind enterprise knowledge by default`
+      );
+      assert.ok(
+        template.workflowGraph.nodes.some((node) => node.type === 'knowledge'),
+        `${template.templateId} enterprise template must include a knowledge node`
+      );
+    }
+
     const orderedSteps = [...template.workflowSteps].sort((left, right) => left.order - right.order);
     assert.deepEqual(
       orderedSteps.map((step) => step.order),
@@ -88,5 +123,8 @@ test('server role template catalog is focused and production-oriented', () => {
       assert.ok(graphNodeIds.has(edge.sourceNodeId), `${template.templateId} graph edge source must exist`);
       assert.ok(graphNodeIds.has(edge.targetNodeId), `${template.templateId} graph edge target must exist`);
     }
+
+    const artifactAction = artifactNode.config?.action;
+    assert.equal(typeof artifactAction, 'string', `${template.templateId} artifact must define a concrete tool action`);
   }
 });
