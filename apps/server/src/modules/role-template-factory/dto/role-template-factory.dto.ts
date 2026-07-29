@@ -87,6 +87,9 @@ export class AdminRoleTemplateDetailDto {
   @ApiPropertyOptional({ type: Object })
   workflowGraph?: unknown;
 
+  @ApiPropertyOptional({ type: Object })
+  dependencyManifest?: unknown;
+
   @ApiProperty({ type: [String] })
   sampleInputs!: string[];
 

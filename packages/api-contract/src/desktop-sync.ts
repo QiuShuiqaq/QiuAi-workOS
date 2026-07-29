@@ -1,3 +1,5 @@
+import type { RoleTemplateDependencyManifest } from './dependency-manifest';
+
 export type DesktopPlatform = 'windows' | 'macos' | 'linux';
 
 export type DesktopRolePackageState = 'installed' | 'running' | 'paused' | 'error' | 'deleted';
@@ -30,6 +32,34 @@ export interface DesktopRolePackageSummary {
   templateId?: string;
   templateVersion?: string;
   skills?: DesktopRoleSkillSummary[];
+}
+
+export interface DesktopAuthorizedRoleTemplateSummary {
+  id: string;
+  version: string;
+  name: string;
+  industry: string;
+  scenario: string;
+  description: string;
+  recommendedPlanCode: string;
+  businessGoal: string;
+  knowledgeSources: string[];
+  tools: string[];
+  skills: DesktopRoleSkillSummary[];
+  workflowSteps: Array<{
+    id: string;
+    order: number;
+    type: 'input' | 'reasoning' | 'knowledge' | 'tool' | 'approval' | 'output';
+    name: string;
+    instruction: string;
+    toolIds?: string[];
+    requiresApproval?: boolean;
+  }>;
+  workflowGraph?: unknown;
+  dependencyManifest?: RoleTemplateDependencyManifest;
+  sampleInputs: string[];
+  outputFormat: string;
+  approvalPolicy: string;
 }
 
 export interface DesktopToolSummary {

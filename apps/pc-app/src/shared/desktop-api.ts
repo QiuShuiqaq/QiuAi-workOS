@@ -9,6 +9,7 @@ import type {
   ModelProfile,
   ModelProviderCatalog,
   RoleModelCredentialBinding,
+  RoleTemplateDependencyManifest,
   RolePackageManifest,
   ToolManifest,
   DesktopTaskDetail
@@ -121,6 +122,7 @@ export interface DesktopAuthorizedRoleTemplateSummary {
   skills: DesktopAuthorizedRoleSkillSummary[];
   workflowSteps: DesktopAuthorizedRoleTemplateWorkflowStep[];
   workflowGraph?: unknown;
+  dependencyManifest?: RoleTemplateDependencyManifest;
   sampleInputs: string[];
   outputFormat: string;
   approvalPolicy: string;
@@ -265,6 +267,7 @@ export interface QiuDesktopBridge {
   writeTaskArtifact(request: DesktopTaskArtifactWriteRequest): Promise<DesktopTaskArtifactWriteResult>;
   saveArtifactAs(request: DesktopArtifactSaveAsRequest): Promise<DesktopArtifactSaveAsResult>;
   invokeDesktopTool(request: DesktopToolInvocationRequest): Promise<DesktopToolInvocationResult>;
+  getPathForFile(file: unknown): string | undefined;
   openLocalPath(path: string): Promise<void>;
   openExternalUrl(url: string): Promise<void>;
   controlWindow(action: DesktopWindowControlAction): Promise<boolean>;

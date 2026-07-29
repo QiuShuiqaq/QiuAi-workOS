@@ -51,7 +51,7 @@ const storedRuntimeSnapshot = storedBundle?.runtime?.runtimeSnapshot as
   | { tasks?: Array<{ executionContext?: unknown }> }
   | undefined;
 assert.ok(Array.isArray(storedRuntimeSnapshot?.tasks));
-assert.ok(storedRuntimeSnapshot?.tasks?.[0].executionContext);
+assert.equal(storedRuntimeSnapshot?.tasks?.length, 0);
 assert.equal(toolRegistry.length, initialState.tools.length);
 assert.equal(
   toolRegistry.find((tool) => tool.toolId === 'office-document'),
@@ -59,14 +59,11 @@ assert.equal(
 );
 assert.equal(loadedState?.localRuntime.lastSyncedAt, '2026-07-20T01:00:00.000Z');
 assert.equal(loadedState?.runtimeSnapshot.tasks.length, initialState.runtimeSnapshot.tasks.length);
-assert.ok(loadedState?.runtimeSnapshot.tasks[0].executionContext);
 assert.equal(loadedState?.rolePackages.length, initialState.rolePackages.length);
 assert.equal(loadedState?.modelProfiles[0].apiBaseUrl, 'https://api.example.com/v1');
 assert.equal(loadedState?.modelProfiles[0].apiKey, 'local-test-key');
 assert.equal(loadedState?.knowledgeSources[0]?.localPath, 'C:\\QiuAI\\CustomerDocs');
 assert.equal(loadedState?.taskDetails?.length, initialState.taskDetails?.length);
-assert.ok(loadedState?.taskDetails?.[0].executionContext);
-assert.equal(loadedState?.taskDetails?.[0].executionContext?.toolIds.length, 3);
 
 const legacyTempDir = mkdtempSync(path.join(os.tmpdir(), 'qiuai-workos-runtime-legacy-'));
 const legacyState = createDesktopRuntimePreviewState();

@@ -1,5 +1,7 @@
 import type {
   AuthSessionResponse,
+  CreateAdminAssetDefinitionRequest,
+  CreateAdminAssetDefinitionResponse,
   CreateBillingOrderRequest,
   CreateBillingOrderResponse,
   LoginRequest,
@@ -37,8 +39,11 @@ import type {
   CreateAdminRoleTemplateRequest,
   CreateAdminRoleTemplateResponse,
   DeleteAdminRoleTemplateResponse,
+  DeleteAdminAssetDefinitionResponse,
   GetAdminRoleTemplateResponse,
   ListAdminActionLogsResponse,
+  ListAdminAssetDefinitionsQuery,
+  ListAdminAssetDefinitionsResponse,
   ListAdminDesktopReleasesQuery,
   ListAdminDesktopReleasesResponse,
   ListAdminRoleTemplatesResponse,
@@ -72,6 +77,8 @@ import type {
   RevokeAdminDesktopDeviceResponse,
   TestAdminRoleTemplateRequest,
   TestAdminRoleTemplateResponse,
+  UpdateAdminAssetDefinitionRequest,
+  UpdateAdminAssetDefinitionResponse,
   UpdateAdminWorkspaceStatusRequest,
   UpdateAdminWorkspaceStatusResponse,
   UploadAdminDesktopReleaseAssetResponse,
@@ -145,6 +152,41 @@ export class QiuApiClient {
 
   listAdminToolActionCatalog(): Promise<ListToolActionCatalogResponse> {
     return this.get('/api/v1/admin/tool-actions');
+  }
+
+  listAdminAssets(
+    params?: ListAdminAssetDefinitionsQuery
+  ): Promise<ListAdminAssetDefinitionsResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.type) {
+      searchParams.set('type', params.type);
+    }
+    if (params?.status) {
+      searchParams.set('status', params.status);
+    }
+    if (params?.query) {
+      searchParams.set('query', params.query);
+    }
+
+    const queryString = searchParams.toString();
+    return this.get(`/api/v1/admin/assets${queryString ? `?${queryString}` : ''}`);
+  }
+
+  createAdminAsset(
+    input: CreateAdminAssetDefinitionRequest
+  ): Promise<CreateAdminAssetDefinitionResponse> {
+    return this.post('/api/v1/admin/assets', input);
+  }
+
+  updateAdminAsset(
+    assetId: string,
+    input: UpdateAdminAssetDefinitionRequest
+  ): Promise<UpdateAdminAssetDefinitionResponse> {
+    return this.patch(`/api/v1/admin/assets/${encodeURIComponent(assetId)}`, input);
+  }
+
+  deleteAdminAsset(assetId: string): Promise<DeleteAdminAssetDefinitionResponse> {
+    return this.delete(`/api/v1/admin/assets/${encodeURIComponent(assetId)}`);
   }
 
   createAdminWorkspace(input: CreateAdminWorkspaceRequest): Promise<CreateAdminWorkspaceResponse> {

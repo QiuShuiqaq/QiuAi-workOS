@@ -46,8 +46,13 @@ export function readWorkflowRequiredModelProfileIds(workflowGraph: unknown): str
 }
 
 export function readRequiredModelProfileIdsForRolePackage(
-  rolePackage: Pick<RolePackageManifest, 'modelProfileIds' | 'workflowGraph'>
+  rolePackage: Pick<RolePackageManifest, 'modelProfileIds' | 'workflowGraph' | 'dependencyManifest'>
 ): string[] {
+  const manifestModelProfileIds = readDependencyManifestModelProfileIds(rolePackage.dependencyManifest);
+  if (manifestModelProfileIds.length > 0) {
+    return manifestModelProfileIds;
+  }
+
   const declaredModelProfileIds = rolePackage.modelProfileIds
     .map((profileId) => profileId.trim())
     .filter(Boolean);
@@ -61,7 +66,7 @@ export function readRequiredModelProfileIdsForRolePackage(
 
 export function ensureModelProfilesForRolePackage(
   modelProfiles: ModelProfile[],
-  rolePackage: Pick<RolePackageManifest, 'modelProfileIds' | 'workflowGraph'>
+  rolePackage: Pick<RolePackageManifest, 'modelProfileIds' | 'workflowGraph' | 'dependencyManifest'>
 ): ModelProfile[] {
   const existingIds = new Set(modelProfiles.map((profile) => profile.id));
   const requiredProfiles = readRequiredModelProfileIdsForRolePackage(rolePackage)
@@ -73,11 +78,11 @@ export function ensureModelProfilesForRolePackage(
 
 export function getRoleModelRequirementStatuses(
   modelProfiles: ModelProfile[],
-  rolePackage: Pick<RolePackageManifest, 'roleCode' | 'modelProfileIds' | 'workflowGraph'>,
+  rolePackage: Pick<RolePackageManifest, 'roleCode' | 'modelProfileIds' | 'workflowGraph' | 'dependencyManifest'>,
   credentialContext: RoleModelCredentialContext = {}
 ): RoleModelRequirementStatus[] {
   const knownProfilesById = new Map(modelProfiles.map((profile) => [profile.id, profile]));
-  const nodeIdsByModelId = readWorkflowModelNodeIdsByModelProfileId(rolePackage.workflowGraph);
+  const nodeIdsByModelId = readModelNodeIdsByModelProfileId(rolePackage);
 
   return readRequiredModelProfileIdsForRolePackage(rolePackage).map((profileId) => {
     const profile = knownProfilesById.get(profileId);
@@ -99,7 +104,7 @@ export function getRoleModelRequirementStatuses(
 export function getRoleModelRuntimeRequirementStatuses(
   modelProfiles: ModelProfile[],
   enabledModelProfileIds: string[],
-  rolePackage: Pick<RolePackageManifest, 'roleCode' | 'modelProfileIds' | 'workflowGraph'>,
+  rolePackage: Pick<RolePackageManifest, 'roleCode' | 'modelProfileIds' | 'workflowGraph' | 'dependencyManifest'>,
   credentialContext: RoleModelCredentialContext = {}
 ): RoleModelRuntimeRequirementStatus[] {
   const enabledIds = new Set(enabledModelProfileIds);
@@ -125,7 +130,7 @@ export function getRoleModelRuntimeRequirementStatuses(
 
 export function findFirstUnconfiguredRequiredModelProfileId(
   modelProfiles: ModelProfile[],
-  rolePackage: Pick<RolePackageManifest, 'roleCode' | 'modelProfileIds' | 'workflowGraph'>,
+  rolePackage: Pick<RolePackageManifest, 'roleCode' | 'modelProfileIds' | 'workflowGraph' | 'dependencyManifest'>,
   credentialContext: RoleModelCredentialContext = {}
 ): string | undefined {
   return getRoleModelRequirementStatuses(modelProfiles, rolePackage, credentialContext).find(
@@ -136,7 +141,7 @@ export function findFirstUnconfiguredRequiredModelProfileId(
 export function findFirstUnreadyRequiredModelProfileId(
   modelProfiles: ModelProfile[],
   enabledModelProfileIds: string[],
-  rolePackage: Pick<RolePackageManifest, 'roleCode' | 'modelProfileIds' | 'workflowGraph'>,
+  rolePackage: Pick<RolePackageManifest, 'roleCode' | 'modelProfileIds' | 'workflowGraph' | 'dependencyManifest'>,
   credentialContext: RoleModelCredentialContext = {}
 ): string | undefined {
   return getRoleModelRuntimeRequirementStatuses(
@@ -180,6 +185,48 @@ function readWorkflowModelNodeIdsByModelProfileId(workflowGraph: unknown): Map<s
 
     const modelProfileId = node.modelProfileId.trim();
     result.set(modelProfileId, [...(result.get(modelProfileId) ?? []), node.id]);
+  }
+
+  return result;
+}
+
+function readModelNodeIdsByModelProfileId(
+  rolePackage: Pick<RolePackageManifest, 'workflowGraph' | 'dependencyManifest'>
+): Map<string, string[]> {
+  const manifestNodeIds = readDependencyManifestModelNodeIdsByModelProfileId(rolePackage.dependencyManifest);
+  return manifestNodeIds.size > 0 ? manifestNodeIds : readWorkflowModelNodeIdsByModelProfileId(rolePackage.workflowGraph);
+}
+
+function readDependencyManifestModelProfileIds(
+  manifest: RolePackageManifest['dependencyManifest']
+): string[] {
+  if (!manifest?.modelAssets?.length) {
+    return [];
+  }
+
+  return mergeUniqueStrings(
+    manifest.modelAssets
+      .map((asset) => asset.modelProfileId || asset.modelId || asset.key)
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
+    []
+  );
+}
+
+function readDependencyManifestModelNodeIdsByModelProfileId(
+  manifest: RolePackageManifest['dependencyManifest']
+): Map<string, string[]> {
+  const result = new Map<string, string[]>();
+  if (!manifest?.modelAssets?.length) {
+    return result;
+  }
+
+  for (const asset of manifest.modelAssets) {
+    const profileId = (asset.modelProfileId || asset.modelId || asset.key).trim();
+    if (!profileId) {
+      continue;
+    }
+
+    result.set(profileId, mergeUniqueStrings(result.get(profileId) ?? [], asset.nodeIds ?? []));
   }
 
   return result;

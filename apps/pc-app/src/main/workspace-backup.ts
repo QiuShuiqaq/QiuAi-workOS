@@ -878,6 +878,10 @@ function validateRolePackageManifest(value: unknown): RolePackageManifest {
       ? record.workflowSteps.map(validateDesktopRoleWorkflowStep)
       : undefined,
     workflowGraph: record.workflowGraph,
+    dependencyManifest: optionalRecord(
+      record.dependencyManifest,
+      'rolePackage.dependencyManifest'
+    ) as RolePackageManifest['dependencyManifest'],
     sampleInputs: requireStringArray(record.sampleInputs, 'rolePackage.sampleInputs'),
     outputFormat: optionalString(record.outputFormat, 'rolePackage.outputFormat'),
     modelProfileIds,
@@ -897,6 +901,14 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
   }
 
   return value as Record<string, unknown>;
+}
+
+function optionalRecord(value: unknown, label: string): Record<string, unknown> | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  return requireRecord(value, label);
 }
 
 function requireArray(value: unknown, fieldName: string): unknown[] {

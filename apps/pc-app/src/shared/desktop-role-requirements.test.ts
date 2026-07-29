@@ -78,6 +78,45 @@ assert.deepEqual(readRequiredModelProfileIdsForRolePackage(rolePackage), [
   'openai-gpt-5.6-terra'
 ]);
 
+const manifestDrivenRolePackage: RolePackageManifest = {
+  ...rolePackage,
+  dependencyManifest: {
+    version: '1.0.0',
+    generatedAt: '2026-07-29T00:00:00.000Z',
+    variables: [],
+    modelAssets: [
+      {
+        key: 'deepseek-v4-pro',
+        name: 'DeepSeek V4 Pro',
+        providerId: 'deepseek',
+        providerName: 'DeepSeek',
+        modelId: 'deepseek-v4-pro',
+        modelProfileId: 'deepseek-v4-pro',
+        capabilities: ['reasoning', 'text'],
+        inputTypes: ['text'],
+        outputTypes: ['text'],
+        credentialFields: ['apiKey', 'apiBaseUrl'],
+        required: true,
+        nodeIds: ['classify']
+      }
+    ],
+    toolActions: [],
+    artifactTemplates: [],
+    nodeTemplates: [],
+    warnings: []
+  }
+};
+assert.deepEqual(readRequiredModelProfileIdsForRolePackage(manifestDrivenRolePackage), [
+  'deepseek-v4-pro'
+]);
+assert.deepEqual(
+  getRoleModelRequirementStatuses(
+    [createPlaceholderModelProfile('deepseek-v4-pro')],
+    manifestDrivenRolePackage
+  )[0]?.requiredByNodeIds,
+  ['classify']
+);
+
 const moonshotProfile = createPlaceholderModelProfile('moonshot-v1-32k');
 assert.equal(moonshotProfile.providerId, 'moonshot');
 assert.equal(moonshotProfile.modelName, 'moonshot-v1-32k');

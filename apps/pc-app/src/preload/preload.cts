@@ -22,7 +22,7 @@ import type {
 } from '../shared/desktop-api.js';
 import type { KnowledgeBindingSource } from '../shared/desktop-contract.js';
 
-const { contextBridge, ipcRenderer } = require('electron') as typeof import('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron') as typeof import('electron');
 
 const channels = {
   getAppInfo: 'qiuai:desktop:get-app-info',
@@ -83,6 +83,14 @@ const bridge: QiuDesktopBridge = {
     ipcRenderer.invoke(channels.saveArtifactAs, request) as Promise<DesktopArtifactSaveAsResult>,
   invokeDesktopTool: (request: DesktopToolInvocationRequest) =>
     ipcRenderer.invoke(channels.invokeDesktopTool, request) as Promise<DesktopToolInvocationResult>,
+  getPathForFile: (file: unknown) => {
+    try {
+      const path = webUtils.getPathForFile(file as Parameters<typeof webUtils.getPathForFile>[0]);
+      return path.trim() ? path : undefined;
+    } catch {
+      return undefined;
+    }
+  },
   openLocalPath: (path: string) =>
     ipcRenderer.invoke(channels.openLocalPath, path) as Promise<void>,
   openExternalUrl: (url: string) =>

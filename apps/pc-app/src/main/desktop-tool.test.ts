@@ -181,6 +181,25 @@ assert.equal(docxExtractResult.ok, true);
 assert.match(String(docxExtractResult.output?.text), /Customer Follow-up Plan/);
 assert.match(String(docxExtractResult.output?.text), /Call customer owner/);
 
+const chineseDocxResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'office-document',
+  action: 'office.write_docx_document',
+  input: {
+    title: '多功能集成浴霸产品技术文档',
+    folder: 'documents',
+    fileName: '多功能集成浴霸产品技术文档-整理版',
+    content: '产品概述\n核心技术参数'
+  }
+});
+
+assert.equal(chineseDocxResult.ok, true);
+assert.equal(
+  path.basename(String(chineseDocxResult.output?.localPath)),
+  '多功能集成浴霸产品技术文档-整理版.docx'
+);
+assert.ok(existsSync(String(chineseDocxResult.output?.localPath)));
+
 const structuredDocxResult = await invokeDesktopTool(tempDir, {
   workspaceId,
   toolId: 'office-document',

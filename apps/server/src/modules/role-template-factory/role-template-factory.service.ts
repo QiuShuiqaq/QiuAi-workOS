@@ -9,8 +9,13 @@ import {
 import type { Prisma, RoleTemplateStatus } from '@prisma/client';
 
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
+import { getDefaultAssetDefinitions } from '../../shared/asset-center-catalog';
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import {
+  buildRoleTemplateDependencyManifest,
+  type RoleTemplateDependencyAsset
+} from '../../shared/role-template-dependencies';
 import { getServerToolAction } from '../../shared/tool-action-catalog';
 import {
   buildWorkflowGraphFromSteps,
@@ -79,6 +84,7 @@ type RoleTemplateRecord = {
   skills: unknown;
   workflowSteps: unknown;
   workflowGraph: unknown;
+  dependencyManifest?: unknown;
   sampleInputs: unknown;
   outputFormat?: string | null;
   approvalPolicy: string;
@@ -108,6 +114,7 @@ interface NormalizedRoleTemplateInput {
   }>;
   workflowSteps: RoleTemplateWorkflowStep[];
   workflowGraph: ServerRoleWorkflowGraph;
+  dependencyManifest: ReturnType<typeof buildRoleTemplateDependencyManifest>;
   sampleInputs: string[];
   outputFormat: string;
   approvalPolicy: string;
@@ -346,9 +353,13 @@ export class RoleTemplateFactoryService {
     const id = templateId.trim();
 
     if (!isDatabasePersistenceEnabled()) {
+      const current = this.store.getRoleTemplate(id);
       const template = this.store.updateRoleTemplate(id, {
         status: 'PUBLISHED',
-        publishedAt: new Date().toISOString()
+        publishedAt: new Date().toISOString(),
+        dependencyManifest: current
+          ? this.buildDependencyManifestFromRecord(current, getDefaultAssetDefinitions())
+          : undefined
       });
       if (!template || template.status === 'DELETED') {
         throw this.templateNotFound(id);
@@ -370,6 +381,7 @@ export class RoleTemplateFactoryService {
     this.assertTemplatePublishable(existing);
 
     const publishedAt = new Date();
+    const dependencyManifest = await this.buildDependencyManifestForRecord(existing);
     const published = await this.prismaService.$transaction(async (tx) => {
       const template = await tx.roleTemplate.update({
         where: {
@@ -377,7 +389,8 @@ export class RoleTemplateFactoryService {
         },
         data: {
           status: 'PUBLISHED',
-          publishedAt
+          publishedAt,
+          dependencyManifest: dependencyManifest as unknown as Prisma.InputJsonValue
         }
       });
 
@@ -629,6 +642,7 @@ export class RoleTemplateFactoryService {
       ? this.normalizePlanCodes(input.allowedPlanCodes)
       : this.expandDefaultAllowedPlanCodes(recommendedPlanCode);
     const workflowSteps = this.normalizeWorkflowSteps(input.workflowSteps ?? []);
+    const workflowGraph = this.normalizeWorkflowGraphInput(input.workflowGraph, workflowSteps);
 
     return {
       version: this.requireText(input.version, 'Version cannot be empty.'),
@@ -642,7 +656,11 @@ export class RoleTemplateFactoryService {
       tools: this.normalizeStringArray(input.tools),
       skills: this.normalizeSkills(input.skills),
       workflowSteps,
-      workflowGraph: this.normalizeWorkflowGraphInput(input.workflowGraph, workflowSteps),
+      workflowGraph,
+      dependencyManifest: buildRoleTemplateDependencyManifest({
+        workflowGraph,
+        assets: getDefaultAssetDefinitions()
+      }),
       sampleInputs: this.normalizeStringArray(input.sampleInputs ?? []),
       outputFormat: this.normalizeOptionalText(
         input.outputFormat,
@@ -684,8 +702,16 @@ export class RoleTemplateFactoryService {
         input.workflowGraph,
         normalized.workflowSteps ?? []
       );
+      normalized.dependencyManifest = buildRoleTemplateDependencyManifest({
+        workflowGraph: normalized.workflowGraph,
+        assets: getDefaultAssetDefinitions()
+      });
     } else if (normalized.workflowSteps !== undefined) {
       normalized.workflowGraph = buildWorkflowGraphFromSteps(normalized.workflowSteps);
+      normalized.dependencyManifest = buildRoleTemplateDependencyManifest({
+        workflowGraph: normalized.workflowGraph,
+        assets: getDefaultAssetDefinitions()
+      });
     }
     if (input.sampleInputs !== undefined) normalized.sampleInputs = this.normalizeStringArray(input.sampleInputs);
     if (input.outputFormat !== undefined) {
@@ -721,6 +747,7 @@ export class RoleTemplateFactoryService {
       skills: input.skills,
       workflowSteps: input.workflowSteps,
       workflowGraph: input.workflowGraph as unknown as Prisma.InputJsonValue,
+      dependencyManifest: input.dependencyManifest as unknown as Prisma.InputJsonValue,
       sampleInputs: input.sampleInputs,
       outputFormat: input.outputFormat,
       approvalPolicy: input.approvalPolicy,
@@ -750,6 +777,9 @@ export class RoleTemplateFactoryService {
     if (input.workflowGraph !== undefined) {
       data.workflowGraph = input.workflowGraph as unknown as Prisma.InputJsonValue;
     }
+    if (input.dependencyManifest !== undefined) {
+      data.dependencyManifest = input.dependencyManifest as unknown as Prisma.InputJsonValue;
+    }
     if (input.sampleInputs !== undefined) data.sampleInputs = input.sampleInputs;
     if (input.outputFormat !== undefined) data.outputFormat = input.outputFormat;
     if (input.approvalPolicy !== undefined) data.approvalPolicy = input.approvalPolicy;
@@ -767,6 +797,7 @@ export class RoleTemplateFactoryService {
 
   private toAdminTemplateDetail(template: RoleTemplateRecord): AdminRoleTemplateDetailDto {
     const workflowSteps = this.toWorkflowSteps(template.workflowSteps);
+    const workflowGraph = normalizeWorkflowGraphOrFallback(template.workflowGraph, workflowSteps);
 
     return {
       id: template.id,
@@ -781,7 +812,8 @@ export class RoleTemplateFactoryService {
       tools: this.toStringArray(template.tools),
       skills: this.toSkillSummaries(template.skills),
       workflowSteps,
-      workflowGraph: normalizeWorkflowGraphOrFallback(template.workflowGraph, workflowSteps),
+      workflowGraph,
+      dependencyManifest: this.toDependencyManifest(template.dependencyManifest, workflowGraph),
       sampleInputs: this.toStringArray(template.sampleInputs),
       outputFormat: template.outputFormat?.trim() || '',
       approvalPolicy: template.approvalPolicy,
@@ -1295,6 +1327,52 @@ export class RoleTemplateFactoryService {
     }
 
     return value.filter((item): item is string => typeof item === 'string');
+  }
+
+  private async buildDependencyManifestForRecord(template: RoleTemplateRecord) {
+    const assets = await this.prismaService.assetDefinition.findMany();
+    return this.buildDependencyManifestFromRecord(template, assets);
+  }
+
+  private buildDependencyManifestFromRecord(
+    template: RoleTemplateRecord,
+    assets: RoleTemplateDependencyAsset[]
+  ) {
+    const workflowSteps = this.toWorkflowSteps(template.workflowSteps);
+    const workflowGraph = normalizeWorkflowGraphOrFallback(template.workflowGraph, workflowSteps);
+    return buildRoleTemplateDependencyManifest({
+      workflowGraph,
+      assets
+    });
+  }
+
+  private toDependencyManifest(value: unknown, workflowGraph: ServerRoleWorkflowGraph) {
+    if (this.isDependencyManifest(value)) {
+      return value;
+    }
+
+    return buildRoleTemplateDependencyManifest({
+      workflowGraph,
+      assets: getDefaultAssetDefinitions()
+    });
+  }
+
+  private isDependencyManifest(value: unknown): value is ReturnType<typeof buildRoleTemplateDependencyManifest> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return false;
+    }
+
+    const record = value as Record<string, unknown>;
+    return (
+      record.version === '1.0.0' &&
+      typeof record.generatedAt === 'string' &&
+      Array.isArray(record.variables) &&
+      Array.isArray(record.modelAssets) &&
+      Array.isArray(record.toolActions) &&
+      Array.isArray(record.artifactTemplates) &&
+      Array.isArray(record.nodeTemplates) &&
+      Array.isArray(record.warnings)
+    );
   }
 
   private toSkillSummaries(value: unknown) {

@@ -979,6 +979,114 @@ assert.ok(
   )
 );
 
+let workflowCleanDocxArtifactToolCallCount = 0;
+const workflowCleanDocxTaskTitle = '请把这个文档整理成一份简洁正式的 Word 文档，保留核心内容，结构清晰一点。';
+const workflowCleanDocxArtifactTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-clean-docx-artifact-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: workflowCleanDocxTaskTitle,
+    input: workflowCleanDocxTaskTitle,
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    toolIds: ['office-document'],
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'draft',
+          type: 'llm',
+          name: '整理正文',
+          instruction: '整理附件正文，产物只保留核心内容。',
+          outputVariables: ['deliverable_content']
+        },
+        {
+          id: 'quality_review',
+          type: 'llm',
+          name: '检查建议',
+          instruction: '给用户补充处理建议。',
+          outputVariables: ['quality_review']
+        },
+        {
+          id: 'write_doc',
+          type: 'artifact',
+          name: '生成 Word',
+          instruction: '把正式正文写入 Word 文档。',
+          toolId: 'office-document',
+          artifactType: 'docx',
+          inputVariables: ['deliverable_content', 'quality_review']
+        }
+      ],
+      edges: [
+        { id: 'start-draft', sourceNodeId: 'start', targetNodeId: 'draft', condition: { type: 'always' } },
+        { id: 'draft-review', sourceNodeId: 'draft', targetNodeId: 'quality_review', condition: { type: 'always' } },
+        { id: 'review-write', sourceNodeId: 'quality_review', targetNodeId: 'write_doc', condition: { type: 'always' } }
+      ]
+    }
+  },
+  workspaceId: 'workspace-workflow-clean-docx-artifact',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['office-document'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => ({
+    provider: request.profile.providerName,
+    modelName: request.profile.modelName,
+    content: request.messages.map((message) => message.content).join('\n').includes('检查建议')
+      ? '建议后续补充产品型号和质保政策。'
+      : [
+          workflowCleanDocxTaskTitle,
+          '',
+          '多功能集成浴霸产品技术文档',
+          '',
+          '摘要',
+          '本文件保留产品概述、核心参数、安装规范、维护保养和安全要求。',
+          '',
+          '后续建议',
+          '建议后续补充产品型号和质保政策。'
+        ].join('\n')
+  }),
+  desktopToolInvoker: async (request) => {
+    workflowCleanDocxArtifactToolCallCount += 1;
+    assert.equal(request.toolId, 'office-document');
+    assert.equal(request.action, 'office.write_docx_document');
+    assert.equal(request.input.fileName, '多功能集成浴霸产品技术文档-整理版');
+    assert.equal(request.input.title, '多功能集成浴霸产品技术文档');
+    assert.match(String(request.input.content), /^多功能集成浴霸产品技术文档/);
+    assert.doesNotMatch(String(request.input.content), /请把这个文档整理/);
+    assert.doesNotMatch(String(request.input.content), /后续建议/);
+    assert.doesNotMatch(String(request.input.content), /产品型号和质保政策/);
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\documents\\多功能集成浴霸产品技术文档-整理版.docx'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:05.905Z'
+});
+
+assert.equal(workflowCleanDocxArtifactToolCallCount, 1);
+assert.equal(workflowCleanDocxArtifactTask.task.state, 'completed');
+assert.match(
+  workflowCleanDocxArtifactTask.task.artifacts.find((artifact) => artifact.type === 'report')?.content ?? '',
+  /后续建议/
+);
+assert.match(
+  workflowCleanDocxArtifactTask.task.artifacts.find((artifact) => artifact.type === 'report')?.content ?? '',
+  /产品型号和质保政策/
+);
+
 let workflowCleanXlsxArtifactToolCallCount = 0;
 const workflowCleanXlsxArtifactTask = await runDesktopTask({
   task: createMockTaskDetail({

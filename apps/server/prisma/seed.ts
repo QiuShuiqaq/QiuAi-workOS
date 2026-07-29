@@ -1,6 +1,8 @@
 ﻿import { PrismaClient } from '@prisma/client';
 
 import { hashPassword } from '../src/shared/auth/password-hash';
+import { getDefaultAssetDefinitions } from '../src/shared/asset-center-catalog';
+import { buildRoleTemplateDependencyManifest } from '../src/shared/role-template-dependencies';
 import {
   retiredServerRoleTemplateIds,
   serverRoleTemplateCatalog
@@ -640,6 +642,7 @@ async function seedBilling() {
 
 async function seedRoleTemplates() {
   const publishedAt = new Date('2026-07-24T00:00:00.000Z');
+  const defaultAssets = getDefaultAssetDefinitions();
 
   if (retiredServerRoleTemplateIds.length > 0) {
     await prisma.roleTemplate.updateMany({
@@ -687,6 +690,11 @@ async function seedRoleTemplates() {
         skills: template.skills.map((skill) => ({ ...skill })),
         workflowSteps: template.workflowSteps.map((step) => ({ ...step })),
         workflowGraph: template.workflowGraph,
+        dependencyManifest: buildRoleTemplateDependencyManifest({
+          workflowGraph: template.workflowGraph,
+          assets: defaultAssets,
+          generatedAt: publishedAt
+        }),
         sampleInputs: [...template.sampleInputs],
         outputFormat: template.outputFormat,
         approvalPolicy: template.approvalPolicy,
@@ -709,6 +717,11 @@ async function seedRoleTemplates() {
         skills: template.skills.map((skill) => ({ ...skill })),
         workflowSteps: template.workflowSteps.map((step) => ({ ...step })),
         workflowGraph: template.workflowGraph,
+        dependencyManifest: buildRoleTemplateDependencyManifest({
+          workflowGraph: template.workflowGraph,
+          assets: defaultAssets,
+          generatedAt: publishedAt
+        }),
         sampleInputs: [...template.sampleInputs],
         outputFormat: template.outputFormat,
         approvalPolicy: template.approvalPolicy,
@@ -721,6 +734,45 @@ async function seedRoleTemplates() {
   }
 }
 
+async function seedAssetDefinitions() {
+  for (const asset of getDefaultAssetDefinitions()) {
+    await prisma.assetDefinition.upsert({
+      where: {
+        type_key: {
+          type: asset.type,
+          key: asset.key
+        }
+      },
+      update: {
+        name: asset.name,
+        description: asset.description,
+        category: asset.category,
+        status: asset.status,
+        scope: asset.scope,
+        version: asset.version,
+        schema: asset.schema,
+        defaults: asset.defaults,
+        tags: asset.tags,
+        sortOrder: asset.sortOrder
+      },
+      create: {
+        type: asset.type,
+        key: asset.key,
+        name: asset.name,
+        description: asset.description,
+        category: asset.category,
+        status: asset.status,
+        scope: asset.scope,
+        version: asset.version,
+        schema: asset.schema,
+        defaults: asset.defaults,
+        tags: asset.tags,
+        sortOrder: asset.sortOrder
+      }
+    });
+  }
+}
+
 async function main() {
   await seedAccounts();
   await seedTenantsAndWorkspaces();
@@ -728,6 +780,7 @@ async function main() {
   await seedOrganization();
   await seedSubscriptionsAndUsage();
   await seedBilling();
+  await seedAssetDefinitions();
   await seedRoleTemplates();
 }
 

@@ -89,6 +89,14 @@ export function normalizeWorkspaceId(workspaceId?: string): string {
 }
 
 export function normalizePathSegment(value: string): string {
-  const normalized = value.trim().replace(/[^a-zA-Z0-9._-]+/g, '_');
+  const normalized = value
+    .normalize('NFKC')
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1F]+/g, '_')
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^\.+/g, '')
+    .replace(/[. ]+$/g, '')
+    .slice(0, 120);
   return normalized.length > 0 ? normalized : defaultWorkspaceId;
 }

@@ -5,6 +5,7 @@ import {
   type ServerRoleTemplateWorkflowStep
 } from '../role-template-catalog';
 import type { ServerRoleWorkflowGraph } from '../workflow-graph';
+import type { buildRoleTemplateDependencyManifest } from '../role-template-dependencies';
 
 export interface MockWorkspaceSummary {
   id: string;
@@ -45,6 +46,7 @@ export interface MockRoleTemplateSummary {
   skills: ServerRoleSkill[];
   workflowSteps: ServerRoleTemplateWorkflowStep[];
   workflowGraph: ServerRoleWorkflowGraph;
+  dependencyManifest?: ReturnType<typeof buildRoleTemplateDependencyManifest>;
   sampleInputs: string[];
   outputFormat: string;
   approvalPolicy: string;

@@ -41,6 +41,7 @@ type DatabaseRoleTemplate = {
   skills: unknown;
   workflowSteps: unknown;
   workflowGraph: unknown;
+  dependencyManifest?: unknown;
   sampleInputs: unknown;
   outputFormat?: string | null;
   approvalPolicy: string;
@@ -482,6 +483,7 @@ export class RoleService {
       skills: this.toSkillSummaries(template.skills),
       workflowSteps,
       workflowGraph: normalizeWorkflowGraphOrFallback(template.workflowGraph, workflowSteps),
+      dependencyManifest: template.dependencyManifest,
       sampleInputs: this.toStringArray(template.sampleInputs),
       outputFormat: template.outputFormat?.trim() || '',
       approvalPolicy: template.approvalPolicy

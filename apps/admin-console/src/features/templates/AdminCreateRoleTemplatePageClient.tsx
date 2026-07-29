@@ -16,6 +16,7 @@ import type {
   AdminRoleTemplateDetail,
   AdminRoleTemplateTestGraphTrace,
   AdminWorkspaceSummary,
+  AssetDefinitionDetail,
   CreateAdminRoleTemplateRequest,
   CurrentAccountResponse,
   RoleWorkflowGraph,
@@ -79,6 +80,7 @@ export interface AdminCreateRoleTemplatePageClientProps {
   plans: AdminPlanDetail[];
   workspaces: AdminWorkspaceSummary[];
   toolCatalog: ToolActionCatalog;
+  assets: AssetDefinitionDetail[];
   templateId?: string;
 }
 
@@ -411,6 +413,14 @@ const defaultWorkflowVariableOptions: WorkflowVariableOption[] = [
     source: '运行时'
   }
 ];
+
+const variableRuntimeRefByAssetKey: Record<string, string> = {
+  task_text: 'start.text',
+  input_files: 'start.files',
+  input_file: 'start.files.0',
+  assistant_message: 'assistant_message',
+  artifact_file: 'artifact_file'
+};
 
 const legacyWorkflowNodeNameTranslations: Record<string, string> = {
   Start: '开始',
@@ -822,6 +832,103 @@ function workflowVariableTypeClass(type: WorkflowVariableType) {
   return type.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
 }
 
+function isModelNodeType(type: WorkflowNodeType) {
+  return type === 'llm' || type === 'reasoning' || type === 'parameter_extractor';
+}
+
+function readAssetSchemaString(asset: AssetDefinitionDetail | undefined, key: string): string | undefined {
+  const value = asset?.schema[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function readAssetSchemaStringArray(asset: AssetDefinitionDetail | undefined, key: string): string[] {
+  const value = asset?.schema[key];
+  return Array.isArray(value)
+    ? uniqueTags(value.filter((item): item is string => typeof item === 'string'))
+    : [];
+}
+
+function readAssetDefaultsRecord(asset: AssetDefinitionDetail | undefined): Record<string, unknown> {
+  return asset?.defaults && typeof asset.defaults === 'object' && !Array.isArray(asset.defaults)
+    ? asset.defaults
+    : {};
+}
+
+function readWorkflowConfigString(config: Record<string, unknown> | undefined, key: string): string | undefined {
+  const value = config?.[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function toWorkflowVariableType(value?: string): WorkflowVariableType {
+  if (
+    value === 'text' ||
+    value === 'number' ||
+    value === 'boolean' ||
+    value === 'json' ||
+    value === 'asset' ||
+    value === 'asset[]' ||
+    value === 'table' ||
+    value === 'artifact'
+  ) {
+    return value;
+  }
+
+  if (value === 'files' || value === 'images' || value === 'videos') return 'asset[]';
+  if (value === 'file' || value === 'image' || value === 'video') return 'asset';
+  return 'text';
+}
+
+function buildAssetVariableOptions(assets: AssetDefinitionDetail[]): WorkflowVariableOption[] {
+  return assets
+    .filter((asset) => asset.type === 'VARIABLE' && asset.status === 'ACTIVE')
+    .map((asset) => {
+      const runtimeRef = variableRuntimeRefByAssetKey[asset.key] ?? asset.key;
+      return {
+        value: runtimeRef,
+        label: `${asset.name} / ${asset.key}`,
+        type: toWorkflowVariableType(readAssetSchemaString(asset, 'valueType')),
+        source: '变量库',
+        description: asset.description
+      };
+    });
+}
+
+function buildModelAssetOptions(assets: AssetDefinitionDetail[]) {
+  const assetOptions = assets.map((asset) => {
+    const providerId = readAssetSchemaString(asset, 'providerId') ?? asset.category;
+    const modelId = readAssetSchemaString(asset, 'modelId') ?? asset.key;
+    return {
+      value: asset.key,
+      label: `${asset.name} / ${providerId} / ${modelId}`
+    };
+  });
+  const fallbackOptions = modelProfileOptions.filter(
+    (option) => !assets.some((asset) => asset.key === option.value)
+  );
+  return [...assetOptions, ...fallbackOptions];
+}
+
+function buildToolActionAssetOptions(assets: AssetDefinitionDetail[]) {
+  return assets.map((asset) => {
+    const packageId = readAssetSchemaString(asset, 'packageId') ?? asset.category;
+    const actionId = readAssetSchemaString(asset, 'actionId') ?? asset.key;
+    return {
+      value: asset.key,
+      label: `${asset.name} / ${packageId} / ${actionId}`
+    };
+  });
+}
+
+function buildArtifactTemplateAssetOptions(assets: AssetDefinitionDetail[]) {
+  return assets.map((asset) => {
+    const artifactType = readAssetSchemaString(asset, 'artifactType') ?? asset.category;
+    return {
+      value: asset.key,
+      label: `${asset.name} / ${artifactType}`
+    };
+  });
+}
+
 function inferWorkflowVariableTypeFromName(value: string): WorkflowVariableType {
   const normalized = value.toLowerCase();
   if (/(table|rows|sheet|spreadsheet|csv|xlsx)/.test(normalized)) return 'table';
@@ -897,10 +1004,16 @@ function addWorkflowVariableOption(
   options.set(value, { ...option, value });
 }
 
-function deriveWorkflowVariableOptions(graph: RoleWorkflowGraph): WorkflowVariableOption[] {
+function deriveWorkflowVariableOptions(
+  graph: RoleWorkflowGraph,
+  assetVariableOptions: WorkflowVariableOption[] = []
+): WorkflowVariableOption[] {
   const options = new Map<string, WorkflowVariableOption>();
 
   for (const option of defaultWorkflowVariableOptions) {
+    addWorkflowVariableOption(options, option);
+  }
+  for (const option of assetVariableOptions) {
     addWorkflowVariableOption(options, option);
   }
 
@@ -2142,12 +2255,14 @@ function WorkflowReactFlowEditor({
   graph,
   onChange,
   testGraphTrace,
-  toolCatalog
+  toolCatalog,
+  assets
 }: {
   graph: RoleWorkflowGraph;
   onChange: (graph: RoleWorkflowGraph) => void;
   testGraphTrace?: AdminRoleTemplateTestGraphTrace;
   toolCatalog: ToolActionCatalog;
+  assets: AssetDefinitionDetail[];
 }) {
   const [selection, setSelection] = useState<WorkflowSelection>({
     type: 'node',
@@ -2174,6 +2289,34 @@ function WorkflowReactFlowEditor({
         label: `${toolPackage.name} / ${toolPackage.id}`
       })),
     [toolCatalog]
+  );
+  const assetVariableOptions = useMemo(
+    () => buildAssetVariableOptions(assets),
+    [assets]
+  );
+  const modelAssets = useMemo(
+    () => assets.filter((asset) => asset.type === 'MODEL' && asset.status === 'ACTIVE'),
+    [assets]
+  );
+  const toolActionAssets = useMemo(
+    () => assets.filter((asset) => asset.type === 'TOOL' && asset.status === 'ACTIVE'),
+    [assets]
+  );
+  const artifactTemplateAssets = useMemo(
+    () => assets.filter((asset) => asset.type === 'ARTIFACT_TEMPLATE' && asset.status === 'ACTIVE'),
+    [assets]
+  );
+  const modelAssetOptions = useMemo(
+    () => buildModelAssetOptions(modelAssets),
+    [modelAssets]
+  );
+  const toolActionAssetOptions = useMemo(
+    () => buildToolActionAssetOptions(toolActionAssets),
+    [toolActionAssets]
+  );
+  const artifactTemplateAssetOptions = useMemo(
+    () => buildArtifactTemplateAssetOptions(artifactTemplateAssets),
+    [artifactTemplateAssets]
   );
   const serverToolActionTemplatesByToolId = useMemo(() => {
     const grouped: Record<string, ToolActionTemplate[]> = {};
@@ -2239,7 +2382,10 @@ function WorkflowReactFlowEditor({
     },
     [getDefaultArtifactActionTemplateForCanvas, getSelectedToolActionTemplateForCanvas]
   );
-  const variableOptions = useMemo(() => deriveWorkflowVariableOptions(graph), [graph]);
+  const variableOptions = useMemo(
+    () => deriveWorkflowVariableOptions(graph, assetVariableOptions),
+    [assetVariableOptions, graph]
+  );
   const variableSelectOptions = useMemo(
     () => buildWorkflowVariableSelectOptions(variableOptions),
     [variableOptions]
@@ -2288,6 +2434,18 @@ function WorkflowReactFlowEditor({
   const selectedCodePreviewResult = selectedNode?.type === 'code'
     ? codePreviewResults[selectedNode.id]
     : undefined;
+  const selectedModelAssetKey =
+    selectedNode && isModelNodeType(selectedNode.type)
+      ? readWorkflowConfigString(selectedNode.config, 'modelAssetKey') ?? selectedNode.modelProfileId
+      : undefined;
+  const selectedToolActionAssetKey =
+    selectedNode && (selectedNode.type === 'tool' || selectedNode.type === 'artifact')
+      ? readWorkflowConfigString(selectedNode.config, 'toolActionAssetKey') ?? readWorkflowConfigString(selectedNode.config, 'action')
+      : undefined;
+  const selectedArtifactTemplateAssetKey =
+    selectedNode?.type === 'artifact'
+      ? readWorkflowConfigString(selectedNode.config, 'artifactTemplateAssetKey')
+      : undefined;
 
   useEffect(() => {
     const selectedNodeExists = selection.type === 'node' && graph.nodes.some((node) => node.id === selection.id);
@@ -2647,6 +2805,7 @@ function WorkflowReactFlowEditor({
       artifactType: nextArtifactType,
       config: template
         ? buildToolNodeConfig(node, {
+            toolActionAssetKey: template.value,
             action: template.value,
             input: template.defaults
           })
@@ -2658,8 +2817,115 @@ function WorkflowReactFlowEditor({
     const template = getSelectedToolActionTemplateForCanvas(node.toolId, action);
     updateNode(node.id, {
       config: buildToolNodeConfig(node, {
+        toolActionAssetKey: template?.value ?? action,
         action: template?.value ?? action,
         input: template?.defaults ?? node.config?.input ?? {}
+      })
+    });
+  }
+
+  function updateModelNodeAsset(node: RoleWorkflowGraphNode, assetKey?: string) {
+    if (!assetKey) {
+      updateNode(node.id, {
+        modelProfileId: undefined,
+        config: {
+          ...(node.config ?? {}),
+          modelAssetKey: undefined,
+          modelProviderId: undefined,
+          modelId: undefined
+        }
+      });
+      return;
+    }
+
+    const asset = modelAssets.find((item) => item.key === assetKey);
+    if (!asset) {
+      updateNode(node.id, {
+        modelProfileId: assetKey,
+        config: {
+          ...(node.config ?? {}),
+          modelAssetKey: undefined,
+          modelProviderId: undefined,
+          modelId: assetKey
+        }
+      });
+      return;
+    }
+
+    const modelId = readAssetSchemaString(asset, 'modelId') ?? assetKey;
+    const modelProfileId = readAssetSchemaString(asset, 'modelProfileId') ?? modelId;
+    updateNode(node.id, {
+      modelProfileId,
+      config: {
+        ...(node.config ?? {}),
+        modelAssetKey: asset.key,
+        modelProviderId: readAssetSchemaString(asset, 'providerId'),
+        modelId
+      }
+    });
+  }
+
+  function updateToolNodeActionAsset(node: RoleWorkflowGraphNode, assetKey?: string) {
+    if (!assetKey) {
+      updateNode(node.id, {
+        config: {
+          ...(node.config ?? {}),
+          toolActionAssetKey: undefined,
+          action: undefined
+        }
+      });
+      return;
+    }
+
+    const asset = toolActionAssets.find((item) => item.key === assetKey);
+    const actionId = readAssetSchemaString(asset, 'actionId') ?? assetKey;
+    const action = toolCatalog.actions.find((item) => item.actionId === actionId);
+    const packageId = readAssetSchemaString(asset, 'packageId') ?? action?.packageId ?? node.toolId;
+    updateNode(node.id, {
+      toolId: packageId,
+      config: buildToolNodeConfig(node, {
+        toolActionAssetKey: asset?.key ?? actionId,
+        action: actionId,
+        input: action?.defaultInput ?? readAssetDefaultsRecord(asset) ?? node.config?.input ?? {}
+      })
+    });
+  }
+
+  function updateArtifactTemplateAsset(node: RoleWorkflowGraphNode, assetKey?: string) {
+    if (!assetKey) {
+      updateNode(node.id, {
+        config: {
+          ...(node.config ?? {}),
+          artifactTemplateAssetKey: undefined
+        }
+      });
+      return;
+    }
+
+    const asset = artifactTemplateAssets.find((item) => item.key === assetKey);
+    const artifactType = readAssetSchemaString(asset, 'artifactType') as WorkflowArtifactType | undefined;
+    const actionId = readAssetSchemaString(asset, 'toolActionId');
+    const action = actionId ? toolCatalog.actions.find((item) => item.actionId === actionId) : undefined;
+    const template = action
+      ? getSelectedToolActionTemplateForCanvas(action.packageId, action.actionId)
+      : getDefaultArtifactActionTemplateForCanvas(artifactType ?? node.artifactType);
+    const inputVariables = readAssetSchemaStringArray(asset, 'inputVariables');
+    const fileNamePattern = readAssetSchemaString(asset, 'fileNamePattern');
+    const nextInput = {
+      ...(template?.defaults ?? {}),
+      ...readWorkflowToolInputConfig(node),
+      ...(fileNamePattern ? { fileName: fileNamePattern, title: fileNamePattern } : {})
+    };
+
+    updateNode(node.id, {
+      artifactType: artifactType ?? node.artifactType,
+      toolId: template?.toolId ?? action?.packageId ?? node.toolId,
+      inputVariables: inputVariables.length ? uniqueTags([...(node.inputVariables ?? []), ...inputVariables]) : node.inputVariables,
+      config: buildToolNodeConfig(node, {
+        artifactTemplateAssetKey: asset?.key ?? assetKey,
+        toolActionAssetKey: action?.actionId ?? actionId ?? readWorkflowConfigString(node.config, 'toolActionAssetKey'),
+        action: template?.value ?? actionId ?? readWorkflowConfigString(node.config, 'action'),
+        input: nextInput
       })
     });
   }
@@ -2823,6 +3089,7 @@ function WorkflowReactFlowEditor({
     updateNode(node.id, {
       inputVariables: sourceRef ? uniqueTags([...(node.inputVariables ?? []), sourceRef]) : node.inputVariables,
       config: buildToolNodeConfig(node, {
+        toolActionAssetKey: template?.value ?? (node.artifactType === 'csv' ? 'spreadsheet.write_csv' : 'spreadsheet.write_xlsx'),
         action: template?.value ?? (node.artifactType === 'csv' ? 'spreadsheet.write_csv' : 'spreadsheet.write_xlsx'),
         input: {
           ...(template?.defaults ?? {}),
@@ -3528,11 +3795,11 @@ function WorkflowReactFlowEditor({
                     size="small"
                     allowClear
                     showSearch
-                    value={selectedNode.modelProfileId}
-                    placeholder="选择具体模型（PC 端安装时配置 API Key）"
-                    options={modelProfileOptions}
+                    value={selectedModelAssetKey}
+                    placeholder="从模型库选择具体模型"
+                    options={modelAssetOptions}
                     optionFilterProp="label"
-                    onChange={(modelProfileId) => updateNode(selectedNode.id, { modelProfileId })}
+                    onChange={(assetKey) => updateModelNodeAsset(selectedNode, assetKey)}
                   />
                   <Select
                     size="small"
@@ -3590,14 +3857,26 @@ function WorkflowReactFlowEditor({
                 title={selectedNode.type === 'artifact' ? '写入工具' : '调用工具'}
                 description="选择这个节点实际调用的工具，例如文档、表格、网页搜索、视频处理或 MCP。"
               >
-                <Select
-                  size="small"
-                  allowClear
-                  value={selectedNode.toolId}
-                  placeholder="工具 ID"
-                  options={serverToolOptions}
-                  onChange={(toolId) => updateToolNodeToolId(selectedNode, toolId)}
-                />
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Select
+                    size="small"
+                    allowClear
+                    showSearch
+                    value={selectedToolActionAssetKey}
+                    placeholder="从工具动作库选择具体动作"
+                    options={toolActionAssetOptions}
+                    optionFilterProp="label"
+                    onChange={(assetKey) => updateToolNodeActionAsset(selectedNode, assetKey)}
+                  />
+                  <Select
+                    size="small"
+                    allowClear
+                    value={selectedNode.toolId}
+                    placeholder="工具包"
+                    options={serverToolOptions}
+                    onChange={(toolId) => updateToolNodeToolId(selectedNode, toolId)}
+                  />
+                </Space>
               </WorkflowConfigSection>
             ) : null}
             {selectedNode.type === 'artifact' ? (
@@ -3605,24 +3884,37 @@ function WorkflowReactFlowEditor({
                 title="产物格式"
                 description="选择最终交付物格式；切到 MP4 会自动使用视频处理工具。"
               >
-                <Select
-                  size="small"
-                  allowClear
-                  value={selectedNode.artifactType}
-                  placeholder="产物格式"
-                  options={artifactTypeOptions}
-                  onChange={(artifactType) => {
-                    const nextToolTemplate = getDefaultArtifactActionTemplateForCanvas(artifactType);
-                    updateNode(selectedNode.id, {
-                      artifactType,
-                      toolId: nextToolTemplate?.toolId ?? selectedNode.toolId,
-                      config: buildToolNodeConfig(selectedNode, {
-                        action: nextToolTemplate?.value,
-                        input: nextToolTemplate?.defaults ?? {}
-                      })
-                    });
-                  }}
-                />
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Select
+                    size="small"
+                    allowClear
+                    showSearch
+                    value={selectedArtifactTemplateAssetKey}
+                    placeholder="从产物模板库选择"
+                    options={artifactTemplateAssetOptions}
+                    optionFilterProp="label"
+                    onChange={(assetKey) => updateArtifactTemplateAsset(selectedNode, assetKey)}
+                  />
+                  <Select
+                    size="small"
+                    allowClear
+                    value={selectedNode.artifactType}
+                    placeholder="产物格式"
+                    options={artifactTypeOptions}
+                    onChange={(artifactType) => {
+                      const nextToolTemplate = getDefaultArtifactActionTemplateForCanvas(artifactType);
+                      updateNode(selectedNode.id, {
+                        artifactType,
+                        toolId: nextToolTemplate?.toolId ?? selectedNode.toolId,
+                        config: buildToolNodeConfig(selectedNode, {
+                          toolActionAssetKey: nextToolTemplate?.value,
+                          action: nextToolTemplate?.value,
+                          input: nextToolTemplate?.defaults ?? {}
+                        })
+                      });
+                    }}
+                  />
+                </Space>
               </WorkflowConfigSection>
             ) : null}
             {selectedNode.type === 'artifact' && (selectedNode.artifactType === 'xlsx' || selectedNode.artifactType === 'csv') ? (
@@ -4045,6 +4337,7 @@ export function AdminCreateRoleTemplatePageClient({
   plans,
   workspaces,
   toolCatalog,
+  assets,
   templateId
 }: AdminCreateRoleTemplatePageClientProps) {
   const router = useRouter();
@@ -4362,6 +4655,7 @@ export function AdminCreateRoleTemplatePageClient({
               onChange={setEditableGraph}
               testGraphTrace={testResult?.graphTrace}
               toolCatalog={toolCatalog}
+              assets={assets}
             />
           </section>
 

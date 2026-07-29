@@ -126,6 +126,7 @@ export interface RolePackageManifest {
   }>;
   workflowSteps?: RoleWorkflowStep[];
   workflowGraph?: RoleWorkflowGraph;
+  dependencyManifest?: Record<string, unknown>;
   sampleInputs?: string[];
   outputFormat?: string;
   modelProfileIds: string[];
@@ -272,6 +273,7 @@ export function validateRolePackageManifest(input: unknown): RolePackageManifest
       record.workflowGraph === undefined
         ? undefined
         : validateRoleWorkflowGraph(record.workflowGraph, 'rolePackage.workflowGraph'),
+    dependencyManifest: optionalRecord(record.dependencyManifest, 'rolePackage.dependencyManifest'),
     sampleInputs: requireStringArray(record.sampleInputs, 'rolePackage.sampleInputs'),
     outputFormat: optionalString(record.outputFormat, 'rolePackage.outputFormat'),
     modelProfileIds,

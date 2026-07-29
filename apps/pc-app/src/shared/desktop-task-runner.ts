@@ -890,6 +890,7 @@ async function runWorkflowRuntime(input: {
   task: DesktopTaskDetail;
   binding: ResolvedRuntimeBinding;
   workflowPlan: WorkflowExecutionPlan;
+  rolePackage?: RolePackageManifest;
   graph: WorkflowGraph;
   profiles: ModelProfile[];
   modelInvoker: DesktopModelInvoker;
@@ -1004,6 +1005,7 @@ async function runWorkflowRuntime(input: {
         node: currentNode,
         pool,
         binding: input.binding,
+        rolePackage: input.rolePackage,
         profiles: input.profiles,
         modelInvoker: input.modelInvoker,
         desktopToolInvoker: input.desktopToolInvoker,
@@ -1327,6 +1329,7 @@ async function executeWorkflowRuntimeNode(input: {
   node: WorkflowGraphNode;
   pool: WorkflowVariablePool;
   binding: ResolvedRuntimeBinding;
+  rolePackage?: RolePackageManifest;
   profiles: ModelProfile[];
   modelInvoker: DesktopModelInvoker;
   desktopToolInvoker?: DesktopToolInvoker;
@@ -1431,6 +1434,7 @@ async function invokeWorkflowRuntimeParameterExtractorNode(input: {
   node: WorkflowGraphNode;
   pool: WorkflowVariablePool;
   binding: ResolvedRuntimeBinding;
+  rolePackage?: RolePackageManifest;
   profiles: ModelProfile[];
   modelInvoker: DesktopModelInvoker;
   createdAt: string;
@@ -1446,7 +1450,7 @@ async function invokeWorkflowRuntimeParameterExtractorNode(input: {
   outputVariables: string[];
   message: string;
 }> {
-  const profile = selectWorkflowRuntimeModelProfile(input.node, input.profiles);
+  const profile = selectWorkflowRuntimeModelProfile(input.node, input.profiles, input.rolePackage);
   const variables = resolveWorkflowVariableRefs(input.pool, input.node.inputVariables, getWorkflowRuntimeFallbackInputRefs(input.pool));
   const schema = input.node.config?.schema ?? input.node.config?.parameters ?? {};
   const response = await input.modelInvoker({
@@ -2721,6 +2725,7 @@ async function invokeWorkflowRuntimeModelNode(input: {
   node: WorkflowGraphNode;
   pool: WorkflowVariablePool;
   binding: ResolvedRuntimeBinding;
+  rolePackage?: RolePackageManifest;
   profiles: ModelProfile[];
   modelInvoker: DesktopModelInvoker;
   createdAt: string;
@@ -2736,8 +2741,12 @@ async function invokeWorkflowRuntimeModelNode(input: {
   outputVariables: string[];
   message: string;
 }> {
-  const profile = selectWorkflowRuntimeModelProfile(input.node, input.profiles);
-  const variables = resolveWorkflowVariableRefs(input.pool, input.node.inputVariables, getWorkflowRuntimeFallbackInputRefs(input.pool));
+  const profile = selectWorkflowRuntimeModelProfile(input.node, input.profiles, input.rolePackage);
+  const variables = appendWorkflowOutputAssistantMessageVariable(
+    input.node,
+    input.pool,
+    resolveWorkflowVariableRefs(input.pool, input.node.inputVariables, getWorkflowRuntimeFallbackInputRefs(input.pool))
+  );
   const outputMode = readWorkflowRuntimeModelOutputMode(input.node);
   const messages = buildWorkflowRuntimeModelMessages({
     task: input.task,
@@ -2786,6 +2795,21 @@ async function invokeWorkflowRuntimeModelNode(input: {
     outputVariables,
     message: `Model response saved (${response.content.length} chars).`
   };
+}
+
+function appendWorkflowOutputAssistantMessageVariable(
+  node: WorkflowGraphNode,
+  pool: WorkflowVariablePool,
+  variables: Array<{ ref: string; value: WorkflowRuntimeValue }>
+): Array<{ ref: string; value: WorkflowRuntimeValue }> {
+  if (node.type !== 'output' || variables.some((variable) => variable.ref === 'runtime.artifact_assistant_message')) {
+    return variables;
+  }
+
+  const assistantMessage = pool.get('runtime.artifact_assistant_message');
+  return typeof assistantMessage === 'string' && assistantMessage.trim()
+    ? [...variables, { ref: 'runtime.artifact_assistant_message', value: assistantMessage }]
+    : variables;
 }
 
 async function invokeWorkflowRuntimeToolNode(input: {
@@ -2996,6 +3020,13 @@ async function invokeWorkflowRuntimeArtifactNode(input: {
   const modelResult = explicitInputVariables && artifactInputVariables.length > 0
     ? createWorkflowRuntimeArtifactContentResult(input, artifactInputVariables)
     : await invokeWorkflowRuntimeModelNode(input);
+  const artifactPayload = buildWorkflowArtifactPayload({
+    task: input.task,
+    node: input.node,
+    variables: explicitInputVariables ? artifactInputVariables : undefined,
+    rawContent: modelResult.response.content
+  });
+  writeWorkflowArtifactAssistantMessage(input.pool, input.node, artifactPayload.assistantMessage);
   const availableToolIds = new Set(input.binding.availableTools.map((tool) => tool.id));
   const configuredToolRequest = buildWorkflowRuntimeToolRequest(input.node, input.pool);
   const artifactNode: WorkflowExecutionNodeSummary = {
@@ -3007,14 +3038,19 @@ async function invokeWorkflowRuntimeArtifactNode(input: {
     artifactType: input.node.artifactType,
     requiresApproval: input.node.requiresApproval
   };
-  const toolRequest = configuredToolRequest && availableToolIds.has(configuredToolRequest.toolId)
-    ? configuredToolRequest
-    : buildWorkflowFallbackArtifactToolRequest({
+  const toolRequest = normalizeWorkflowArtifactToolRequest({
+    task: input.task,
+    artifactNode,
+    payload: artifactPayload,
+    request: configuredToolRequest && availableToolIds.has(configuredToolRequest.toolId)
+      ? configuredToolRequest
+      : buildWorkflowFallbackArtifactToolRequest({
         task: input.task,
         artifactNode,
-        content: modelResult.response.content,
+        payload: artifactPayload,
         availableToolIds
-      });
+      })
+  });
 
   if (!toolRequest || !input.desktopToolInvoker || !input.workspaceId) {
     return {
@@ -3051,13 +3087,17 @@ async function invokeWorkflowRuntimeArtifactNode(input: {
   const outputVariables = writeWorkflowNodeOutputs({
     pool: input.pool,
     node: input.node,
-    text: modelResult.response.content,
+    text: artifactPayload.content,
     result: toolResult.output ?? {},
     file
   });
 
   return {
     ...modelResult,
+    response: {
+      ...modelResult.response,
+      content: artifactPayload.assistantMessage ?? modelResult.response.content
+    },
     logs: [
       ...modelResult.logs,
       createLog(
@@ -3100,18 +3140,23 @@ function createWorkflowRuntimeArtifactContentResult(
   outputVariables: string[];
   message: string;
 } {
-  const content = renderWorkflowArtifactContentFromVariables(variables);
+  const payload = buildWorkflowArtifactPayload({
+    task: input.task,
+    node: input.node,
+    variables
+  });
+  writeWorkflowArtifactAssistantMessage(input.pool, input.node, payload.assistantMessage);
   const outputVariables = writeWorkflowNodeOutputs({
     pool: input.pool,
     node: input.node,
-    text: content
+    text: payload.content
   });
-  input.pool.set('runtime.previous_text', content);
+  input.pool.set('runtime.previous_text', payload.content);
 
   return {
     response: {
       ...input.currentResponse,
-      content
+      content: payload.assistantMessage ?? payload.content
     },
     primaryProfile: input.primaryProfile,
     logs: [
@@ -3133,12 +3178,19 @@ function createWorkflowRuntimeArtifactContentResult(
 }
 
 function renderWorkflowArtifactContentFromVariables(
-  variables: Array<{ ref: string; value: WorkflowRuntimeValue }>
+  variables: Array<{ ref: string; value: WorkflowRuntimeValue }>,
+  task?: DesktopTaskDetail,
+  node?: WorkflowGraphNode
 ): string {
+  const preferredValue = selectPreferredWorkflowArtifactContentValue(variables, task, node);
+  if (preferredValue !== undefined) {
+    return normalizeWorkflowArtifactContent(workflowRuntimeValueToArtifactText(preferredValue), task, node);
+  }
+
   if (variables.length === 1) {
     const value = variables[0]?.value;
     if (typeof value === 'string') {
-      return value;
+      return normalizeWorkflowArtifactContent(value, task, node);
     }
 
     if (typeof value === 'number' || typeof value === 'boolean' || value === null) {
@@ -3146,7 +3198,370 @@ function renderWorkflowArtifactContentFromVariables(
     }
   }
 
-  return renderWorkflowVariableRefsForArtifact(variables, 80_000);
+  return normalizeWorkflowArtifactContent(renderWorkflowVariableRefsForArtifact(variables, 80_000), task, node);
+}
+
+interface WorkflowArtifactPayload {
+  content: string;
+  title?: string;
+  fileName?: string;
+  assistantMessage?: string;
+}
+
+function buildWorkflowArtifactPayload(input: {
+  task: DesktopTaskDetail;
+  node: WorkflowGraphNode;
+  variables?: Array<{ ref: string; value: WorkflowRuntimeValue }>;
+  rawContent?: string;
+}): WorkflowArtifactPayload {
+  const structuredPayload =
+    readWorkflowArtifactPayloadFromVariables(input.variables ?? []) ??
+    readWorkflowArtifactPayloadFromText(input.rawContent ?? '');
+  const rawContent =
+    structuredPayload?.content ??
+    (input.variables && input.variables.length > 0
+      ? renderWorkflowArtifactContentFromVariables(input.variables, input.task, input.node)
+      : input.rawContent ?? '');
+  const content = normalizeWorkflowArtifactContent(rawContent, input.task, input.node);
+  const assistantMessage =
+    structuredPayload?.assistantMessage ??
+    extractWorkflowArtifactAssistantMessage(rawContent, input.task, input.node);
+  const title =
+    structuredPayload?.title ??
+    extractWorkflowArtifactTitle(content, input.task) ??
+    extractWorkflowArtifactTitle(input.rawContent ?? '', input.task);
+  const fileName =
+    stripWorkflowArtifactExtension(structuredPayload?.fileName) ??
+    buildWorkflowArtifactFileNameFromPayload({
+      task: input.task,
+      node: input.node,
+      title
+    });
+
+  return {
+    content,
+    title,
+    fileName,
+    assistantMessage
+  };
+}
+
+function readWorkflowArtifactPayloadFromVariables(
+  variables: Array<{ ref: string; value: WorkflowRuntimeValue }>
+): WorkflowArtifactPayload | undefined {
+  for (const variable of variables) {
+    const payload = readWorkflowArtifactPayloadFromValue(variable.value);
+    if (payload?.content) {
+      return payload;
+    }
+  }
+
+  return undefined;
+}
+
+function readWorkflowArtifactPayloadFromValue(value: WorkflowRuntimeValue): WorkflowArtifactPayload | undefined {
+  if (typeof value === 'string') {
+    return readWorkflowArtifactPayloadFromText(value);
+  }
+
+  if (!value || typeof value !== 'object' || Array.isArray(value) || isWorkflowFileValue(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const content = readFirstWorkflowRuntimeString(record, [
+    'artifactBody',
+    'artifactContent',
+    'documentBody',
+    'documentContent',
+    'deliverableBody',
+    'deliverableContent',
+    'body',
+    'content',
+    'markdown',
+    'text'
+  ]);
+
+  if (!content) {
+    return undefined;
+  }
+
+  return {
+    content,
+    title: readFirstWorkflowRuntimeString(record, ['documentTitle', 'artifactTitle', 'title']),
+    fileName: readFirstWorkflowRuntimeString(record, ['fileName', 'filename', 'artifactFileName']),
+    assistantMessage: readFirstWorkflowRuntimeString(record, [
+      'assistantMessage',
+      'userMessage',
+      'reply',
+      'summary',
+      'notes'
+    ])
+  };
+}
+
+function readWorkflowArtifactPayloadFromText(value: string): WorkflowArtifactPayload | undefined {
+  const parsed = parseWorkflowRuntimeJson(value);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return undefined;
+  }
+
+  return readWorkflowArtifactPayloadFromValue(parsed as WorkflowRuntimeValue);
+}
+
+function selectPreferredWorkflowArtifactContentValue(
+  variables: Array<{ ref: string; value: WorkflowRuntimeValue }>,
+  task?: DesktopTaskDetail,
+  node?: WorkflowGraphNode
+): WorkflowRuntimeValue | undefined {
+  if (!shouldStripWorkflowArtifactAssistantNotes(task, node)) {
+    return undefined;
+  }
+
+  const preferred = variables.find((variable) => isPreferredWorkflowArtifactContentRef(variable.ref));
+  if (preferred) {
+    return preferred.value;
+  }
+
+  const nonReviewVariable = variables.find((variable) => !isWorkflowArtifactReviewRef(variable.ref));
+  return nonReviewVariable?.value;
+}
+
+function isPreferredWorkflowArtifactContentRef(ref: string): boolean {
+  const normalized = ref.toLocaleLowerCase();
+  return [
+    'artifactbody',
+    'artifact_body',
+    'artifactcontent',
+    'artifact_content',
+    'documentbody',
+    'document_body',
+    'documentcontent',
+    'document_content',
+    'deliverable_content',
+    'deliverablecontent',
+    'deliverable_body',
+    'draft_text',
+    'draft',
+    'body',
+    'content'
+  ].some((keyword) => normalized.includes(keyword));
+}
+
+function isWorkflowArtifactReviewRef(ref: string): boolean {
+  const normalized = ref.toLocaleLowerCase();
+  return ['quality', 'review', 'assistantmessage', 'assistant_message', 'final_answer', 'final'].some((keyword) =>
+    normalized.includes(keyword)
+  );
+}
+
+function workflowRuntimeValueToArtifactText(value: WorkflowRuntimeValue): string {
+  const payload = readWorkflowArtifactPayloadFromValue(value);
+  if (payload?.content) {
+    return payload.content;
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean' || value === null) {
+    return String(value);
+  }
+
+  return renderWorkflowVariableRefsForArtifact([{ ref: 'value', value }], 80_000);
+}
+
+function normalizeWorkflowArtifactContent(
+  value: string,
+  task?: DesktopTaskDetail,
+  node?: WorkflowGraphNode
+): string {
+  const withoutTaskTitle = stripLeadingWorkflowTaskTitle(value, task?.title);
+  const withoutAssistantNotes = shouldStripWorkflowArtifactAssistantNotes(task, node)
+    ? stripTrailingWorkflowArtifactAssistantNotes(withoutTaskTitle)
+    : withoutTaskTitle;
+
+  return withoutAssistantNotes
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function stripLeadingWorkflowTaskTitle(value: string, taskTitle: string | undefined): string {
+  const title = taskTitle?.trim();
+  if (!title) {
+    return value.trim();
+  }
+
+  const lines = value.replace(/\r\n/g, '\n').split('\n');
+  while (lines.length > 0 && !lines[0]?.trim()) {
+    lines.shift();
+  }
+
+  const firstLine = lines[0]?.trim();
+  if (firstLine && areWorkflowTitleLinesEquivalent(firstLine, title)) {
+    lines.shift();
+    while (lines.length > 0 && !lines[0]?.trim()) {
+      lines.shift();
+    }
+  }
+
+  return lines.join('\n').trim();
+}
+
+function areWorkflowTitleLinesEquivalent(left: string, right: string): boolean {
+  const normalizedLeft = normalizeWorkflowTitleLine(left);
+  const normalizedRight = normalizeWorkflowTitleLine(right);
+  return Boolean(
+    normalizedLeft &&
+      normalizedRight &&
+      (normalizedLeft === normalizedRight ||
+        normalizedLeft.startsWith(normalizedRight) ||
+        normalizedRight.startsWith(normalizedLeft))
+  );
+}
+
+function normalizeWorkflowTitleLine(value: string): string {
+  return value
+    .replace(/^#+\s*/, '')
+    .replace(/[.。…]+$/g, '')
+    .replace(/\s+/g, '')
+    .trim()
+    .toLocaleLowerCase();
+}
+
+function shouldStripWorkflowArtifactAssistantNotes(
+  task: DesktopTaskDetail | undefined,
+  node: WorkflowGraphNode | undefined
+): boolean {
+  const text = [task?.title, task?.input, node?.name, node?.instruction].filter(Boolean).join(' ');
+  const isDocumentArtifact =
+    ['docx', 'markdown', 'pdf'].includes(node?.artifactType ?? '') || /文档|Word|docx|markdown|PDF/i.test(text);
+  return isDocumentArtifact && /文档|Word|docx|整理|简洁|正式|保留核心|摘要|归纳|提炼/i.test(text);
+}
+
+function stripTrailingWorkflowArtifactAssistantNotes(value: string): string {
+  return splitTrailingWorkflowArtifactAssistantNotes(value).content;
+}
+
+function extractWorkflowArtifactAssistantMessage(
+  value: string,
+  task: DesktopTaskDetail,
+  node: WorkflowGraphNode
+): string | undefined {
+  if (!shouldStripWorkflowArtifactAssistantNotes(task, node)) {
+    return undefined;
+  }
+
+  return splitTrailingWorkflowArtifactAssistantNotes(stripLeadingWorkflowTaskTitle(value, task.title)).assistantMessage;
+}
+
+function splitTrailingWorkflowArtifactAssistantNotes(value: string): {
+  content: string;
+  assistantMessage?: string;
+} {
+  const lines = value.replace(/\r\n/g, '\n').split('\n');
+  const cutIndex = lines.findIndex((line, index) => {
+    if (index < 3) {
+      return false;
+    }
+
+    const normalized = line.trim().replace(/^#+\s*/, '').replace(/^\d+[.、]\s*/, '');
+    return /^(后续建议|需补充信息|补充信息|待补充信息|处理建议|给用户的建议)[:：]?$/.test(normalized);
+  });
+
+  if (cutIndex < 0) {
+    return { content: value.trim() };
+  }
+
+  const content = lines.slice(0, cutIndex).join('\n').replace(/[-_\s\n]+$/g, '').trim();
+  const assistantMessage = lines
+    .slice(cutIndex)
+    .join('\n')
+    .replace(/^#+\s*/gm, '')
+    .replace(/^\d+[.、]\s*/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  return {
+    content,
+    assistantMessage: assistantMessage || undefined
+  };
+}
+
+function extractWorkflowArtifactTitle(content: string, task: DesktopTaskDetail): string | undefined {
+  const contentWithoutTaskTitle = stripLeadingWorkflowTaskTitle(content, task.title);
+  const line = contentWithoutTaskTitle
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .find(Boolean);
+  const title = line
+    ?.replace(/^#+\s*/, '')
+    .replace(/^\d+[.、]\s*/, '')
+    .trim();
+
+  if (!title || title.length > 80 || /^(摘要|概述|正文|任务结果|处理结果|后续建议)$/i.test(title)) {
+    return undefined;
+  }
+
+  if (/^请|^帮我|^把这个|^将这个/.test(title)) {
+    return undefined;
+  }
+
+  return title;
+}
+
+function buildWorkflowArtifactFileNameFromPayload(input: {
+  task: DesktopTaskDetail;
+  node: WorkflowGraphNode;
+  title?: string;
+}): string {
+  const title = input.title?.trim();
+  const suffix = shouldStripWorkflowArtifactAssistantNotes(input.task, input.node) ? '整理版' : input.node.name;
+
+  if (title) {
+    return buildWorkflowArtifactFileName(title, suffix);
+  }
+
+  return buildWorkflowArtifactFileName(input.task.title, input.node.name);
+}
+
+function stripWorkflowArtifactExtension(fileName: string | undefined): string | undefined {
+  const value = fileName?.trim();
+  if (!value) {
+    return undefined;
+  }
+
+  return value.replace(/\.(docx|xlsx|csv|pptx|md|markdown|pdf|png|jpe?g|mp4)$/i, '').trim() || undefined;
+}
+
+function readFirstWorkflowRuntimeString(
+  record: Record<string, unknown>,
+  keys: string[]
+): string | undefined {
+  for (const key of keys) {
+    const value = readWorkflowRuntimeString(record[key]);
+    if (value) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function writeWorkflowArtifactAssistantMessage(
+  pool: WorkflowVariablePool,
+  node: WorkflowGraphNode,
+  assistantMessage: string | undefined
+): void {
+  const message = assistantMessage?.trim();
+  if (!message) {
+    return;
+  }
+
+  pool.set(`${node.id}.assistantMessage`, message);
+  pool.set('runtime.artifact_assistant_message', message);
 }
 
 function completeWorkflowRuntimeConditionNode(input: {
@@ -3399,19 +3814,45 @@ function buildWorkflowRuntimeToolRequest(
   return undefined;
 }
 
-function selectWorkflowRuntimeModelProfile(node: WorkflowGraphNode, profiles: ModelProfile[]): ModelProfile {
-  if (node.modelProfileId) {
-    const selected = profiles.find((profile) => profile.id === node.modelProfileId);
+function selectWorkflowRuntimeModelProfile(
+  node: WorkflowGraphNode,
+  profiles: ModelProfile[],
+  rolePackage?: RolePackageManifest
+): ModelProfile {
+  const requiredModelProfileId = readDependencyManifestModelProfileIdForNode(rolePackage, node) ?? node.modelProfileId;
+  if (requiredModelProfileId) {
+    const selected = profiles.find((profile) => profile.id === requiredModelProfileId);
     if (selected) {
       return selected;
     }
 
     throw new Error(
-      `Workflow node "${node.name}" requires model profile "${node.modelProfileId}", but it is not configured or enabled on this PC.`
+      `Workflow node "${node.name}" requires model profile "${requiredModelProfileId}", but it is not configured or enabled on this PC.`
     );
   }
 
   return profiles[0]!;
+}
+
+function readDependencyManifestModelProfileIdForNode(
+  rolePackage: RolePackageManifest | undefined,
+  node: WorkflowGraphNode
+): string | undefined {
+  const modelAssets = rolePackage?.dependencyManifest?.modelAssets;
+  if (!modelAssets?.length) {
+    return undefined;
+  }
+
+  const modelAssetKey =
+    typeof node.config?.modelAssetKey === 'string' && node.config.modelAssetKey.trim()
+      ? node.config.modelAssetKey.trim()
+      : undefined;
+  const asset = modelAssetKey
+    ? modelAssets.find((item) => item.key === modelAssetKey)
+    : modelAssets.find((item) => item.nodeIds.includes(node.id));
+  const profileId = asset?.modelProfileId || asset?.modelId || asset?.key;
+
+  return profileId?.trim() || undefined;
 }
 
 function mergeWorkflowRuntimeResponses(
@@ -4268,11 +4709,21 @@ async function maybeGenerateWorkflowFallbackArtifact(input: {
   }
 
   const availableToolIds = new Set(input.binding.availableTools.map((tool) => tool.id));
-  const toolRequest = buildWorkflowFallbackArtifactToolRequest({
+  const payload = buildWorkflowArtifactPayload({
+    task: input.task,
+    node: workflowExecutionSummaryToGraphNode(artifactNode),
+    rawContent: input.response.content
+  });
+  const toolRequest = normalizeWorkflowArtifactToolRequest({
     task: input.task,
     artifactNode,
-    content: input.response.content,
-    availableToolIds
+    payload,
+    request: buildWorkflowFallbackArtifactToolRequest({
+      task: input.task,
+      artifactNode,
+      payload,
+      availableToolIds
+    })
   });
 
   if (!toolRequest) {
@@ -4434,12 +4885,12 @@ async function maybeGenerateWorkflowFallbackArtifact(input: {
 function buildWorkflowFallbackArtifactToolRequest(input: {
   task: DesktopTaskDetail;
   artifactNode: WorkflowExecutionNodeSummary;
-  content: string;
+  payload: WorkflowArtifactPayload;
   availableToolIds: Set<string>;
 }): { toolId: string; action: DesktopToolInvocationAction; input: Record<string, unknown> } | undefined {
-  const title = `${input.task.title} - ${input.artifactNode.name}`;
-  const fileName = buildWorkflowArtifactFileName(input.task.title, input.artifactNode.name);
-  const content = input.content.trim() || '任务已完成，但模型没有返回可写入的正文。';
+  const title = input.payload.title || `${input.task.title} - ${input.artifactNode.name}`;
+  const fileName = input.payload.fileName || buildWorkflowArtifactFileName(input.task.title, input.artifactNode.name);
+  const content = input.payload.content.trim() || '任务已完成，但模型没有返回可写入的正文。';
 
   if (input.artifactNode.artifactType === 'pptx' && input.availableToolIds.has('office-document')) {
     return {
@@ -4540,6 +4991,61 @@ function buildWorkflowFallbackArtifactToolRequest(input: {
   }
 
   return undefined;
+}
+
+function normalizeWorkflowArtifactToolRequest(input: {
+  task: DesktopTaskDetail;
+  artifactNode: WorkflowExecutionNodeSummary;
+  payload: WorkflowArtifactPayload;
+  request: { toolId: string; action: DesktopToolInvocationAction; input: Record<string, unknown> } | undefined;
+}): { toolId: string; action: DesktopToolInvocationAction; input: Record<string, unknown> } | undefined {
+  if (!input.request) {
+    return undefined;
+  }
+
+  const requestInput = { ...input.request.input };
+  const existingContent = readWorkflowRuntimeString(requestInput.content);
+  if (existingContent || input.payload.content) {
+    requestInput.content = normalizeWorkflowArtifactContent(
+      existingContent ?? input.payload.content,
+      input.task,
+      workflowExecutionSummaryToGraphNode(input.artifactNode)
+    );
+  }
+
+  const existingTitle = readWorkflowRuntimeString(requestInput.title);
+  if (!existingTitle || isWorkflowTaskDerivedLabel(existingTitle, input.task.title)) {
+    requestInput.title = input.payload.title ?? existingTitle ?? input.task.title;
+  }
+
+  const existingFileName = stripWorkflowArtifactExtension(readWorkflowRuntimeString(requestInput.fileName));
+  if (!existingFileName || isWorkflowTaskDerivedLabel(existingFileName, input.task.title)) {
+    requestInput.fileName =
+      input.payload.fileName ?? existingFileName ?? buildWorkflowArtifactFileName(input.task.title, input.artifactNode.name);
+  } else {
+    requestInput.fileName = existingFileName;
+  }
+
+  return {
+    ...input.request,
+    input: requestInput
+  };
+}
+
+function isWorkflowTaskDerivedLabel(value: string, taskTitle: string): boolean {
+  return areWorkflowTitleLinesEquivalent(value, taskTitle) || normalizeWorkflowTitleLine(value).startsWith('word-');
+}
+
+function workflowExecutionSummaryToGraphNode(node: WorkflowExecutionNodeSummary): WorkflowGraphNode {
+  return {
+    id: node.id,
+    type: node.type,
+    name: node.name,
+    instruction: node.instruction,
+    toolId: node.toolIds[0],
+    artifactType: node.artifactType,
+    requiresApproval: node.requiresApproval
+  };
 }
 
 function findFirstVideoAttachmentPath(paths: string[]): string | undefined {

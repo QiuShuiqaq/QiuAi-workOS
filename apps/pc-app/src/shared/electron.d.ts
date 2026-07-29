@@ -105,4 +105,8 @@ declare module 'electron' {
   export const ipcRenderer: {
     invoke<T = unknown>(channel: string, ...args: unknown[]): Promise<T>;
   };
+
+  export const webUtils: {
+    getPathForFile(file: unknown): string;
+  };
 }

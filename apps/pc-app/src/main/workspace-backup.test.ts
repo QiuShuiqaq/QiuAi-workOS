@@ -4,6 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { createDesktopRuntimePreviewState } from '../shared/desktop-state.js';
+import {
+  createMockTaskDetail,
+  toDesktopTaskSummary
+} from '../shared/workbench-data.js';
 import { loadDesktopRuntimeState, saveDesktopRuntimeState } from './runtime-store.js';
 import { getDesktopStorageLayout } from './storage-layout.js';
 import { writeTaskArtifactFile } from './artifact-store.js';
@@ -33,7 +37,7 @@ initialState.knowledgeSources = [
 ];
 const artifactWriteResult = writeTaskArtifactFile(tempDir, {
   workspaceId: initialState.localRuntime.workspaceId,
-  taskId: 'task-preview-case-review',
+  taskId: 'task-backup-fixture',
   artifact: {
     id: 'artifact-backup-test',
     type: 'report',
@@ -42,23 +46,34 @@ const artifactWriteResult = writeTaskArtifactFile(tempDir, {
     createdAt: '2026-07-20T02:01:00.000Z'
   }
 });
-initialState.taskDetails = initialState.taskDetails?.map((task) =>
-  task.taskId === 'task-preview-case-review'
-    ? {
-        ...task,
-        artifacts: [
-          {
-            id: 'artifact-backup-test',
-            type: 'report',
-            title: 'Backup Artifact',
-            content: 'Artifact content that must be copied into the backup.',
-            createdAt: '2026-07-20T02:01:00.000Z',
-            localPath: artifactWriteResult.localPath
-          }
-        ]
-      }
-    : task
-);
+const backupTask = createMockTaskDetail({
+  taskId: 'task-backup-fixture',
+  roleCode: 'ai-backup-fixture',
+  roleName: 'Backup Fixture',
+  title: 'Backup fixture task',
+  taskType: 'general_assist',
+  state: 'completed',
+  updatedAt: '2026-07-20T02:01:00.000Z',
+  artifactCount: 1,
+  costCents: 100,
+  executionContext: {
+    modelProfileIds: ['qiu-general-default'],
+    toolIds: ['office-document'],
+    knowledgeBindingIds: ['kb-local-file', 'kb-server-summary']
+  }
+});
+backupTask.artifacts = [
+  {
+    id: 'artifact-backup-test',
+    type: 'report',
+    title: 'Backup Artifact',
+    content: 'Artifact content that must be copied into the backup.',
+    createdAt: '2026-07-20T02:01:00.000Z',
+    localPath: artifactWriteResult.localPath
+  }
+];
+initialState.taskDetails = [backupTask];
+initialState.runtimeSnapshot.tasks = [toDesktopTaskSummary(backupTask)];
 
 await saveDesktopRuntimeState(tempDir, initialState);
 

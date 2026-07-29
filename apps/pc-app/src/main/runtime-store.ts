@@ -67,6 +67,7 @@ interface StoredDesktopWorkspaceRuntime {
 }
 
 const identityFileName = 'runtime-identity.json';
+const retiredBuiltInRoleCodes = new Set(['ai-operations-specialist']);
 
 export function loadRuntimeIdentity(userDataPath: string): StoredRuntimeIdentity {
   mkdirSync(userDataPath, { recursive: true });
@@ -117,13 +118,18 @@ export async function loadDesktopRuntimeState(
   const databaseSnapshot = await readWorkspaceSnapshotBundle(layout, requestedWorkspaceId);
   const databaseState = databaseSnapshot ? readPersistedDesktopRuntimeState(databaseSnapshot) : undefined;
   if (databaseState) {
-    return databaseState;
+    const sanitizedState = removeRetiredBuiltInRolePackages(databaseState);
+    if (sanitizedState !== databaseState) {
+      await saveDesktopRuntimeState(userDataPath, sanitizedState);
+    }
+    return sanitizedState;
   }
 
   const persistedState = readSplitDesktopRuntimeState(layout);
   if (persistedState) {
-    await saveDesktopRuntimeState(userDataPath, persistedState);
-    return persistedState;
+    const sanitizedState = removeRetiredBuiltInRolePackages(persistedState);
+    await saveDesktopRuntimeState(userDataPath, sanitizedState);
+    return sanitizedState;
   }
 
   const legacyState = readDesktopRuntimeState(layout.legacyRuntimeStatePath);
@@ -146,8 +152,9 @@ export async function loadDesktopRuntimeState(
     roleModelCredentialBindings: legacyState.roleModelCredentialBindings ?? []
   };
 
-  await saveDesktopRuntimeState(userDataPath, normalizedLegacyState);
-  return normalizedLegacyState;
+  const sanitizedLegacyState = removeRetiredBuiltInRolePackages(normalizedLegacyState);
+  await saveDesktopRuntimeState(userDataPath, sanitizedLegacyState);
+  return sanitizedLegacyState;
 }
 
 export async function saveDesktopRuntimeState(
@@ -175,6 +182,46 @@ export async function saveDesktopRuntimeState(
   };
 
   writeRuntimeIdentity(layout.runtimeIdentityPath, updatedIdentity);
+}
+
+function removeRetiredBuiltInRolePackages(state: DesktopRuntimeState): DesktopRuntimeState {
+  const rolePackages = state.rolePackages.filter(
+    (rolePackage) => !retiredBuiltInRoleCodes.has(rolePackage.roleCode)
+  );
+  const removedRoleCodes = new Set(
+    state.rolePackages
+      .filter((rolePackage) => retiredBuiltInRoleCodes.has(rolePackage.roleCode))
+      .map((rolePackage) => rolePackage.roleCode)
+  );
+
+  if (removedRoleCodes.size === 0) {
+    return state;
+  }
+
+  const activeRoleCode =
+    state.localRuntime.activeRoleCode && !removedRoleCodes.has(state.localRuntime.activeRoleCode)
+      ? state.localRuntime.activeRoleCode
+      : rolePackages[0]?.roleCode;
+
+  return {
+    ...state,
+    rolePackages,
+    localRuntime: {
+      ...state.localRuntime,
+      installedRoleCodes: state.localRuntime.installedRoleCodes.filter(
+        (roleCode) => !removedRoleCodes.has(roleCode)
+      ),
+      activeRoleCode
+    },
+    runtimeSnapshot: {
+      ...state.runtimeSnapshot,
+      rolePackages: state.runtimeSnapshot.rolePackages.filter(
+        (rolePackage) => !removedRoleCodes.has(rolePackage.roleCode)
+      ),
+      tasks: state.runtimeSnapshot.tasks.filter((task) => !removedRoleCodes.has(task.roleCode))
+    },
+    taskDetails: state.taskDetails?.filter((task) => !removedRoleCodes.has(task.roleCode))
+  };
 }
 
 function readRuntimeIdentity(filePath: string): StoredRuntimeIdentity | undefined {
@@ -525,6 +572,10 @@ function isRolePackageManifest(value: unknown): value is RolePackageManifest {
       (Array.isArray(record.skills) && record.skills.every(isRoleSkillSummary))) &&
     (record.workflowSteps === undefined ||
       (Array.isArray(record.workflowSteps) && record.workflowSteps.every(isRoleWorkflowStep))) &&
+    (record.dependencyManifest === undefined ||
+      (typeof record.dependencyManifest === 'object' &&
+        record.dependencyManifest !== null &&
+        !Array.isArray(record.dependencyManifest))) &&
     (record.sampleInputs === undefined ||
       (Array.isArray(record.sampleInputs) && record.sampleInputs.every((item) => typeof item === 'string'))) &&
     (record.outputFormat === undefined || typeof record.outputFormat === 'string') &&

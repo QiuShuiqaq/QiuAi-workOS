@@ -1,5 +1,7 @@
 export * from './auth';
 export * from './admin';
+export * from './asset-center';
+export * from './dependency-manifest';
 export * from './desktop-sync';
 export * from './desktop-release';
 export * from './billing';

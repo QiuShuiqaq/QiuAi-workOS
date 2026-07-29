@@ -726,6 +726,96 @@ test('admin role template factory governs publication and workspace visibility',
   }
 });
 
+test('admin asset center manages standard asset definitions', async () => {
+  const app = await createApplication();
+  app.useLogger(false);
+
+  await app.init();
+  try {
+    const loginResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: {
+        'content-type': 'application/json'
+      },
+      payload: {
+        email: 'admin@qiuai.local',
+        password: process.env.WORKOS_MOCK_ADMIN_PASSWORD ?? 'qiuai-demo'
+      }
+    });
+
+    assert.equal(loginResponse.statusCode, 201);
+    const setCookie = loginResponse.headers['set-cookie'];
+    const sessionCookie: string | undefined = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+    assert.ok(sessionCookie);
+
+    const headers = {
+      cookie: sessionCookie.split(';')[0],
+      'content-type': 'application/json'
+    };
+
+    const listResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/admin/assets?type=VARIABLE',
+      headers
+    });
+    assert.equal(listResponse.statusCode, 200);
+    const listedAssets = JSON.parse(listResponse.body).data;
+    assert.ok(listedAssets.some((asset: { key: string }) => asset.key === 'task_text'));
+
+    const assetKey = `custom_variable_${Date.now()}`;
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/assets',
+      headers,
+      payload: {
+        type: 'VARIABLE',
+        key: assetKey,
+        name: 'Custom Variable',
+        description: 'Custom variable for asset center smoke tests.',
+        category: 'custom',
+        schema: {
+          valueType: 'text',
+          usableIn: ['llm']
+        },
+        defaults: {},
+        tags: ['custom'],
+        sortOrder: 1999
+      }
+    });
+    assert.equal(createResponse.statusCode, 201);
+    const createdAsset = JSON.parse(createResponse.body).data;
+    assert.equal(createdAsset.key, assetKey);
+    assert.equal(createdAsset.status, 'ACTIVE');
+
+    const updateResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/admin/assets/${encodeURIComponent(createdAsset.id)}`,
+      headers,
+      payload: {
+        name: 'Updated Custom Variable',
+        tags: ['custom', 'updated']
+      }
+    });
+    assert.equal(updateResponse.statusCode, 200);
+    const updatedAsset = JSON.parse(updateResponse.body).data;
+    assert.equal(updatedAsset.name, 'Updated Custom Variable');
+    assert.deepEqual(updatedAsset.tags, ['custom', 'updated']);
+
+    const deleteResponse = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/admin/assets/${encodeURIComponent(createdAsset.id)}`,
+      headers: {
+        cookie: headers.cookie
+      }
+    });
+    assert.equal(deleteResponse.statusCode, 200);
+    assert.equal(JSON.parse(deleteResponse.body).data.deleted, true);
+  } finally {
+    await app.close();
+  }
+});
+
 test('desktop release publishing drives public update checks', async () => {
   const originalUploadDir = process.env.WORKOS_DESKTOP_RELEASE_UPLOAD_DIR;
   const uploadDir = mkdtempSync(join(tmpdir(), 'qiuai-desktop-release-'));

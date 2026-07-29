@@ -121,6 +121,25 @@ enum RoleTemplateStatus {
   DELETED
 }
 
+enum AssetDefinitionType {
+  VARIABLE
+  MODEL
+  TOOL
+  ARTIFACT_TEMPLATE
+  NODE_TEMPLATE
+}
+
+enum AssetDefinitionStatus {
+  ACTIVE
+  DISABLED
+  ARCHIVED
+}
+
+enum AssetDefinitionScope {
+  SYSTEM
+  CUSTOM
+}
+
 enum TaskStatus {
   QUEUED
   RUNNING
@@ -574,6 +593,7 @@ model RoleTemplate {
   skills              Json
   workflowSteps       Json     @default("[]") @map("workflow_steps")
   workflowGraph       Json     @default("{}") @map("workflow_graph")
+  dependencyManifest  Json     @default("{}") @map("dependency_manifest")
   sampleInputs        Json     @default("[]") @map("sample_inputs")
   outputFormat        String?  @map("output_format")
   approvalPolicy      String   @map("approval_policy")
@@ -591,6 +611,31 @@ model RoleTemplate {
   @@index([status])
   @@index([version])
   @@map("role_templates")
+}
+
+model AssetDefinition {
+  id          String                @id @default(uuid()) @db.Uuid
+  type        AssetDefinitionType
+  key         String
+  name        String
+  description String?
+  category    String
+  status      AssetDefinitionStatus @default(ACTIVE)
+  scope       AssetDefinitionScope  @default(CUSTOM)
+  version     String                @default("1.0.0")
+  schema      Json                  @default("{}")
+  defaults    Json                  @default("{}")
+  tags        Json                  @default("[]")
+  sortOrder   Int                   @default(1000) @map("sort_order")
+  createdAt   DateTime              @default(now()) @map("created_at")
+  updatedAt   DateTime              @updatedAt @map("updated_at")
+
+  @@unique([type, key])
+  @@index([type])
+  @@index([status])
+  @@index([category])
+  @@index([sortOrder])
+  @@map("asset_definitions")
 }
 
 model RoleInstance {

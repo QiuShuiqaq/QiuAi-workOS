@@ -10,7 +10,6 @@ import type {
   DesktopRuntimeState,
   DesktopServerConnectionStatus
 } from './desktop-api.js';
-import { createDesktopPreviewTaskDetails, toDesktopTaskSummary } from './workbench-data.js';
 
 export interface CreateDesktopRuntimeStateInput {
   app: DesktopAppInfo;
@@ -21,19 +20,7 @@ export interface CreateDesktopRuntimeStateInput {
   serverConnection?: DesktopServerConnectionStatus;
 }
 
-const initialRolePackages: RolePackageManifest[] = [
-  {
-    roleCode: 'ai-operations-specialist',
-    name: 'AI Operations Specialist',
-    version: '0.1.0',
-    summary: 'Handles content review, title generation, publication prep, and daily reports.',
-    modelProfileIds: ['qiu-general-default', 'qiu-vision-default'],
-    toolIds: [],
-    requiredKnowledgeSources: ['local_folder', 'server_summary'],
-    defaultTaskTypes: ['content_review', 'publish_plan', 'daily_report'],
-    syncPolicy: 'summary_only'
-  }
-];
+const initialRolePackages: RolePackageManifest[] = [];
 
 const initialModelProfiles: ModelProfile[] = [
   {
@@ -78,8 +65,8 @@ export function createInitialDesktopRuntimeState(
   input: CreateDesktopRuntimeStateInput
 ): DesktopRuntimeState {
   const installedRoleCodes = initialRolePackages.map((rolePackage) => rolePackage.roleCode);
-  const taskDetails = createDesktopPreviewTaskDetails();
-  const runtimeTasks = taskDetails.map(toDesktopTaskSummary);
+  const taskDetails: NonNullable<DesktopRuntimeState['taskDetails']> = [];
+  const runtimeTasks: DesktopTaskSummary[] = [];
   const taskCountByRole = countTasksByRole(runtimeTasks);
   const lastTaskAtByRole = lastTaskAtMap(runtimeTasks);
   const enabledToolIds: string[] = [];

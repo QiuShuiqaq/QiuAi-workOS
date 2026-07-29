@@ -1,4 +1,5 @@
 import type { DesktopToolActionHealthSummary } from './desktop-sync';
+import type { RoleTemplateDependencyManifest } from './dependency-manifest';
 import type { PaginationMeta } from './pagination';
 import type { RoleSkillSummary, RoleTemplateWorkflowStep } from './role';
 import type { RoleWorkflowGraph } from './workflow-graph';
@@ -20,6 +21,7 @@ export interface AdminRoleTemplateDetail {
   skills: RoleSkillSummary[];
   workflowSteps: RoleTemplateWorkflowStep[];
   workflowGraph?: RoleWorkflowGraph;
+  dependencyManifest?: RoleTemplateDependencyManifest;
   sampleInputs: string[];
   outputFormat: string;
   approvalPolicy: string;

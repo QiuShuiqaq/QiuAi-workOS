@@ -6,6 +6,7 @@ import {
   AppstoreAddOutlined,
   CloudDownloadOutlined,
   DashboardOutlined,
+  DatabaseOutlined,
   DollarOutlined,
   LogoutOutlined,
   PlusCircleOutlined,
@@ -35,6 +36,7 @@ function selectedKey(pathname: string) {
   if (pathname.startsWith('/plans')) return 'plans';
   if (pathname.startsWith('/workspaces')) return 'workspaces';
   if (pathname.startsWith('/desktop-releases')) return 'desktop-releases';
+  if (pathname.startsWith('/assets')) return 'assets';
   if (pathname.startsWith('/audit')) return 'audit';
   if (pathname.startsWith('/templates/canvas') || pathname.startsWith('/templates/new')) return 'templates-canvas';
   if (pathname.startsWith('/templates')) return 'templates';
@@ -119,6 +121,11 @@ export function AdminShell({ currentAccount, children }: AdminShellProps) {
               key: 'templates-canvas',
               icon: <PlusCircleOutlined />,
               label: <Link href="/templates/canvas">工作画布</Link>
+            },
+            {
+              key: 'assets',
+              icon: <DatabaseOutlined />,
+              label: <Link href="/assets">资产中心</Link>
             },
             {
               key: 'desktop-releases',

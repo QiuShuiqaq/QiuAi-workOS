@@ -1,3 +1,4 @@
+import type { RoleTemplateDependencyManifest } from './dependency-manifest';
 import type { RoleWorkflowGraph } from './workflow-graph';
 
 export interface RoleSkillSummary {
@@ -38,6 +39,7 @@ export interface RoleTemplateSummary {
   skills: RoleSkillSummary[];
   workflowSteps: RoleTemplateWorkflowStep[];
   workflowGraph?: RoleWorkflowGraph;
+  dependencyManifest?: RoleTemplateDependencyManifest;
   sampleInputs: string[];
   outputFormat: string;
   approvalPolicy: string;

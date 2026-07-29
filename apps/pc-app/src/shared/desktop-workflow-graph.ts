@@ -236,13 +236,20 @@ export function buildWorkflowExecutionPlan(input: {
     task: input.task,
     createdAt: input.createdAt
   });
-  const requiredModelProfileIds = [
+  const graphRequiredModelProfileIds = [
     ...new Set(selection.orderedNodes.flatMap((node) => (node.modelProfileId ? [node.modelProfileId] : [])))
   ];
-  const requiredToolIds = [...new Set(graph.nodes.flatMap((node) => readWorkflowNodeToolIds(node)))];
+  const manifestModelProfileIds = readDependencyManifestModelProfileIds(input.rolePackage.dependencyManifest);
+  const requiredModelProfileIds =
+    manifestModelProfileIds.length > 0 ? manifestModelProfileIds : graphRequiredModelProfileIds;
+  const manifestToolIds = readDependencyManifestToolIds(input.rolePackage.dependencyManifest);
+  const requiredToolIds =
+    manifestToolIds.length > 0
+      ? manifestToolIds
+      : [...new Set(graph.nodes.flatMap((node) => readWorkflowNodeToolIds(node)))];
   const orderedNodeSummaries = selection.orderedNodes.map(toWorkflowExecutionNodeSummary);
-  const preferredModelProfileId = selection.orderedNodes.find((node) => node.modelProfileId)
-    ?.modelProfileId;
+  const preferredModelProfileId =
+    requiredModelProfileIds[0] ?? selection.orderedNodes.find((node) => node.modelProfileId)?.modelProfileId;
   const promptContext = buildWorkflowPromptContext({
     graph,
     orderedNodes: selection.orderedNodes,
@@ -603,6 +610,30 @@ function readWorkflowNodeToolIds(node: WorkflowGraphNode): string[] {
       ...configToolIds.map((toolId) => toolId.trim())
     ])
   ];
+}
+
+function readDependencyManifestModelProfileIds(
+  manifest: RolePackageManifest['dependencyManifest']
+): string[] {
+  if (!manifest?.modelAssets?.length) {
+    return [];
+  }
+
+  return uniqueStrings(
+    manifest.modelAssets.map((asset) => asset.modelProfileId || asset.modelId || asset.key)
+  );
+}
+
+function readDependencyManifestToolIds(manifest: RolePackageManifest['dependencyManifest']): string[] {
+  if (!manifest?.toolActions?.length) {
+    return [];
+  }
+
+  return uniqueStrings(manifest.toolActions.map((action) => action.packageId));
+}
+
+function uniqueStrings(values: Array<string | undefined>): string[] {
+  return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))];
 }
 
 function formatWorkflowEdgeConditionNote(edge: WorkflowGraphEdge): string | undefined {

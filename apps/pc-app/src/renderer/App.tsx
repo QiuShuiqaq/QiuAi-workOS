@@ -78,6 +78,7 @@ import type {
   ModelProviderCatalog,
   ModelProfile,
   RoleModelCredentialBinding,
+  RoleTemplateDependencyManifest,
   RolePackageManifest,
   ToolManifest
 } from '../shared/desktop-contract';
@@ -128,7 +129,9 @@ interface DesktopClientPreferences {
   startupSection: SectionKey;
 }
 
-type DesktopRoleTemplate = RoleTemplateCatalogEntry;
+type DesktopRoleTemplate = RoleTemplateCatalogEntry & {
+  dependencyManifest?: RoleTemplateDependencyManifest;
+};
 
 interface TaskFormValues {
   roleCode: string;
@@ -688,6 +691,9 @@ function cloneJsonValue<T>(value: T | undefined): T | undefined {
 function toDesktopRoleTemplate(summary: DesktopAuthorizedRoleTemplateSummary): DesktopRoleTemplate {
   const roleCode = createRoleCodeFromTemplateId(summary.id);
   const workflowGraph = cloneJsonValue(summary.workflowGraph) as DesktopRoleTemplate['workflowGraph'];
+  const dependencyManifest = cloneRoleTemplateDependencyManifest(summary.dependencyManifest);
+  const manifestModelProfileIds = readDependencyManifestModelProfileIds(dependencyManifest);
+  const manifestToolIds = readDependencyManifestToolIds(dependencyManifest);
 
   return {
     templateId: summary.id,
@@ -709,15 +715,80 @@ function toDesktopRoleTemplate(summary: DesktopAuthorizedRoleTemplateSummary): D
       toolIds: step.toolIds ? [...step.toolIds] : undefined
     })),
     workflowGraph,
+    dependencyManifest,
     sampleInputs: [...(summary.sampleInputs ?? [])],
     outputFormat: summary.outputFormat ?? '',
-    modelProfileIds: inferDesktopModelProfileIds(workflowGraph),
-    toolIds: inferDesktopToolIds(summary),
+    modelProfileIds:
+      manifestModelProfileIds.length > 0
+        ? manifestModelProfileIds
+        : inferDesktopModelProfileIds(workflowGraph),
+    toolIds:
+      manifestToolIds.length > 0
+        ? manifestToolIds
+        : inferDesktopToolIds(summary),
     requiredKnowledgeSources: inferRequiredKnowledgeSources(summary),
     defaultTaskTypes: inferDefaultTaskTypes(summary),
     syncPolicy: 'summary_only',
     installNote: '由平台授权模板生成，可按企业实际情况配置模型、工具和知识来源。'
   };
+}
+
+function cloneRoleTemplateDependencyManifest(
+  manifest: RoleTemplateDependencyManifest | undefined
+): RoleTemplateDependencyManifest | undefined {
+  if (!isRoleTemplateDependencyManifest(manifest)) {
+    return undefined;
+  }
+
+  return cloneJsonValue(manifest);
+}
+
+function isRoleTemplateDependencyManifest(value: unknown): value is RoleTemplateDependencyManifest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  const record = value as Partial<RoleTemplateDependencyManifest>;
+  return (
+    record.version === '1.0.0' &&
+    typeof record.generatedAt === 'string' &&
+    Array.isArray(record.variables) &&
+    Array.isArray(record.modelAssets) &&
+    Array.isArray(record.toolActions) &&
+    Array.isArray(record.artifactTemplates) &&
+    Array.isArray(record.nodeTemplates) &&
+    Array.isArray(record.warnings)
+  );
+}
+
+function readDependencyManifestModelProfileIds(
+  manifest: RoleTemplateDependencyManifest | undefined
+): string[] {
+  if (!manifest) {
+    return [];
+  }
+
+  return mergeUniqueStrings(
+    manifest.modelAssets
+      .map((asset) => asset.modelProfileId || asset.modelId || asset.key)
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
+    []
+  );
+}
+
+function readDependencyManifestToolIds(
+  manifest: RoleTemplateDependencyManifest | undefined
+): string[] {
+  if (!manifest) {
+    return [];
+  }
+
+  return mergeUniqueStrings(
+    manifest.toolActions
+      .map((action) => action.packageId)
+      .filter((value) => value.trim().length > 0),
+    []
+  );
 }
 
 function inferDesktopModelProfileIds(workflowGraph: DesktopRoleTemplate['workflowGraph']): string[] {
@@ -2499,7 +2570,7 @@ export default function App() {
       (rolePackage) => rolePackage.roleCode === roleConfigRoleCode
     );
     const roleConfigPreviewPackage = roleConfigTemplate
-      ? roleConfigRolePackage ?? toInstalledRolePackage(roleConfigTemplate)
+      ? toConfiguredRolePackagePreview(roleConfigTemplate, roleConfigRolePackage)
       : undefined;
     const roleConfigModelRequirements = roleConfigPreviewPackage
       ? getRoleModelRuntimeRequirementStatuses(
@@ -2729,11 +2800,9 @@ export default function App() {
                 layout="vertical"
                 id="role-config-form"
                 initialValues={{
-                  modelProfileIds: roleConfigRolePackage?.modelProfileIds ?? roleConfigTemplate.modelProfileIds,
-                  toolIds: roleConfigRolePackage?.toolIds ?? roleConfigTemplate.toolIds,
-                  knowledgeSources:
-                    roleConfigRolePackage?.requiredKnowledgeSources ??
-                    roleConfigTemplate.requiredKnowledgeSources,
+                  modelProfileIds: roleConfigPreviewPackage?.modelProfileIds ?? roleConfigTemplate.modelProfileIds,
+                  toolIds: roleConfigPreviewPackage?.toolIds ?? roleConfigTemplate.toolIds,
+                  knowledgeSources: roleConfigPreviewPackage?.requiredKnowledgeSources ?? roleConfigTemplate.requiredKnowledgeSources,
                   modelCredentialBindings: roleConfigCredentialInitialValues
                 }}
                 onFinish={submitRoleConfig}
@@ -2755,10 +2824,11 @@ export default function App() {
                     allowClear
                     optionLabelProp="label"
                     placeholder="选择可调用的工具"
-                    options={runtimeState.tools.map((tool) => ({
-                      label: tool.name,
-                      value: tool.id
+                    options={(roleConfigPreviewPackage?.toolIds ?? roleConfigTemplate.toolIds).map((toolId) => ({
+                      label: resolveToolLabel(runtimeState.tools, toolId),
+                      value: toolId
                     }))}
+                    disabled
                   />
                 </Form.Item>
 
@@ -3640,11 +3710,11 @@ export default function App() {
         (rolePackage) => rolePackage.roleCode === template.roleCode
       );
       const now = new Date().toISOString();
+      const templateRolePackage = toInstalledRolePackage(template);
       const configuredRolePackage = {
-        ...(existingRole ?? toInstalledRolePackage(template)),
-        modelProfileIds: template.modelProfileIds,
-        toolIds: values?.toolIds ?? template.toolIds,
-        requiredKnowledgeSources: values?.knowledgeSources ?? template.requiredKnowledgeSources
+        ...templateRolePackage,
+        toolIds: templateRolePackage.toolIds,
+        requiredKnowledgeSources: values?.knowledgeSources ?? templateRolePackage.requiredKnowledgeSources
       };
       const installedRolePackage = {
         ...configuredRolePackage,
@@ -4176,8 +4246,10 @@ export default function App() {
     }
 
     const currentRolePackage =
-      runtimeState.rolePackages.find((rolePackage) => rolePackage.roleCode === roleCode) ??
-      toInstalledRolePackage(template);
+      toConfiguredRolePackagePreview(
+        template,
+        runtimeState.rolePackages.find((rolePackage) => rolePackage.roleCode === roleCode)
+      );
 
     setRoleConfigRoleCode(roleCode);
     setRoleConfigMode(mode);
@@ -4210,7 +4282,7 @@ export default function App() {
     const previewRolePackage: RolePackageManifest = {
       ...toInstalledRolePackage(template),
       modelProfileIds: template.modelProfileIds,
-      toolIds: values.toolIds,
+      toolIds: template.toolIds,
       requiredKnowledgeSources: values.knowledgeSources
     };
     const normalizedPreviewRolePackage: RolePackageManifest = {
@@ -4904,7 +4976,12 @@ function hasDraggedFiles(dataTransfer: DataTransfer) {
 
 function getFileLocalPath(file: File): string | undefined {
   const candidate = file as File & { path?: unknown };
-  return typeof candidate.path === 'string' && candidate.path.trim() ? candidate.path.trim() : undefined;
+  if (typeof candidate.path === 'string' && candidate.path.trim()) {
+    return candidate.path.trim();
+  }
+
+  const bridgePath = window.qiuDesktop?.getPathForFile(file);
+  return typeof bridgePath === 'string' && bridgePath.trim() ? bridgePath.trim() : undefined;
 }
 
 function formatFileSize(size: number) {
@@ -5300,6 +5377,7 @@ function toInstalledRolePackage(template: DesktopRoleTemplate): RolePackageManif
       toolIds: step.toolIds ? [...step.toolIds] : undefined
     })),
     workflowGraph: cloneJsonValue(template.workflowGraph),
+    dependencyManifest: cloneRoleTemplateDependencyManifest(template.dependencyManifest),
     sampleInputs: [...(template.sampleInputs ?? [])],
     outputFormat: template.outputFormat,
     modelProfileIds: [...template.modelProfileIds],
@@ -5307,6 +5385,19 @@ function toInstalledRolePackage(template: DesktopRoleTemplate): RolePackageManif
     requiredKnowledgeSources: [...template.requiredKnowledgeSources],
     defaultTaskTypes: [...template.defaultTaskTypes],
     syncPolicy: template.syncPolicy
+  };
+}
+
+function toConfiguredRolePackagePreview(
+  template: DesktopRoleTemplate,
+  installedRolePackage: RolePackageManifest | undefined
+): RolePackageManifest {
+  const templateRolePackage = toInstalledRolePackage(template);
+
+  return {
+    ...templateRolePackage,
+    requiredKnowledgeSources:
+      installedRolePackage?.requiredKnowledgeSources ?? templateRolePackage.requiredKnowledgeSources
   };
 }
 
