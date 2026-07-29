@@ -100,8 +100,8 @@ const artifactTemplateAssets: ServerAssetDefinitionSeed[] = [
   artifactTemplate('analysis-xlsx', '分析表格 Excel', 'xlsx', ['artifact_title', 'table_rows'], 'spreadsheet.write_xlsx', '{{artifact_title}}-分析表'),
   artifactTemplate('quote-xlsx', '报价清单 Excel', 'xlsx', ['artifact_title', 'table_rows'], 'spreadsheet.write_xlsx', '{{artifact_title}}-报价清单'),
   artifactTemplate('plain-markdown', 'Markdown 文档', 'markdown', ['artifact_title', 'final_content'], 'office.write_markdown_document', '{{artifact_title}}'),
-  artifactTemplate('summary-pdf', 'PDF 摘要文档', 'pdf', ['artifact_title', 'final_content'], 'office.write_docx_document', '{{artifact_title}}-摘要'),
-  artifactTemplate('slides-pptx', '演示 PPT', 'pptx', ['artifact_title', 'table_rows'], 'presentation.write_pptx', '{{artifact_title}}-演示稿')
+  artifactTemplate('summary-docx', '摘要 Word 文档', 'docx', ['artifact_title', 'final_content'], 'office.write_docx_document', '{{artifact_title}}-摘要'),
+  artifactTemplate('slides-pptx', '演示 PPT', 'pptx', ['artifact_title', 'final_content'], 'presentation.write_pptx', '{{artifact_title}}-演示稿')
 ];
 
 const nodeTemplateAssets: ServerAssetDefinitionSeed[] = [

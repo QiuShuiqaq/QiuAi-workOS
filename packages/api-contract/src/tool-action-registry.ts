@@ -271,20 +271,24 @@ export const qiuaiToolActions: ToolActionDefinition[] = [
     category: 'document',
     description: '把二维数组或对象数组写成 xlsx 文件。',
     input: [
-      { key: 'rows', label: '表格行', type: 'table', required: true },
+      { key: 'rows', label: '表格行', type: 'table' },
+      { key: 'content', label: '表格内容', type: 'text' },
       { key: 'fileName', label: '文件名', type: 'text' }
     ],
     output: [
       { key: 'artifact', label: 'Excel 文件', type: 'artifact' }
     ],
     defaultInput: {
+      title: '{{task.title}}',
       folder: 'spreadsheets',
       fileName: '{{task.title}}',
-      rows: [['项目', '内容'], ['结果', '{{runtime.previous_text}}']]
+      content: '{{runtime.previous_text}}'
     },
     uiFields: [
+      { key: 'title', label: '标题' },
       { key: 'folder', label: '目录' },
       { key: 'fileName', label: '文件名' },
+      { key: 'content', label: '内容', type: 'textarea', format: 'text', placeholder: '{{runtime.previous_text}}' },
       { key: 'rows', label: '行数据 JSON', type: 'textarea', format: 'json', placeholder: '[["项目","内容"],["结果","{{runtime.previous_text}}"]]' }
     ],
     requiredConfig: [],
@@ -299,20 +303,24 @@ export const qiuaiToolActions: ToolActionDefinition[] = [
     category: 'document',
     description: '把二维数组或对象数组写成 csv 文件。',
     input: [
-      { key: 'rows', label: '表格行', type: 'table', required: true },
+      { key: 'rows', label: '表格行', type: 'table' },
+      { key: 'content', label: '表格内容', type: 'text' },
       { key: 'fileName', label: '文件名', type: 'text' }
     ],
     output: [
       { key: 'artifact', label: 'CSV 文件', type: 'artifact' }
     ],
     defaultInput: {
+      title: '{{task.title}}',
       folder: 'spreadsheets',
       fileName: '{{task.title}}',
-      rows: [['项目', '内容'], ['结果', '{{runtime.previous_text}}']]
+      content: '{{runtime.previous_text}}'
     },
     uiFields: [
+      { key: 'title', label: '标题' },
       { key: 'folder', label: '目录' },
       { key: 'fileName', label: '文件名' },
+      { key: 'content', label: '内容', type: 'textarea', format: 'text', placeholder: '{{runtime.previous_text}}' },
       { key: 'rows', label: '行数据 JSON', type: 'textarea', format: 'json', placeholder: '[["项目","内容"],["结果","{{runtime.previous_text}}"]]' }
     ],
     requiredConfig: [],
@@ -327,7 +335,8 @@ export const qiuaiToolActions: ToolActionDefinition[] = [
     category: 'document',
     description: '根据幻灯片 JSON 生成 pptx 文件。',
     input: [
-      { key: 'slides', label: '幻灯片', type: 'json', required: true },
+      { key: 'slides', label: '幻灯片', type: 'json' },
+      { key: 'content', label: '演示内容', type: 'text' },
       { key: 'fileName', label: '文件名', type: 'text' }
     ],
     output: [
@@ -337,12 +346,13 @@ export const qiuaiToolActions: ToolActionDefinition[] = [
       title: '{{task.title}}',
       folder: 'presentations',
       fileName: '{{task.title}}',
-      slides: [{ title: '{{task.title}}', bullets: ['{{runtime.previous_text}}'] }]
+      content: '{{runtime.previous_text}}'
     },
     uiFields: [
       { key: 'title', label: '标题' },
       { key: 'folder', label: '目录' },
       { key: 'fileName', label: '文件名' },
+      { key: 'content', label: '内容', type: 'textarea', format: 'text', placeholder: '{{runtime.previous_text}}' },
       { key: 'slides', label: '幻灯片 JSON', type: 'textarea', format: 'json', placeholder: '[{"title":"标题","bullets":["要点"]}]' }
     ],
     requiredConfig: [],

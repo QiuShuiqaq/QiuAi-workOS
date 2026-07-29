@@ -235,7 +235,8 @@ export function buildWorkflowGraphFromSteps(steps: WorkflowStepLike[]): ServerRo
       toolId: artifactType === 'mp4' ? 'video-processing' : 'office-document',
       artifactType,
       inputVariables: ['draft_result.text'],
-      outputVariables: ['deliverable_file']
+      outputVariables: ['deliverable_file'],
+      config: buildArtifactWriterConfig(artifactType, '{{draft_text}}')
     },
     {
       id: 'final_output',
@@ -291,6 +292,58 @@ function inferArtifactTypeFromSteps(
   }
 
   return 'docx';
+}
+
+function buildArtifactWriterConfig(
+  artifactType: NonNullable<ServerRoleWorkflowGraphNode['artifactType']>,
+  contentRef: string
+): Record<string, unknown> {
+  const title = '{{task.title}}';
+  const fileName = '{{task.title}}';
+
+  if (artifactType === 'docx') {
+    return {
+      action: 'office.write_docx_document',
+      input: { title, folder: 'documents', fileName, content: contentRef }
+    };
+  }
+
+  if (artifactType === 'markdown') {
+    return {
+      action: 'office.write_markdown_document',
+      input: { title, folder: 'documents', fileName, content: contentRef }
+    };
+  }
+
+  if (artifactType === 'xlsx' || artifactType === 'csv') {
+    return {
+      action: artifactType === 'csv' ? 'spreadsheet.write_csv' : 'spreadsheet.write_xlsx',
+      input: { title, folder: 'spreadsheets', fileName, content: contentRef }
+    };
+  }
+
+  if (artifactType === 'pptx') {
+    return {
+      action: 'presentation.write_pptx',
+      input: { title, folder: 'presentations', fileName, content: contentRef }
+    };
+  }
+
+  if (artifactType === 'mp4') {
+    return {
+      action: 'video.compose_clips',
+      input: {
+        videoPath: '$runtime.current_item.localPath',
+        cutPlan: '$analyze_video.json.cutPlan',
+        folder: 'videos',
+        fileName
+      }
+    };
+  }
+
+  return {
+    input: { title, folder: 'documents', fileName, content: contentRef }
+  };
 }
 
 export function normalizeWorkflowGraph(

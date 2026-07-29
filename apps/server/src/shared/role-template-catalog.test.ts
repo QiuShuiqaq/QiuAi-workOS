@@ -126,5 +126,56 @@ test('server role template catalog is focused and production-oriented', () => {
 
     const artifactAction = artifactNode.config?.action;
     assert.equal(typeof artifactAction, 'string', `${template.templateId} artifact must define a concrete tool action`);
+    assert.equal(
+      artifactAction,
+      expectedArtifactAction(artifactNode.artifactType),
+      `${template.templateId} artifact action must match artifact type`
+    );
+    const artifactInput = readRecord(artifactNode.config?.input);
+    assert.ok(artifactInput, `${template.templateId} artifact must define writer input`);
+    assert.equal(typeof artifactInput.folder, 'string', `${template.templateId} artifact must define output folder`);
+    assert.equal(typeof artifactInput.fileName, 'string', `${template.templateId} artifact must define file name`);
+    if (artifactNode.artifactType === 'docx' || artifactNode.artifactType === 'markdown') {
+      assert.equal(typeof artifactInput.title, 'string', `${template.templateId} document artifact must define title`);
+      assert.equal(typeof artifactInput.content, 'string', `${template.templateId} document artifact must define content`);
+    }
+    if (artifactNode.artifactType === 'xlsx' || artifactNode.artifactType === 'csv') {
+      assert.ok(
+        typeof artifactInput.content === 'string' || Array.isArray(artifactInput.rows) || Array.isArray(artifactInput.sheets),
+        `${template.templateId} spreadsheet artifact must define content, rows, or sheets`
+      );
+    }
+    if (typeof artifactInput.content === 'string') {
+      assert.notEqual(
+        artifactInput.content,
+        '{{runtime.previous_text}}',
+        `${template.templateId} artifact must bind content to a stable upstream output`
+      );
+    }
   }
 });
+
+function expectedArtifactAction(artifactType: string | undefined): string | undefined {
+  switch (artifactType) {
+    case 'docx':
+      return 'office.write_docx_document';
+    case 'markdown':
+      return 'office.write_markdown_document';
+    case 'xlsx':
+      return 'spreadsheet.write_xlsx';
+    case 'csv':
+      return 'spreadsheet.write_csv';
+    case 'pptx':
+      return 'presentation.write_pptx';
+    case 'mp4':
+      return 'video.compose_clips';
+    default:
+      return undefined;
+  }
+}
+
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}

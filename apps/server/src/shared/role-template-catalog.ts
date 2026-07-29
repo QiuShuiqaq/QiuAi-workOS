@@ -319,7 +319,11 @@ function buildRunnableWorkflowGraphForTemplate(
       toolId: artifactType === 'mp4' ? 'video-processing' : 'office-document',
       artifactType,
       inputVariables: ['draft_result.text'],
-      outputVariables: ['deliverable_file']
+      outputVariables: ['deliverable_file'],
+      config: buildArtifactWriterConfig({
+        artifactType,
+        contentRef: '{{draft_text}}'
+      })
     },
     {
       id: 'final_output',
@@ -360,20 +364,95 @@ function buildRunnableWorkflowGraphForTemplate(
 
 type OfficeProductionWorkflowArtifactType = Extract<
   NonNullable<ServerRoleWorkflowGraph['nodes'][number]['artifactType']>,
-  'docx' | 'xlsx' | 'pptx' | 'pdf' | 'markdown'
+  'docx' | 'xlsx' | 'pptx' | 'markdown'
 >;
+type ServerWorkflowArtifactType = NonNullable<ServerRoleWorkflowGraph['nodes'][number]['artifactType']>;
 
-function officeArtifactAction(artifactType: OfficeProductionWorkflowArtifactType): string {
+function artifactWriterAction(artifactType: ServerWorkflowArtifactType): string | undefined {
   switch (artifactType) {
     case 'xlsx':
       return 'spreadsheet.write_xlsx';
+    case 'csv':
+      return 'spreadsheet.write_csv';
     case 'pptx':
       return 'presentation.write_pptx';
     case 'docx':
       return 'office.write_docx_document';
-    default:
+    case 'markdown':
       return 'office.write_markdown_document';
+    case 'mp4':
+      return 'video.compose_clips';
+    default:
+      return undefined;
   }
+}
+
+function buildArtifactWriterConfig(input: {
+  artifactType: ServerWorkflowArtifactType;
+  contentRef: string;
+  fileNameSuffix?: string;
+}): { action?: string; input?: Record<string, unknown> } {
+  const action = artifactWriterAction(input.artifactType);
+  const title = '{{task.title}}';
+  const fileName = `{{task.title}}${input.fileNameSuffix ?? ''}`;
+
+  if (input.artifactType === 'docx' || input.artifactType === 'markdown') {
+    return {
+      action,
+      input: {
+        title,
+        folder: 'documents',
+        fileName,
+        content: input.contentRef
+      }
+    };
+  }
+
+  if (input.artifactType === 'xlsx' || input.artifactType === 'csv') {
+    return {
+      action,
+      input: {
+        title,
+        folder: 'spreadsheets',
+        fileName,
+        content: input.contentRef
+      }
+    };
+  }
+
+  if (input.artifactType === 'pptx') {
+    return {
+      action,
+      input: {
+        title,
+        folder: 'presentations',
+        fileName,
+        content: input.contentRef
+      }
+    };
+  }
+
+  if (input.artifactType === 'mp4') {
+    return {
+      action,
+      input: {
+        videoPath: '$runtime.current_item.localPath',
+        cutPlan: '$analyze_video.json.cutPlan',
+        folder: 'videos',
+        fileName
+      }
+    };
+  }
+
+  return {
+    action,
+    input: {
+      title,
+      folder: 'documents',
+      fileName,
+      content: input.contentRef
+    }
+  };
 }
 
 function graphEdge(sourceNodeId: string, targetNodeId: string): ServerRoleWorkflowGraph['edges'][number] {
@@ -511,9 +590,11 @@ function buildOfficeProductionWorkflowGraph(input: {
       artifactType: input.artifactType,
       inputVariables: ['deliverable_content', 'quality_review'],
       outputVariables: ['deliverable_file'],
-      config: {
-        action: officeArtifactAction(input.artifactType)
-      }
+      config: buildArtifactWriterConfig({
+        artifactType: input.artifactType,
+        contentRef: '{{deliverable_content}}',
+        fileNameSuffix: input.artifactType === 'docx' ? '-整理版' : undefined
+      })
     },
     {
       id: 'final_output',

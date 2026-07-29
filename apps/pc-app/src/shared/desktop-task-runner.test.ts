@@ -1089,6 +1089,95 @@ assert.match(
   /产品型号和质保政策/
 );
 
+let workflowMismatchedDocxActionToolCallCount = 0;
+const workflowMismatchedDocxActionTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-mismatched-docx-action-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: '整理产品文档',
+    input: '整理产品文档并输出 Word。',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    toolIds: ['office-document'],
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'prepare_content',
+          type: 'data',
+          name: 'Prepare deliverable content',
+          config: {
+            dataMode: 'assign',
+            values: {
+              deliverable_content: '产品文档整理正文。'
+            }
+          }
+        },
+        {
+          id: 'write_doc',
+          type: 'artifact',
+          name: 'Write Word deliverable',
+          toolId: 'office-document',
+          artifactType: 'docx',
+          inputVariables: ['deliverable_content'],
+          config: {
+            action: 'office.write_markdown_document',
+            input: {
+              title: '错误 Markdown 配置',
+              folder: 'documents',
+              fileName: 'wrong-markdown-file',
+              content: '{{deliverable_content}}'
+            }
+          }
+        }
+      ],
+      edges: [
+        { id: 'start-prepare', sourceNodeId: 'start', targetNodeId: 'prepare_content', condition: { type: 'always' } },
+        { id: 'prepare-write', sourceNodeId: 'prepare_content', targetNodeId: 'write_doc', condition: { type: 'always' } }
+      ]
+    }
+  },
+  workspaceId: 'workspace-workflow-mismatched-docx-action',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['office-document'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async () => {
+    throw new Error('Mismatched artifact action should be corrected by fallback without invoking model.');
+  },
+  desktopToolInvoker: async (request) => {
+    workflowMismatchedDocxActionToolCallCount += 1;
+    assert.equal(request.toolId, 'office-document');
+    assert.equal(request.action, 'office.write_docx_document');
+    assert.match(String(request.input.content), /产品文档整理正文/);
+    assert.notEqual(request.input.fileName, 'wrong-markdown-file');
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\documents\\product-doc.docx'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:05.910Z'
+});
+
+assert.equal(workflowMismatchedDocxActionToolCallCount, 1);
+assert.equal(workflowMismatchedDocxActionTask.task.state, 'completed');
+assert.equal(
+  workflowMismatchedDocxActionTask.task.artifacts[0]?.localPath,
+  'C:\\QiuAI\\workspace\\documents\\product-doc.docx'
+);
+
 let workflowCleanXlsxArtifactToolCallCount = 0;
 const workflowCleanXlsxArtifactTask = await runDesktopTask({
   task: createMockTaskDetail({

@@ -341,13 +341,9 @@ const artifactTypeOptions: Array<{ value: WorkflowArtifactType; label: string }>
   'docx',
   'xlsx',
   'pptx',
-  'pdf',
-  'png',
-  'jpg',
   'mp4',
   'markdown',
-  'csv',
-  'zip'
+  'csv'
 ].map((value) => ({ value: value as WorkflowArtifactType, label: value }));
 
 const conditionTypeOptions: Array<{ value: WorkflowEdgeConditionType; label: string }> = [
@@ -823,6 +819,24 @@ function readWorkflowToolInputConfig(node: RoleWorkflowGraphNode): Record<string
   return node.config?.input && typeof node.config.input === 'object' && !Array.isArray(node.config.input)
     ? (node.config.input as Record<string, unknown>)
     : {};
+}
+
+function mergeWorkflowToolInputDefaults(
+  defaults: Record<string, unknown> | undefined,
+  current: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  const merged = { ...(defaults ?? {}) };
+  for (const [key, value] of Object.entries(current ?? {})) {
+    if (isBlankWorkflowToolInputValue(value)) {
+      continue;
+    }
+    merged[key] = value;
+  }
+  return merged;
+}
+
+function isBlankWorkflowToolInputValue(value: unknown): boolean {
+  return value === undefined || value === null || (typeof value === 'string' && value.trim().length === 0);
 }
 
 function readArtifactTableSourceRef(node: RoleWorkflowGraphNode): string | undefined {
@@ -1670,6 +1684,14 @@ function workflowNodeWarnings(node: RoleWorkflowGraphNode, variableOptions?: Wor
     if (!node.artifactType) warnings.push('未选格式');
     if (!node.toolId) warnings.push('未选写入工具');
     if (!action) warnings.push('未选写入动作');
+    const actionArtifactType = workflowArtifactTypeForToolAction(action);
+    if (node.artifactType && actionArtifactType && actionArtifactType !== node.artifactType) {
+      warnings.push(`写入动作生成 ${actionArtifactType}，与产物格式 ${node.artifactType} 不一致`);
+    }
+    const missingFields = missingArtifactWriterInputFields(node);
+    if (missingFields.length > 0) {
+      warnings.push(`产物写入参数缺少：${missingFields.join('、')}`);
+    }
     if (
       (node.artifactType === 'xlsx' || node.artifactType === 'csv') &&
       !(node.inputVariables ?? []).some((value) =>
@@ -1687,6 +1709,54 @@ function workflowNodeWarnings(node: RoleWorkflowGraphNode, variableOptions?: Wor
   }
 
   return warnings;
+}
+
+function workflowArtifactTypeForToolAction(action: string): WorkflowArtifactType | undefined {
+  if (action === 'office.write_docx_document') return 'docx';
+  if (action === 'office.write_markdown_document' || action === 'filesystem.write_text_file') return 'markdown';
+  if (action === 'spreadsheet.write_xlsx') return 'xlsx';
+  if (action === 'spreadsheet.write_csv') return 'csv';
+  if (action === 'presentation.write_pptx') return 'pptx';
+  if (action === 'video.compose_clips' || action === 'video.export_mp4') return 'mp4';
+  return undefined;
+}
+
+function missingArtifactWriterInputFields(node: RoleWorkflowGraphNode): string[] {
+  const input = readWorkflowToolInputConfig(node);
+  const missing: string[] = [];
+  const requireFilled = (key: string, label: string) => {
+    if (isBlankWorkflowToolInputValue(input[key])) missing.push(label);
+  };
+  const hasAnyFilled = (keys: string[]) => keys.some((key) => !isBlankWorkflowToolInputValue(input[key]));
+
+  if (node.artifactType === 'docx' || node.artifactType === 'markdown') {
+    requireFilled('title', '标题');
+    requireFilled('folder', '目录');
+    requireFilled('fileName', '文件名');
+    requireFilled('content', '内容');
+  }
+
+  if (node.artifactType === 'xlsx' || node.artifactType === 'csv') {
+    requireFilled('folder', '目录');
+    requireFilled('fileName', '文件名');
+    if (!hasAnyFilled(['content', 'rows', 'sheets'])) missing.push('内容或表格数据');
+  }
+
+  if (node.artifactType === 'pptx') {
+    requireFilled('title', '标题');
+    requireFilled('folder', '目录');
+    requireFilled('fileName', '文件名');
+    if (!hasAnyFilled(['content', 'slides'])) missing.push('内容或幻灯片');
+  }
+
+  if (node.artifactType === 'mp4') {
+    requireFilled('videoPath', '视频路径');
+    requireFilled('cutPlan', '剪辑方案');
+    requireFilled('folder', '目录');
+    requireFilled('fileName', '文件名');
+  }
+
+  return missing;
 }
 
 function isSpreadsheetReadyVariableRef(value: string) {
@@ -2547,7 +2617,7 @@ function WorkflowReactFlowEditor({
       if (artifactType === 'pptx') {
         return officeTemplates.find((template) => template.value === 'presentation.write_pptx');
       }
-      if (artifactType === 'markdown' || artifactType === 'pdf') {
+      if (artifactType === 'markdown') {
         return officeTemplates.find((template) => template.value === 'office.write_markdown_document');
       }
       return officeTemplates.find((template) => template.value === 'office.write_docx_document');
@@ -3003,7 +3073,7 @@ function WorkflowReactFlowEditor({
         ? buildToolNodeConfig(node, {
             toolActionAssetKey: template.value,
             action: template.value,
-            input: template.defaults
+            input: mergeWorkflowToolInputDefaults(template.defaults, readWorkflowToolInputConfig(node))
           })
         : node.config
     });
@@ -3015,7 +3085,7 @@ function WorkflowReactFlowEditor({
       config: buildToolNodeConfig(node, {
         toolActionAssetKey: template?.value ?? action,
         action: template?.value ?? action,
-        input: template?.defaults ?? node.config?.input ?? {}
+        input: mergeWorkflowToolInputDefaults(template?.defaults, readWorkflowToolInputConfig(node))
       })
     });
   }
@@ -3082,7 +3152,10 @@ function WorkflowReactFlowEditor({
       config: buildToolNodeConfig(node, {
         toolActionAssetKey: asset?.key ?? actionId,
         action: actionId,
-        input: action?.defaultInput ?? readAssetDefaultsRecord(asset) ?? node.config?.input ?? {}
+        input: mergeWorkflowToolInputDefaults(
+          action?.defaultInput ?? readAssetDefaultsRecord(asset),
+          readWorkflowToolInputConfig(node)
+        )
       })
     });
   }
@@ -3108,8 +3181,7 @@ function WorkflowReactFlowEditor({
     const inputVariables = readAssetSchemaStringArray(asset, 'inputVariables');
     const fileNamePattern = readAssetSchemaString(asset, 'fileNamePattern');
     const nextInput = {
-      ...(template?.defaults ?? {}),
-      ...readWorkflowToolInputConfig(node),
+      ...mergeWorkflowToolInputDefaults(template?.defaults, readWorkflowToolInputConfig(node)),
       ...(fileNamePattern ? { fileName: fileNamePattern, title: fileNamePattern } : {})
     };
 
@@ -3359,8 +3431,7 @@ function WorkflowReactFlowEditor({
         toolActionAssetKey: template?.value ?? (node.artifactType === 'csv' ? 'spreadsheet.write_csv' : 'spreadsheet.write_xlsx'),
         action: template?.value ?? (node.artifactType === 'csv' ? 'spreadsheet.write_csv' : 'spreadsheet.write_xlsx'),
         input: {
-          ...(template?.defaults ?? {}),
-          ...currentInput,
+          ...mergeWorkflowToolInputDefaults(template?.defaults, currentInput),
           rows
         }
       })
@@ -3782,7 +3853,10 @@ function WorkflowReactFlowEditor({
                         type === 'tool' || type === 'artifact'
                           ? buildToolNodeConfig(selectedNode, {
                               action: nextToolTemplate?.value,
-                              input: nextToolTemplate?.defaults ?? selectedNode.config?.input ?? {}
+                              input: mergeWorkflowToolInputDefaults(
+                                nextToolTemplate?.defaults,
+                                readWorkflowToolInputConfig(selectedNode)
+                              )
                             })
                           : type === 'data'
                             ? {
@@ -4190,7 +4264,10 @@ function WorkflowReactFlowEditor({
                         config: buildToolNodeConfig(selectedNode, {
                           toolActionAssetKey: nextToolTemplate?.value,
                           action: nextToolTemplate?.value,
-                          input: nextToolTemplate?.defaults ?? {}
+                          input: mergeWorkflowToolInputDefaults(
+                            nextToolTemplate?.defaults,
+                            readWorkflowToolInputConfig(selectedNode)
+                          )
                         })
                       });
                     }}

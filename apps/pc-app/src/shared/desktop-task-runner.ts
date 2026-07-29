@@ -2967,6 +2967,10 @@ async function invokeWorkflowRuntimeArtifactNode(input: {
   writeWorkflowArtifactAssistantMessage(input.pool, input.node, artifactPayload.assistantMessage);
   const availableToolIds = new Set(input.binding.availableTools.map((tool) => tool.id));
   const configuredToolRequest = buildWorkflowRuntimeToolRequest(input.node, input.pool);
+  const configuredToolRequestIsUsable =
+    configuredToolRequest &&
+    availableToolIds.has(configuredToolRequest.toolId) &&
+    isWorkflowArtifactToolRequestCompatible(input.node.artifactType, configuredToolRequest);
   const artifactNode: WorkflowExecutionNodeSummary = {
     id: input.node.id,
     type: input.node.type,
@@ -2980,7 +2984,7 @@ async function invokeWorkflowRuntimeArtifactNode(input: {
     task: input.task,
     artifactNode,
     payload: artifactPayload,
-    request: configuredToolRequest && availableToolIds.has(configuredToolRequest.toolId)
+    request: configuredToolRequestIsUsable
       ? configuredToolRequest
       : buildWorkflowFallbackArtifactToolRequest({
         task: input.task,
@@ -4887,7 +4891,7 @@ function buildWorkflowFallbackArtifactToolRequest(input: {
   }
 
   if (
-    ['markdown', 'pdf'].includes(input.artifactNode.artifactType ?? '') &&
+    input.artifactNode.artifactType === 'markdown' &&
     input.availableToolIds.has('office-document')
   ) {
     return {
@@ -4947,6 +4951,11 @@ function normalizeWorkflowArtifactToolRequest(input: {
   }
 
   const requestInput = { ...input.request.input };
+  const existingFolder = readWorkflowRuntimeString(requestInput.folder);
+  if (!existingFolder) {
+    requestInput.folder = defaultWorkflowArtifactFolder(input.artifactNode.artifactType);
+  }
+
   const existingContent = readWorkflowRuntimeString(requestInput.content);
   if (existingContent || input.payload.content) {
     requestInput.content = normalizeWorkflowArtifactContent(
@@ -4973,6 +4982,41 @@ function normalizeWorkflowArtifactToolRequest(input: {
     ...input.request,
     input: requestInput
   };
+}
+
+function isWorkflowArtifactToolRequestCompatible(
+  artifactType: WorkflowExecutionNodeSummary['artifactType'],
+  request: { toolId: string; action: DesktopToolInvocationAction }
+): boolean {
+  if (!artifactType) {
+    return true;
+  }
+
+  return workflowArtifactTypeForToolRequest(request) === artifactType;
+}
+
+function workflowArtifactTypeForToolRequest(
+  request: { toolId: string; action: DesktopToolInvocationAction }
+): WorkflowExecutionNodeSummary['artifactType'] | undefined {
+  if (request.toolId === 'office-document' && request.action === 'office.write_docx_document') return 'docx';
+  if (request.toolId === 'office-document' && request.action === 'office.write_markdown_document') return 'markdown';
+  if (request.toolId === 'office-document' && request.action === 'spreadsheet.write_xlsx') return 'xlsx';
+  if (request.toolId === 'office-document' && request.action === 'spreadsheet.write_csv') return 'csv';
+  if (request.toolId === 'office-document' && request.action === 'presentation.write_pptx') return 'pptx';
+  if (request.toolId === 'local-filesystem' && request.action === 'filesystem.write_text_file') return 'markdown';
+  if (request.toolId === 'video-processing' && ['video.compose_clips', 'video.export_mp4'].includes(request.action)) {
+    return 'mp4';
+  }
+  return undefined;
+}
+
+function defaultWorkflowArtifactFolder(
+  artifactType: WorkflowExecutionNodeSummary['artifactType']
+): string {
+  if (artifactType === 'xlsx' || artifactType === 'csv') return 'spreadsheets';
+  if (artifactType === 'pptx') return 'presentations';
+  if (artifactType === 'mp4') return 'videos';
+  return 'documents';
 }
 
 function isWorkflowTaskDerivedLabel(value: string, taskTitle: string): boolean {
@@ -5254,7 +5298,7 @@ function buildArtifactToolActionHint(
     return 'office-document/office.write_docx_document';
   }
 
-  if (['markdown', 'pdf'].includes(artifactType) && hasAction('office-document', 'office.write_markdown_document')) {
+  if (artifactType === 'markdown' && hasAction('office-document', 'office.write_markdown_document')) {
     return 'office-document/office.write_markdown_document';
   }
 
