@@ -61,7 +61,7 @@ const skill = (code: string, name: string, summary: string): ServerRoleSkill => 
   summary
 });
 
-const DESIGNED_ROLE_TEMPLATE_VERSION = '1.1.0';
+const DESIGNED_ROLE_TEMPLATE_VERSION = '1.1.1';
 
 const skills = {
   caseScreening: skill('case_screening', '案例筛选', '按企业标准筛选出可交付的案例素材。'),
@@ -628,6 +628,10 @@ function buildOfficeProductionWorkflowGraph(input: {
   qualityInstruction: string;
   finalInstruction: string;
   includeWebSearch?: boolean;
+  analysisModelProfileId?: string;
+  analysisTimeoutMs?: number;
+  draftTimeoutMs?: number;
+  qualityTimeoutMs?: number;
 }): ServerRoleWorkflowGraph {
   const spreadsheetArtifactType = isSpreadsheetArtifactType(input.artifactType) ? input.artifactType : undefined;
   const nodes: ServerRoleWorkflowGraph['nodes'] = [
@@ -708,7 +712,7 @@ function buildOfficeProductionWorkflowGraph(input: {
       type: 'llm',
       name: '分析与规划',
       instruction: input.analysisInstruction,
-      modelProfileId: 'qiu-reasoning-default',
+      modelProfileId: input.analysisModelProfileId ?? 'qiu-reasoning-default',
       inputVariables: [
         'start.text',
         'task_parameters',
@@ -716,7 +720,8 @@ function buildOfficeProductionWorkflowGraph(input: {
         'read_attachments.text',
         input.includeWebSearch ? 'web_research.text' : undefined
       ].filter((value): value is string => Boolean(value)),
-      outputVariables: ['analysis_result']
+      outputVariables: ['analysis_result'],
+      config: input.analysisTimeoutMs ? { timeoutMs: input.analysisTimeoutMs } : undefined
     },
     {
       id: 'draft_deliverable',
@@ -731,9 +736,12 @@ function buildOfficeProductionWorkflowGraph(input: {
       config: spreadsheetArtifactType
         ? {
             outputMode: 'json',
-            schema: buildSpreadsheetDeliverableSchema(spreadsheetArtifactType)
+            schema: buildSpreadsheetDeliverableSchema(spreadsheetArtifactType),
+            ...(input.draftTimeoutMs ? { timeoutMs: input.draftTimeoutMs } : {})
           }
-        : undefined
+        : input.draftTimeoutMs
+          ? { timeoutMs: input.draftTimeoutMs }
+          : undefined
     },
     {
       id: 'quality_check',
@@ -742,7 +750,8 @@ function buildOfficeProductionWorkflowGraph(input: {
       instruction: input.qualityInstruction,
       modelProfileId: 'qiu-general-default',
       inputVariables: ['deliverable_content', 'task_parameters'],
-      outputVariables: ['quality_review']
+      outputVariables: ['quality_review'],
+      config: input.qualityTimeoutMs ? { timeoutMs: input.qualityTimeoutMs } : undefined
     },
     {
       id: 'write_artifact',
@@ -1877,6 +1886,10 @@ type DesignedOfficeRoleTemplateInput = {
   draftInstruction?: string;
   qualityInstruction?: string;
   finalInstruction?: string;
+  analysisModelProfileId?: string;
+  analysisTimeoutMs?: number;
+  draftTimeoutMs?: number;
+  qualityTimeoutMs?: number;
 };
 
 function createOfficeRoleTemplate(input: DesignedOfficeRoleTemplateInput): BaseServerRoleTemplateCatalogEntry {
@@ -1928,7 +1941,11 @@ function createOfficeRoleTemplate(input: DesignedOfficeRoleTemplateInput): BaseS
       finalInstruction:
         input.finalInstruction ??
         '返回生成文件位置、核心结论、需要人工确认的问题和下一步建议。',
-      includeWebSearch
+      includeWebSearch,
+      analysisModelProfileId: input.analysisModelProfileId,
+      analysisTimeoutMs: input.analysisTimeoutMs,
+      draftTimeoutMs: input.draftTimeoutMs,
+      qualityTimeoutMs: input.qualityTimeoutMs
     }),
     approvalPolicy: input.approvalPolicy
   };
@@ -1986,6 +2003,10 @@ const freeBasicRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     ],
     outputFormat: 'Excel 文件，包含整理后明细、异常项、字段说明和下一步处理建议。',
     artifactType: 'xlsx',
+    analysisModelProfileId: 'qiu-general-default',
+    analysisTimeoutMs: 60_000,
+    draftTimeoutMs: 60_000,
+    qualityTimeoutMs: 45_000,
     analysisInstruction:
       '读取表格或文本，识别字段、重复项、缺失值、异常值、分类维度和用户要求的汇总口径。',
     draftInstruction:

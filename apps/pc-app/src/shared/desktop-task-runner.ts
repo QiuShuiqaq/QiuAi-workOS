@@ -2697,7 +2697,7 @@ async function invokeWorkflowRuntimeModelNode(input: {
   const response = await input.modelInvoker({
     profile,
     messages,
-    timeoutMs: 45_000
+    timeoutMs: readWorkflowRuntimeModelTimeoutMs(input.node.config?.timeoutMs)
   });
   const parsedJson = parseWorkflowRuntimeJson(response.content);
   if (outputMode === 'json' && parsedJson === undefined) {
@@ -4061,6 +4061,11 @@ function extractFirstJsonValue(value: string): string | undefined {
 
 function readWorkflowRuntimeNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function readWorkflowRuntimeModelTimeoutMs(value: unknown): number {
+  const timeoutMs = readWorkflowRuntimeNumber(value, 45_000);
+  return Math.min(180_000, Math.max(10_000, Math.round(timeoutMs)));
 }
 
 function readWorkflowRuntimeString(value: unknown): string | undefined {

@@ -1527,6 +1527,7 @@ const workflowJsonSheetsXlsxTask = await runDesktopTask({
           instruction: 'Return JSON with sheets for a spreadsheet.',
           config: {
             outputMode: 'json',
+            timeoutMs: 60_000,
             schema: {
               sheets: [
                 {
@@ -1574,6 +1575,7 @@ const workflowJsonSheetsXlsxTask = await runDesktopTask({
   enabledKnowledgeBindingIds: [],
   modelInvoker: async (request) => {
     workflowJsonSheetsXlsxModelInvocationCount += 1;
+    assert.equal(request.timeoutMs, 60_000);
     const prompt = request.messages.map((message) => message.content).join('\n');
     assert.match(prompt, /Return valid JSON only/);
     assert.match(prompt, /sheets/);

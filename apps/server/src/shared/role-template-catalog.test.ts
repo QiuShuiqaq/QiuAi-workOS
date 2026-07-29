@@ -55,6 +55,20 @@ test('server role template catalog is focused and production-oriented', () => {
     );
   }
 
+  const basicSpreadsheetTemplate = templateById.get('basic_spreadsheet_organizer_v1');
+  assert.ok(basicSpreadsheetTemplate, 'basic spreadsheet template must exist');
+  const spreadsheetAnalyzeNode = basicSpreadsheetTemplate.workflowGraph.nodes.find((node) => node.id === 'analyze_work');
+  assert.equal(
+    spreadsheetAnalyzeNode?.modelProfileId,
+    'qiu-general-default',
+    'basic spreadsheet analysis must use the general model to avoid slow reasoning timeouts'
+  );
+  assert.equal(
+    spreadsheetAnalyzeNode?.config?.timeoutMs,
+    60_000,
+    'basic spreadsheet analysis must define a longer but bounded model timeout'
+  );
+
   const salesTemplates = serverRoleTemplateCatalog.filter((template) => template.templateId.startsWith('sales_'));
   assert.ok(salesTemplates.length >= 70);
   assert.ok(salesTemplates.some((template) => template.industry.includes('软件与企业服务')));
@@ -63,7 +77,7 @@ test('server role template catalog is focused and production-oriented', () => {
   assert.ok(salesTemplates.some((template) => template.industry.includes('政企项目')));
 
   for (const template of serverRoleTemplateCatalog) {
-    assert.equal(template.version, '1.1.0', `${template.templateId} must use the latest designed template version`);
+    assert.equal(template.version, '1.1.1', `${template.templateId} must use the latest designed template version`);
     assert.ok(template.name.trim(), `${template.templateId} must have a name`);
     assert.ok(template.industry.trim(), `${template.templateId} must have an industry`);
     assert.ok(template.scenario.trim(), `${template.templateId} must have a scenario`);
