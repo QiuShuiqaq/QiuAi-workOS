@@ -440,6 +440,25 @@ export class TestAdminRoleTemplateRequestDto {
   sampleWorkspaceId?: string;
 }
 
+export class AdminRoleTemplateRuntimePreviewDto {
+  @ApiProperty({ type: [String], example: ['start.text'] })
+  inputVariables!: string[];
+
+  @ApiProperty({ type: [String], example: ['draft_result.text'] })
+  outputVariables!: string[];
+}
+
+export class AdminRoleTemplateToolCompatibilityDto {
+  @ApiProperty({ enum: ['passed', 'warning', 'failed'] })
+  status!: 'passed' | 'warning' | 'failed';
+
+  @ApiProperty({ example: 'PC desktop tool input is compatible.' })
+  message!: string;
+
+  @ApiProperty({ type: [String], example: ['Tool action exists in server catalog.'] })
+  checks!: string[];
+}
+
 export class AdminRoleTemplateTestNodeTraceDto {
   @ApiProperty({ example: 'draft_result' })
   nodeId!: string;
@@ -470,6 +489,32 @@ export class AdminRoleTemplateTestNodeTraceDto {
 
   @ApiProperty({ required: false, type: [String], example: ['text', 'json'] })
   producedOutputTypes?: string[];
+
+  @ApiPropertyOptional({ type: AdminRoleTemplateRuntimePreviewDto })
+  runtimePreview?: AdminRoleTemplateRuntimePreviewDto;
+
+  @ApiPropertyOptional({ type: Object })
+  resolvedToolInput?: unknown;
+
+  @ApiPropertyOptional({ type: AdminRoleTemplateToolCompatibilityDto })
+  toolCompatibility?: AdminRoleTemplateToolCompatibilityDto;
+}
+
+export class AdminRoleTemplatePcCompatibilitySummaryDto {
+  @ApiProperty({ enum: ['passed', 'warning', 'failed'] })
+  status!: 'passed' | 'warning' | 'failed';
+
+  @ApiProperty({ example: 'PC compatibility check passed.' })
+  message!: string;
+
+  @ApiProperty({ example: 4 })
+  passedCount!: number;
+
+  @ApiProperty({ example: 1 })
+  warningCount!: number;
+
+  @ApiProperty({ example: 0 })
+  failedCount!: number;
 }
 
 export class AdminRoleTemplateTestGraphTraceDto {
@@ -484,6 +529,9 @@ export class AdminRoleTemplateTestGraphTraceDto {
 
   @ApiProperty({ type: [AdminRoleTemplateTestNodeTraceDto] })
   nodes!: AdminRoleTemplateTestNodeTraceDto[];
+
+  @ApiPropertyOptional({ type: AdminRoleTemplatePcCompatibilitySummaryDto })
+  pcCompatibility?: AdminRoleTemplatePcCompatibilitySummaryDto;
 }
 
 export class TestAdminRoleTemplateResponseDto {

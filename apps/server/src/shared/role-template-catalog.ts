@@ -61,6 +61,8 @@ const skill = (code: string, name: string, summary: string): ServerRoleSkill => 
   summary
 });
 
+const DESIGNED_ROLE_TEMPLATE_VERSION = '1.1.0';
+
 const skills = {
   caseScreening: skill('case_screening', '案例筛选', '按企业标准筛选出可交付的案例素材。'),
   contentRewrite: skill('content_rewrite', '内容改写', '把原始内容改写为可发布版本。'),
@@ -391,6 +393,8 @@ function buildArtifactWriterConfig(input: {
   artifactType: ServerWorkflowArtifactType;
   contentRef: string;
   fileNameSuffix?: string;
+  tableDataRef?: string;
+  tableDataField?: 'rows' | 'sheets';
 }): { action?: string; input?: Record<string, unknown> } {
   const action = artifactWriterAction(input.artifactType);
   const title = '{{task.title}}';
@@ -409,12 +413,19 @@ function buildArtifactWriterConfig(input: {
   }
 
   if (input.artifactType === 'xlsx' || input.artifactType === 'csv') {
+    const tableInput = input.tableDataRef
+      ? {
+          [input.tableDataField ?? (input.artifactType === 'csv' ? 'rows' : 'sheets')]: input.tableDataRef
+        }
+      : {};
+
     return {
       action,
       input: {
         title,
         folder: 'spreadsheets',
         fileName,
+        ...tableInput,
         content: input.contentRef
       }
     };
@@ -455,6 +466,57 @@ function buildArtifactWriterConfig(input: {
   };
 }
 
+function isSpreadsheetArtifactType(artifactType: ServerWorkflowArtifactType): artifactType is 'xlsx' | 'csv' {
+  return artifactType === 'xlsx' || artifactType === 'csv';
+}
+
+function buildSpreadsheetDeliverableSchema(artifactType: 'xlsx' | 'csv'): Record<string, unknown> {
+  if (artifactType === 'csv') {
+    return {
+      rows: [
+        ['用户要求字段1', '用户要求字段2'],
+        ['字段值1', '字段值2']
+      ],
+      assistantMessage: '给用户看的处理摘要、异常说明和待确认字段，不写入主表。'
+    };
+  }
+
+  return {
+    sheets: [
+      {
+        name: '整理后明细',
+        rows: [
+          ['用户要求字段1', '用户要求字段2'],
+          ['字段值1', '字段值2']
+        ]
+      },
+      {
+        name: '异常项',
+        rows: [
+          ['类型', '说明'],
+          ['缺失值', '无法确认的字段留空或标记待确认']
+        ]
+      }
+    ],
+    assistantMessage: '给用户看的处理摘要、异常说明和待确认字段，不写入主表。'
+  };
+}
+
+function buildSpreadsheetDraftInstruction(instruction: string, artifactType: 'xlsx' | 'csv'): string {
+  const outputField = artifactType === 'csv' ? 'rows' : 'sheets';
+
+  return [
+    instruction,
+    `本节点必须只返回合法 JSON，不要返回 Markdown、代码块或自然语言正文。根字段必须包含 ${outputField}。`,
+    artifactType === 'xlsx'
+      ? 'sheets 是工作表数组；每个工作表包含 name 和 rows；rows 必须是二维数组，第一行是表头。主工作表命名为“整理后明细”。'
+      : 'rows 必须是二维数组，第一行是表头。',
+    '如果用户明确指定字段，例如“商品名称”和“价格”，主表只保留这些字段，不要额外增加备注、销量、建议等列。',
+    '缺失、异常、无法确认的信息不要混入主表；Excel 可放入“异常项”工作表，CSV 则放入 assistantMessage。',
+    '数值保持原始精度；不确定的数据留空或写“待确认”，不要编造。'
+  ].join('\n');
+}
+
 function graphEdge(sourceNodeId: string, targetNodeId: string): ServerRoleWorkflowGraph['edges'][number] {
   return {
     id: `${sourceNodeId}__${targetNodeId}`,
@@ -466,6 +528,98 @@ function graphEdge(sourceNodeId: string, targetNodeId: string): ServerRoleWorkfl
   };
 }
 
+function buildOfficeProductionWorkflowSteps(input: {
+  artifactType: OfficeProductionWorkflowArtifactType;
+  includeWebSearch: boolean;
+  scenario: string;
+}): ServerRoleTemplateWorkflowStep[] {
+  const steps: ServerRoleTemplateWorkflowStep[] = [
+    {
+      id: 'receive_input',
+      order: 1,
+      type: 'input',
+      name: '接收任务',
+      instruction: `确认用户输入、附件、目标、边界和交付物要求：${input.scenario}。`
+    },
+    {
+      id: 'extract_parameters',
+      order: 2,
+      type: 'llm',
+      name: '提取任务参数',
+      instruction: '把用户要求整理成结构化参数，字段缺失时标记为 null，不编造。'
+    },
+    {
+      id: 'gather_context',
+      order: 3,
+      type: 'knowledge',
+      name: '读取知识',
+      instruction: '读取企业知识库、本地知识和已配置资料，只保留与当前任务相关的内容。'
+    },
+    {
+      id: 'read_attachments',
+      order: 4,
+      type: 'tool',
+      name: '按需读取附件',
+      instruction: '仅当用户上传附件时读取文档、表格、PPT、PDF 或文本内容。',
+      toolIds: ['office-document']
+    }
+  ];
+
+  if (input.includeWebSearch) {
+    steps.push({
+      id: 'web_research',
+      order: steps.length + 1,
+      type: 'tool',
+      name: '联网检索',
+      instruction: '需要外部公开资料时检索网页，并把来源标题、链接和摘要带入后续分析。',
+      toolIds: ['web-search']
+    });
+  }
+
+  steps.push(
+    {
+      id: 'analyze_work',
+      order: steps.length + 1,
+      type: 'llm',
+      name: '分析与规划',
+      instruction: '结合用户输入、附件、知识库和工具结果，形成事实、风险、缺失信息和处理计划。'
+    },
+    {
+      id: 'draft_deliverable',
+      order: steps.length + 2,
+      type: 'llm',
+      name: '生成交付内容',
+      instruction: input.artifactType === 'xlsx'
+        ? '生成可直接写入 Excel 的结构化 JSON，必须包含 sheets。'
+        : '生成可直接写入目标文件的正式正文。'
+    },
+    {
+      id: 'quality_check',
+      order: steps.length + 3,
+      type: 'llm',
+      name: '自检修订',
+      instruction: '检查事实依据、格式、越权承诺、缺失项和需要人工确认的内容。'
+    },
+    {
+      id: 'write_artifact',
+      order: steps.length + 4,
+      type: 'tool',
+      name: '写入产物文件',
+      instruction: `调用 PC 端办公工具生成 ${input.artifactType} 文件。`,
+      toolIds: ['office-document']
+    },
+    {
+      id: 'final_output',
+      order: steps.length + 5,
+      type: 'output',
+      name: '返回结果',
+      instruction: '返回文件位置、核心结果、异常或待确认事项。'
+    }
+  );
+
+  return steps;
+}
+
 function buildOfficeProductionWorkflowGraph(input: {
   artifactType: OfficeProductionWorkflowArtifactType;
   parameterSchema: Record<string, unknown>;
@@ -475,6 +629,7 @@ function buildOfficeProductionWorkflowGraph(input: {
   finalInstruction: string;
   includeWebSearch?: boolean;
 }): ServerRoleWorkflowGraph {
+  const spreadsheetArtifactType = isSpreadsheetArtifactType(input.artifactType) ? input.artifactType : undefined;
   const nodes: ServerRoleWorkflowGraph['nodes'] = [
     {
       id: 'start',
@@ -567,10 +722,18 @@ function buildOfficeProductionWorkflowGraph(input: {
       id: 'draft_deliverable',
       type: 'llm',
       name: '生成交付内容',
-      instruction: input.draftInstruction,
+      instruction: spreadsheetArtifactType
+        ? buildSpreadsheetDraftInstruction(input.draftInstruction, spreadsheetArtifactType)
+        : input.draftInstruction,
       modelProfileId: 'qiu-general-default',
       inputVariables: ['analysis_result', 'knowledge_context', 'attachment_text'],
-      outputVariables: ['deliverable_content']
+      outputVariables: ['deliverable_content'],
+      config: spreadsheetArtifactType
+        ? {
+            outputMode: 'json',
+            schema: buildSpreadsheetDeliverableSchema(spreadsheetArtifactType)
+          }
+        : undefined
     },
     {
       id: 'quality_check',
@@ -592,8 +755,14 @@ function buildOfficeProductionWorkflowGraph(input: {
       outputVariables: ['deliverable_file'],
       config: buildArtifactWriterConfig({
         artifactType: input.artifactType,
-        contentRef: '{{deliverable_content}}',
-        fileNameSuffix: input.artifactType === 'docx' ? '-整理版' : undefined
+        contentRef: spreadsheetArtifactType ? '{{quality_review}}' : '{{deliverable_content}}',
+        fileNameSuffix: input.artifactType === 'docx' ? '-整理版' : undefined,
+        tableDataRef: spreadsheetArtifactType
+          ? '$deliverable_content.sheets'
+          : undefined,
+        tableDataField: spreadsheetArtifactType
+          ? 'sheets'
+          : undefined
       })
     },
     {
@@ -607,10 +776,40 @@ function buildOfficeProductionWorkflowGraph(input: {
     }
   ];
 
+  const afterAttachmentNodeId = input.includeWebSearch ? 'web_research' : 'analyze_work';
+  const edges: ServerRoleWorkflowGraph['edges'] = [
+    graphEdge('start', 'receive_input'),
+    graphEdge('receive_input', 'extract_parameters'),
+    graphEdge('extract_parameters', 'gather_context'),
+    {
+      id: 'gather_context__read_attachments',
+      sourceNodeId: 'gather_context',
+      targetNodeId: 'read_attachments',
+      condition: {
+        type: 'exists',
+        variable: 'start.files'
+      }
+    },
+    {
+      id: `gather_context__${afterAttachmentNodeId}`,
+      sourceNodeId: 'gather_context',
+      targetNodeId: afterAttachmentNodeId,
+      condition: {
+        type: 'always'
+      }
+    },
+    graphEdge('read_attachments', afterAttachmentNodeId),
+    ...(input.includeWebSearch ? [graphEdge('web_research', 'analyze_work')] : []),
+    graphEdge('analyze_work', 'draft_deliverable'),
+    graphEdge('draft_deliverable', 'quality_check'),
+    graphEdge('quality_check', 'write_artifact'),
+    graphEdge('write_artifact', 'final_output')
+  ];
+
   return {
     version: '1.0.0',
     nodes,
-    edges: nodes.slice(1).map((node, index) => graphEdge(nodes[index]!.id, node.id)),
+    edges,
     entryNodeId: 'start',
     variables: [
       { name: 'task_brief', type: 'text', description: '用户任务摘要', required: true },
@@ -618,7 +817,11 @@ function buildOfficeProductionWorkflowGraph(input: {
       { name: 'knowledge_context', type: 'text', description: '企业和本地知识上下文' },
       { name: 'attachment_text', type: 'text', description: '附件提取文本' },
       { name: 'analysis_result', type: 'text', description: '分析和处理计划' },
-      { name: 'deliverable_content', type: 'text', description: '最终交付内容' },
+      {
+        name: 'deliverable_content',
+        type: spreadsheetArtifactType ? 'json' : 'text',
+        description: spreadsheetArtifactType ? '最终交付表格 JSON' : '最终交付内容'
+      },
       { name: 'deliverable_file', type: 'artifact', description: '生成的本地文件' }
     ],
     runtimePolicy: {
@@ -1683,10 +1886,11 @@ function createOfficeRoleTemplate(input: DesignedOfficeRoleTemplateInput): BaseS
     'local-filesystem'
   ];
   const artifactType = input.artifactType ?? 'docx';
+  const includeWebSearch = input.includeWebSearch ?? tools.includes('web-search');
 
   return {
     templateId: input.templateId,
-    version: '1.0.0',
+    version: DESIGNED_ROLE_TEMPLATE_VERSION,
     name: `AI ${input.name}`,
     industry: input.industry,
     scenario: input.scenario,
@@ -1696,6 +1900,11 @@ function createOfficeRoleTemplate(input: DesignedOfficeRoleTemplateInput): BaseS
     knowledgeSources: input.knowledgeSources,
     tools,
     skills: input.skills,
+    workflowSteps: buildOfficeProductionWorkflowSteps({
+      artifactType,
+      includeWebSearch,
+      scenario: input.scenario
+    }),
     sampleInputs: input.sampleInputs,
     outputFormat: input.outputFormat,
     workflowGraph: buildOfficeProductionWorkflowGraph({
@@ -1719,7 +1928,7 @@ function createOfficeRoleTemplate(input: DesignedOfficeRoleTemplateInput): BaseS
       finalInstruction:
         input.finalInstruction ??
         '返回生成文件位置、核心结论、需要人工确认的问题和下一步建议。',
-      includeWebSearch: input.includeWebSearch ?? tools.includes('web-search')
+      includeWebSearch
     }),
     approvalPolicy: input.approvalPolicy
   };

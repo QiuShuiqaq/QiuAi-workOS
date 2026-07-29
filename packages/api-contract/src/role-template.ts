@@ -92,6 +92,19 @@ export interface TestAdminRoleTemplateRequest {
   sampleWorkspaceId?: string;
 }
 
+export type AdminRoleTemplateToolCompatibilityStatus = 'passed' | 'warning' | 'failed';
+
+export interface AdminRoleTemplateToolCompatibility {
+  status: AdminRoleTemplateToolCompatibilityStatus;
+  message: string;
+  checks: string[];
+}
+
+export interface AdminRoleTemplateRuntimePreview {
+  inputVariables: string[];
+  outputVariables: string[];
+}
+
 export interface AdminRoleTemplateTestNodeTrace {
   nodeId: string;
   nodeName: string;
@@ -103,6 +116,9 @@ export interface AdminRoleTemplateTestNodeTrace {
   toolActionId?: string;
   requiredInputTypes?: string[];
   producedOutputTypes?: string[];
+  runtimePreview?: AdminRoleTemplateRuntimePreview;
+  resolvedToolInput?: unknown;
+  toolCompatibility?: AdminRoleTemplateToolCompatibility;
 }
 
 export interface AdminRoleTemplateTestGraphTrace {
@@ -110,6 +126,13 @@ export interface AdminRoleTemplateTestGraphTrace {
   nodeCount: number;
   edgeCount: number;
   nodes: AdminRoleTemplateTestNodeTrace[];
+  pcCompatibility?: {
+    status: AdminRoleTemplateToolCompatibilityStatus;
+    message: string;
+    passedCount: number;
+    warningCount: number;
+    failedCount: number;
+  };
 }
 
 export interface TestAdminRoleTemplateResponse {

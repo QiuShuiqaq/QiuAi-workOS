@@ -189,6 +189,7 @@ export const serverToolActions: ServerToolActionDefinition[] = [
     category: 'document',
     description: '把二维数组或对象数组写成 xlsx 文件。',
     input: [
+      { key: 'sheets', label: 'Sheets', type: 'json' },
       { key: 'rows', label: '表格行', type: 'table' },
       { key: 'content', label: '表格内容', type: 'text' },
       { key: 'fileName', label: '文件名', type: 'text' }
@@ -200,6 +201,7 @@ export const serverToolActions: ServerToolActionDefinition[] = [
       { key: 'folder', label: '目录' },
       { key: 'fileName', label: '文件名' },
       { key: 'content', label: '内容', type: 'textarea', format: 'text', placeholder: '{{runtime.previous_text}}' },
+      { key: 'sheets', label: 'Sheets JSON', type: 'textarea', format: 'json', placeholder: '[{"name":"Sheet1","rows":[["项目","内容"]]}]' },
       { key: 'rows', label: '行数据 JSON', type: 'textarea', format: 'json', placeholder: '[["项目","内容"],["结果","{{runtime.previous_text}}"]]' }
     ],
     requiredConfig: [],

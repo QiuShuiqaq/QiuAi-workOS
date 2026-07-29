@@ -123,6 +123,34 @@ interface NormalizedRoleTemplateInput {
   visibleWorkspaceIds: string[];
 }
 
+type WorkflowTestCompatibilityStatus = 'passed' | 'warning' | 'failed';
+type WorkflowTestRuntimeValue =
+  | string
+  | number
+  | boolean
+  | null
+  | Record<string, unknown>
+  | unknown[];
+type WorkflowTestVariablePool = Map<string, WorkflowTestRuntimeValue>;
+type WorkflowTestToolRequest = {
+  toolId: string;
+  action: string;
+  input: Record<string, unknown>;
+  unresolvedRefs: string[];
+};
+type WorkflowTestToolCompatibility = {
+  status: WorkflowTestCompatibilityStatus;
+  message: string;
+  checks: string[];
+};
+type WorkflowTestNodeOutput = {
+  text?: string;
+  json?: unknown;
+  result?: WorkflowTestRuntimeValue;
+  file?: Record<string, unknown>;
+  outputValue?: WorkflowTestRuntimeValue;
+};
+
 @Injectable()
 export class RoleTemplateFactoryService {
   constructor(
@@ -852,7 +880,14 @@ export class RoleTemplateFactoryService {
 
     const graph = this.getTemplateWorkflowGraphForInspection(template);
     const requiredToolActions = graph ? this.getRequiredWorkflowToolActionIds(graph) : [];
-    const valid = issues.length === 0;
+    const graphTrace = this.buildTemplateTestGraphTrace(template, input);
+    if (graphTrace.pcCompatibility?.warningCount) {
+      warnings.push(graphTrace.pcCompatibility.message);
+    }
+    if (graphTrace.pcCompatibility?.failedCount) {
+      warnings.push(graphTrace.pcCompatibility.message);
+    }
+    const valid = issues.length === 0 && (graphTrace.pcCompatibility?.failedCount ?? 0) === 0;
 
     return {
       data: {
@@ -864,7 +899,7 @@ export class RoleTemplateFactoryService {
           : 'Template failed basic factory validation.',
         warnings,
         sampleInput: input.sampleInput?.trim(),
-        graphTrace: this.buildTemplateTestGraphTrace(template, input),
+        graphTrace,
         requiredToolActions
       }
     };
@@ -879,6 +914,7 @@ export class RoleTemplateFactoryService {
     const templateTools = new Set(this.toStringArray(template.tools));
     const knowledgeSources = this.toStringArray(template.knowledgeSources);
     const outgoingEdgesByNodeId = new Map<string, string[]>();
+    const variablePool = this.createWorkflowTestVariablePool(template, input);
 
     for (const edge of graph.edges) {
       const targets = outgoingEdgesByNodeId.get(edge.sourceNodeId) ?? [];
@@ -889,28 +925,874 @@ export class RoleTemplateFactoryService {
       outgoingEdgesByNodeId.set(edge.sourceNodeId, targets);
     }
 
+    const nodes = graph.nodes.map((node) => {
+      const runtimeInputVariables = this.getWorkflowTestInputVariables(node, variablePool);
+      const toolRequest = this.buildWorkflowTestToolRequest(node, variablePool);
+      const actionId = toolRequest?.action ?? this.getWorkflowNodeToolActionId(node);
+      const actionDefinition = actionId ? getServerToolAction(actionId) : undefined;
+      const warnings = this.getWorkflowNodeTraceWarnings(node, templateTools);
+      const toolCompatibility = node.type === 'tool' || node.type === 'artifact'
+        ? this.checkWorkflowTestToolCompatibility(node, templateTools, toolRequest)
+        : undefined;
+      const outputVariables = this.writeWorkflowTestNodeOutputs(
+        variablePool,
+        node,
+        this.buildWorkflowTestNodeOutput(node, input, toolRequest)
+      );
+      const hasFailedCompatibility = toolCompatibility?.status === 'failed';
+      const hasWarningCompatibility = toolCompatibility?.status === 'warning';
+      const status: WorkflowTestCompatibilityStatus = hasFailedCompatibility
+        ? 'failed'
+        : warnings.length > 0 || hasWarningCompatibility
+          ? 'warning'
+          : 'passed';
+
+      return {
+        nodeId: node.id,
+        nodeName: node.name,
+        nodeType: node.type,
+        status,
+        inputPreview: this.describeWorkflowNodeInput(node, input, knowledgeSources),
+        outputPreview: this.describeWorkflowNodeOutput(node, outgoingEdgesByNodeId.get(node.id) ?? []),
+        warnings,
+        toolActionId: actionId,
+        requiredInputTypes: actionDefinition?.input.map((port) => port.type),
+        producedOutputTypes: actionDefinition?.output.map((port) => port.type),
+        runtimePreview: {
+          inputVariables: runtimeInputVariables,
+          outputVariables
+        },
+        resolvedToolInput: toolRequest
+          ? {
+              toolId: toolRequest.toolId,
+              action: toolRequest.action,
+              input: toolRequest.input
+            }
+          : undefined,
+        toolCompatibility
+      };
+    });
+    const toolCompatibilityItems = nodes
+      .map((node) => node.toolCompatibility)
+      .filter((item): item is WorkflowTestToolCompatibility => Boolean(item));
+    const failedCount = toolCompatibilityItems.filter((item) => item.status === 'failed').length;
+    const warningCount = toolCompatibilityItems.filter((item) => item.status === 'warning').length;
+    const passedCount = toolCompatibilityItems.filter((item) => item.status === 'passed').length;
+    const pcCompatibilityStatus: WorkflowTestCompatibilityStatus = failedCount > 0
+      ? 'failed'
+      : warningCount > 0
+        ? 'warning'
+        : 'passed';
+
     return {
       entryNodeId: graph.entryNodeId,
       nodeCount: graph.nodes.length,
       edgeCount: graph.edges.length,
-      nodes: graph.nodes.map((node) => {
-        const actionId = this.getWorkflowNodeToolActionId(node);
-        const actionDefinition = actionId ? getServerToolAction(actionId) : undefined;
-        const warnings = this.getWorkflowNodeTraceWarnings(node, templateTools);
-        return {
-          nodeId: node.id,
-          nodeName: node.name,
-          nodeType: node.type,
-          status: warnings.length > 0 ? 'warning' : 'passed',
-          inputPreview: this.describeWorkflowNodeInput(node, input, knowledgeSources),
-          outputPreview: this.describeWorkflowNodeOutput(node, outgoingEdgesByNodeId.get(node.id) ?? []),
-          warnings,
-          toolActionId: actionId,
-          requiredInputTypes: actionDefinition?.input.map((port) => port.type),
-          producedOutputTypes: actionDefinition?.output.map((port) => port.type)
-        };
-      })
+      nodes,
+      pcCompatibility: {
+        status: pcCompatibilityStatus,
+        message: failedCount > 0
+          ? `PC compatibility check failed for ${failedCount} node(s).`
+          : warningCount > 0
+            ? `PC compatibility check has ${warningCount} warning node(s).`
+            : 'PC compatibility check passed.',
+        passedCount,
+        warningCount,
+        failedCount
+      }
     };
+  }
+
+  private createWorkflowTestVariablePool(
+    template: RoleTemplateRecord,
+    input: TestAdminRoleTemplateRequestDto
+  ): WorkflowTestVariablePool {
+    const sampleInput = input.sampleInput?.trim()
+      || this.toStringArray(template.sampleInputs)[0]
+      || `测试任务：${template.name}`;
+    const taskTitle = this.compactPreview(sampleInput).slice(0, 80) || template.name;
+    const sampleDocument = {
+      id: 'start-file-1',
+      name: 'sample-document.txt',
+      kind: 'text',
+      uri: 'local://C:\\QiuAI\\test-input\\sample-document.txt',
+      mimeType: 'text/plain',
+      localPath: 'C:\\QiuAI\\test-input\\sample-document.txt',
+      sizeBytes: 2048,
+      extractedText: '这是 admin-console 测试用的模拟附件文本。'
+    };
+    const sampleVideo = {
+      id: 'start-video-1',
+      name: 'sample-video.mp4',
+      kind: 'video',
+      uri: 'local://C:\\QiuAI\\test-input\\sample-video.mp4',
+      mimeType: 'video/mp4',
+      localPath: 'C:\\QiuAI\\test-input\\sample-video.mp4',
+      sizeBytes: 5_000_000
+    };
+    const sampleFiles = [sampleDocument, sampleVideo];
+
+    return new Map<string, WorkflowTestRuntimeValue>([
+      ['input', sampleInput],
+      ['title', taskTitle],
+      ['task.input', sampleInput],
+      ['task.title', taskTitle],
+      ['task.type', 'general_assist'],
+      ['task.roleCode', template.id],
+      ['task.roleName', template.name],
+      ['start.text', sampleInput],
+      ['start.title', taskTitle],
+      ['start.files', sampleFiles],
+      ['start.documents', [sampleDocument]],
+      ['start.videos', [sampleVideo]],
+      ['start.images', []],
+      ['start.spreadsheets', []],
+      ['runtime.current_item', sampleVideo],
+      ['runtime.current_item.localPath', sampleVideo.localPath],
+      ['runtime.previous_text', sampleInput]
+    ]);
+  }
+
+  private getWorkflowTestInputVariables(
+    node: ServerRoleWorkflowGraphNode,
+    pool: WorkflowTestVariablePool
+  ): string[] {
+    if (node.inputVariables && node.inputVariables.length > 0) {
+      return node.inputVariables;
+    }
+    if (node.type === 'start' || node.type === 'input') {
+      return ['start.text', 'start.files'];
+    }
+    return pool.has('runtime.previous_text') ? ['runtime.previous_text', 'start.text'] : ['start.text'];
+  }
+
+  private buildWorkflowTestToolRequest(
+    node: ServerRoleWorkflowGraphNode,
+    pool: WorkflowTestVariablePool
+  ): WorkflowTestToolRequest | undefined {
+    const config = node.config ?? {};
+    const toolId = this.readWorkflowTestToolId(node);
+    if (!toolId) {
+      return undefined;
+    }
+
+    const configuredAction = typeof config.action === 'string' && config.action.trim()
+      ? config.action.trim()
+      : undefined;
+    if (configuredAction && this.isRecord(config.input)) {
+      const resolved = this.resolveWorkflowTestConfigValue(config.input, pool);
+      return {
+        toolId,
+        action: configuredAction,
+        input: this.isRecord(resolved.value) ? resolved.value : {},
+        unresolvedRefs: resolved.unresolvedRefs
+      };
+    }
+
+    const variables = this.resolveWorkflowTestVariableRefs(pool, node.inputVariables);
+    const query = variables
+      .map((variable) => this.previewWorkflowTestValue(variable.value, 1000))
+      .join('\n\n')
+      .trim();
+
+    if (toolId === 'web-search') {
+      return {
+        toolId,
+        action: 'web.search',
+        input: {
+          query: query || String(this.getWorkflowTestVariable(pool, 'start.text') ?? ''),
+          maxResults: this.readWorkflowTestNumber(config.maxResults, 5)
+        },
+        unresolvedRefs: []
+      };
+    }
+
+    if (toolId === 'office-document') {
+      const file = this.findFirstWorkflowTestFile(variables)
+        ?? this.findFirstWorkflowTestFile([{ ref: 'start.files', value: this.getWorkflowTestVariable(pool, 'start.files') }]);
+      if (file) {
+        return {
+          toolId,
+          action: 'document.extract_text',
+          input: {
+            path: file.localPath,
+            maxChars: this.readWorkflowTestNumber(config.maxChars, 30_000)
+          },
+          unresolvedRefs: []
+        };
+      }
+    }
+
+    if (toolId === 'local-filesystem' && typeof config.path === 'string') {
+      const resolvedPath = this.resolveWorkflowTestConfigValue(config.path, pool);
+      return {
+        toolId,
+        action: 'filesystem.read_text_file',
+        input: {
+          path: String(resolvedPath.value ?? ''),
+          maxChars: this.readWorkflowTestNumber(config.maxChars, 30_000)
+        },
+        unresolvedRefs: resolvedPath.unresolvedRefs
+      };
+    }
+
+    if (toolId === 'http-request' && typeof config.url === 'string') {
+      const resolved = this.resolveWorkflowTestConfigValue(
+        {
+          method: config.method ?? 'GET',
+          url: config.url,
+          headers: config.headers ?? {},
+          body: config.body,
+          maxChars: config.maxChars ?? 24_000,
+          timeoutMs: config.timeoutMs,
+          allowPrivateNetwork: config.allowPrivateNetwork === true
+        },
+        pool
+      );
+      return {
+        toolId,
+        action: 'http.request',
+        input: this.isRecord(resolved.value) ? resolved.value : {},
+        unresolvedRefs: resolved.unresolvedRefs
+      };
+    }
+
+    if (toolId === 'mcp' && typeof config.endpoint === 'string' && typeof config.toolName === 'string') {
+      const resolved = this.resolveWorkflowTestConfigValue(
+        {
+          endpoint: config.endpoint,
+          toolName: config.toolName,
+          arguments: config.arguments ?? {},
+          headers: config.headers ?? {},
+          timeoutMs: config.timeoutMs,
+          allowPrivateNetwork: config.allowPrivateNetwork === true
+        },
+        pool
+      );
+      return {
+        toolId,
+        action: 'mcp.call',
+        input: this.isRecord(resolved.value) ? resolved.value : {},
+        unresolvedRefs: resolved.unresolvedRefs
+      };
+    }
+
+    if (toolId === 'video-processing') {
+      const file = this.findFirstWorkflowTestFile(variables)
+        ?? this.findFirstWorkflowTestFile([{ ref: 'start.videos', value: this.getWorkflowTestVariable(pool, 'start.videos') }]);
+      const resolvedVideoPath = typeof config.videoPath === 'string'
+        ? this.resolveWorkflowTestConfigValue(config.videoPath, pool)
+        : undefined;
+      const videoPath = resolvedVideoPath
+        ? String(resolvedVideoPath.value ?? '')
+        : file?.localPath;
+      if (!videoPath) {
+        return undefined;
+      }
+      return {
+        toolId,
+        action: 'video.probe',
+        input: { videoPath },
+        unresolvedRefs: resolvedVideoPath?.unresolvedRefs ?? []
+      };
+    }
+
+    return undefined;
+  }
+
+  private buildWorkflowTestNodeOutput(
+    node: ServerRoleWorkflowGraphNode,
+    input: TestAdminRoleTemplateRequestDto,
+    toolRequest?: WorkflowTestToolRequest
+  ): WorkflowTestNodeOutput {
+    const sampleInput = input.sampleInput?.trim() || String(this.getWorkflowTestNodeDefaultText(node));
+
+    if (node.type === 'start' || node.type === 'input') {
+      return {
+        text: sampleInput,
+        result: {
+          title: this.compactPreview(sampleInput).slice(0, 80),
+          input: sampleInput,
+          files: []
+        }
+      };
+    }
+
+    if (node.type === 'knowledge') {
+      return {
+        text: `模拟知识库上下文：${sampleInput}`,
+        result: {
+          text: `模拟知识库上下文：${sampleInput}`,
+          sources: ['admin-console dry-run']
+        }
+      };
+    }
+
+    if (node.type === 'llm') {
+      const outputMode = node.config?.outputMode === 'json' || node.config?.responseFormat === 'json'
+        || node.config?.llmTaskType === 'structured_extraction'
+        ? 'json'
+        : 'text';
+      if (outputMode === 'json') {
+        const json = this.buildWorkflowTestStructuredJson(sampleInput);
+        return {
+          text: JSON.stringify(json, null, 2),
+          json,
+          result: json,
+          outputValue: json
+        };
+      }
+
+      const text = `模拟模型输出：已根据任务整理正文。\n\n${sampleInput}`;
+      return {
+        text,
+        result: text,
+        outputValue: text
+      };
+    }
+
+    if (node.type === 'data') {
+      return this.buildWorkflowTestDataNodeOutput(node);
+    }
+
+    if (node.type === 'tool') {
+      return this.buildWorkflowTestToolNodeOutput(node, toolRequest);
+    }
+
+    if (node.type === 'artifact') {
+      const fileName = `${this.normalizeArtifactFileName(String(toolRequest?.input.fileName ?? node.name))}.${node.artifactType ?? 'artifact'}`;
+      const localPath = `C:\\QiuAI\\test-output\\${fileName}`;
+      return {
+        text: `模拟生成产物：${localPath}`,
+        result: {
+          localPath,
+          fileName,
+          artifactType: node.artifactType
+        },
+        file: {
+          id: `${node.id}-file`,
+          name: fileName,
+          kind: 'artifact',
+          localPath
+        }
+      };
+    }
+
+    if (node.type === 'output') {
+      return {
+        text: '模拟返回：任务已完成，产物已生成。'
+      };
+    }
+
+    return {
+      text: this.getWorkflowTestNodeDefaultText(node)
+    };
+  }
+
+  private buildWorkflowTestDataNodeOutput(node: ServerRoleWorkflowGraphNode): WorkflowTestNodeOutput {
+    const firstOutputVariable = node.outputVariables?.[0]?.trim();
+    const value = firstOutputVariable
+      ? this.buildWorkflowTestValueForOutputVariable(firstOutputVariable)
+      : this.getWorkflowTestNodeDefaultText(node);
+
+    return {
+      text: this.previewWorkflowTestValue(value, 2000),
+      result: value as WorkflowTestRuntimeValue,
+      outputValue: value as WorkflowTestRuntimeValue
+    };
+  }
+
+  private buildWorkflowTestToolNodeOutput(
+    node: ServerRoleWorkflowGraphNode,
+    toolRequest?: WorkflowTestToolRequest
+  ): WorkflowTestNodeOutput {
+    if (!toolRequest) {
+      return {
+        text: `工具节点 ${node.name} 无法构造请求。`
+      };
+    }
+
+    if (toolRequest.action === 'web.search') {
+      const result = {
+        results: [
+          {
+            title: '模拟搜索结果',
+            url: 'https://example.com/qiuai-test',
+            snippet: this.previewWorkflowTestValue(toolRequest.input.query ?? '', 160)
+          }
+        ],
+        text: '模拟网页搜索摘要。'
+      };
+      return {
+        text: result.text,
+        result,
+        outputValue: result
+      };
+    }
+
+    if (toolRequest.action === 'document.extract_text' || toolRequest.action === 'filesystem.read_text_file') {
+      return {
+        text: '模拟读取到的文件正文。实际内容会由 PC 端工具读取本地路径。',
+        result: {
+          text: '模拟读取到的文件正文。',
+          localPath: toolRequest.input.path
+        }
+      };
+    }
+
+    if (toolRequest.action.startsWith('video.')) {
+      return {
+        text: '模拟视频工具输出。实际执行需要 PC 端视频工具和 FFmpeg。',
+        result: {
+          metadata: {
+            videoPath: toolRequest.input.videoPath,
+            durationSeconds: 60
+          },
+          cutPlan: [{ start: 0, end: 15, reason: '保留高质量片段' }]
+        }
+      };
+    }
+
+    return {
+      text: `模拟工具输出：${toolRequest.toolId}/${toolRequest.action}`,
+      result: {
+        ok: true,
+        action: toolRequest.action
+      }
+    };
+  }
+
+  private writeWorkflowTestNodeOutputs(
+    pool: WorkflowTestVariablePool,
+    node: ServerRoleWorkflowGraphNode,
+    output: WorkflowTestNodeOutput
+  ): string[] {
+    const outputRefs: string[] = [];
+
+    if (output.text !== undefined) {
+      pool.set(`${node.id}.text`, output.text);
+      pool.set('runtime.previous_text', output.text);
+      outputRefs.push(`${node.id}.text`);
+    }
+
+    if (output.json !== undefined) {
+      pool.set(`${node.id}.json`, output.json as WorkflowTestRuntimeValue);
+      outputRefs.push(`${node.id}.json`);
+    }
+
+    if (output.result !== undefined) {
+      pool.set(`${node.id}.result`, output.result);
+      outputRefs.push(`${node.id}.result`);
+    }
+
+    if (output.file !== undefined) {
+      pool.set(`${node.id}.file`, output.file);
+      outputRefs.push(`${node.id}.file`);
+    }
+
+    for (const outputVariable of node.outputVariables ?? []) {
+      const normalizedOutputVariable = outputVariable.trim();
+      if (!normalizedOutputVariable) {
+        continue;
+      }
+
+      const value = Object.prototype.hasOwnProperty.call(output, 'outputValue')
+        ? output.outputValue
+        : output.text ?? output.result ?? output.file ?? output.json;
+      if (value === undefined) {
+        continue;
+      }
+
+      pool.set(normalizedOutputVariable, value as WorkflowTestRuntimeValue);
+      outputRefs.push(normalizedOutputVariable);
+
+      if (!normalizedOutputVariable.includes('.')) {
+        pool.set(`${node.id}.${normalizedOutputVariable}`, value as WorkflowTestRuntimeValue);
+        outputRefs.push(`${node.id}.${normalizedOutputVariable}`);
+      }
+    }
+
+    return [...new Set(outputRefs)];
+  }
+
+  private checkWorkflowTestToolCompatibility(
+    node: ServerRoleWorkflowGraphNode,
+    templateTools: Set<string>,
+    request?: WorkflowTestToolRequest
+  ): WorkflowTestToolCompatibility {
+    const checks: string[] = [];
+    const failures: string[] = [];
+    const warnings: string[] = [];
+
+    if (!request) {
+      return {
+        status: 'failed',
+        message: 'PC 端无法构造这个工具节点的请求，请检查 toolId、action 和 input。',
+        checks: ['未生成 toolId/action/input。']
+      };
+    }
+
+    const actionDefinition = getServerToolAction(request.action);
+    if (!actionDefinition) {
+      failures.push(`工具动作未在服务端工具目录定义：${request.action}`);
+    } else {
+      checks.push(`工具动作已定义：${actionDefinition.packageId}/${actionDefinition.actionId}`);
+      if (actionDefinition.packageId !== request.toolId) {
+        failures.push(`工具动作属于 ${actionDefinition.packageId}，但节点 toolId 是 ${request.toolId}。`);
+      }
+      if (!templateTools.has(actionDefinition.packageId)) {
+        failures.push(`数字员工工具清单未包含 ${actionDefinition.packageId}，PC 安装后可能不会启用该工具。`);
+      }
+      if (node.type === 'artifact' && node.artifactType && actionDefinition.artifactFormat) {
+        const actionArtifactType = actionDefinition.artifactFormat === 'md'
+          ? 'markdown'
+          : actionDefinition.artifactFormat;
+        if (actionArtifactType !== node.artifactType) {
+          failures.push(`产物类型是 ${node.artifactType}，但工具动作输出 ${actionArtifactType}。`);
+        }
+      }
+
+      for (const port of actionDefinition.input.filter((item) => item.required)) {
+        if (!this.hasWorkflowTestUsableValue(request.input[port.key])) {
+          failures.push(`缺少必填工具参数：${port.key}`);
+        }
+      }
+
+      if (actionDefinition.requiredDependencies.length > 0) {
+        warnings.push(`PC 端需要安装依赖：${actionDefinition.requiredDependencies.join(', ')}。`);
+      }
+    }
+
+    if (request.unresolvedRefs.length > 0) {
+      failures.push(`以下变量没有解析到值：${[...new Set(request.unresolvedRefs)].join(', ')}`);
+    }
+
+    this.checkWorkflowTestActionSpecificInput(request, failures, warnings, checks);
+
+    const status: WorkflowTestCompatibilityStatus = failures.length > 0
+      ? 'failed'
+      : warnings.length > 0
+        ? 'warning'
+        : 'passed';
+    const message = failures[0]
+      ?? warnings[0]
+      ?? 'PC 端工具请求可以直接执行。';
+
+    return {
+      status,
+      message,
+      checks: [...checks, ...warnings, ...failures]
+    };
+  }
+
+  private checkWorkflowTestActionSpecificInput(
+    request: WorkflowTestToolRequest,
+    failures: string[],
+    warnings: string[],
+    checks: string[]
+  ): void {
+    if (request.action === 'spreadsheet.write_xlsx') {
+      const hasRows = this.hasWorkflowTestUsableValue(request.input.rows);
+      const hasSheets = this.hasWorkflowTestUsableValue(request.input.sheets);
+      if (!hasRows && !hasSheets) {
+        failures.push('Excel 产物缺少 rows/sheets，PC 端会按文本兜底生成内容摘要表，不适合表格交付。');
+      } else {
+        checks.push(hasSheets ? 'Excel 已绑定 sheets。' : 'Excel 已绑定 rows。');
+      }
+      return;
+    }
+
+    if (request.action === 'spreadsheet.write_csv') {
+      if (!this.hasWorkflowTestUsableValue(request.input.rows)) {
+        failures.push('CSV 产物必须绑定 rows，不能只传 content。');
+      } else {
+        checks.push('CSV 已绑定 rows。');
+      }
+      return;
+    }
+
+    if (request.action === 'office.write_docx_document' || request.action === 'office.write_markdown_document') {
+      if (!this.hasWorkflowTestUsableValue(request.input.content)) {
+        failures.push('文档产物缺少 content，PC 端无法写入正文。');
+      } else {
+        checks.push('文档产物已绑定 content。');
+      }
+      return;
+    }
+
+    if (request.action === 'presentation.write_pptx') {
+      if (this.hasWorkflowTestUsableValue(request.input.slides)) {
+        checks.push('PPT 已绑定 slides。');
+      } else if (this.hasWorkflowTestUsableValue(request.input.content)) {
+        warnings.push('PPT 只绑定 content，PC 端会生成基础演示稿，建议后续改为 slides JSON。');
+      } else {
+        failures.push('PPT 产物缺少 slides/content。');
+      }
+      return;
+    }
+
+    if (request.action === 'video.compose_clips' || request.action === 'video.export_mp4') {
+      if (!this.hasWorkflowTestUsableValue(request.input.videoPath)) {
+        failures.push('视频产物缺少 videoPath。');
+      }
+      if (!this.hasWorkflowTestUsableValue(request.input.cutPlan)) {
+        failures.push('视频产物缺少 cutPlan。');
+      }
+      if (this.hasWorkflowTestUsableValue(request.input.videoPath) && this.hasWorkflowTestUsableValue(request.input.cutPlan)) {
+        checks.push('视频产物已绑定 videoPath 和 cutPlan。');
+      }
+    }
+  }
+
+  private resolveWorkflowTestConfigValue(
+    value: unknown,
+    pool: WorkflowTestVariablePool
+  ): { value: unknown; unresolvedRefs: string[] } {
+    if (typeof value === 'string') {
+      const variableOnly = value.match(/^\$([a-zA-Z0-9_.-]+)$/);
+      if (variableOnly) {
+        const ref = variableOnly[1] ?? '';
+        const resolved = this.getWorkflowTestVariable(pool, ref);
+        return resolved === undefined
+          ? { value: '', unresolvedRefs: [ref] }
+          : { value: resolved, unresolvedRefs: [] };
+      }
+
+      const unresolvedRefs: string[] = [];
+      const resolvedText = value.replace(/\{\{#?([a-zA-Z0-9_.-]+)#?\}\}/g, (_match, ref: string) => {
+        const resolved = this.getWorkflowTestVariable(pool, ref);
+        if (resolved === undefined) {
+          unresolvedRefs.push(ref);
+          return '';
+        }
+        return this.previewWorkflowTestValue(resolved, 8_000);
+      });
+      return { value: resolvedText, unresolvedRefs };
+    }
+
+    if (Array.isArray(value)) {
+      const resolvedItems = value.map((item) => this.resolveWorkflowTestConfigValue(item, pool));
+      return {
+        value: resolvedItems.map((item) => item.value),
+        unresolvedRefs: resolvedItems.flatMap((item) => item.unresolvedRefs)
+      };
+    }
+
+    if (this.isRecord(value)) {
+      const entries = Object.entries(value).map(([key, item]) => {
+        const resolved = this.resolveWorkflowTestConfigValue(item, pool);
+        return [key, resolved] as const;
+      });
+      return {
+        value: Object.fromEntries(entries.map(([key, resolved]) => [key, resolved.value])),
+        unresolvedRefs: entries.flatMap(([, resolved]) => resolved.unresolvedRefs)
+      };
+    }
+
+    return { value, unresolvedRefs: [] };
+  }
+
+  private resolveWorkflowTestVariableRefs(
+    pool: WorkflowTestVariablePool,
+    refs: string[] | undefined,
+    fallbackRefs: string[] = ['start.text']
+  ): Array<{ ref: string; value: WorkflowTestRuntimeValue | undefined }> {
+    const normalizedRefs = (refs && refs.length > 0 ? refs : fallbackRefs)
+      .map((ref) => ref.trim())
+      .filter(Boolean);
+    return normalizedRefs.map((ref) => ({
+      ref,
+      value: this.getWorkflowTestVariable(pool, ref)
+    }));
+  }
+
+  private getWorkflowTestVariable(
+    pool: WorkflowTestVariablePool,
+    ref: string | undefined
+  ): WorkflowTestRuntimeValue | undefined {
+    const normalizedRef = ref?.trim();
+    if (!normalizedRef) {
+      return undefined;
+    }
+
+    const exactValue = pool.get(normalizedRef);
+    if (exactValue !== undefined) {
+      return exactValue;
+    }
+
+    const parts = normalizedRef.split('.');
+    for (let prefixLength = parts.length - 1; prefixLength > 0; prefixLength -= 1) {
+      const prefix = parts.slice(0, prefixLength).join('.');
+      const source = pool.get(prefix);
+      const nestedValue = this.readNestedWorkflowTestValue(source, parts.slice(prefixLength));
+      if (nestedValue !== undefined) {
+        return nestedValue as WorkflowTestRuntimeValue;
+      }
+    }
+
+    return undefined;
+  }
+
+  private readNestedWorkflowTestValue(value: unknown, segments: string[]): unknown {
+    let current = value;
+
+    for (const segment of segments) {
+      if (current === undefined || current === null) {
+        return undefined;
+      }
+
+      if (Array.isArray(current)) {
+        const index = Number(segment);
+        if (!Number.isInteger(index) || index < 0 || index >= current.length) {
+          return undefined;
+        }
+        current = current[index];
+        continue;
+      }
+
+      if (typeof current === 'object') {
+        current = (current as Record<string, unknown>)[segment];
+        continue;
+      }
+
+      return undefined;
+    }
+
+    return current;
+  }
+
+  private readWorkflowTestToolId(node: ServerRoleWorkflowGraphNode): string | undefined {
+    if (node.toolId?.trim()) {
+      return node.toolId.trim();
+    }
+
+    const toolIds = Array.isArray(node.config?.toolIds)
+      ? node.config.toolIds.filter((toolId): toolId is string => typeof toolId === 'string' && toolId.trim().length > 0)
+      : [];
+    return toolIds[0]?.trim();
+  }
+
+  private readWorkflowTestNumber(value: unknown, fallback: number): number {
+    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  }
+
+  private findFirstWorkflowTestFile(
+    variables: Array<{ ref: string; value: WorkflowTestRuntimeValue | undefined }>
+  ): (Record<string, unknown> & { localPath: string }) | undefined {
+    for (const variable of variables) {
+      if (this.isWorkflowTestFileValue(variable.value)) {
+        return variable.value;
+      }
+
+      if (Array.isArray(variable.value)) {
+        const file = variable.value.find((item) => this.isWorkflowTestFileValue(item));
+        if (file) {
+          return file;
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  private isWorkflowTestFileValue(value: unknown): value is Record<string, unknown> & { localPath: string } {
+    return this.isRecord(value) && typeof value.localPath === 'string' && value.localPath.trim().length > 0;
+  }
+
+  private hasWorkflowTestUsableValue(value: unknown): boolean {
+    if (value === undefined || value === null) {
+      return false;
+    }
+    if (typeof value === 'string') {
+      return value.trim().length > 0;
+    }
+    if (Array.isArray(value)) {
+      return value.length > 0;
+    }
+    if (typeof value === 'object') {
+      return Object.keys(value).length > 0;
+    }
+    return true;
+  }
+
+  private buildWorkflowTestStructuredJson(sampleInput: string): Record<string, unknown> {
+    return {
+      content: `模拟结构化正文：${sampleInput}`,
+      rows: [
+        ['字段', '内容'],
+        ['任务', sampleInput]
+      ],
+      sheets: [
+        {
+          name: '整理结果',
+          rows: [
+            ['字段', '内容'],
+            ['任务', sampleInput]
+          ]
+        }
+      ],
+      cutPlan: [
+        {
+          start: 0,
+          end: 15,
+          reason: '保留最有价值片段'
+        }
+      ]
+    };
+  }
+
+  private buildWorkflowTestValueForOutputVariable(variable: string): WorkflowTestRuntimeValue {
+    const normalized = variable.toLowerCase();
+    if (normalized.includes('sheets')) {
+      return [
+        {
+          name: '整理结果',
+          rows: [
+            ['字段', '内容'],
+            ['示例', '测试值']
+          ]
+        }
+      ];
+    }
+    if (normalized.includes('rows') || normalized.includes('table')) {
+      return [
+        ['字段', '内容'],
+        ['示例', '测试值']
+      ];
+    }
+    if (normalized.includes('cutplan') || normalized.includes('cut_plan')) {
+      return [{ start: 0, end: 15, reason: '保留最有价值片段' }];
+    }
+    if (normalized.includes('json') || normalized.includes('content')) {
+      return this.buildWorkflowTestStructuredJson('测试任务');
+    }
+    return `模拟变量 ${variable} 的输出。`;
+  }
+
+  private getWorkflowTestNodeDefaultText(node: ServerRoleWorkflowGraphNode): string {
+    return node.instruction?.trim() || `模拟节点输出：${node.name}`;
+  }
+
+  private previewWorkflowTestValue(value: unknown, maxChars = 240): string {
+    const text = typeof value === 'string'
+      ? value
+      : JSON.stringify(value ?? '', null, 2);
+    return this.compactPreview(text.length > maxChars ? `${text.slice(0, maxChars - 3)}...` : text);
+  }
+
+  private normalizeArtifactFileName(value: string): string {
+    const normalized = value
+      .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+      .replace(/\s+/g, '-')
+      .replace(/_+/g, '_')
+      .replace(/-+/g, '-')
+      .replace(/^[-_.]+|[-_.]+$/g, '')
+      .trim();
+    return normalized.slice(0, 80) || 'qiuai-artifact';
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   private getWorkflowNodeTraceWarnings(

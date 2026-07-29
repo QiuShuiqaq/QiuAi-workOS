@@ -1499,6 +1499,137 @@ assert.equal(
   'C:\\QiuAI\\workspace\\spreadsheets\\lead-table.xlsx'
 );
 
+let workflowJsonSheetsXlsxModelInvocationCount = 0;
+let workflowJsonSheetsXlsxToolCallCount = 0;
+const workflowJsonSheetsXlsxTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-json-sheets-xlsx-001',
+    roleCode: 'ai-spreadsheet-organizer',
+    roleName: 'AI 表格整理专员',
+    title: '整理商品名称和价格',
+    input: '整理“商品名称”和“价格”，输出 Excel。',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    toolIds: ['office-document'],
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'draft_deliverable',
+          type: 'llm',
+          name: '生成交付内容',
+          instruction: 'Return JSON with sheets for a spreadsheet.',
+          config: {
+            outputMode: 'json',
+            schema: {
+              sheets: [
+                {
+                  name: '整理后明细',
+                  rows: [
+                    ['商品名称', '价格'],
+                    ['纯棉毛巾', '19.90']
+                  ]
+                }
+              ]
+            }
+          },
+          outputVariables: ['deliverable_content']
+        },
+        {
+          id: 'write_artifact',
+          type: 'artifact',
+          name: '生成文件',
+          toolId: 'office-document',
+          artifactType: 'xlsx',
+          inputVariables: ['deliverable_content'],
+          outputVariables: ['deliverable_file'],
+          config: {
+            action: 'spreadsheet.write_xlsx',
+            input: {
+              folder: 'spreadsheets',
+              fileName: 'product-price-table',
+              sheets: '$deliverable_content.sheets',
+              content: '{{deliverable_content.assistantMessage}}'
+            }
+          }
+        }
+      ],
+      edges: [
+        { id: 'start-draft-sheets', sourceNodeId: 'start', targetNodeId: 'draft_deliverable', condition: { type: 'always' } },
+        { id: 'draft-sheets-write', sourceNodeId: 'draft_deliverable', targetNodeId: 'write_artifact', condition: { type: 'always' } }
+      ]
+    }
+  },
+  workspaceId: 'workspace-workflow-json-sheets-xlsx',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['office-document'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    workflowJsonSheetsXlsxModelInvocationCount += 1;
+    const prompt = request.messages.map((message) => message.content).join('\n');
+    assert.match(prompt, /Return valid JSON only/);
+    assert.match(prompt, /sheets/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: JSON.stringify({
+        sheets: [
+          {
+            name: '整理后明细',
+            rows: [
+              ['商品名称', '价格'],
+              ['纯棉毛巾', '19.90'],
+              ['无线蓝牙耳机', '129']
+            ]
+          }
+        ],
+        assistantMessage: '已整理 2 条商品价格。'
+      })
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    workflowJsonSheetsXlsxToolCallCount += 1;
+    assert.equal(request.toolId, 'office-document');
+    assert.equal(request.action, 'spreadsheet.write_xlsx');
+    assert.deepEqual(request.input.sheets, [
+      {
+        name: '整理后明细',
+        rows: [
+          ['商品名称', '价格'],
+          ['纯棉毛巾', '19.90'],
+          ['无线蓝牙耳机', '129']
+        ]
+      }
+    ]);
+    assert.notEqual(request.input.sheets, undefined);
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\spreadsheets\\product-price-table.xlsx'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:05.975Z'
+});
+
+assert.equal(workflowJsonSheetsXlsxModelInvocationCount, 1);
+assert.equal(workflowJsonSheetsXlsxToolCallCount, 1);
+assert.equal(workflowJsonSheetsXlsxTask.task.state, 'completed');
+assert.equal(
+  workflowJsonSheetsXlsxTask.task.artifacts[0]?.localPath,
+  'C:\\QiuAI\\workspace\\spreadsheets\\product-price-table.xlsx'
+);
+
 let workflowCodeRowsXlsxModelInvocationCount = 0;
 let workflowCodeRowsXlsxToolCallCount = 0;
 const workflowCodeRowsXlsxTask = await runDesktopTask({

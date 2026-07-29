@@ -1614,6 +1614,12 @@ function traceStatusTone(status: 'passed' | 'warning' | 'failed') {
   return 'gold';
 }
 
+function traceStatusText(status: 'passed' | 'warning' | 'failed') {
+  if (status === 'passed') return '通过';
+  if (status === 'failed') return '失败';
+  return '警告';
+}
+
 function workflowNodeMeta(node: RoleWorkflowGraphNode) {
   return node.toolId ?? node.artifactType ?? node.modelProfileId ?? (node.type === 'data' ? readWorkflowDataMode(node) : node.id);
 }
@@ -1908,6 +1914,8 @@ const workflowNodeTypes = {
 };
 
 function WorkflowTestTracePanel({ result }: { result: TemplateTestResult }) {
+  const pcCompatibility = result.graphTrace?.pcCompatibility;
+
   return (
     <Space direction="vertical" size={10} style={{ width: '100%' }}>
       <Alert
@@ -1926,6 +1934,23 @@ function WorkflowTestTracePanel({ result }: { result: TemplateTestResult }) {
           </Space>
         }
       />
+      {pcCompatibility ? (
+        <Alert
+          showIcon
+          type={pcCompatibility.status === 'failed' ? 'error' : pcCompatibility.status === 'warning' ? 'warning' : 'success'}
+          message={`PC 端兼容性：${traceStatusText(pcCompatibility.status)}`}
+          description={
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <Typography.Text>{pcCompatibility.message}</Typography.Text>
+              <Space wrap size={4}>
+                <Tag color="green">通过 {pcCompatibility.passedCount}</Tag>
+                <Tag color="gold">警告 {pcCompatibility.warningCount}</Tag>
+                <Tag color="red">失败 {pcCompatibility.failedCount}</Tag>
+              </Space>
+            </Space>
+          }
+        />
+      ) : null}
       {result.requiredToolActions?.length ? (
         <Card size="small" bordered={false} className="workflow-empty-panel">
           <Space direction="vertical" size={6} style={{ width: '100%' }}>
@@ -1955,6 +1980,21 @@ function WorkflowTestTracePanel({ result }: { result: TemplateTestResult }) {
                 </Space>
                 <Typography.Text type="secondary">输入：{node.inputPreview}</Typography.Text>
                 <Typography.Text type="secondary">输出：{node.outputPreview}</Typography.Text>
+                {node.runtimePreview ? (
+                  <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                    <Typography.Text type="secondary">运行变量</Typography.Text>
+                    <Space wrap size={4}>
+                      {(node.runtimePreview.inputVariables ?? []).map((variable) => (
+                        <Tag key={`runtime-in-${node.nodeId}-${variable}`}>读 {variable}</Tag>
+                      ))}
+                      {(node.runtimePreview.outputVariables ?? []).map((variable) => (
+                        <Tag key={`runtime-out-${node.nodeId}-${variable}`} color="cyan">
+                          写 {variable}
+                        </Tag>
+                      ))}
+                    </Space>
+                  </Space>
+                ) : null}
                 {node.toolActionId ? (
                   <Space wrap size={4}>
                     <Tag color="blue">{node.toolActionId}</Tag>
@@ -1964,6 +2004,38 @@ function WorkflowTestTracePanel({ result }: { result: TemplateTestResult }) {
                     {(node.producedOutputTypes ?? []).map((type) => (
                       <Tag key={`out-${node.nodeId}-${type}`}>出：{type}</Tag>
                     ))}
+                  </Space>
+                ) : null}
+                {node.resolvedToolInput ? (
+                  <Card size="small" bordered={false} className="workflow-empty-panel">
+                    <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                      <Typography.Text strong>工具请求预览</Typography.Text>
+                      <Typography.Paragraph className="workflow-trace-preview">
+                        {stringifyJsonConfigValue(node.resolvedToolInput)}
+                      </Typography.Paragraph>
+                    </Space>
+                  </Card>
+                ) : null}
+                {node.toolCompatibility ? (
+                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                    <Space wrap size={4}>
+                      <Typography.Text strong>PC 兼容</Typography.Text>
+                      <Tag color={traceStatusTone(node.toolCompatibility.status)}>
+                        {traceStatusText(node.toolCompatibility.status)}
+                      </Tag>
+                      <Typography.Text type={node.toolCompatibility.status === 'failed' ? 'danger' : 'secondary'}>
+                        {node.toolCompatibility.message}
+                      </Typography.Text>
+                    </Space>
+                    {node.toolCompatibility.checks.length ? (
+                      <div className="workflow-test-check-list">
+                        {node.toolCompatibility.checks.map((check) => (
+                          <Typography.Text key={`${node.nodeId}-${check}`} type="secondary">
+                            {check}
+                          </Typography.Text>
+                        ))}
+                      </div>
+                    ) : null}
                   </Space>
                 ) : null}
                 {node.warnings.length ? (

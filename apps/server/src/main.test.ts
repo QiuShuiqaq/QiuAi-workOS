@@ -371,6 +371,7 @@ test('admin role template factory governs publication and workspace visibility',
     assert.equal(testResponseData.valid, true);
     assert.deepEqual(testResponseData.requiredToolActions, ['office.write_markdown_document']);
     assert.ok(testResponseData.graphTrace);
+    assert.equal(testResponseData.graphTrace.pcCompatibility.status, 'passed');
     assert.ok(testResponseData.graphTrace.nodes.length >= 2);
     assert.ok(
       testResponseData.graphTrace.nodes.some(
@@ -378,6 +379,124 @@ test('admin role template factory governs publication and workspace visibility',
           node.nodeId === 'receive_input' &&
           node.inputPreview.includes('Please verify the template factory flow.') &&
           node.outputPreview.length > 0
+      )
+    );
+    assert.ok(
+      testResponseData.graphTrace.nodes.some(
+        (node: {
+          nodeId: string;
+          resolvedToolInput?: { action?: string; input?: Record<string, unknown> };
+          toolCompatibility?: { status: string };
+        }) =>
+          node.nodeId === 'write_artifact' &&
+          node.resolvedToolInput?.action === 'office.write_markdown_document' &&
+          node.resolvedToolInput.input?.content &&
+          node.toolCompatibility?.status === 'passed'
+      )
+    );
+
+    const xlsxContentOnlyTemplateId = `${templateId}_xlsx_content_only`;
+    const createBadXlsxResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/role-templates',
+      headers,
+      payload: {
+        id: xlsxContentOnlyTemplateId,
+        version: '1.0.0',
+        name: 'AI Bad XLSX Tester',
+        industry: 'Operations',
+        scenario: 'Spreadsheet compatibility smoke test',
+        description: 'Verifies spreadsheet artifact validation rejects content-only xlsx payloads.',
+        recommendedPlanCode: 'PERSONAL_FREE',
+        businessGoal: 'Catch spreadsheet templates that would generate bad PC artifacts.',
+        knowledgeSources: [],
+        tools: ['office-document'],
+        skills: [
+          {
+            code: 'xlsx_contract_check',
+            name: 'XLSX Contract Check',
+            summary: 'Checks xlsx writer input contract.'
+          }
+        ],
+        workflowSteps: [
+          {
+            id: 'receive_input',
+            order: 1,
+            type: 'input',
+            name: 'Receive Input',
+            instruction: 'Receive spreadsheet test input.'
+          },
+          {
+            id: 'deliver_output',
+            order: 2,
+            type: 'output',
+            name: 'Deliver Output',
+            instruction: 'Return spreadsheet test output.'
+          }
+        ],
+        workflowGraph: {
+          version: '1.0.0',
+          entryNodeId: 'start',
+          nodes: [
+            { id: 'start', type: 'start', name: 'Start' },
+            {
+              id: 'draft_table',
+              type: 'llm',
+              name: 'Draft Table',
+              instruction: 'Return table text.',
+              outputVariables: ['draft_text']
+            },
+            {
+              id: 'write_xlsx',
+              type: 'artifact',
+              name: 'Write XLSX',
+              toolId: 'office-document',
+              artifactType: 'xlsx',
+              inputVariables: ['draft_text'],
+              outputVariables: ['deliverable_file'],
+              config: {
+                action: 'spreadsheet.write_xlsx',
+                input: {
+                  title: '{{task.title}}',
+                  folder: 'spreadsheets',
+                  fileName: 'bad-xlsx',
+                  content: '{{draft_text}}'
+                }
+              }
+            }
+          ],
+          edges: [
+            { id: 'start__draft_table', sourceNodeId: 'start', targetNodeId: 'draft_table', condition: { type: 'always' } },
+            { id: 'draft_table__write_xlsx', sourceNodeId: 'draft_table', targetNodeId: 'write_xlsx', condition: { type: 'always' } }
+          ]
+        },
+        sampleInputs: ['Extract product name and price.'],
+        outputFormat: 'XLSX table.',
+        approvalPolicy: 'No approval required for smoke test.',
+        allowedPlanCodes: ['PERSONAL_FREE'],
+        visibleWorkspaceIds: []
+      }
+    });
+    assert.equal(createBadXlsxResponse.statusCode, 201);
+
+    const badXlsxTestResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v1/admin/role-templates/${encodeURIComponent(xlsxContentOnlyTemplateId)}/test`,
+      headers,
+      payload: {
+        sampleInput: '整理商品名称和价格。'
+      }
+    });
+    assert.equal(badXlsxTestResponse.statusCode, 201);
+    const badXlsxTestData = JSON.parse(badXlsxTestResponse.body).data;
+    assert.equal(badXlsxTestData.valid, false);
+    assert.equal(badXlsxTestData.graphTrace.pcCompatibility.status, 'failed');
+    assert.ok(
+      badXlsxTestData.graphTrace.nodes.some(
+        (node: { nodeId: string; toolCompatibility?: { status: string; message: string } }) =>
+          node.nodeId === 'write_xlsx' &&
+          node.toolCompatibility?.status === 'failed' &&
+          node.toolCompatibility.message.includes('rows/sheets')
       )
     );
 

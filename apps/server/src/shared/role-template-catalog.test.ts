@@ -63,12 +63,18 @@ test('server role template catalog is focused and production-oriented', () => {
   assert.ok(salesTemplates.some((template) => template.industry.includes('政企项目')));
 
   for (const template of serverRoleTemplateCatalog) {
+    assert.equal(template.version, '1.1.0', `${template.templateId} must use the latest designed template version`);
     assert.ok(template.name.trim(), `${template.templateId} must have a name`);
     assert.ok(template.industry.trim(), `${template.templateId} must have an industry`);
     assert.ok(template.scenario.trim(), `${template.templateId} must have a scenario`);
     assert.ok(template.businessGoal.trim(), `${template.templateId} must have a business goal`);
     assert.ok(template.skills.length >= 3, `${template.templateId} must define at least 3 skills`);
     assert.ok(template.workflowSteps.length >= 5, `${template.templateId} must define workflow steps`);
+    assert.equal(
+      template.workflowSteps.some((step) => step.id === 'use_tools'),
+      false,
+      `${template.templateId} workflow steps must describe concrete executable nodes`
+    );
     assert.ok(template.workflowGraph.nodes.length >= 2, `${template.templateId} must define graph nodes`);
     assert.ok(template.workflowGraph.edges.length >= 1, `${template.templateId} must define graph edges`);
     assert.equal(template.workflowGraph.entryNodeId, 'start', `${template.templateId} must define graph entry`);
@@ -124,6 +130,29 @@ test('server role template catalog is focused and production-oriented', () => {
       assert.ok(graphNodeIds.has(edge.targetNodeId), `${template.templateId} graph edge target must exist`);
     }
 
+    const attachmentNode = template.workflowGraph.nodes.find((node) => node.id === 'read_attachments');
+    if (attachmentNode) {
+      assert.ok(
+        template.workflowGraph.edges.some(
+          (edge) =>
+            edge.sourceNodeId === 'gather_context' &&
+            edge.targetNodeId === 'read_attachments' &&
+            edge.condition?.type === 'exists' &&
+            edge.condition.variable === 'start.files'
+        ),
+        `${template.templateId} must read attachments only when start.files exists`
+      );
+      assert.ok(
+        template.workflowGraph.edges.some(
+          (edge) =>
+            edge.sourceNodeId === 'gather_context' &&
+            edge.targetNodeId !== 'read_attachments' &&
+            edge.condition?.type === 'always'
+        ),
+        `${template.templateId} must bypass attachment reading when no file is uploaded`
+      );
+    }
+
     const artifactAction = artifactNode.config?.action;
     assert.equal(typeof artifactAction, 'string', `${template.templateId} artifact must define a concrete tool action`);
     assert.equal(
@@ -141,8 +170,27 @@ test('server role template catalog is focused and production-oriented', () => {
     }
     if (artifactNode.artifactType === 'xlsx' || artifactNode.artifactType === 'csv') {
       assert.ok(
-        typeof artifactInput.content === 'string' || Array.isArray(artifactInput.rows) || Array.isArray(artifactInput.sheets),
-        `${template.templateId} spreadsheet artifact must define content, rows, or sheets`
+        template.workflowSteps.some((step) => step.id === 'draft_deliverable' && step.instruction.includes('sheets')),
+        `${template.templateId} spreadsheet workflow steps must tell operators that sheets are required`
+      );
+      const hasStructuredSpreadsheetInput =
+        typeof artifactInput.rows === 'string' ||
+        Array.isArray(artifactInput.rows) ||
+        typeof artifactInput.sheets === 'string' ||
+        Array.isArray(artifactInput.sheets);
+
+      assert.ok(
+        hasStructuredSpreadsheetInput,
+        `${template.templateId} spreadsheet artifact must bind rows or sheets instead of plain content only`
+      );
+      assert.ok(
+        template.workflowGraph.nodes.some(
+          (node) =>
+            node.type === 'llm' &&
+            node.outputVariables?.includes('deliverable_content') &&
+            readRecord(node.config)?.outputMode === 'json'
+        ),
+        `${template.templateId} spreadsheet draft node must request structured JSON output`
       );
     }
     if (typeof artifactInput.content === 'string') {

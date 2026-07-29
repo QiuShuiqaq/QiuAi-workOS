@@ -6,7 +6,9 @@ import {
   CloseOutlined,
   ControlOutlined,
   DatabaseOutlined,
+  DeleteOutlined,
   DownOutlined,
+  ExclamationCircleOutlined,
   FileAddOutlined,
   FileExcelOutlined,
   FileImageOutlined,
@@ -53,6 +55,7 @@ import Select from 'antd/es/select';
 import Space from 'antd/es/space';
 import Switch from 'antd/es/switch';
 import Tag from 'antd/es/tag';
+import Tooltip from 'antd/es/tooltip';
 import Typography from 'antd/es/typography';
 import zhCN from 'antd/es/locale/zh_CN';
 import { type ChangeEvent, type DragEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
@@ -117,6 +120,10 @@ import {
   resolveModelProfileCredential,
   upsertDefaultModelCredential
 } from '../shared/desktop-model-credentials';
+import {
+  parseWorkflowGraph,
+  type WorkflowGraphArtifactType
+} from '../shared/desktop-workflow-graph';
 
 type SectionKey = 'workbench' | 'roles' | 'models' | 'tools' | 'knowledge' | 'settings';
 type AccountModalKey = 'enterprise' | 'help' | 'release' | 'download' | 'logout';
@@ -1004,6 +1011,7 @@ export default function App() {
   const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
   const [isComposerDragOver, setIsComposerDragOver] = useState(false);
   const [taskHistoryOpen, setTaskHistoryOpen] = useState(false);
+  const [pendingUninstallRoleCode, setPendingUninstallRoleCode] = useState('');
 
   useEffect(() => {
     void loadRuntimeState();
@@ -1075,9 +1083,7 @@ export default function App() {
 
   useEffect(() => {
     const activeRoleCode = runtimeState.localRuntime.activeRoleCode ?? runtimeState.rolePackages[0]?.roleCode;
-    if (activeRoleCode) {
-      taskForm.setFieldsValue({ roleCode: activeRoleCode });
-    }
+    taskForm.setFieldsValue({ roleCode: activeRoleCode ?? '' });
   }, [runtimeState.localRuntime.activeRoleCode, runtimeState.rolePackages, taskForm]);
 
   async function loadRuntimeState() {
@@ -1699,6 +1705,7 @@ export default function App() {
         </Layout>
         {renderOnboardingModal()}
         {renderAccountModal()}
+        {renderRoleUninstallModal()}
       </AppProvider>
     </ConfigProvider>
   );
@@ -2022,6 +2029,51 @@ export default function App() {
             </Space>
           </Space>
         ) : null}
+      </Modal>
+    );
+  }
+
+  function renderRoleUninstallModal() {
+    const rolePackage = runtimeState.rolePackages.find(
+      (item) => item.roleCode === pendingUninstallRoleCode
+    );
+    const blockingTasks = pendingUninstallRoleCode
+      ? getBlockingTasksForRole(runtimeState, pendingUninstallRoleCode)
+      : [];
+    const hasBlockingTasks = blockingTasks.length > 0;
+
+    return (
+      <Modal
+        title={rolePackage ? `卸载：${rolePackage.name}` : '卸载数字员工'}
+        open={Boolean(pendingUninstallRoleCode)}
+        okText={hasBlockingTasks ? '暂不能卸载' : '确认卸载'}
+        cancelText="取消"
+        okButtonProps={{ danger: true, disabled: hasBlockingTasks || !rolePackage }}
+        destroyOnHidden
+        onCancel={() => setPendingUninstallRoleCode('')}
+        onOk={() => {
+          if (rolePackage) {
+            uninstallRole(rolePackage.roleCode);
+          }
+        }}
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Typography.Paragraph>
+            卸载后，该数字员工将从当前电脑移除。历史任务和已生成产物仍会保留，以后可以在数字员工市场重新安装。
+          </Typography.Paragraph>
+          {hasBlockingTasks ? (
+            <div className="role-uninstall-blocking-note">
+              <Typography.Text strong>该数字员工还有未结束任务，完成或取消后再卸载。</Typography.Text>
+              <Space direction="vertical" size={4} style={{ width: '100%', marginTop: 8 }}>
+                {blockingTasks.slice(0, 3).map((task) => (
+                  <Typography.Text key={task.taskId} type="secondary" ellipsis>
+                    {taskStateLabel(task.state)}：{task.title}
+                  </Typography.Text>
+                ))}
+              </Space>
+            </div>
+          ) : null}
+        </Space>
       </Modal>
     );
   }
@@ -2641,10 +2693,11 @@ export default function App() {
               const installed = installedRoleCodes.has(template.roleCode);
               const active = runtimeState.localRuntime.activeRoleCode === template.roleCode;
               const summary = installedRoleSummaries.find((item) => item.roleCode === template.roleCode);
+              const fileContract = buildRoleFileContractSummary(template);
 
               return (
                 <Card key={template.roleCode} bordered={false} className="catalog-card role-catalog-card">
-                  <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                  <Space direction="vertical" size={10} style={{ width: '100%' }} className="role-card-content">
                     <Flex align="flex-start" justify="space-between" gap={12}>
                       <span className="catalog-card-icon">
                         <RobotOutlined />
@@ -2657,12 +2710,22 @@ export default function App() {
                       </Space>
                     </Flex>
 
-                    <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                      <Typography.Title level={5}>{template.name}</Typography.Title>
-                      <Typography.Paragraph type="secondary" ellipsis={{ rows: 2 }}>
-                        {template.summary}
-                      </Typography.Paragraph>
-                    </Space>
+                    <Flex align="center" gap={6} className="role-card-title-row">
+                      <Typography.Title level={5} ellipsis title={template.name}>
+                        {template.name}
+                      </Typography.Title>
+                      {template.summary ? (
+                        <Tooltip title={template.summary} placement="top">
+                          <button
+                            type="button"
+                            className="role-info-trigger"
+                            aria-label={`${template.name} 说明`}
+                          >
+                            <ExclamationCircleOutlined />
+                          </button>
+                        </Tooltip>
+                      ) : null}
+                    </Flex>
 
                     <Space size={6} wrap>
                       {template.skills.slice(0, 3).map((skill) => (
@@ -2670,13 +2733,19 @@ export default function App() {
                       ))}
                     </Space>
 
+                    <div className="role-card-io-grid">
+                      {renderRoleIoRow('可上传', fileContract.uploadLabels, fileContract.uploadDetail)}
+                      {renderRoleIoRow('可输出', fileContract.outputLabels, fileContract.outputDetail)}
+                    </div>
+
                     <Typography.Text type="secondary" className="catalog-card-meta">
                       {template.industry} · 任务 {summary?.taskCount ?? 0}
                     </Typography.Text>
 
-                    <Space wrap>
+                    <Space size={6} className="role-card-actions">
                       {installed ? (
                         <Button
+                          size="small"
                           type={active ? 'default' : 'primary'}
                           onClick={() => {
                             activateRole(template.roleCode);
@@ -2686,13 +2755,23 @@ export default function App() {
                           {active ? '进入对话' : '开始使用'}
                         </Button>
                       ) : (
-                        <Button type="primary" onClick={() => openRoleConfig(template.roleCode, 'install')}>
+                        <Button size="small" type="primary" onClick={() => openRoleConfig(template.roleCode, 'install')}>
                           安装
                         </Button>
                       )}
-                      <Button onClick={() => openRoleConfig(template.roleCode, installed ? 'configure' : 'install')}>
+                      <Button size="small" onClick={() => openRoleConfig(template.roleCode, installed ? 'configure' : 'install')}>
                         配置
                       </Button>
+                      {installed ? (
+                        <Button
+                          size="small"
+                          danger
+                          icon={<DeleteOutlined />}
+                          onClick={() => confirmUninstallRole(template.roleCode)}
+                        >
+                          卸载
+                        </Button>
+                      ) : null}
                     </Space>
                   </Space>
                 </Card>
@@ -2845,12 +2924,55 @@ export default function App() {
                   />
                 </Form.Item>
               </Form>
+
+              {roleConfigMode === 'configure' && roleConfigRolePackage ? (
+                <div className="role-config-danger-zone">
+                  <Flex align="center" justify="space-between" gap={12} wrap="wrap">
+                    <Space direction="vertical" size={2}>
+                      <Typography.Text strong>本机卸载</Typography.Text>
+                      <Typography.Text type="secondary">
+                        从当前电脑移除该数字员工，历史任务和已生成产物仍会保留。
+                      </Typography.Text>
+                    </Space>
+                    <Button
+                      danger
+                      icon={<DeleteOutlined />}
+                      onClick={() => confirmUninstallRole(roleConfigRolePackage.roleCode)}
+                    >
+                      卸载数字员工
+                    </Button>
+                  </Flex>
+                </div>
+              ) : null}
             </Space>
           ) : (
             <Empty description="未找到数字员工" />
           )}
         </Modal>
       </>
+    );
+  }
+
+  function renderRoleIoRow(label: string, values: string[], detail: string) {
+    const visibleValues = values.slice(0, 3);
+    const hiddenCount = Math.max(values.length - visibleValues.length, 0);
+
+    return (
+      <div className="role-card-io-row">
+        <span className="role-card-io-label">{label}</span>
+        <span className="role-card-io-tags">
+          {visibleValues.map((value) => (
+            <Tag key={`${label}-${value}`} className="role-card-io-tag">
+              {value}
+            </Tag>
+          ))}
+          {hiddenCount > 0 ? (
+            <Tooltip title={detail}>
+              <Tag className="role-card-io-tag">+{hiddenCount}</Tag>
+            </Tooltip>
+          ) : null}
+        </span>
+      </div>
     );
   }
 
@@ -3787,6 +3909,37 @@ export default function App() {
     });
   }
 
+  function confirmUninstallRole(roleCode: string) {
+    const rolePackage = runtimeState.rolePackages.find((item) => item.roleCode === roleCode);
+    if (!rolePackage) {
+      message.warning('该数字员工未安装在当前电脑。');
+      return;
+    }
+
+    setPendingUninstallRoleCode(roleCode);
+  }
+
+  function uninstallRole(roleCode: string) {
+    const rolePackage = runtimeState.rolePackages.find((item) => item.roleCode === roleCode);
+    if (!rolePackage) {
+      message.warning('该数字员工未安装在当前电脑。');
+      return;
+    }
+
+    if (hasBlockingTaskForRole(runtimeState, roleCode)) {
+      message.warning('该数字员工正在执行任务，请等待任务完成或取消后再卸载。');
+      return;
+    }
+
+    setRuntimeState((current) => uninstallRolePackageFromRuntimeState(current, roleCode));
+    if (roleConfigRoleCode === roleCode) {
+      closeRoleConfig();
+    }
+    setPendingUninstallRoleCode('');
+    setTaskHistoryOpen(false);
+    message.success(`${rolePackage.name} 已从当前电脑卸载，历史任务和产物已保留。`);
+  }
+
   function activateRole(roleCode: string) {
     setRuntimeState((current) => {
       if (current.localRuntime.activeRoleCode === roleCode) {
@@ -4326,7 +4479,8 @@ export default function App() {
   function prepareRoleForTaskRun(roleCode: string): DesktopRuntimeState | undefined {
     const rolePackage = runtimeState.rolePackages.find((item) => item.roleCode === roleCode);
     if (!rolePackage) {
-      return runtimeState;
+      message.warning('该数字员工未安装在当前电脑，请先安装后再执行任务。');
+      return undefined;
     }
     if (isRuntimeRolePackageDeleted(runtimeState, roleCode)) {
       message.warning('该数字员工已被服务端删除，不能继续执行。');
@@ -5405,6 +5559,200 @@ function mergeUniqueStrings(left: string[], right: string[]) {
   return [...new Set([...left, ...right])];
 }
 
+interface RoleFileContractSummary {
+  uploadLabels: string[];
+  uploadDetail: string;
+  outputLabels: string[];
+  outputDetail: string;
+}
+
+function buildRoleFileContractSummary(
+  rolePackage: Pick<RolePackageManifest, 'workflowGraph' | 'dependencyManifest' | 'outputFormat' | 'toolIds'> & {
+    name?: string;
+    summary?: string;
+  }
+): RoleFileContractSummary {
+  const inputTypes = new Set<string>();
+  const outputTypes = new Set<string>();
+  const artifactTypes = new Set<string>();
+  const graph = parseWorkflowGraph(rolePackage.workflowGraph);
+
+  for (const variable of rolePackage.dependencyManifest?.variables ?? []) {
+    collectRoleInputFormat(inputTypes, variable.key);
+    collectRoleInputFormat(inputTypes, variable.valueType);
+  }
+
+  for (const modelAsset of rolePackage.dependencyManifest?.modelAssets ?? []) {
+    for (const inputType of modelAsset.inputTypes) {
+      collectRoleInputFormat(inputTypes, inputType);
+    }
+    for (const outputType of modelAsset.outputTypes) {
+      collectRoleOutputFormat(outputTypes, outputType);
+    }
+  }
+
+  for (const toolAction of rolePackage.dependencyManifest?.toolActions ?? []) {
+    for (const inputType of toolAction.inputTypes) {
+      collectRoleInputFormat(inputTypes, inputType);
+    }
+    for (const outputType of toolAction.outputTypes) {
+      collectRoleOutputFormat(outputTypes, outputType);
+    }
+    if (toolAction.artifactFormat) {
+      collectRoleArtifactFormat(artifactTypes, toolAction.artifactFormat);
+    }
+  }
+
+  for (const artifactTemplate of rolePackage.dependencyManifest?.artifactTemplates ?? []) {
+    if (artifactTemplate.artifactType) {
+      collectRoleArtifactFormat(artifactTypes, artifactTemplate.artifactType);
+    }
+  }
+
+  for (const node of graph?.nodes ?? []) {
+    for (const inputVariable of node.inputVariables ?? []) {
+      collectRoleInputFormat(inputTypes, inputVariable);
+    }
+    if (node.artifactType) {
+      collectRoleArtifactFormat(artifactTypes, node.artifactType);
+    }
+  }
+
+  collectRoleInputFormat(inputTypes, rolePackage.name);
+  collectRoleInputFormat(inputTypes, rolePackage.summary);
+  collectRoleFormatsFromText(artifactTypes, rolePackage.outputFormat);
+
+  if (rolePackage.toolIds.includes('office-document')) {
+    collectRoleInputFormat(inputTypes, 'document');
+  }
+  if (rolePackage.toolIds.includes('video-processing')) {
+    collectRoleInputFormat(inputTypes, 'video');
+  }
+
+  const uploadLabels = sortRoleFormatLabels(
+    inputTypes.size > 0 ? [...inputTypes] : ['文本', '附件']
+  );
+  const outputLabels = sortRoleFormatLabels(
+    artifactTypes.size > 0
+      ? [...artifactTypes]
+      : outputTypes.size > 0
+        ? [...outputTypes]
+        : ['按工作流配置']
+  );
+
+  return {
+    uploadLabels,
+    uploadDetail: uploadLabels.join(' / '),
+    outputLabels,
+    outputDetail: outputLabels.join(' / ')
+  };
+}
+
+function collectRoleInputFormat(target: Set<string>, value: string | undefined) {
+  const normalized = normalizeRoleFormatValue(value);
+  if (!normalized) {
+    return;
+  }
+
+  if (includesAny(normalized, ['xlsx', 'xls', 'excel', 'spreadsheet', 'csv', 'table', 'rows', '表格', '清单', '报价', '报销'])) {
+    target.add('Excel');
+    target.add('CSV');
+    target.add('TXT');
+    return;
+  }
+
+  if (includesAny(normalized, ['docx', 'word', 'pdf', 'txt', 'markdown', 'md', 'document', 'file', 'files', 'attachment', '文档', '合同', '纪要', '笔记'])) {
+    target.add('Word');
+    target.add('PDF');
+    target.add('TXT');
+    return;
+  }
+
+  if (includesAny(normalized, ['image', 'images', 'png', 'jpg', 'jpeg', '图片', '图像'])) {
+    target.add('图片');
+    return;
+  }
+
+  if (includesAny(normalized, ['video', 'videos', 'mp4', '视频'])) {
+    target.add('视频');
+    return;
+  }
+
+  if (includesAny(normalized, ['audio', 'mp3', 'wav', '录音', '音频'])) {
+    target.add('音频');
+    return;
+  }
+
+  if (includesAny(normalized, ['text', '文本', '聊天记录'])) {
+    target.add('文本');
+  }
+}
+
+function collectRoleOutputFormat(target: Set<string>, value: string | undefined) {
+  const normalized = normalizeRoleFormatValue(value);
+  if (!normalized) {
+    return;
+  }
+
+  if (includesAny(normalized, ['json'])) target.add('JSON');
+  if (includesAny(normalized, ['text'])) target.add('文本');
+  if (includesAny(normalized, ['image', 'png', 'jpg', 'jpeg'])) target.add('图片');
+  if (includesAny(normalized, ['video', 'mp4'])) target.add('视频');
+  if (includesAny(normalized, ['embedding'])) target.add('Embedding');
+  if (includesAny(normalized, ['scores'])) target.add('评分');
+}
+
+function collectRoleArtifactFormat(target: Set<string>, value: string | WorkflowGraphArtifactType | undefined) {
+  const normalized = normalizeRoleFormatValue(value);
+  if (!normalized) {
+    return;
+  }
+
+  const artifactLabelMap: Record<string, string> = {
+    markdown: 'MD',
+    md: 'MD',
+    docx: 'DOCX',
+    xlsx: 'XLSX',
+    csv: 'CSV',
+    pptx: 'PPTX',
+    pdf: 'PDF',
+    png: 'PNG',
+    jpg: 'JPG',
+    jpeg: 'JPG',
+    mp4: 'MP4',
+    zip: 'ZIP'
+  };
+
+  for (const [keyword, label] of Object.entries(artifactLabelMap)) {
+    if (normalized.includes(keyword)) {
+      target.add(label);
+    }
+  }
+}
+
+function collectRoleFormatsFromText(target: Set<string>, text: string | undefined) {
+  const normalized = normalizeRoleFormatValue(text);
+  if (!normalized) {
+    return;
+  }
+
+  collectRoleArtifactFormat(target, normalized);
+}
+
+function normalizeRoleFormatValue(value: string | undefined) {
+  return value?.trim().toLowerCase().replace(/_/g, '-');
+}
+
+function sortRoleFormatLabels(labels: string[]) {
+  const order = ['文本', '附件', 'Word', 'PDF', 'TXT', 'Excel', 'CSV', '图片', '视频', '音频', 'DOCX', 'XLSX', 'PPTX', 'MD', 'PDF', 'PNG', 'JPG', 'MP4', 'ZIP', 'JSON', '评分', 'Embedding', '按工作流配置'];
+  const orderOf = (label: string) => {
+    const index = order.indexOf(label);
+    return index >= 0 ? index : order.length;
+  };
+
+  return [...new Set(labels)].sort((left, right) => orderOf(left) - orderOf(right) || left.localeCompare(right));
+}
+
 function findModelProviderCatalog(
   catalogs: ModelProviderCatalog[],
   providerId: string,
@@ -5486,6 +5834,74 @@ function isRuntimeRolePackageDeleted(state: DesktopRuntimeState, roleCode: strin
   return state.runtimeSnapshot.rolePackages.some(
     (summary) => summary.roleCode === roleCode && summary.state === 'deleted'
   );
+}
+
+function hasBlockingTaskForRole(state: DesktopRuntimeState, roleCode: string): boolean {
+  return getBlockingTasksForRole(state, roleCode).length > 0;
+}
+
+function getBlockingTasksForRole(state: DesktopRuntimeState, roleCode: string): DesktopTaskDetail[] {
+  return getRuntimeTaskDetails(state).filter(
+    (task) =>
+      task.roleCode === roleCode &&
+      (task.state === 'queued' || task.state === 'running' || task.state === 'waiting_approval')
+  );
+}
+
+function uninstallRolePackageFromRuntimeState(
+  state: DesktopRuntimeState,
+  roleCode: string
+): DesktopRuntimeState {
+  if (!state.rolePackages.some((rolePackage) => rolePackage.roleCode === roleCode)) {
+    return state;
+  }
+
+  const rolePackages = state.rolePackages.filter((rolePackage) => rolePackage.roleCode !== roleCode);
+  const deletedRoleCodes = new Set(
+    state.runtimeSnapshot.rolePackages
+      .filter((summary) => summary.state === 'deleted')
+      .map((summary) => summary.roleCode)
+  );
+  const activeRoleIsAvailable =
+    Boolean(state.localRuntime.activeRoleCode) &&
+    rolePackages.some(
+      (rolePackage) =>
+        rolePackage.roleCode === state.localRuntime.activeRoleCode &&
+        !deletedRoleCodes.has(rolePackage.roleCode)
+    );
+  const activeRoleCode = activeRoleIsAvailable
+    ? state.localRuntime.activeRoleCode
+    : rolePackages.find((rolePackage) => !deletedRoleCodes.has(rolePackage.roleCode))?.roleCode;
+  const rolePackageSummaries = rebuildRoleSummaries(
+    rolePackages,
+    state.runtimeSnapshot.tasks,
+    state.runtimeSnapshot.rolePackages,
+    activeRoleCode
+  ).map((summary) =>
+    deletedRoleCodes.has(summary.roleCode)
+      ? {
+          ...summary,
+          state: 'deleted' as const
+        }
+      : summary
+  );
+
+  return {
+    ...state,
+    rolePackages,
+    roleModelCredentialBindings: state.roleModelCredentialBindings.filter(
+      (binding) => binding.roleCode !== roleCode
+    ),
+    localRuntime: {
+      ...state.localRuntime,
+      installedRoleCodes: rolePackages.map((rolePackage) => rolePackage.roleCode),
+      activeRoleCode
+    },
+    runtimeSnapshot: {
+      ...state.runtimeSnapshot,
+      rolePackages: rolePackageSummaries
+    }
+  };
 }
 
 function isRolePackageTemplateDeleted(
