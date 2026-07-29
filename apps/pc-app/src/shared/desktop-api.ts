@@ -61,6 +61,41 @@ export interface DesktopUpdateCheckResult {
   latestRelease?: DesktopUpdateReleaseSummary;
 }
 
+export interface DesktopAgreementDocumentSummary {
+  agreementKey: string;
+  agreementVersion: string;
+  contentHash: string;
+  title: string;
+  effectiveDate: string;
+  requiredReadSeconds: number;
+}
+
+export interface DesktopAgreementAcceptanceSummary {
+  id: string;
+  agreementKey: string;
+  agreementVersion: string;
+  contentHash: string;
+  runtimeId: string;
+  deviceId: string;
+  workspaceId?: string;
+  acceptedAt: string;
+  consentMethod: string;
+  minimumReadSeconds?: number;
+  actualReadSeconds?: number;
+}
+
+export interface DesktopAgreementStatus {
+  agreement: DesktopAgreementDocumentSummary;
+  accepted: boolean;
+  cloudSynced: boolean;
+  acceptance?: DesktopAgreementAcceptanceSummary;
+  message?: string;
+}
+
+export interface DesktopAgreementAcceptRequest {
+  actualReadSeconds: number;
+}
+
 export interface DesktopRuntimeSyncResponse {
   data: {
     accepted: true;
@@ -251,6 +286,8 @@ export type DesktopWindowControlAction = 'minimize' | 'toggle-maximize' | 'close
 export interface QiuDesktopBridge {
   getAppInfo(): Promise<DesktopAppInfo>;
   getRuntimeState(): Promise<DesktopRuntimeState>;
+  getUserAgreementStatus(): Promise<DesktopAgreementStatus>;
+  acceptUserAgreement(request: DesktopAgreementAcceptRequest): Promise<DesktopAgreementStatus>;
   bindDesktopDevice(bindingCode: string): Promise<DesktopRuntimeState>;
   unbindDesktopDevice(): Promise<DesktopRuntimeState>;
   checkServerConnection(): Promise<DesktopServerConnectionStatus>;

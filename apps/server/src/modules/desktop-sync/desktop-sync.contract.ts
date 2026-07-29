@@ -20,6 +20,49 @@ export interface RedeemDesktopBindingCodeRequest {
   appVersion: string;
 }
 
+export interface DesktopAgreementAcceptanceStatusQuery {
+  agreementKey: string;
+  agreementVersion: string;
+  contentHash: string;
+  runtimeId: string;
+  deviceId: string;
+}
+
+export interface AcceptDesktopAgreementRequest extends DesktopAgreementAcceptanceStatusQuery {
+  workspaceId?: string;
+  deviceName?: string;
+  platform?: DesktopRuntimeSnapshot['platform'];
+  appVersion?: string;
+  consentMethod: string;
+  minimumReadSeconds?: number;
+  actualReadSeconds?: number;
+}
+
+export interface DesktopAgreementAcceptanceSummary {
+  id: string;
+  agreementKey: string;
+  agreementVersion: string;
+  contentHash: string;
+  runtimeId: string;
+  deviceId: string;
+  workspaceId?: string;
+  acceptedAt: string;
+  consentMethod: string;
+  minimumReadSeconds?: number;
+  actualReadSeconds?: number;
+}
+
+export interface DesktopAgreementAcceptanceStatusResponse {
+  data: {
+    accepted: boolean;
+    acceptance?: DesktopAgreementAcceptanceSummary;
+  };
+}
+
+export interface AcceptDesktopAgreementResponse {
+  data: DesktopAgreementAcceptanceSummary;
+}
+
 export interface DesktopDeviceSummary {
   id: string;
   workspaceId: string;
@@ -201,6 +244,54 @@ export function parseRedeemDesktopBindingCodeRequest(input: unknown): RedeemDesk
     deviceName: requireString(record.deviceName, 'desktopBindingRedeem.deviceName'),
     platform: requireEnum(record.platform, 'desktopBindingRedeem.platform', ['windows', 'macos', 'linux']),
     appVersion: requireString(record.appVersion, 'desktopBindingRedeem.appVersion')
+  };
+}
+
+export function parseAgreementAcceptanceStatusQuery(
+  input: Record<string, unknown>
+): DesktopAgreementAcceptanceStatusQuery {
+  return {
+    agreementKey: requireString(input.agreementKey, 'agreementAcceptance.agreementKey'),
+    agreementVersion: requireString(input.agreementVersion, 'agreementAcceptance.agreementVersion'),
+    contentHash: requireString(input.contentHash, 'agreementAcceptance.contentHash'),
+    runtimeId: requireString(input.runtimeId, 'agreementAcceptance.runtimeId'),
+    deviceId: requireString(input.deviceId, 'agreementAcceptance.deviceId')
+  };
+}
+
+export function parseAcceptDesktopAgreementRequest(input: unknown): AcceptDesktopAgreementRequest {
+  const record = requireRecord(input, 'desktop agreement acceptance request');
+  const platform = record.platform === undefined || record.platform === null
+    ? undefined
+    : (requireEnum(
+        record.platform,
+        'agreementAcceptance.platform',
+        ['windows', 'macos', 'linux']
+      ) as DesktopRuntimeSnapshot['platform']);
+
+  return {
+    agreementKey: requireString(record.agreementKey, 'agreementAcceptance.agreementKey'),
+    agreementVersion: requireString(record.agreementVersion, 'agreementAcceptance.agreementVersion'),
+    contentHash: requireString(record.contentHash, 'agreementAcceptance.contentHash'),
+    runtimeId: requireString(record.runtimeId, 'agreementAcceptance.runtimeId'),
+    deviceId: requireString(record.deviceId, 'agreementAcceptance.deviceId'),
+    workspaceId: optionalString(record.workspaceId, 'agreementAcceptance.workspaceId'),
+    deviceName: optionalString(record.deviceName, 'agreementAcceptance.deviceName'),
+    platform,
+    appVersion: optionalString(record.appVersion, 'agreementAcceptance.appVersion'),
+    consentMethod: requireString(record.consentMethod, 'agreementAcceptance.consentMethod'),
+    minimumReadSeconds: optionalBoundedInteger(
+      record.minimumReadSeconds,
+      'agreementAcceptance.minimumReadSeconds',
+      0,
+      3600
+    ),
+    actualReadSeconds: optionalBoundedInteger(
+      record.actualReadSeconds,
+      'agreementAcceptance.actualReadSeconds',
+      0,
+      86400
+    )
   };
 }
 

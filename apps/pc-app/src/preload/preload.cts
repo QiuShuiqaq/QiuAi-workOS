@@ -1,5 +1,7 @@
 import type {
   DesktopAppInfo,
+  DesktopAgreementAcceptRequest,
+  DesktopAgreementStatus,
   DesktopBackupSummary,
   DesktopAuthorizedRoleTemplateCatalog,
   DesktopKnowledgeSourcePathResult,
@@ -27,6 +29,8 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron') as typeof i
 const channels = {
   getAppInfo: 'qiuai:desktop:get-app-info',
   getRuntimeState: 'qiuai:desktop:get-runtime-state',
+  getUserAgreementStatus: 'qiuai:desktop:get-user-agreement-status',
+  acceptUserAgreement: 'qiuai:desktop:accept-user-agreement',
   bindDesktopDevice: 'qiuai:desktop:bind-desktop-device',
   unbindDesktopDevice: 'qiuai:desktop:unbind-desktop-device',
   checkServerConnection: 'qiuai:desktop:check-server-connection',
@@ -51,6 +55,10 @@ const channels = {
 const bridge: QiuDesktopBridge = {
   getAppInfo: () => ipcRenderer.invoke(channels.getAppInfo) as Promise<DesktopAppInfo>,
   getRuntimeState: () => ipcRenderer.invoke(channels.getRuntimeState) as Promise<DesktopRuntimeState>,
+  getUserAgreementStatus: () =>
+    ipcRenderer.invoke(channels.getUserAgreementStatus) as Promise<DesktopAgreementStatus>,
+  acceptUserAgreement: (request: DesktopAgreementAcceptRequest) =>
+    ipcRenderer.invoke(channels.acceptUserAgreement, request) as Promise<DesktopAgreementStatus>,
   bindDesktopDevice: (bindingCode: string) =>
     ipcRenderer.invoke(channels.bindDesktopDevice, bindingCode) as Promise<DesktopRuntimeState>,
   unbindDesktopDevice: () =>

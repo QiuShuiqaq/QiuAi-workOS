@@ -10,6 +10,10 @@ import {
   syncDesktopRuntimeState,
   unbindDesktopDevice
 } from './runtime-state.js';
+import {
+  acceptUserAgreement,
+  getUserAgreementStatus
+} from './agreement-state.js';
 import { saveDesktopRuntimeState } from './runtime-store.js';
 import { invokeOpenAiCompatibleModelChat, listOpenAiCompatibleModels } from './model-chat.js';
 import { selectKnowledgeSourcePath } from './knowledge-source.js';
@@ -31,6 +35,8 @@ const { BrowserWindow, dialog, ipcMain, shell, app } = electronApi;
 const channels = {
   getAppInfo: 'qiuai:desktop:get-app-info',
   getRuntimeState: 'qiuai:desktop:get-runtime-state',
+  getUserAgreementStatus: 'qiuai:desktop:get-user-agreement-status',
+  acceptUserAgreement: 'qiuai:desktop:accept-user-agreement',
   bindDesktopDevice: 'qiuai:desktop:bind-desktop-device',
   unbindDesktopDevice: 'qiuai:desktop:unbind-desktop-device',
   checkServerConnection: 'qiuai:desktop:check-server-connection',
@@ -55,6 +61,10 @@ const channels = {
 export function registerDesktopIpc() {
   ipcMain.handle(channels.getAppInfo, () => getDesktopAppInfo());
   ipcMain.handle(channels.getRuntimeState, () => getDesktopRuntimeState());
+  ipcMain.handle(channels.getUserAgreementStatus, () => getUserAgreementStatus());
+  ipcMain.handle(channels.acceptUserAgreement, async (_, request) => {
+    return acceptUserAgreement(request);
+  });
   ipcMain.handle(channels.bindDesktopDevice, async (_, bindingCode: string) => {
     return bindDesktopDevice(bindingCode);
   });

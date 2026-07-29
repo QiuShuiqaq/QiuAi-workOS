@@ -253,6 +253,9 @@ body,
 
 .account-modal-body {
   width: 100%;
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .account-stat-grid {
@@ -272,22 +275,132 @@ body,
   background: #f8fafc;
 }
 
+.account-help-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.account-help-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .account-help-item,
 .account-legal-section {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 12px 0;
+  padding: 12px;
   border-bottom: 1px solid #eef2f7;
 }
 
-.account-help-item:last-child,
 .account-legal-section:last-child {
   border-bottom: 0;
 }
 
+.account-help-item {
+  min-width: 0;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
 .account-legal-section .ant-typography {
   margin-bottom: 0;
+}
+
+.account-legal-header .ant-typography {
+  margin-bottom: 0;
+}
+
+.account-legal-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.account-legal-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  width: 100%;
+  min-height: 94px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  color: #1f2328;
+  text-align: left;
+  cursor: pointer;
+}
+
+.account-legal-card:hover {
+  border-color: #91caff;
+  background: #f8fbff;
+}
+
+.account-legal-card > span:first-child,
+.account-legal-meta,
+.account-update-note {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.account-legal-meta {
+  align-items: flex-end;
+}
+
+.account-update-note {
+  padding: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+
+.user-agreement-modal-body {
+  width: 100%;
+}
+
+.user-agreement-critical-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  background: #fffbeb;
+}
+
+.user-agreement-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 46vh;
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.user-agreement-scroll .ant-typography {
+  margin-bottom: 0;
+}
+
+.user-agreement-basis {
+  margin: 2px 0 4px;
+}
+
+.user-agreement-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid #eef2f7;
 }
 
 .product-surface {

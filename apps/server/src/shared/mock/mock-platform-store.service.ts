@@ -59,6 +59,28 @@ export interface MockDesktopReleaseSummary {
   updatedAt: string | Date;
 }
 
+export interface MockDesktopAgreementAcceptanceSummary {
+  id: string;
+  agreementKey: string;
+  agreementVersion: string;
+  contentHash: string;
+  runtimeId: string;
+  deviceId: string;
+  deviceName?: string;
+  platform?: string;
+  appVersion?: string;
+  workspaceId?: string;
+  desktopDeviceId?: string;
+  consentMethod: string;
+  minimumReadSeconds?: number;
+  actualReadSeconds?: number;
+  ipAddress?: string;
+  userAgent?: string;
+  acceptedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 @Injectable()
 export class MockPlatformStore {
   private readonly roleTemplates: MockRoleTemplateSummary[] = [...demoRoleTemplates];
@@ -71,6 +93,7 @@ export class MockPlatformStore {
   private readonly subscriptions: MockSubscriptionSummary[] = demoSubscriptions.map((item) => ({ ...item }));
   private readonly desktopRuntimeSyncs: MockDesktopRuntimeSyncSummary[] = [];
   private readonly desktopReleases: MockDesktopReleaseSummary[] = [];
+  private readonly desktopAgreementAcceptances: MockDesktopAgreementAcceptanceSummary[] = [];
 
   listRoleTemplates(): MockRoleTemplateSummary[] {
     return this.roleTemplates;
@@ -443,6 +466,58 @@ export class MockPlatformStore {
 
   getDesktopRuntimeSync(runtimeId: string) {
     return this.desktopRuntimeSyncs.find((sync) => sync.runtimeId === runtimeId);
+  }
+
+  findDesktopAgreementAcceptance(input: {
+    agreementKey: string;
+    agreementVersion: string;
+    contentHash: string;
+    runtimeId: string;
+    deviceId?: string;
+  }) {
+    const acceptance = this.desktopAgreementAcceptances.find(
+      (item) =>
+        item.agreementKey === input.agreementKey &&
+        item.agreementVersion === input.agreementVersion &&
+        item.contentHash === input.contentHash &&
+        item.runtimeId === input.runtimeId &&
+        (input.deviceId === undefined || item.deviceId === input.deviceId)
+    );
+
+    return acceptance ? { ...acceptance } : undefined;
+  }
+
+  upsertDesktopAgreementAcceptance(
+    input: Omit<MockDesktopAgreementAcceptanceSummary, 'id' | 'createdAt' | 'updatedAt'> & {
+      id?: string;
+      createdAt?: string;
+      updatedAt?: string;
+    }
+  ) {
+    const now = new Date().toISOString();
+    const existingIndex = this.desktopAgreementAcceptances.findIndex(
+      (item) =>
+        item.agreementKey === input.agreementKey &&
+        item.agreementVersion === input.agreementVersion &&
+        item.contentHash === input.contentHash &&
+        item.runtimeId === input.runtimeId
+    );
+    const existing = existingIndex >= 0 ? this.desktopAgreementAcceptances[existingIndex] : undefined;
+    const record: MockDesktopAgreementAcceptanceSummary = {
+      ...input,
+      id: input.id ?? existing?.id ?? `agreement-${Date.now()}`,
+      acceptedAt: existing?.acceptedAt ?? input.acceptedAt,
+      createdAt: input.createdAt ?? existing?.createdAt ?? now,
+      updatedAt: input.updatedAt ?? now
+    };
+
+    if (existingIndex >= 0) {
+      this.desktopAgreementAcceptances[existingIndex] = record;
+      return { ...record };
+    }
+
+    this.desktopAgreementAcceptances.unshift(record);
+    return { ...record };
   }
 
   listDesktopReleases() {

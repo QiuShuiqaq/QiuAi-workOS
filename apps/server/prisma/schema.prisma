@@ -416,6 +416,7 @@ model DesktopDevice {
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   bindingCodes DesktopBindingCode[]
+  agreementAcceptances DesktopAgreementAcceptance[]
 
   @@unique([workspaceId, runtimeId])
   @@unique([workspaceId, deviceId])
@@ -423,6 +424,38 @@ model DesktopDevice {
   @@index([status])
   @@index([lastSeenAt])
   @@map("desktop_devices")
+}
+
+model DesktopAgreementAcceptance {
+  id                 String   @id @default(uuid()) @db.Uuid
+  agreementKey       String   @map("agreement_key")
+  agreementVersion   String   @map("agreement_version")
+  contentHash        String   @map("content_hash")
+  runtimeId          String   @map("runtime_id")
+  deviceId           String   @map("device_id")
+  deviceName         String?  @map("device_name")
+  platform           String?
+  appVersion         String?  @map("app_version")
+  workspaceId        String?  @map("workspace_id")
+  desktopDeviceId    String?  @map("desktop_device_id") @db.Uuid
+  consentMethod      String   @map("consent_method")
+  minimumReadSeconds Int?     @map("minimum_read_seconds")
+  actualReadSeconds  Int?     @map("actual_read_seconds")
+  ipAddress          String?  @map("ip_address")
+  userAgent          String?  @map("user_agent")
+  acceptedAt         DateTime @default(now()) @map("accepted_at")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  desktopDevice DesktopDevice? @relation(fields: [desktopDeviceId], references: [id], onDelete: SetNull)
+
+  @@unique([agreementKey, agreementVersion, contentHash, runtimeId])
+  @@index([agreementKey, agreementVersion, contentHash])
+  @@index([runtimeId, deviceId])
+  @@index([workspaceId])
+  @@index([desktopDeviceId])
+  @@index([acceptedAt])
+  @@map("desktop_agreement_acceptances")
 }
 
 model Plan {

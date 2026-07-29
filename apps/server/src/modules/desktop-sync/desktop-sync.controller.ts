@@ -19,6 +19,18 @@ function readDesktopDeviceToken(request: FastifyRequest): string | undefined {
   return Array.isArray(header) ? header[0] : header;
 }
 
+function readClientIpAddress(request: FastifyRequest): string | undefined {
+  const forwardedFor = request.headers['x-forwarded-for'];
+  const forwardedValue = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
+  const firstForwardedIp = forwardedValue?.split(',')[0]?.trim();
+  return firstForwardedIp || request.ip;
+}
+
+function readUserAgent(request: FastifyRequest): string | undefined {
+  const userAgent = request.headers['user-agent'];
+  return Array.isArray(userAgent) ? userAgent[0] : userAgent;
+}
+
 function parseInstalledTemplateIds(value: unknown): string[] {
   const values = Array.isArray(value) ? value : value === undefined ? [] : [value];
   return [
@@ -125,6 +137,29 @@ export class DesktopBindingController {
   @Post('redeem')
   redeemBindingCode(@Body() body: unknown) {
     return this.desktopSyncService.redeemBindingCode(body);
+  }
+}
+
+@ApiTags('desktop')
+@Controller({
+  path: 'desktop/agreement-acceptances',
+  version: '1'
+})
+export class DesktopAgreementAcceptanceController {
+  constructor(@Inject(DesktopSyncService) private readonly desktopSyncService: DesktopSyncService) {}
+
+  @Get('status')
+  getAcceptanceStatus(@Query() query: Record<string, unknown>) {
+    return this.desktopSyncService.getDesktopAgreementAcceptanceStatus(query);
+  }
+
+  @Post()
+  acceptAgreement(@Body() body: unknown, @Req() request: FastifyRequest) {
+    return this.desktopSyncService.acceptDesktopAgreement(body, {
+      deviceToken: readDesktopDeviceToken(request),
+      ipAddress: readClientIpAddress(request),
+      userAgent: readUserAgent(request)
+    });
   }
 }
 

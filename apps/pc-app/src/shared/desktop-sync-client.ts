@@ -1,6 +1,7 @@
 ﻿import type {
   DesktopAuthorizedRoleTemplateSummary,
-  DesktopUpdateCheckResult
+  DesktopUpdateCheckResult,
+  DesktopAgreementAcceptanceSummary
 } from './desktop-api.js';
 import type {
   DesktopRuntimeSnapshot,
@@ -61,6 +62,36 @@ interface CheckDesktopUpdateInput {
 
 interface CheckDesktopUpdateResponse {
   data: DesktopUpdateCheckResult;
+}
+
+export interface DesktopAgreementAcceptanceStatusInput {
+  agreementKey: string;
+  agreementVersion: string;
+  contentHash: string;
+  runtimeId: string;
+  deviceId: string;
+}
+
+export interface AcceptDesktopAgreementInput extends DesktopAgreementAcceptanceStatusInput {
+  workspaceId?: string;
+  deviceName?: string;
+  platform?: DesktopRuntimeSnapshot['platform'];
+  appVersion?: string;
+  consentMethod: string;
+  minimumReadSeconds?: number;
+  actualReadSeconds?: number;
+  deviceToken?: string;
+}
+
+interface DesktopAgreementAcceptanceStatusResponse {
+  data: {
+    accepted: boolean;
+    acceptance?: DesktopAgreementAcceptanceSummary;
+  };
+}
+
+interface AcceptDesktopAgreementResponse {
+  data: DesktopAgreementAcceptanceSummary;
 }
 
 export async function syncDesktopRuntimeSnapshot(
@@ -250,6 +281,61 @@ export async function checkDesktopUpdate(
   }
 
   return body as CheckDesktopUpdateResponse;
+}
+
+export async function fetchDesktopAgreementAcceptanceStatus(
+  baseUrl: string,
+  input: DesktopAgreementAcceptanceStatusInput
+): Promise<DesktopAgreementAcceptanceStatusResponse> {
+  const searchParams = new URLSearchParams();
+  searchParams.set('agreementKey', input.agreementKey);
+  searchParams.set('agreementVersion', input.agreementVersion);
+  searchParams.set('contentHash', input.contentHash);
+  searchParams.set('runtimeId', input.runtimeId);
+  searchParams.set('deviceId', input.deviceId);
+
+  const response = await fetch(
+    `${normalizeBaseUrl(baseUrl)}/api/v1/desktop/agreement-acceptances/status?${searchParams.toString()}`,
+    {
+      headers: {
+        accept: 'application/json'
+      }
+    }
+  );
+
+  const body = (await response.json()) as DesktopAgreementAcceptanceStatusResponse | { error?: { message?: string } };
+  if (!response.ok) {
+    const errorBody = body as { error?: { message?: string } };
+    const message = errorBody.error?.message ?? `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return body as DesktopAgreementAcceptanceStatusResponse;
+}
+
+export async function acceptDesktopAgreement(
+  baseUrl: string,
+  input: AcceptDesktopAgreementInput
+): Promise<AcceptDesktopAgreementResponse> {
+  const { deviceToken, ...payload } = input;
+  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/api/v1/desktop/agreement-acceptances`, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      ...(deviceToken ? { 'x-qiuai-device-token': deviceToken } : {})
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const body = (await response.json()) as AcceptDesktopAgreementResponse | { error?: { message?: string } };
+  if (!response.ok) {
+    const errorBody = body as { error?: { message?: string } };
+    const message = errorBody.error?.message ?? `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return body as AcceptDesktopAgreementResponse;
 }
 
 function normalizeBaseUrl(baseUrl: string): string {

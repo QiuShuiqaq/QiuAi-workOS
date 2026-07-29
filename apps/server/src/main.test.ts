@@ -120,6 +120,95 @@ test('workspace APIs require an authenticated workspace session', async () => {
   }
 });
 
+test('desktop agreement acceptance records device consent', async () => {
+  const app = await createApplication();
+  app.useLogger(false);
+
+  await app.init();
+  try {
+    const query = new URLSearchParams({
+      agreementKey: 'qiuai_workos_user_agreement',
+      agreementVersion: 'v1.0',
+      contentHash: 'sha256:test-user-agreement',
+      runtimeId: 'runtime-test-agreement',
+      deviceId: 'device-test-agreement'
+    });
+
+    const initialStatusResponse = await app.inject({
+      method: 'GET',
+      url: `/api/v1/desktop/agreement-acceptances/status?${query.toString()}`
+    });
+    assert.equal(initialStatusResponse.statusCode, 200);
+    assert.equal(JSON.parse(initialStatusResponse.body).data.accepted, false);
+
+    const tooFastResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/desktop/agreement-acceptances',
+      headers: {
+        'content-type': 'application/json',
+        'user-agent': 'QiuAI WorkOS Test',
+        'x-forwarded-for': '203.0.113.10'
+      },
+      payload: {
+        agreementKey: 'qiuai_workos_user_agreement',
+        agreementVersion: 'v1.0',
+        contentHash: 'sha256:test-user-agreement',
+        runtimeId: 'runtime-test-agreement',
+        deviceId: 'device-test-agreement',
+        workspaceId: 'workspace_pending_login',
+        deviceName: 'test-device',
+        platform: 'windows',
+        appVersion: '1.0.0',
+        consentMethod: 'pc_first_launch_countdown_10s',
+        minimumReadSeconds: 10,
+        actualReadSeconds: 3
+      }
+    });
+    assert.equal(tooFastResponse.statusCode, 400);
+
+    const acceptResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/desktop/agreement-acceptances',
+      headers: {
+        'content-type': 'application/json',
+        'user-agent': 'QiuAI WorkOS Test',
+        'x-forwarded-for': '203.0.113.10'
+      },
+      payload: {
+        agreementKey: 'qiuai_workos_user_agreement',
+        agreementVersion: 'v1.0',
+        contentHash: 'sha256:test-user-agreement',
+        runtimeId: 'runtime-test-agreement',
+        deviceId: 'device-test-agreement',
+        workspaceId: 'workspace_pending_login',
+        deviceName: 'test-device',
+        platform: 'windows',
+        appVersion: '1.0.0',
+        consentMethod: 'pc_first_launch_countdown_10s',
+        minimumReadSeconds: 10,
+        actualReadSeconds: 10
+      }
+    });
+    assert.equal(acceptResponse.statusCode, 201);
+    const acceptance = JSON.parse(acceptResponse.body).data;
+    assert.equal(acceptance.agreementKey, 'qiuai_workos_user_agreement');
+    assert.equal(acceptance.runtimeId, 'runtime-test-agreement');
+    assert.equal(acceptance.deviceId, 'device-test-agreement');
+    assert.equal(acceptance.actualReadSeconds, 10);
+
+    const acceptedStatusResponse = await app.inject({
+      method: 'GET',
+      url: `/api/v1/desktop/agreement-acceptances/status?${query.toString()}`
+    });
+    assert.equal(acceptedStatusResponse.statusCode, 200);
+    const acceptedStatus = JSON.parse(acceptedStatusResponse.body).data;
+    assert.equal(acceptedStatus.accepted, true);
+    assert.equal(acceptedStatus.acceptance.contentHash, 'sha256:test-user-agreement');
+  } finally {
+    await app.close();
+  }
+});
+
 test('admin role template factory governs publication and workspace visibility', async () => {
   const app = await createApplication();
   app.useLogger(false);

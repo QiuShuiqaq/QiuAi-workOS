@@ -27,8 +27,11 @@ import {
   normalizeDesktopBindingCode
 } from './desktop-auth-token';
 import {
+  AcceptDesktopAgreementResponse,
   CancelDesktopBindingCodeResponse,
   CreateDesktopBindingCodeResponse,
+  DesktopAgreementAcceptanceStatusResponse,
+  DesktopAgreementAcceptanceSummary,
   DesktopDeviceSummary,
   DesktopRuntimeSnapshot,
   DesktopRuntimeSyncResponse,
@@ -36,6 +39,8 @@ import {
   ListDesktopDevicesResponse,
   RedeemDesktopBindingCodeResponse,
   UpdateDesktopBindingCodeResponse,
+  parseAcceptDesktopAgreementRequest,
+  parseAgreementAcceptanceStatusQuery,
   parseCreateDesktopBindingCodeRequest,
   parseDesktopRuntimeSyncRequest,
   parseRedeemDesktopBindingCodeRequest,
@@ -75,6 +80,20 @@ type DesktopReleaseRecord = {
   publishedAt?: DesktopReleaseDate | null;
   createdAt: DesktopReleaseDate;
   updatedAt: DesktopReleaseDate;
+};
+
+type DesktopAgreementAcceptanceRecord = {
+  id: string;
+  agreementKey: string;
+  agreementVersion: string;
+  contentHash: string;
+  runtimeId: string;
+  deviceId: string;
+  workspaceId?: string | null;
+  consentMethod: string;
+  minimumReadSeconds?: number | null;
+  actualReadSeconds?: number | null;
+  acceptedAt: DesktopReleaseDate;
 };
 
 @Injectable()
@@ -153,6 +172,155 @@ export class DesktopSyncService {
     return {
       ...response,
       deletedTemplateIds
+    };
+  }
+
+  async getDesktopAgreementAcceptanceStatus(
+    query: Record<string, unknown>
+  ): Promise<DesktopAgreementAcceptanceStatusResponse> {
+    const request = parseAgreementAcceptanceStatusQuery(query);
+
+    if (isDatabasePersistenceEnabled()) {
+      const acceptance = await this.prismaService.desktopAgreementAcceptance.findUnique({
+        where: {
+          agreementKey_agreementVersion_contentHash_runtimeId: {
+            agreementKey: request.agreementKey,
+            agreementVersion: request.agreementVersion,
+            contentHash: request.contentHash,
+            runtimeId: request.runtimeId
+          }
+        }
+      });
+
+      if (!acceptance || acceptance.deviceId !== request.deviceId) {
+        return {
+          data: {
+            accepted: false
+          }
+        };
+      }
+
+      return {
+        data: {
+          accepted: true,
+          acceptance: this.toDesktopAgreementAcceptanceSummary(acceptance)
+        }
+      };
+    }
+
+    const acceptance = this.store.findDesktopAgreementAcceptance(request);
+    return {
+      data: acceptance
+        ? {
+            accepted: true,
+            acceptance: this.toDesktopAgreementAcceptanceSummary(acceptance)
+          }
+        : {
+            accepted: false
+          }
+    };
+  }
+
+  async acceptDesktopAgreement(
+    body: unknown,
+    context: {
+      deviceToken?: string;
+      ipAddress?: string;
+      userAgent?: string;
+    } = {}
+  ): Promise<AcceptDesktopAgreementResponse> {
+    const request = parseAcceptDesktopAgreementRequest(body);
+    if (
+      request.minimumReadSeconds !== undefined &&
+      request.actualReadSeconds !== undefined &&
+      request.actualReadSeconds < request.minimumReadSeconds
+    ) {
+      throw new BadRequestException({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Agreement must be readable for the required duration before acceptance.',
+          details: {
+            minimumReadSeconds: request.minimumReadSeconds,
+            actualReadSeconds: request.actualReadSeconds
+          }
+        }
+      });
+    }
+
+    const acceptedAt = new Date();
+
+    if (isDatabasePersistenceEnabled()) {
+      const desktopDevice = await this.findOptionalDatabaseDeviceForAgreementAcceptance(
+        request,
+        context.deviceToken
+      );
+      const acceptance = await this.prismaService.desktopAgreementAcceptance.upsert({
+        where: {
+          agreementKey_agreementVersion_contentHash_runtimeId: {
+            agreementKey: request.agreementKey,
+            agreementVersion: request.agreementVersion,
+            contentHash: request.contentHash,
+            runtimeId: request.runtimeId
+          }
+        },
+        update: {
+          deviceId: request.deviceId,
+          deviceName: request.deviceName,
+          platform: request.platform,
+          appVersion: request.appVersion,
+          workspaceId: request.workspaceId,
+          desktopDeviceId: desktopDevice?.id,
+          consentMethod: request.consentMethod,
+          minimumReadSeconds: request.minimumReadSeconds,
+          actualReadSeconds: request.actualReadSeconds,
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent
+        },
+        create: {
+          agreementKey: request.agreementKey,
+          agreementVersion: request.agreementVersion,
+          contentHash: request.contentHash,
+          runtimeId: request.runtimeId,
+          deviceId: request.deviceId,
+          deviceName: request.deviceName,
+          platform: request.platform,
+          appVersion: request.appVersion,
+          workspaceId: request.workspaceId,
+          desktopDeviceId: desktopDevice?.id,
+          consentMethod: request.consentMethod,
+          minimumReadSeconds: request.minimumReadSeconds,
+          actualReadSeconds: request.actualReadSeconds,
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent,
+          acceptedAt
+        }
+      });
+
+      return {
+        data: this.toDesktopAgreementAcceptanceSummary(acceptance)
+      };
+    }
+
+    const acceptance = this.store.upsertDesktopAgreementAcceptance({
+      agreementKey: request.agreementKey,
+      agreementVersion: request.agreementVersion,
+      contentHash: request.contentHash,
+      runtimeId: request.runtimeId,
+      deviceId: request.deviceId,
+      deviceName: request.deviceName,
+      platform: request.platform,
+      appVersion: request.appVersion,
+      workspaceId: request.workspaceId,
+      consentMethod: request.consentMethod,
+      minimumReadSeconds: request.minimumReadSeconds,
+      actualReadSeconds: request.actualReadSeconds,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+      acceptedAt: acceptedAt.toISOString()
+    });
+
+    return {
+      data: this.toDesktopAgreementAcceptanceSummary(acceptance)
     };
   }
 
@@ -824,6 +992,62 @@ export class DesktopSyncService {
     };
   }
 
+  private async findOptionalDatabaseDeviceForAgreementAcceptance(
+    request: { runtimeId: string; deviceId: string; workspaceId?: string },
+    deviceToken?: string
+  ) {
+    if (!deviceToken) {
+      return undefined;
+    }
+
+    const device = await this.prismaService.desktopDevice.findUnique({
+      where: {
+        tokenHash: hashDesktopToken(deviceToken)
+      }
+    });
+
+    if (!device || device.status !== 'ACTIVE') {
+      throw new UnauthorizedException({
+        error: {
+          code: 'AUTHENTICATION_REQUIRED',
+          message: 'Desktop device token is invalid.'
+        }
+      });
+    }
+
+    if (request.workspaceId && device.workspaceId !== request.workspaceId) {
+      throw new ForbiddenException({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Desktop device is not bound to this workspace.',
+          details: {
+            workspaceId: request.workspaceId
+          }
+        }
+      });
+    }
+
+    if (device.runtimeId !== request.runtimeId || device.deviceId !== request.deviceId) {
+      throw new ForbiddenException({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Desktop device token does not match this runtime.'
+        }
+      });
+    }
+
+    await this.prismaService.desktopDevice.update({
+      where: {
+        id: device.id
+      },
+      data: {
+        lastSeenAt: new Date()
+      }
+    });
+
+    return device;
+  }
+
   private async requireDatabaseDeviceToken(
     workspaceId: string,
     snapshot: { runtimeId: string; deviceId: string },
@@ -1077,6 +1301,24 @@ export class DesktopSyncService {
 
   private toRequiredIsoDateString(value: DesktopReleaseDate): string {
     return this.toIsoDateString(value) ?? new Date(0).toISOString();
+  }
+
+  private toDesktopAgreementAcceptanceSummary(
+    acceptance: DesktopAgreementAcceptanceRecord
+  ): DesktopAgreementAcceptanceSummary {
+    return {
+      id: acceptance.id,
+      agreementKey: acceptance.agreementKey,
+      agreementVersion: acceptance.agreementVersion,
+      contentHash: acceptance.contentHash,
+      runtimeId: acceptance.runtimeId,
+      deviceId: acceptance.deviceId,
+      workspaceId: acceptance.workspaceId ?? undefined,
+      acceptedAt: this.toRequiredIsoDateString(acceptance.acceptedAt),
+      consentMethod: acceptance.consentMethod,
+      minimumReadSeconds: acceptance.minimumReadSeconds ?? undefined,
+      actualReadSeconds: acceptance.actualReadSeconds ?? undefined
+    };
   }
 
   private toDesktopReleaseSummary(release: DesktopReleaseRecord) {

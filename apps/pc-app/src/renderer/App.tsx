@@ -30,8 +30,7 @@ import {
   SettingOutlined,
   RollbackOutlined,
   ReloadOutlined,
-  ToolOutlined,
-  UserOutlined
+  ToolOutlined
 } from '@ant-design/icons';
 import { qiuAntTheme } from '@qiuai/design-tokens';
 import AppProvider from 'antd/es/app';
@@ -61,6 +60,7 @@ import zhCN from 'antd/es/locale/zh_CN';
 import { type ChangeEvent, type DragEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 
 import type {
+  DesktopAgreementStatus,
   DesktopAuthorizedRoleTemplateCatalog,
   DesktopAuthorizedRoleTemplateSummary,
   DesktopBackupSummary,
@@ -124,6 +124,11 @@ import {
   parseWorkflowGraph,
   type WorkflowGraphArtifactType
 } from '../shared/desktop-workflow-graph';
+import {
+  qiuaiUserAgreementDocument,
+  qiuaiUserAgreementRequiredReadSeconds,
+  type DesktopLegalDocument
+} from '../shared/desktop-agreements';
 
 type SectionKey = 'workbench' | 'roles' | 'logs' | 'models' | 'tools' | 'knowledge' | 'settings';
 type AccountModalKey = 'enterprise' | 'help' | 'release' | 'download' | 'logout';
@@ -221,6 +226,14 @@ interface KnowledgeBindingCatalogEntry {
   description: string;
 }
 
+interface AccountHelpSection {
+  title: string;
+  items: Array<{
+    question: string;
+    answer: string;
+  }>;
+}
+
 const sectionItems: Array<{ key: SectionKey; icon: ReactNode; label: string }> = [
   { key: 'workbench', icon: <ControlOutlined />, label: '对话' },
   { key: 'roles', icon: <RobotOutlined />, label: '数字员工' },
@@ -278,6 +291,394 @@ const knowledgeBindingCatalog: KnowledgeBindingCatalogEntry[] = [
 const knowledgeBindingCatalogByBindingId = new Map(
   knowledgeBindingCatalog.map((entry) => [entry.bindingId, entry] as const)
 );
+
+const accountHelpSections: AccountHelpSection[] = [
+  {
+    title: '快速开始',
+    items: [
+      {
+        question: '首次打开为什么是免费版？',
+        answer: 'PC 客户端安装后默认进入免费版，可以安装公开免费的数字员工。输入企业绑定码后，才会接入企业授权、企业数字员工和企业知识库。'
+      },
+      {
+        question: '怎么绑定企业？',
+        answer: '点击左侧或设置里的“绑定企业”，输入 web-console 生成的绑定码。绑定成功后客户端会自动同步企业授权和可安装数字员工。'
+      },
+      {
+        question: '退出登录是什么意思？',
+        answer: '退出登录等同于解绑当前设备。解绑后保留本机历史任务、模型配置和产物文件，但不再同步企业数字员工和企业授权。'
+      }
+    ]
+  },
+  {
+    title: '模型与 API Key',
+    items: [
+      {
+        question: '模型应该在哪里配置？',
+        answer: '进入左侧“模型”，按供应商填写默认 API Key。安装数字员工后，也可以在该数字员工的配置里选择使用默认 Key，或单独填写一个专用 Key。'
+      },
+      {
+        question: '为什么模型测试失败？',
+        answer: '常见原因包括 API Key 填错、账户余额不足、模型名不在该 Key 权限内、网络无法访问供应商接口，或接口地址不是兼容的 OpenAI 格式。'
+      },
+      {
+        question: '一个供应商多个模型能共用 Key 吗？',
+        answer: '可以。推荐先在模型页配置供应商默认 Key，再通过“拉取模型”确认该 Key 支持哪些模型；特殊数字员工再单独覆盖。'
+      }
+    ]
+  },
+  {
+    title: '数字员工',
+    items: [
+      {
+        question: '为什么看不到某个数字员工？',
+        answer: '请先刷新数字员工市场。如果仍看不到，通常是该模板未上架、权限套餐不包含当前账号、企业白名单限制，或服务端已删除该模板。'
+      },
+      {
+        question: '数字员工安装后为什么还不能运行？',
+        answer: '请打开数字员工配置，检查所需模型、工具和知识库是否就绪。只有 API Key 等隐私配置需要你本机填写，其他工具能力应由服务端模板定义。'
+      },
+      {
+        question: '卸载数字员工会删除历史结果吗？',
+        answer: '不会。卸载只移除当前电脑上的数字员工，历史任务和已生成产物仍保留；以后可以重新安装。'
+      }
+    ]
+  },
+  {
+    title: '文件与产物',
+    items: [
+      {
+        question: '怎么把文件交给数字员工？',
+        answer: '在对话输入框拖入文件，或点击附件按钮选择文件，再输入任务要求。支持类型取决于该数字员工的输入合约和已安装工具。'
+      },
+      {
+        question: '为什么文件读取失败？',
+        answer: '常见原因是文件路径未暴露、文件被其他软件占用、格式不受当前工具支持、文件过大，或数字员工模板没有接入对应读取工具。'
+      },
+      {
+        question: '结果文件保存在哪里？',
+        answer: '产物会先保存到本机缓存目录，聊天里显示文件图标和下载按钮。点击下载按钮可以另存到你选择的本地文件夹；默认缓存会定期清理。'
+      }
+    ]
+  },
+  {
+    title: '工具与运行环境',
+    items: [
+      {
+        question: '网页搜索不可用怎么办？',
+        answer: '确认该数字员工模板已接入网页搜索工具，并且工具中心已启用对应工具。企业部署时建议由管理员在服务端配置好可用的搜索接口。'
+      },
+      {
+        question: 'Office 文档能力包括什么？',
+        answer: 'Office 能力按具体工具拆分，例如读取文档、生成 Word、生成 Excel、处理 Markdown 等。数字员工最终能输出什么，由工作画布里的产物节点决定。'
+      },
+      {
+        question: '视频任务为什么提示缺少 FFmpeg？',
+        answer: '视频剪辑、转码、截帧等能力依赖 FFmpeg。缺少时可以先完成视频理解类任务，但无法稳定生成剪辑产物。'
+      }
+    ]
+  },
+  {
+    title: '故障排查',
+    items: [
+      {
+        question: '任务失败后先看哪里？',
+        answer: '进入左侧“日志”，找到对应任务。日志会记录每个节点做了什么、用了哪个模型或工具、在哪里失败。'
+      },
+      {
+        question: '保存文件提示权限不足怎么办？',
+        answer: '不要直接保存到磁盘根目录或受系统保护的目录，建议选择桌面、文档或你有写入权限的文件夹。'
+      },
+      {
+        question: '客户端没有同步最新配置怎么办？',
+        answer: '先点击刷新或同步；如果仍未变化，检查服务端连接状态、企业绑定状态，以及管理后台模板是否已经上架。'
+      }
+    ]
+  }
+];
+
+const accountLegalDocuments: DesktopLegalDocument[] = [
+  qiuaiUserAgreementDocument,
+  {
+    id: 'privacy-policy',
+    title: '隐私政策',
+    version: 'v1.0',
+    effectiveDate: '2026-07-29',
+    summary: '说明个人信息和设备信息的收集、使用、保存、共享、删除及用户权利。',
+    legalBasis: ['《中华人民共和国个人信息保护法》', '《中华人民共和国网络安全法》'],
+    sections: [
+      {
+        title: '信息收集范围',
+        paragraphs: [
+          '为提供软件运行、设备授权、模型配置、任务执行、错误排查和版本更新服务，软件可能处理设备 ID、运行 ID、客户端版本、连接状态、任务日志、模型配置状态等必要信息。',
+          'API Key、业务文件、产物文件和本地知识库属于敏感业务数据。除完成用户主动发起的任务或同步企业授权所需外，软件不应主动上传无关内容。'
+        ]
+      },
+      {
+        title: '信息使用目的',
+        paragraphs: [
+          '相关信息仅用于账号授权、设备识别、任务执行、产物生成、日志排查、服务安全、版本更新和用户明确授权的业务处理。',
+          '平台不得将用户业务数据用于与服务无关的广告投放、画像交易或未经授权的第三方训练。'
+        ]
+      },
+      {
+        title: '用户权利',
+        paragraphs: [
+          '用户有权根据适用法律法规要求查询、更正、删除相关个人信息或撤回授权。企业用户可通过内部管理员统一管理企业设备和授权。',
+          '用户可通过解绑设备停止企业授权同步；本地历史任务和产物是否删除，由用户在本机自行管理。'
+        ]
+      }
+    ]
+  },
+  {
+    id: 'data-security',
+    title: '企业数据与本地文件处理说明',
+    version: 'v1.0',
+    effectiveDate: '2026-07-29',
+    summary: '说明本地文件、知识库、任务产物和企业资料的处理边界。',
+    legalBasis: ['《中华人民共和国数据安全法》', '《网络数据安全管理条例》'],
+    sections: [
+      {
+        title: '本地优先原则',
+        paragraphs: [
+          'PC 客户端处理文件时应优先传递文件路径、摘要或必要片段，避免在不必要的情况下传输大体积原始文件。',
+          '涉及模型调用或工具调用时，系统会根据数字员工模板和用户任务需要读取必要内容；用户应自行判断资料是否适合交由第三方模型或工具处理。'
+        ]
+      },
+      {
+        title: '企业知识库',
+        paragraphs: [
+          '企业数字员工可结合企业知识库执行任务。企业应确保知识库内容来源合法、权限清晰、分类准确，并定期删除过期或不应继续使用的资料。',
+          '当企业账号到期、设备解绑或授权被撤销时，客户端应停止继续同步受限企业能力。'
+        ]
+      },
+      {
+        title: '产物缓存',
+        paragraphs: [
+          '任务产物会保存到本机缓存目录，便于用户查看和另存。默认缓存用于提升使用便利性，不等同于长期归档。',
+          '含有商业秘密、个人信息或重要合同资料的产物，用户应按企业制度及时归档、加密或删除。'
+        ]
+      }
+    ]
+  },
+  {
+    id: 'ai-content',
+    title: 'AI 生成内容使用声明',
+    version: 'v1.0',
+    effectiveDate: '2026-07-29',
+    summary: '明确 AI 输出属于辅助结果，需人工复核，不得直接替代专业判断。',
+    legalBasis: ['《生成式人工智能服务管理暂行办法》', '《人工智能生成合成内容标识办法》'],
+    sections: [
+      {
+        title: '辅助办公定位',
+        paragraphs: [
+          '数字员工输出用于辅助办公、资料整理、文本生成、信息提取、流程建议和工具调用，不保证绝对准确、完整或适合全部业务场景。',
+          '涉及法律、医疗、金融、投资、人事处分、安全生产、重大合同等高风险事项时，必须由具备资质或职责权限的人员复核。'
+        ]
+      },
+      {
+        title: '内容责任',
+        paragraphs: [
+          '用户应对其输入内容、配置的模型、选择的工具、发布或使用的最终产物承担相应责任。',
+          '用户不得利用 AI 生成虚假信息、侵权内容、欺诈材料、违法广告、恶意代码、违法音视频或其他违反法律法规和公序良俗的内容。'
+        ]
+      },
+      {
+        title: '标识与披露',
+        paragraphs: [
+          '当法律法规、平台规则、客户合同或企业制度要求披露 AI 参与生成时，用户应主动进行必要标识或说明。',
+          '平台可在后续版本中对特定类型产物加入生成标识、来源记录或审计提示。'
+        ]
+      }
+    ]
+  },
+  {
+    id: 'usage-boundary',
+    title: '服务使用边界与免责声明',
+    version: 'v1.0',
+    effectiveDate: '2026-07-29',
+    summary: '明确禁止用途、风险场景、第三方服务异常和不可抗力责任边界。',
+    legalBasis: ['《中华人民共和国网络安全法》', '《中华人民共和国数据安全法》'],
+    sections: [
+      {
+        title: '禁止用途',
+        paragraphs: [
+          '不得使用本软件实施违法违规活动，包括但不限于侵犯个人隐私、侵犯知识产权、规避安全控制、攻击系统、非法采集数据、生成欺诈材料或传播违法有害信息。',
+          '不得将本软件用于未经授权的监控、自动化骚扰、账号批量注册、绕过平台限制、恶意营销或其他损害第三方权益的行为。'
+        ]
+      },
+      {
+        title: '风险提示',
+        paragraphs: [
+          'AI 模型可能出现事实错误、遗漏、格式不稳定、理解偏差或幻觉。用户应结合业务场景进行验收和复核。',
+          '第三方模型、搜索服务、Office 工具、视频工具或网络环境异常，可能导致任务失败、超时、结果不完整或产物格式变化。'
+        ]
+      },
+      {
+        title: '责任边界',
+        paragraphs: [
+          '在法律允许范围内，因用户违法使用、错误配置、未复核 AI 输出、第三方服务不可用、网络故障或不可抗力造成的损失，平台不承担超出法定范围的责任。',
+          '如平台故意或重大过失导致用户权益受损，应依法承担相应责任。'
+        ]
+      }
+    ]
+  },
+  {
+    id: 'third-party',
+    title: '第三方模型与工具服务声明',
+    version: 'v1.0',
+    effectiveDate: '2026-07-29',
+    summary: '说明用户自配 API Key、第三方模型供应商和外部工具的责任分界。',
+    legalBasis: ['《中华人民共和国民法典》', '《中华人民共和国个人信息保护法》'],
+    sections: [
+      {
+        title: '第三方模型',
+        paragraphs: [
+          '用户在 PC 客户端配置的 API Key 可能对应 DeepSeek、OpenAI、通义千问、Kimi、智谱、MiniMax、火山方舟或其他模型服务商。',
+          '用户应自行阅读并遵守第三方模型服务商的服务条款、隐私政策、数据处理规则、计费规则和地区合规要求。'
+        ]
+      },
+      {
+        title: '第三方工具',
+        paragraphs: [
+          '网页搜索、Office 处理、OCR、视频处理、MCP 工具或其他外部能力可能由本地程序、企业服务或第三方接口提供。',
+          '当数字员工调用第三方服务时，可能产生额外费用、网络请求、日志记录或数据处理行为。用户应确认相关工具适合当前业务资料。'
+        ]
+      },
+      {
+        title: '密钥管理',
+        paragraphs: [
+          '用户应妥善保存 API Key，不得将密钥公开、共享给无关人员或提交到不可信环境。',
+          '如发现密钥泄露，应立即到对应服务商控制台禁用或轮换密钥，并检查异常调用和账单。'
+        ]
+      }
+    ]
+  },
+  {
+    id: 'paid-license',
+    title: '付费服务与授权规则',
+    version: 'v1.0',
+    effectiveDate: '2026-07-29',
+    summary: '说明套餐权限、设备授权、续费到期和免费版降级规则。',
+    legalBasis: ['《中华人民共和国民法典》', '《中华人民共和国消费者权益保护法》'],
+    sections: [
+      {
+        title: '套餐授权',
+        paragraphs: [
+          '企业套餐对应不同数字员工、工具能力、设备数量、服务范围和支持等级。具体以购买页面、订单、合同或管理后台展示为准。',
+          '数字员工模板可按套餐、白名单或企业授权控制安装范围。白名单设置优先级高于普通套餐范围。'
+        ]
+      },
+      {
+        title: '续费与降级',
+        paragraphs: [
+          '企业账号未续费或授权到期后，对应企业授权设备应降级为免费版，仅保留免费能力和本地历史数据访问能力。',
+          '降级不会主动删除本地产物，但会停止同步企业专属数字员工、企业知识库和付费工具权限。'
+        ]
+      },
+      {
+        title: '费用与退款',
+        paragraphs: [
+          '具体价格、计费周期、开票、退款和服务支持，以用户购买页面、订单、合同或双方书面约定为准。',
+          '第三方模型和工具产生的费用，通常由用户与第三方服务商直接结算，除非合同另有约定。'
+        ]
+      }
+    ]
+  },
+  {
+    id: 'software-update',
+    title: '软件许可与更新维护规则',
+    version: 'v1.0',
+    effectiveDate: '2026-07-29',
+    summary: '说明客户端版本更新、安装包下载、强制更新和维护责任。',
+    legalBasis: ['《中华人民共和国网络安全法》', '《中华人民共和国民法典》'],
+    sections: [
+      {
+        title: '软件许可',
+        paragraphs: [
+          '用户获得的是在授权范围内安装和使用 QiuAI WorkOS 的非独占、不可转让、不可再许可的软件使用权。',
+          '未经书面许可，用户不得反向工程、破解、复制授权机制、移除版权标识或将软件用于超出授权范围的商业分发。'
+        ]
+      },
+      {
+        title: '版本更新',
+        paragraphs: [
+          '客户端可通过“版本与更新”检查管理后台发布的最新安装包。更新可能包含功能改进、稳定性修复、安全修复和兼容性调整。',
+          '当旧版本存在安全风险或协议不兼容时，平台可设置强制更新。用户应及时安装新版，以免影响服务可用性。'
+        ]
+      },
+      {
+        title: '维护边界',
+        paragraphs: [
+          '平台负责维护自身软件、服务端接口和已发布数字员工模板的可用性。第三方模型、用户电脑环境、系统权限和本地文件损坏不属于平台完全可控范围。',
+          '用户应保持操作系统、依赖工具、网络环境和安全软件配置处于可用状态。'
+        ]
+      }
+    ]
+  },
+  {
+    id: 'ip-rights',
+    title: '知识产权与内容权属声明',
+    version: 'v1.0',
+    effectiveDate: '2026-07-29',
+    summary: '说明软件、模板、用户输入、企业资料和生成产物的权属边界。',
+    legalBasis: ['《中华人民共和国著作权法》', '《中华人民共和国民法典》'],
+    sections: [
+      {
+        title: '软件与模板',
+        paragraphs: [
+          'QiuAI WorkOS 的软件代码、界面设计、数字员工模板、工作流编排、文档和品牌标识受知识产权相关法律保护。',
+          '用户不得未经授权复制、出售、出租、改编、反向工程或以其他方式侵犯平台知识产权。'
+        ]
+      },
+      {
+        title: '用户内容',
+        paragraphs: [
+          '用户对其合法拥有或依法获得授权的输入资料、企业知识库、业务文件和人工确认后的最终产物享有相应权利。',
+          '用户应确保输入内容不侵犯第三方著作权、商标权、商业秘密、肖像权、名誉权、隐私权或其他合法权益。'
+        ]
+      },
+      {
+        title: '生成产物',
+        paragraphs: [
+          'AI 生成产物的可使用范围可能受输入资料、第三方模型条款、素材来源和适用法律影响。用户在对外发布或商业使用前应自行审查。',
+          '平台不保证任何生成产物天然满足商用、注册、审查、备案或对外承诺条件。'
+        ]
+      }
+    ]
+  },
+  {
+    id: 'open-source',
+    title: '开源软件与第三方组件声明',
+    version: 'v1.0',
+    effectiveDate: '2026-07-29',
+    summary: '说明 Electron、React、Ant Design 等第三方组件的许可边界。',
+    legalBasis: ['开源软件许可证', '第三方组件许可文件'],
+    sections: [
+      {
+        title: '第三方组件',
+        paragraphs: [
+          '本软件可能使用 Electron、React、Ant Design、Vite、Prisma、sql.js、JSZip 等开源或第三方组件。',
+          '第三方组件分别适用其自身许可证。平台会尽合理努力遵守相关许可要求，并在必要时提供许可证信息。'
+        ]
+      },
+      {
+        title: '组件责任',
+        paragraphs: [
+          '第三方组件按其许可证和维护状态提供。组件漏洞、安全更新或兼容性变化可能影响软件运行。',
+          '平台会根据产品维护计划评估并升级关键依赖，但不对第三方组件作出超出其许可证范围的承诺。'
+        ]
+      },
+      {
+        title: '商用注意',
+        paragraphs: [
+          '企业在二次分发、私有化改造或深度集成时，应额外核查第三方组件许可证、模型服务条款和企业内部合规要求。',
+          '如客户合同对开源软件披露、供应链安全或漏洞修复周期有特别要求，应在签约或交付前单独约定。'
+        ]
+      }
+    ]
+  }
+];
 
 const knowledgeBindingOptions = [
   { id: 'kb-local-folder', label: '本地文件夹' },
@@ -973,6 +1374,14 @@ export default function App() {
   const [backupNotice, setBackupNotice] = useState('');
   const [updateNotice, setUpdateNotice] = useState('');
   const [updateCheckResult, setUpdateCheckResult] = useState<DesktopUpdateCheckResult | null>(null);
+  const [userAgreementStatus, setUserAgreementStatus] = useState<DesktopAgreementStatus | null>(null);
+  const [isCheckingUserAgreement, setIsCheckingUserAgreement] = useState(true);
+  const [isAcceptingUserAgreement, setIsAcceptingUserAgreement] = useState(false);
+  const [userAgreementNotice, setUserAgreementNotice] = useState('');
+  const [userAgreementReadStartedAt, setUserAgreementReadStartedAt] = useState<number | null>(null);
+  const [userAgreementRemainingSeconds, setUserAgreementRemainingSeconds] = useState(
+    qiuaiUserAgreementRequiredReadSeconds
+  );
   const [modelTestNotice, setModelTestNotice] = useState('');
   const [isTestingModel, setIsTestingModel] = useState(false);
   const [isPullingProviderModels, setIsPullingProviderModels] = useState(false);
@@ -1008,6 +1417,7 @@ export default function App() {
   );
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [accountModal, setAccountModal] = useState<AccountModalKey | null>(null);
+  const [selectedLegalDocumentId, setSelectedLegalDocumentId] = useState('');
   const [isUnbindingDevice, setIsUnbindingDevice] = useState(false);
   const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
   const [isComposerDragOver, setIsComposerDragOver] = useState(false);
@@ -1016,7 +1426,32 @@ export default function App() {
 
   useEffect(() => {
     void loadRuntimeState();
+    void loadUserAgreementStatus();
   }, []);
+
+  useEffect(() => {
+    if (!userAgreementStatus || userAgreementStatus.accepted) {
+      return;
+    }
+
+    const startedAt = Date.now();
+    setUserAgreementReadStartedAt(startedAt);
+    setUserAgreementRemainingSeconds(userAgreementStatus.agreement.requiredReadSeconds);
+
+    const handle = window.setInterval(() => {
+      const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+      setUserAgreementRemainingSeconds(
+        Math.max(0, userAgreementStatus.agreement.requiredReadSeconds - elapsedSeconds)
+      );
+    }, 250);
+
+    return () => window.clearInterval(handle);
+  }, [
+    userAgreementStatus?.accepted,
+    userAgreementStatus?.agreement.agreementVersion,
+    userAgreementStatus?.agreement.contentHash,
+    userAgreementStatus?.agreement.requiredReadSeconds
+  ]);
 
   useEffect(() => {
     const handleHashChange = () => {
@@ -1099,6 +1534,74 @@ export default function App() {
       await loadWorkspaceBackups();
     } finally {
       setIsRefreshing(false);
+    }
+  }
+
+  async function loadUserAgreementStatus() {
+    if (!window.qiuDesktop) {
+      setUserAgreementStatus({
+        agreement: {
+          agreementKey: qiuaiUserAgreementDocument.id,
+          agreementVersion: qiuaiUserAgreementDocument.version,
+          contentHash: 'browser-preview',
+          title: qiuaiUserAgreementDocument.title,
+          effectiveDate: qiuaiUserAgreementDocument.effectiveDate,
+          requiredReadSeconds: qiuaiUserAgreementRequiredReadSeconds
+        },
+        accepted: true,
+        cloudSynced: false
+      });
+      return;
+    }
+
+    setIsCheckingUserAgreement(true);
+    setUserAgreementNotice('');
+    try {
+      const status = await window.qiuDesktop.getUserAgreementStatus();
+      setUserAgreementStatus(status);
+      setUserAgreementNotice(status.message ?? '');
+    } catch (error) {
+      setUserAgreementNotice(
+        `协议状态加载失败：${error instanceof Error ? error.message : 'unknown error'}`
+      );
+      setUserAgreementStatus({
+        agreement: {
+          agreementKey: qiuaiUserAgreementDocument.id,
+          agreementVersion: qiuaiUserAgreementDocument.version,
+          contentHash: 'unavailable',
+          title: qiuaiUserAgreementDocument.title,
+          effectiveDate: qiuaiUserAgreementDocument.effectiveDate,
+          requiredReadSeconds: qiuaiUserAgreementRequiredReadSeconds
+        },
+        accepted: false,
+        cloudSynced: false
+      });
+    } finally {
+      setIsCheckingUserAgreement(false);
+    }
+  }
+
+  async function submitUserAgreementAcceptance() {
+    if (!window.qiuDesktop || !userAgreementReadStartedAt) {
+      return;
+    }
+
+    setIsAcceptingUserAgreement(true);
+    setUserAgreementNotice('');
+    try {
+      const actualReadSeconds = Math.floor((Date.now() - userAgreementReadStartedAt) / 1000);
+      const status = await window.qiuDesktop.acceptUserAgreement({
+        actualReadSeconds
+      });
+      setUserAgreementStatus(status);
+      setUserAgreementNotice('');
+      message.success('用户协议已同意并完成云端留痕');
+    } catch (error) {
+      setUserAgreementNotice(
+        `同意协议失败：${error instanceof Error ? error.message : 'unknown error'}`
+      );
+    } finally {
+      setIsAcceptingUserAgreement(false);
     }
   }
 
@@ -1390,7 +1893,36 @@ export default function App() {
 
   function openAccountModal(modal: AccountModalKey) {
     setAccountModal(modal);
+    setSelectedLegalDocumentId('');
     setAccountMenuOpen(false);
+  }
+
+  async function copyDeviceDiagnostics() {
+    const diagnostics = [
+      `应用：${runtimeState.app.appName}`,
+      `客户端版本：${runtimeState.app.appVersion}`,
+      `系统平台：${runtimeState.app.platform} ${runtimeState.app.arch}`,
+      `设备名称：${runtimeState.app.deviceName}`,
+      `设备 ID：${runtimeState.localRuntime.deviceId}`,
+      `运行时 ID：${runtimeState.localRuntime.runtimeId}`,
+      `授权状态：${isEnterpriseUnbound ? '免费版（未绑定企业）' : '已绑定企业'}`,
+      `工作区：${runtimeState.localRuntime.workspaceId}`,
+      `控制端：${runtimeState.app.serverBaseUrl}`,
+      `连接状态：${connectionLabel(runtimeState.serverConnection.state)}`,
+      `最近同步：${formatDate(runtimeState.localRuntime.lastSyncedAt)}`,
+      `数字员工：${runtimeState.rolePackages.length}`,
+      `已启用模型：${enabledModelCount}`,
+      `已启用工具：${enabledToolCount}`,
+      `知识来源：${knowledgeBindingCount}`,
+      `本地数据目录：${runtimeState.app.userDataPath}`
+    ].join('\n');
+
+    try {
+      await navigator.clipboard.writeText(diagnostics);
+      message.success('设备诊断信息已复制');
+    } catch {
+      message.error('复制失败，请手动复制设备信息');
+    }
   }
 
   async function handleUnbindDesktopDevice() {
@@ -1708,6 +2240,7 @@ export default function App() {
         {renderOnboardingModal()}
         {renderAccountModal()}
         {renderRoleUninstallModal()}
+        {renderUserAgreementModal()}
       </AppProvider>
     </ConfigProvider>
   );
@@ -1800,20 +2333,20 @@ export default function App() {
               </div>
               <div className="account-popover-list">
                 <button type="button" onClick={() => openAccountModal('enterprise')}>
-                  <UserOutlined />
-                  <span>企业资料</span>
+                  <BorderOutlined />
+                  <span>设备信息</span>
                 </button>
                 <button type="button" onClick={() => openAccountModal('help')}>
                   <QuestionCircleOutlined />
                   <span>帮助中心</span>
                 </button>
                 <button type="button" onClick={() => openAccountModal('release')}>
-                  <InfoCircleOutlined />
-                  <span>发行说明</span>
+                  <SafetyCertificateOutlined />
+                  <span>协议与声明</span>
                 </button>
                 <button type="button" onClick={() => openAccountModal('download')}>
                   <CloudDownloadOutlined />
-                  <span>下载应用</span>
+                  <span>版本与更新</span>
                 </button>
                 <button type="button" onClick={() => openAccountModal('logout')}>
                   <LogoutOutlined />
@@ -1832,6 +2365,95 @@ export default function App() {
           </button>
         </div>
       </aside>
+    );
+  }
+
+  function renderUserAgreementModal() {
+    const mustShowAgreement = !userAgreementStatus || !userAgreementStatus.accepted;
+    const canAcceptAgreement =
+      mustShowAgreement &&
+      !isCheckingUserAgreement &&
+      !isAcceptingUserAgreement &&
+      userAgreementRemainingSeconds <= 0;
+
+    return (
+      <Modal
+        title="欢迎使用 QiuAI WorkOS"
+        open={mustShowAgreement}
+        width={820}
+        closable={false}
+        maskClosable={false}
+        destroyOnHidden={false}
+        footer={
+          <Flex align="center" justify="space-between" gap={12} wrap="wrap">
+            <Typography.Text type={userAgreementRemainingSeconds > 0 ? 'secondary' : 'success'}>
+              {isCheckingUserAgreement
+                ? '正在校验协议状态'
+                : userAgreementRemainingSeconds > 0
+                ? `请阅读协议，${userAgreementRemainingSeconds} 秒后可同意`
+                : '已达到最低阅读时间，可以同意'}
+            </Typography.Text>
+            <Space>
+              <Button onClick={() => handleWindowControl('close')}>不同意并退出</Button>
+              <Button
+                type="primary"
+                loading={isAcceptingUserAgreement}
+                disabled={!canAcceptAgreement}
+                onClick={() => void submitUserAgreementAcceptance()}
+              >
+                我已阅读并同意
+              </Button>
+            </Space>
+          </Flex>
+        }
+      >
+        <Space direction="vertical" size={14} className="user-agreement-modal-body">
+          <div className="user-agreement-critical-notice">
+            <Typography.Text strong>重点提示</Typography.Text>
+            <Typography.Text type="secondary">
+              使用本软件前，请确认你已阅读并理解 AI 输出需要人工复核、本地文件和企业数据需合法授权、第三方模型和工具由用户自行配置和承担相应责任、禁止违法违规用途等条款。
+            </Typography.Text>
+          </div>
+          <Descriptions column={1} size="small" bordered>
+            <Descriptions.Item label="协议名称">{qiuaiUserAgreementDocument.title}</Descriptions.Item>
+            <Descriptions.Item label="协议版本">
+              {userAgreementStatus?.agreement.agreementVersion ?? qiuaiUserAgreementDocument.version}
+            </Descriptions.Item>
+            <Descriptions.Item label="生效日期">
+              {userAgreementStatus?.agreement.effectiveDate ?? qiuaiUserAgreementDocument.effectiveDate}
+            </Descriptions.Item>
+            <Descriptions.Item label="内容指纹">
+              <Typography.Text copyable ellipsis>
+                {userAgreementStatus?.agreement.contentHash ?? '—'}
+              </Typography.Text>
+            </Descriptions.Item>
+          </Descriptions>
+          {userAgreementNotice ? (
+            <Typography.Text type="danger">{userAgreementNotice}</Typography.Text>
+          ) : null}
+          <div className="user-agreement-scroll">
+            <Typography.Title level={4}>{qiuaiUserAgreementDocument.title}</Typography.Title>
+            <Typography.Text type="secondary">
+              {qiuaiUserAgreementDocument.summary}
+            </Typography.Text>
+            <Space wrap className="user-agreement-basis">
+              {qiuaiUserAgreementDocument.legalBasis.map((basis) => (
+                <Tag key={basis}>{basis}</Tag>
+              ))}
+            </Space>
+            {qiuaiUserAgreementDocument.sections.map((section) => (
+              <section key={section.title} className="user-agreement-section">
+                <Typography.Text strong>{section.title}</Typography.Text>
+                {section.paragraphs.map((paragraph) => (
+                  <Typography.Paragraph key={paragraph} type="secondary">
+                    {paragraph}
+                  </Typography.Paragraph>
+                ))}
+              </section>
+            ))}
+          </div>
+        </Space>
+      </Modal>
     );
   }
 
@@ -1868,34 +2490,53 @@ export default function App() {
   function renderAccountModal() {
     const open = Boolean(accountModal);
     const latestRelease = updateCheckResult?.latestRelease;
+    const selectedLegalDocument = accountLegalDocuments.find(
+      (document) => document.id === selectedLegalDocumentId
+    );
+    const accountModalWidth = accountModal === 'release' ? 860 : accountModal === 'help' ? 760 : 680;
 
     return (
       <Modal
         title={accountModalTitle(accountModal)}
         open={open}
         footer={null}
-        width={accountModal === 'release' ? 720 : 640}
+        width={accountModalWidth}
         destroyOnHidden
-        onCancel={() => setAccountModal(null)}
+        onCancel={() => {
+          setAccountModal(null);
+          setSelectedLegalDocumentId('');
+        }}
       >
         {accountModal === 'enterprise' ? (
           <Space direction="vertical" size={16} className="account-modal-body">
             <Descriptions column={1} size="small" bordered>
-              <Descriptions.Item label="企业工作区">
-                {runtimeState.localRuntime.workspaceId === pendingWorkspaceId
-                  ? '免费版（未绑定企业）'
-                  : runtimeState.localRuntime.workspaceId}
+              <Descriptions.Item label="授权状态">
+                {isEnterpriseUnbound ? <Tag>免费版（未绑定企业）</Tag> : <Tag color="green">已绑定企业</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="工作区 ID">
+                {isEnterpriseUnbound ? '未绑定企业工作区' : runtimeState.localRuntime.workspaceId}
               </Descriptions.Item>
               <Descriptions.Item label="设备名称">{runtimeState.app.deviceName}</Descriptions.Item>
               <Descriptions.Item label="设备 ID">{runtimeState.localRuntime.deviceId}</Descriptions.Item>
               <Descriptions.Item label="运行时 ID">{runtimeState.localRuntime.runtimeId}</Descriptions.Item>
               <Descriptions.Item label="客户端版本">{runtimeState.app.appVersion}</Descriptions.Item>
+              <Descriptions.Item label="系统平台">
+                {runtimeState.app.platform} / {runtimeState.app.arch}
+              </Descriptions.Item>
               <Descriptions.Item label="控制端">{runtimeState.app.serverBaseUrl}</Descriptions.Item>
               <Descriptions.Item label="连接状态">
                 <Tag color={connectionTone}>{connectionLabel(runtimeState.serverConnection.state)}</Tag>
+                {runtimeState.serverConnection.latencyMs ? (
+                  <Typography.Text type="secondary"> {runtimeState.serverConnection.latencyMs}ms</Typography.Text>
+                ) : null}
               </Descriptions.Item>
               <Descriptions.Item label="最近同步">
                 {formatDate(runtimeState.localRuntime.lastSyncedAt)}
+              </Descriptions.Item>
+              <Descriptions.Item label="本地数据目录">
+                <Typography.Text copyable ellipsis>
+                  {runtimeState.app.userDataPath}
+                </Typography.Text>
               </Descriptions.Item>
             </Descriptions>
 
@@ -1917,57 +2558,104 @@ export default function App() {
                 <Typography.Text type="secondary">知识来源</Typography.Text>
               </div>
             </div>
+
+            <Space wrap>
+              <Button icon={<CloudSyncOutlined />} loading={isRefreshing} onClick={refreshConnection}>
+                检查连接
+              </Button>
+              <Button icon={<FolderOpenOutlined />} onClick={() => void openLocalPath(runtimeState.app.userDataPath)}>
+                打开数据目录
+              </Button>
+              <Button icon={<InfoCircleOutlined />} onClick={() => void copyDeviceDiagnostics()}>
+                复制诊断信息
+              </Button>
+            </Space>
           </Space>
         ) : null}
 
         {accountModal === 'help' ? (
-          <Space direction="vertical" size={14} className="account-modal-body">
-            {[
-              ['怎么绑定企业？', '客户端默认可直接使用免费版；在 web-console 生成绑定码后，点击“绑定企业”输入绑定码即可接入企业工作区。'],
-              ['模型在哪里配置？', '进入左侧“模型”，选择供应商卡片并填写 API Key。不同数字员工可要求不同模型配置。'],
-              ['文件怎么交给数字员工？', '在“对话”输入框直接拖入文档、表格、图片等文件，再输入任务要求。'],
-              ['结果文件在哪里？', '任务完成后会在聊天记录里显示可下载或可打开的本地产物。'],
-              ['怎么更新客户端？', '打开左下角 Q 菜单里的“下载应用”，检查版本并下载新版安装包。']
-            ].map(([question, answer]) => (
-              <div key={question} className="account-help-item">
-                <Typography.Text strong>{question}</Typography.Text>
-                <Typography.Text type="secondary">{answer}</Typography.Text>
-              </div>
+          <Space direction="vertical" size={18} className="account-modal-body">
+            {accountHelpSections.map((section) => (
+              <section key={section.title} className="account-help-section">
+                <Typography.Text strong>{section.title}</Typography.Text>
+                <div className="account-help-grid">
+                  {section.items.map((item) => (
+                    <div key={item.question} className="account-help-item">
+                      <Typography.Text strong>{item.question}</Typography.Text>
+                      <Typography.Text type="secondary">{item.answer}</Typography.Text>
+                    </div>
+                  ))}
+                </div>
+              </section>
             ))}
           </Space>
         ) : null}
 
         {accountModal === 'release' ? (
           <Space direction="vertical" size={16} className="account-modal-body">
-            <section className="account-legal-section">
-              <Typography.Text strong>版本说明</Typography.Text>
-              <Typography.Paragraph type="secondary">
-                当前版本 {runtimeState.app.appVersion}，重点支持数字员工安装、模型配置、工具调用、本地文件处理、任务历史和本地数据备份。
-              </Typography.Paragraph>
-            </section>
-            <section className="account-legal-section">
-              <Typography.Text strong>协议声明</Typography.Text>
-              <Typography.Paragraph type="secondary">
-                使用本客户端即表示企业确认已获得处理相关业务数据、文件和账号信息的授权。企业应自行确保上传、处理、导出的资料符合内部制度和适用法律法规。
-              </Typography.Paragraph>
-            </section>
-            <section className="account-legal-section">
-              <Typography.Text strong>法律边界</Typography.Text>
-              <Typography.Paragraph type="secondary">
-                数字员工输出用于辅助办公，不构成法律、医疗、金融投资等强监管领域的最终专业意见。涉及重大决策时，应由具备资质的人员复核。
-              </Typography.Paragraph>
-            </section>
-            <section className="account-legal-section">
-              <Typography.Text strong>使用边界</Typography.Text>
-              <Typography.Paragraph type="secondary">
-                不得用于违法违规、侵犯隐私、绕过安全限制、批量骚扰、恶意爬取、生成欺诈内容或其他损害第三方权益的行为。
-              </Typography.Paragraph>
-            </section>
+            {selectedLegalDocument ? (
+              <>
+                <Space direction="vertical" size={8} className="account-legal-header">
+                  <Button size="small" icon={<RollbackOutlined />} onClick={() => setSelectedLegalDocumentId('')}>
+                    返回协议列表
+                  </Button>
+                  <Typography.Title level={4}>{selectedLegalDocument.title}</Typography.Title>
+                  <Typography.Text type="secondary">
+                    版本 {selectedLegalDocument.version} · 生效日期 {selectedLegalDocument.effectiveDate}
+                  </Typography.Text>
+                  <Typography.Text type="secondary">{selectedLegalDocument.summary}</Typography.Text>
+                  <Space wrap>
+                    {selectedLegalDocument.legalBasis.map((basis) => (
+                      <Tag key={basis}>{basis}</Tag>
+                    ))}
+                  </Space>
+                </Space>
+                <Divider />
+                {selectedLegalDocument.sections.map((section) => (
+                  <section key={section.title} className="account-legal-section">
+                    <Typography.Text strong>{section.title}</Typography.Text>
+                    {section.paragraphs.map((paragraph) => (
+                      <Typography.Paragraph key={paragraph} type="secondary">
+                        {paragraph}
+                      </Typography.Paragraph>
+                    ))}
+                  </section>
+                ))}
+              </>
+            ) : (
+              <>
+                <Typography.Paragraph type="secondary">
+                  以下文件用于说明 QiuAI WorkOS 的法律责任、数据处理边界、AI 生成内容风险和软件授权规则。具体文本建议在正式商用前交由律师复核。
+                </Typography.Paragraph>
+                <div className="account-legal-list">
+                  {accountLegalDocuments.map((document) => (
+                    <button
+                      key={document.id}
+                      type="button"
+                      className="account-legal-card"
+                      onClick={() => setSelectedLegalDocumentId(document.id)}
+                    >
+                      <span>
+                        <Typography.Text strong>{document.title}</Typography.Text>
+                        <Typography.Text type="secondary">{document.summary}</Typography.Text>
+                      </span>
+                      <span className="account-legal-meta">
+                        <Tag>{document.version}</Tag>
+                        <Typography.Text type="secondary">{document.effectiveDate}</Typography.Text>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </Space>
         ) : null}
 
         {accountModal === 'download' ? (
           <Space direction="vertical" size={16} className="account-modal-body">
+            <Typography.Paragraph type="secondary">
+              客户端会从服务端读取管理后台“桌面版本”中已发布的 Windows stable 安装包。管理员上传并发布新版后，这里即可检查并下载。
+            </Typography.Paragraph>
             <Descriptions column={1} size="small" bordered>
               <Descriptions.Item label="当前版本">{runtimeState.app.appVersion}</Descriptions.Item>
               <Descriptions.Item label="最新版本">
@@ -1984,6 +2672,16 @@ export default function App() {
               ) : null}
               {latestRelease?.releaseNotes ? (
                 <Descriptions.Item label="更新说明">{latestRelease.releaseNotes}</Descriptions.Item>
+              ) : null}
+              {latestRelease?.minimumSupportedVersion ? (
+                <Descriptions.Item label="最低支持版本">
+                  {latestRelease.minimumSupportedVersion}
+                </Descriptions.Item>
+              ) : null}
+              {latestRelease?.publishedAt ? (
+                <Descriptions.Item label="发布时间">
+                  {formatDate(latestRelease.publishedAt)}
+                </Descriptions.Item>
               ) : null}
               <Descriptions.Item label="更新策略">
                 {updateCheckResult?.forceUpdate ? <Tag color="red">强制更新</Tag> : <Tag>常规更新</Tag>}
@@ -2003,9 +2701,15 @@ export default function App() {
                 disabled={!updateCheckResult?.updateAvailable || !latestRelease}
                 onClick={() => void openUpdateDownload()}
               >
-                下载新版
+                下载并安装新版
               </Button>
             </Space>
+            <div className="account-update-note">
+              <Typography.Text strong>管理员维护方式</Typography.Text>
+              <Typography.Text type="secondary">
+                在 admin-console 打开“桌面版本”，上传新版安装包，填写版本号、更新说明、最低支持版本和强制更新策略，确认无误后发布。
+              </Typography.Text>
+            </div>
           </Space>
         ) : null}
 
@@ -5162,10 +5866,10 @@ function sectionMeta(section: SectionKey) {
 
 function accountModalTitle(modal: AccountModalKey | null) {
   const titles: Record<AccountModalKey, string> = {
-    enterprise: '企业资料',
+    enterprise: '设备信息',
     help: '帮助中心',
-    release: '发行说明',
-    download: '下载应用',
+    release: '协议与声明',
+    download: '版本与更新',
     logout: '退出登录'
   };
 
