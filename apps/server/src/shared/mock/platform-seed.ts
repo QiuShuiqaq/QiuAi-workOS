@@ -5,7 +5,10 @@ import {
   type ServerRoleTemplateWorkflowStep
 } from '../role-template-catalog';
 import type { ServerRoleWorkflowGraph } from '../workflow-graph';
-import type { buildRoleTemplateDependencyManifest } from '../role-template-dependencies';
+import {
+  buildRoleTemplateDependencyManifest,
+  type ServerRoleTemplateDependencyManifest
+} from '../role-template-dependencies';
 
 export interface MockWorkspaceSummary {
   id: string;
@@ -47,7 +50,7 @@ export interface MockRoleTemplateSummary {
   skills: ServerRoleSkill[];
   workflowSteps: ServerRoleTemplateWorkflowStep[];
   workflowGraph: ServerRoleWorkflowGraph;
-  dependencyManifest?: ReturnType<typeof buildRoleTemplateDependencyManifest>;
+  dependencyManifest?: ServerRoleTemplateDependencyManifest;
   sampleInputs: string[];
   outputFormat: string;
   approvalPolicy: string;
@@ -318,6 +321,7 @@ export const demoPlans: MockPlanDetail[] = [
 export const demoRoleTemplates: MockRoleTemplateSummary[] = serverRoleTemplateCatalog.map(
   (template) => ({
     id: template.templateId,
+    applicationType: template.applicationType,
     version: template.version,
     name: template.name,
     industry: template.industry,
@@ -333,6 +337,18 @@ export const demoRoleTemplates: MockRoleTemplateSummary[] = serverRoleTemplateCa
       toolIds: step.toolIds ? [...step.toolIds] : undefined
     })),
     workflowGraph: template.workflowGraph,
+    dependencyManifest: {
+      ...buildRoleTemplateDependencyManifest({
+        workflowGraph: template.workflowGraph,
+        generatedAt: '2026-07-24T00:00:00.000Z'
+      }),
+      applicationType: template.applicationType === 'DIGITAL_FACTORY' ? 'digital_factory' : 'digital_employee',
+      ...(template.dependencyManifestFactory === undefined
+        ? {}
+        : {
+            factory: template.dependencyManifestFactory
+          })
+    },
     sampleInputs: [...template.sampleInputs],
     outputFormat: template.outputFormat,
     approvalPolicy: template.approvalPolicy,

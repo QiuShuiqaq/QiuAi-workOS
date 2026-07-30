@@ -245,6 +245,26 @@ const plans = [
 
 const roleTemplates = serverRoleTemplateCatalog;
 
+function buildSeedRoleTemplateDependencyManifest(
+  template: (typeof roleTemplates)[number],
+  generatedAt: Date,
+  assets: ReturnType<typeof getDefaultAssetDefinitions>
+) {
+  return {
+    ...buildRoleTemplateDependencyManifest({
+      workflowGraph: template.workflowGraph,
+      assets,
+      generatedAt
+    }),
+    applicationType: template.applicationType === 'DIGITAL_FACTORY' ? 'digital_factory' : 'digital_employee',
+    ...(template.dependencyManifestFactory === undefined
+      ? {}
+      : {
+          factory: template.dependencyManifestFactory
+        })
+  };
+}
+
 async function seedAccounts() {
   const accounts = [
     {
@@ -678,6 +698,7 @@ async function seedRoleTemplates() {
         id: template.templateId
       },
       update: {
+        applicationType: template.applicationType ?? 'DIGITAL_EMPLOYEE',
         version: template.version,
         name: template.name,
         industry: template.industry,
@@ -690,11 +711,7 @@ async function seedRoleTemplates() {
         skills: template.skills.map((skill) => ({ ...skill })),
         workflowSteps: template.workflowSteps.map((step) => ({ ...step })),
         workflowGraph: template.workflowGraph,
-        dependencyManifest: buildRoleTemplateDependencyManifest({
-          workflowGraph: template.workflowGraph,
-          assets: defaultAssets,
-          generatedAt: publishedAt
-        }),
+        dependencyManifest: buildSeedRoleTemplateDependencyManifest(template, publishedAt, defaultAssets),
         sampleInputs: [...template.sampleInputs],
         outputFormat: template.outputFormat,
         approvalPolicy: template.approvalPolicy,
@@ -705,6 +722,7 @@ async function seedRoleTemplates() {
       },
       create: {
         id: template.templateId,
+        applicationType: template.applicationType ?? 'DIGITAL_EMPLOYEE',
         version: template.version,
         name: template.name,
         industry: template.industry,
@@ -717,11 +735,7 @@ async function seedRoleTemplates() {
         skills: template.skills.map((skill) => ({ ...skill })),
         workflowSteps: template.workflowSteps.map((step) => ({ ...step })),
         workflowGraph: template.workflowGraph,
-        dependencyManifest: buildRoleTemplateDependencyManifest({
-          workflowGraph: template.workflowGraph,
-          assets: defaultAssets,
-          generatedAt: publishedAt
-        }),
+        dependencyManifest: buildSeedRoleTemplateDependencyManifest(template, publishedAt, defaultAssets),
         sampleInputs: [...template.sampleInputs],
         outputFormat: template.outputFormat,
         approvalPolicy: template.approvalPolicy,

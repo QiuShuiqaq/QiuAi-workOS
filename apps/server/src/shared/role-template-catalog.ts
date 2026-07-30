@@ -1,4 +1,4 @@
-import type { ServerRoleWorkflowGraph } from './workflow-graph';
+import type { ServerRoleWorkflowGraph, ServerRoleWorkflowGraphNode } from './workflow-graph';
 
 export interface ServerRoleSkill {
   code: string;
@@ -26,6 +26,7 @@ export interface ServerRoleTemplateWorkflowStep {
 
 export interface ServerRoleTemplateCatalogEntry {
   templateId: string;
+  applicationType?: 'DIGITAL_EMPLOYEE' | 'DIGITAL_FACTORY';
   version: string;
   name: string;
   industry: string;
@@ -42,6 +43,7 @@ export interface ServerRoleTemplateCatalogEntry {
   outputFormat: string;
   approvalPolicy: string;
   allowedPlanCodes: string[];
+  dependencyManifestFactory?: unknown;
 }
 
 type BaseServerRoleTemplateCatalogEntry = Omit<
@@ -977,6 +979,528 @@ function buildVideoContentWorkflowGraph(): ServerRoleWorkflowGraph {
   };
 }
 
+type CrossBorderFactoryPackageKey =
+  | 'white_background'
+  | 'main_image'
+  | 'scene_image'
+  | 'background_replacement'
+  | 'model_replacement'
+  | 'dimension_image'
+  | 'selling_point_image';
+
+const crossBorderFactoryPackageOptions: Array<{
+  key: CrossBorderFactoryPackageKey;
+  label: string;
+  description: string;
+  outputType: 'image';
+}> = [
+  {
+    key: 'white_background',
+    label: '白底图',
+    description: '保留商品主体，生成干净白底商品图。',
+    outputType: 'image'
+  },
+  {
+    key: 'main_image',
+    label: '商品主图',
+    description: '突出商品卖点，适合平台列表和首图。',
+    outputType: 'image'
+  },
+  {
+    key: 'scene_image',
+    label: '场景图',
+    description: '把商品放入真实使用场景，增强购买代入感。',
+    outputType: 'image'
+  },
+  {
+    key: 'background_replacement',
+    label: '换背景',
+    description: '替换背景风格，同时保持商品主体一致。',
+    outputType: 'image'
+  },
+  {
+    key: 'model_replacement',
+    label: '换模特',
+    description: '适合服饰、配饰、家居等需要人物展示的商品图。',
+    outputType: 'image'
+  },
+  {
+    key: 'dimension_image',
+    label: '尺寸图',
+    description: '生成带尺寸、规格或关键参数标注的说明图。',
+    outputType: 'image'
+  },
+  {
+    key: 'selling_point_image',
+    label: '卖点图',
+    description: '围绕核心卖点生成电商详情页可用图片。',
+    outputType: 'image'
+  }
+];
+
+const crossBorderFactoryPlatforms = [
+  { key: 'amazon', label: 'Amazon', imageRatio: '1:1', notes: '主图简洁，避免夸张文字和过度装饰。' },
+  { key: 'temu', label: 'Temu', imageRatio: '1:1', notes: '强调直观卖点、价格感和清晰主体。' },
+  { key: 'aliexpress', label: '速卖通', imageRatio: '1:1', notes: '适合主图、场景图和参数卖点图组合。' },
+  { key: 'tiktok_shop', label: 'TikTok Shop', imageRatio: '1:1', notes: '画面更生活化，适合短视频封面和场景图。' },
+  { key: 'ozon', label: 'Ozon', imageRatio: '1:1', notes: '主体清晰，参数和尺寸信息需要可读。' },
+  { key: 'shopee', label: 'Shopee', imageRatio: '1:1', notes: '适合醒目、轻促销风格的商品图。' },
+  { key: 'lazada', label: 'Lazada', imageRatio: '1:1', notes: '重视商品主体和卖点信息层级。' },
+  { key: 'ebay', label: 'eBay', imageRatio: '1:1', notes: '真实、清晰、少修饰，便于买家检查商品。' },
+  { key: 'walmart', label: 'Walmart', imageRatio: '1:1', notes: '偏干净、规范的零售商品图。' },
+  { key: 'shein', label: 'SHEIN', imageRatio: '3:4', notes: '服饰类可突出模特、穿搭和风格。' }
+];
+
+const crossBorderFactoryDefaultPackageKeys: CrossBorderFactoryPackageKey[] = [
+  'white_background',
+  'main_image',
+  'scene_image',
+  'background_replacement',
+  'model_replacement',
+  'dimension_image',
+  'selling_point_image'
+];
+
+const medicalCaseVideoScreeningGates = [
+  {
+    key: 'video_spec',
+    label: '视频规格筛选',
+    description: '先剔除比例、时长和音轨不达标的视频，减少后续模型成本。',
+    rules: [
+      { metric: 'portraitRatio', operator: 'between', value: [1.72, 1.86], failReason: '视频不是合格的 9:16 竖屏比例' },
+      { metric: 'durationSeconds', operator: '>=', value: 20, failReason: '视频时长小于 20 秒' },
+      { metric: 'hasAudio', operator: 'equals', value: true, failReason: '视频缺少可识别音轨' }
+    ]
+  },
+  {
+    key: 'asr_quality',
+    label: '语音质量筛选',
+    description: '用 ASR 转写结果判断是否存在说话听不清、识别失败或内容过短。',
+    rules: [
+      { metric: 'transcriptChars', operator: '>=', value: 80, failReason: '识别文本过短，说话内容不足' },
+      { metric: 'unclearTokenRatio', operator: '<=', value: 0.25, failReason: '语音含糊或识别失败比例过高' }
+    ]
+  },
+  {
+    key: 'content_minimum',
+    label: '内容完整性筛选',
+    description: '只让具备使用前、使用过程、使用后改善表达的视频进入评分。',
+    rules: [
+      { metric: 'beforeAfterCompleteness', operator: '>=', value: 0.6, failReason: '缺少清晰的使用前/使用后改善表述' }
+    ]
+  }
+];
+
+function buildCrossBorderImageFactoryManifest() {
+  return {
+    kind: 'cross_border_product_image_factory',
+    version: '1.0.0',
+    title: '跨境商品图工厂',
+    batch: {
+      maxItems: 50,
+      itemUnit: 'product',
+      inputFileKinds: ['image', 'spreadsheet', 'csv'],
+      imageExtensions: ['png', 'jpg', 'jpeg', 'webp'],
+      tableExtensions: ['xlsx', 'csv']
+    },
+    platforms: crossBorderFactoryPlatforms,
+    packages: crossBorderFactoryPackageOptions.map((item) => ({
+      key: item.key,
+      label: item.label,
+      description: item.description,
+      outputType: item.outputType,
+      defaultSelected: crossBorderFactoryDefaultPackageKeys.includes(item.key)
+    })),
+    qualityCheck: {
+      defaultMode: 'basic',
+      modes: [
+        { key: 'none', label: '不质检', description: '不额外调用模型，只生成图片。' },
+        { key: 'basic', label: '基础质检', description: '检查文件数量、命名、格式和基础规则。' },
+        { key: 'smart', label: '智能质检', description: '调用多模态模型检查主体一致性、平台合规和卖点可读性。' }
+      ]
+    },
+    output: {
+      cacheDays: 30,
+      defaultImageFormat: 'png',
+      packageFormat: 'url_manifest',
+      folder: 'product-images'
+    },
+    requiredCapabilities: ['vision', 'image_generation', 'image_editing'],
+    ui: {
+      primaryActionLabel: '开始生成',
+      uploadHint: '上传商品参考图，可选上传 SKU 表格；单批最多 50 个商品。',
+      packageSelection: 'checkbox'
+    }
+  };
+}
+
+function buildMedicalCaseVideoFactoryManifest() {
+  return {
+    kind: 'medical_case_video_screening_factory',
+    version: '1.0.0',
+    title: '案例视频质检剪辑工厂',
+    batch: {
+      maxItems: 50,
+      itemUnit: 'video',
+      inputFileKinds: ['video'],
+      videoExtensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v']
+    },
+    packages: [
+      {
+        key: 'screening_score',
+        label: '筛选评分表',
+        description: '输出每个视频的筛选状态、失败原因、评分、等级、ASR 转写和风险提示。',
+        outputType: 'xlsx',
+        defaultSelected: true
+      },
+      {
+        key: 'optional_edit',
+        label: '可选初剪视频',
+        description: '用户开启初剪后，只对通过筛选且评分较高的视频生成本地初剪视频。',
+        outputType: 'video',
+        defaultSelected: false
+      }
+    ],
+    asr: {
+      defaultLanguage: 'zh',
+      defaultDialect: 'auto',
+      dialects: [
+        { key: 'auto', label: '自动识别' },
+        { key: 'mandarin', label: '普通话' },
+        { key: 'cantonese', label: '粤语' },
+        { key: 'shanghai', label: '上海话' },
+        { key: 'sichuan_chongqing', label: '四川/重庆口音' }
+      ]
+    },
+    screeningProfiles: [
+      {
+        key: 'default_medical_case',
+        label: '医疗案例素材标准',
+        description: '适合用户口述使用前后变化的视频素材筛选，不判断医学疗效。',
+        defaultSelected: true,
+        gates: medicalCaseVideoScreeningGates.map((gate) => ({
+          id: gate.key,
+          name: gate.label,
+          description: gate.description,
+          rules: gate.rules
+        }))
+      }
+    ],
+    editing: {
+      defaultEnabled: false,
+      targetSeconds: 30,
+      targetSecondOptions: [15, 30, 45],
+      requiresFfmpeg: true
+    },
+    output: {
+      cacheDays: 30,
+      folder: 'case-videos',
+      reportFormat: 'xlsx',
+      videoFormat: 'mp4'
+    },
+    requiredCapabilities: ['audio_to_text', 'text', 'video_processing', 'spreadsheet_edit'],
+    ui: {
+      primaryActionLabel: '开始筛选',
+      uploadHint: '上传案例视频，单批最多 50 个；大视频只在本机处理，不经过服务端。',
+      screeningSelection: 'select',
+      editingToggle: true
+    }
+  };
+}
+
+function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
+  const nodes: ServerRoleWorkflowGraphNode[] = [
+    {
+      id: 'start',
+      type: 'start',
+      name: '开始',
+      description: '工作流入口。'
+    },
+    {
+      id: 'factory_input',
+      type: 'input',
+      name: '接收商品批次',
+      instruction: '接收商品图片、SKU 表格、目标平台、勾选产物包和质检模式；单批最多 50 个商品。',
+      inputVariables: ['start.text', 'start.files', 'start.images', 'start.spreadsheets'],
+      outputVariables: ['task_brief'],
+      config: {
+        acceptedFileKinds: ['image', 'spreadsheet', 'csv'],
+        maxItems: 50,
+        source: 'digital_factory'
+      }
+    },
+    {
+      id: 'gather_factory_rules',
+      type: 'knowledge',
+      name: '读取平台和品牌规则',
+      instruction: '读取企业知识库里的平台规则、品牌素材规范、禁用词和历史优质商品图案例。',
+      inputVariables: ['task_brief', 'factory_request'],
+      outputVariables: ['knowledge_context']
+    },
+    {
+      id: 'prepare_batch',
+      type: 'data',
+      name: '整理批次参数',
+      instruction: '把用户输入、附件和工厂面板参数整理成稳定 JSON，供后续节点读取。',
+      inputVariables: ['start.files', 'factory_request'],
+      outputVariables: ['factory_request', 'factory_items', 'selected_packages', 'target_platform', 'quality_check_mode'],
+      config: {
+        dataMode: 'code',
+        outputVariable: 'factory_items',
+        timeoutMs: 2_000,
+        code:
+          'const request = input.factory_request && typeof input.factory_request === "object" ? input.factory_request : {};\n' +
+          'const files = Array.isArray(input["start.files"]) ? input["start.files"] : [];\n' +
+          'const images = files.filter((file) => file && file.kind === "image");\n' +
+          'const selectedPackages = Array.isArray(request.packages) ? request.packages : [];\n' +
+          'const platform = request.platform && typeof request.platform === "object" ? request.platform : { key: "amazon", label: "Amazon" };\n' +
+          'const qualityCheckMode = typeof request.qualityCheckMode === "string" ? request.qualityCheckMode : "basic";\n' +
+          'return {\n' +
+          '  factory_request: request,\n' +
+          '  factory_items: images.slice(0, 50).map((file, index) => ({ sku: `SKU-${index + 1}`, image: file, sourceName: file.name || `image-${index + 1}` })),\n' +
+          '  selected_packages: selectedPackages,\n' +
+          '  target_platform: platform,\n' +
+          '  quality_check_mode: qualityCheckMode\n' +
+          '};'
+      }
+    },
+    {
+      id: 'generate_package_prompts',
+      type: 'llm',
+      name: '理解图片并生成提示词',
+      instruction: '使用多模态模型读取商品参考图、平台规则和品牌规则，直接输出每个商品、每个所选产物包的生图提示词。不要生成图片，只输出 JSON。',
+      modelProfileId: 'openai-gpt-4o',
+      inputVariables: ['factory_request', 'factory_items', 'selected_packages', 'target_platform', 'knowledge_context'],
+      outputVariables: ['package_instructions'],
+      config: {
+        llmTaskType: 'vision',
+        outputMode: 'json',
+        schema: {
+          items: [
+            {
+              sku: 'string',
+              productName: 'string',
+              packages: [
+                {
+                  key: 'white_background',
+                  prompt: 'string',
+                  negativePrompt: 'string',
+                  referenceImagePath: 'string'
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      id: 'generate_images',
+      type: 'llm',
+      name: '批量生成商品图',
+      instruction: '按 package_instructions 调用图片生成模型。只处理用户勾选的产物包，保持商品主体一致，输出图片远程 URL 元数据；大图片不经过服务端。',
+      modelProfileId: 'openai-gpt-image-2',
+      inputVariables: ['package_instructions', 'start.images'],
+      outputVariables: ['factory_generated_images'],
+      config: {
+        llmTaskType: 'image_generation',
+        outputMode: 'json',
+        packageKeys: crossBorderFactoryDefaultPackageKeys,
+        concurrency: 8,
+        output: {
+          folder: 'product-images',
+          imageFormat: 'png'
+        }
+      }
+    },
+    {
+      id: 'quality_check',
+      type: 'llm',
+      name: '可选质检',
+      instruction: '如果 quality_check_mode 为 none，则输出 skipped。basic 只做文件数量、命名、尺寸规则检查；smart 再用多模态模型检查主体一致性、平台合规和卖点可读性。',
+      modelProfileId: 'openai-gpt-4o',
+      inputVariables: ['factory_generated_images', 'factory_items', 'quality_check_mode', 'target_platform'],
+      outputVariables: ['quality_report'],
+      config: {
+        llmTaskType: 'vision',
+        outputMode: 'json',
+        schema: {
+          mode: 'basic',
+          passed: true,
+          issues: [{ sku: 'string', packageKey: 'string', message: 'string' }]
+        }
+      }
+    },
+    {
+      id: 'factory_output',
+      type: 'output',
+      name: '返回结果',
+      instruction: '返回批量完成数量、失败项、图片 URL 结果和质检摘要。',
+      inputVariables: ['factory_generated_images', 'quality_report'],
+      outputVariables: ['final_answer']
+    }
+  ];
+
+  return {
+    version: '1.0.0',
+    entryNodeId: 'start',
+    nodes,
+    edges: [
+      { id: 'start__factory_input', sourceNodeId: 'start', targetNodeId: 'factory_input', condition: { type: 'always' } },
+      { id: 'factory_input__gather_factory_rules', sourceNodeId: 'factory_input', targetNodeId: 'gather_factory_rules', condition: { type: 'always' } },
+      { id: 'gather_factory_rules__prepare_batch', sourceNodeId: 'gather_factory_rules', targetNodeId: 'prepare_batch', condition: { type: 'always' } },
+      { id: 'prepare_batch__generate_package_prompts', sourceNodeId: 'prepare_batch', targetNodeId: 'generate_package_prompts', condition: { type: 'always' } },
+      { id: 'generate_package_prompts__generate_images', sourceNodeId: 'generate_package_prompts', targetNodeId: 'generate_images', condition: { type: 'always' } },
+      { id: 'generate_images__quality_check', sourceNodeId: 'generate_images', targetNodeId: 'quality_check', condition: { type: 'always' } },
+      { id: 'quality_check__factory_output', sourceNodeId: 'quality_check', targetNodeId: 'factory_output', condition: { type: 'always' } }
+    ],
+    variables: [
+      { name: 'factory_request', type: 'json', description: '工厂面板提交的批量运行参数。', required: true },
+      { name: 'factory_items', type: 'json', description: '待处理商品列表，单批最多 50 个。', required: true },
+      { name: 'selected_packages', type: 'json', description: '用户勾选的产物包 key。', required: true },
+      { name: 'target_platform', type: 'text', description: '目标电商平台。', required: true },
+      { name: 'quality_check_mode', type: 'text', description: 'none/basic/smart。', required: true },
+      { name: 'package_instructions', type: 'json', description: '多模态模型生成的分包生图提示词。', required: true },
+      { name: 'factory_generated_images', type: 'asset[]', description: '图片结果元数据，包含 remoteUrl、thumbnailPath、SKU 和产物包信息。', required: true },
+      { name: 'quality_report', type: 'json', description: '质检报告或跳过记录。' }
+    ],
+    runtimePolicy: {
+      maxNodeExecutions: 160,
+      maxLoopIterations: 50,
+      requireApprovalBeforeTools: false
+    }
+  };
+}
+
+function buildMedicalCaseVideoScreeningFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
+  const nodes: ServerRoleWorkflowGraphNode[] = [
+    {
+      id: 'start',
+      type: 'start',
+      name: '开始',
+      description: '工作流入口。'
+    },
+    {
+      id: 'factory_input',
+      type: 'input',
+      name: '接收视频批次',
+      instruction: '接收案例视频、筛选规则、ASR 语言/方言、是否启用初剪和目标成片时长；单批最多 50 个视频。',
+      inputVariables: ['start.text', 'start.files', 'start.videos'],
+      outputVariables: ['task_brief'],
+      config: {
+        acceptedFileKinds: ['video'],
+        maxItems: 50,
+        source: 'digital_factory'
+      }
+    },
+    {
+      id: 'load_screening_rules',
+      type: 'knowledge',
+      name: '读取筛选标准',
+      instruction: '读取企业知识库中的案例视频标准、合规边界、禁用表述和人工复核规则。',
+      inputVariables: ['task_brief', 'factory_request'],
+      outputVariables: ['knowledge_context']
+    },
+    {
+      id: 'screen_score_and_edit',
+      type: 'llm',
+      name: '批量筛选评分',
+      instruction: '按 factory_request 对每个视频先做硬性筛选：视频比例、时长、音轨、ASR 可识别度、内容完整性；未通过的直接标记并停止后续处理。通过筛选的视频再按表达清晰度、使用前后完整性、改善表述具体度、自然度、剪辑价值评分。只评价素材质量和表达质量，不做医疗诊断，不判断疗效真实性。',
+      modelProfileId: 'qiu-general-default',
+      inputVariables: ['factory_request', 'start.files', 'start.videos', 'knowledge_context'],
+      outputVariables: ['video_screening_results', 'screening_summary'],
+      config: {
+        llmTaskType: 'video_screening_batch',
+        outputMode: 'json',
+        concurrency: 3,
+        schema: {
+          summary: 'string',
+          results: [
+            {
+              fileName: 'string',
+              status: 'rejected | scored | review_required | edited',
+              rejectedGate: 'string',
+              rejectedReason: 'string',
+              score: 0,
+              grade: 'A | B | C | D',
+              transcript: 'string',
+              editPlan: [{ start: 0, end: 10, label: 'string', reason: 'string' }]
+            }
+          ]
+        }
+      }
+    },
+    {
+      id: 'factory_output',
+      type: 'output',
+      name: '返回结果',
+      instruction: '返回筛选评分表、筛掉原因、评分摘要、风险提示和可选初剪视频；提醒用户医疗相关内容需人工复核。',
+      inputVariables: ['video_screening_results', 'screening_summary'],
+      outputVariables: ['final_answer']
+    },
+    {
+      id: 'asr_dependency',
+      type: 'llm',
+      name: 'ASR 模型依赖',
+      description: '依赖声明节点，不接入主链路。',
+      instruction: '需要配置支持普通话、粤语、上海话、四川/重庆口音等常见中文方言的语音转文字模型。',
+      modelProfileId: 'qiu-asr-default',
+      inputVariables: ['start.videos'],
+      outputVariables: ['transcript'],
+      config: {
+        llmTaskType: 'audio_transcription',
+        dependencyOnly: true
+      }
+    },
+    {
+      id: 'video_tool_dependency',
+      type: 'tool',
+      name: '视频工具依赖',
+      description: '依赖声明节点，不接入主链路。',
+      instruction: '需要 PC 端视频处理工具读取比例、时长、音轨，并在用户开启初剪时调用 FFmpeg 生成视频片段。',
+      toolId: 'video-processing',
+      config: {
+        action: 'video.probe',
+        dependencyOnly: true
+      }
+    },
+    {
+      id: 'spreadsheet_tool_dependency',
+      type: 'tool',
+      name: '表格产物依赖',
+      description: '依赖声明节点，不接入主链路。',
+      instruction: '需要 Office 文档工具把筛选、评分、转写和风险信息写入 Excel 结果表。',
+      toolId: 'office-document',
+      config: {
+        action: 'spreadsheet.write_xlsx',
+        dependencyOnly: true
+      }
+    }
+  ];
+
+  return {
+    version: '1.0.0',
+    entryNodeId: 'start',
+    nodes,
+    edges: [
+      { id: 'start__factory_input', sourceNodeId: 'start', targetNodeId: 'factory_input', condition: { type: 'always' } },
+      { id: 'factory_input__load_screening_rules', sourceNodeId: 'factory_input', targetNodeId: 'load_screening_rules', condition: { type: 'always' } },
+      { id: 'load_screening_rules__screen_score_and_edit', sourceNodeId: 'load_screening_rules', targetNodeId: 'screen_score_and_edit', condition: { type: 'always' } },
+      { id: 'screen_score_and_edit__factory_output', sourceNodeId: 'screen_score_and_edit', targetNodeId: 'factory_output', condition: { type: 'always' } }
+    ],
+    variables: [
+      { name: 'factory_request', type: 'json', description: '工厂面板提交的视频批量处理参数。', required: true },
+      { name: 'video_screening_results', type: 'json', description: '每个视频的筛选、评分、转写、风险和初剪结果。', required: true },
+      { name: 'screening_summary', type: 'text', description: '批量处理统计摘要。', required: true },
+      { name: 'transcript', type: 'text', description: 'ASR 转写文本。' }
+    ],
+    runtimePolicy: {
+      maxNodeExecutions: 180,
+      maxLoopIterations: 50,
+      requireApprovalBeforeTools: false
+    }
+  };
+}
+
 function defaultWorkflowSteps(template: BaseServerRoleTemplateCatalogEntry): ServerRoleTemplateWorkflowStep[] {
   const toolIds = inferWorkflowToolIds(template);
 
@@ -1076,6 +1600,7 @@ function completeCatalogEntry(
 
   return {
     ...template,
+    applicationType: template.applicationType ?? 'DIGITAL_EMPLOYEE',
     workflowSteps,
     workflowGraph: template.workflowGraph ?? buildRunnableWorkflowGraphForTemplate(template, workflowSteps),
     sampleInputs: template.sampleInputs ?? [
@@ -2464,9 +2989,148 @@ const enterpriseCoreRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
   })
 ];
 
+const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
+  {
+    templateId: 'factory_cross_border_product_images_v1',
+    applicationType: 'DIGITAL_FACTORY',
+    version: DESIGNED_ROLE_TEMPLATE_VERSION,
+    name: '跨境商品图工厂',
+    industry: '跨境电商 / 商品图片',
+    scenario: '批量生成白底图、主图、场景图、换背景、换模特、尺寸图和卖点图',
+    description: '面向跨境电商团队，批量上传商品参考图，选择目标平台和产物包后生成图片结果 URL 与本地缩略图预览。',
+    recommendedPlanCode: 'ENTERPRISE_PRO_MONTHLY',
+    businessGoal: '把跨境商品图从单张手工制作提升为批量化工厂流程，减少运营制图和重复提示词调试成本。',
+    knowledgeSources: ['企业知识库', '品牌素材规范', '跨境平台图片规则', '历史优质商品图案例'],
+    tools: ['local-filesystem'],
+    skills: [
+      skill('product_image_understanding', '商品图理解', '识别商品主体、材质、颜色、使用场景和平台展示约束。'),
+      skill('prompt_package_generation', '分包提示词生成', '按白底图、主图、场景图等产物包生成稳定生图提示词。'),
+      skill('image_batch_generation', '批量生图', '按用户勾选产物包并发生成商品图结果，输出 URL 和缩略图预览。')
+    ],
+    workflowSteps: [
+      {
+        id: 'factory_input',
+        order: 1,
+        type: 'input',
+        name: '接收商品批次',
+        instruction: '接收商品图片、SKU 表格、目标平台、勾选产物包和质检模式。'
+      },
+      {
+        id: 'gather_factory_rules',
+        order: 2,
+        type: 'knowledge',
+        name: '读取平台和品牌规则',
+        instruction: '读取企业知识库里的平台规则、品牌素材规范、禁用词和历史优质商品图案例。'
+      },
+      {
+        id: 'prepare_batch',
+        order: 3,
+        type: 'llm',
+        name: '整理批次参数',
+        instruction: '把商品图、SKU、目标平台和产物包整理成可并发执行的批次 JSON。'
+      },
+      {
+        id: 'generate_package_prompts',
+        order: 4,
+        type: 'llm',
+        name: '理解图片并生成提示词',
+        instruction: '用多模态模型理解商品图，同时生成各产物包的稳定生图提示词。'
+      },
+      {
+        id: 'generate_images',
+        order: 5,
+        type: 'llm',
+        name: '批量生成商品图',
+        instruction: '按商品批次和所选产物包调用图片生成模型，输出图片远程 URL 元数据。'
+      },
+      {
+        id: 'quality_check',
+        order: 6,
+        type: 'llm',
+        name: '可选质检',
+        instruction: '按用户选择执行基础规则检查或多模态质检。'
+      },
+      {
+        id: 'factory_output',
+        order: 7,
+        type: 'output',
+        name: '返回结果',
+        instruction: '返回批量任务统计、失败项和图片预览结果。'
+      }
+    ],
+    workflowGraph: buildCrossBorderImageFactoryWorkflowGraph(),
+    dependencyManifestFactory: buildCrossBorderImageFactoryManifest(),
+    sampleInputs: [
+      '请把这批商品图按 Amazon 生成白底图、主图、场景图、尺寸图和卖点图。',
+      '请按 Temu 风格批量生成商品图，保留主体一致，开启基础质检。'
+    ],
+    outputFormat: '图片批次结果，包含各 SKU 的产物包、远程图片 URL、本地缩略图、失败原因和质检摘要。',
+    allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_PRO_MONTHLY'),
+    approvalPolicy: '生成前由用户选择产物包和目标平台；对外发布前需人工复核平台规则、品牌合规和图片真实性。'
+  },
+  {
+    templateId: 'factory_medical_case_video_screening_v1',
+    applicationType: 'DIGITAL_FACTORY',
+    version: DESIGNED_ROLE_TEMPLATE_VERSION,
+    name: '案例视频质检剪辑工厂',
+    industry: '医疗健康 / 案例视频运营',
+    scenario: '批量筛选案例视频、ASR 转写、素材评分和可选初剪',
+    description: '面向医疗健康案例视频运营场景，按硬性规则先筛掉不合格视频，再对通过视频做表达质量评分，并可选生成本地初剪视频。',
+    recommendedPlanCode: 'ENTERPRISE_PRO_MONTHLY',
+    businessGoal: '用稳定的批量筛选和评分流程替代人工初筛，降低案例视频素材审核与粗剪成本。',
+    knowledgeSources: ['企业知识库', '案例视频筛选标准', '医疗内容合规边界', '历史高质量案例素材'],
+    tools: ['video-processing', 'office-document', 'local-filesystem'],
+    skills: [
+      skill('video_gate_screening', '视频硬性筛选', '按比例、时长、音轨、ASR 质量和内容完整性逐级筛掉不合格素材。'),
+      skill('case_expression_scoring', '案例表达评分', '按表达清晰度、改善表述完整度、自然度和剪辑价值评分。'),
+      skill('rough_cut_planning', '可选初剪规划', '在用户开启初剪时生成剪辑计划并调用本地视频工具导出片段。')
+    ],
+    workflowSteps: [
+      {
+        id: 'factory_input',
+        order: 1,
+        type: 'input',
+        name: '接收视频批次',
+        instruction: '接收用户上传的案例视频、筛选配置、ASR 方言设置和是否初剪。'
+      },
+      {
+        id: 'load_screening_rules',
+        order: 2,
+        type: 'knowledge',
+        name: '读取筛选标准',
+        instruction: '读取企业知识库中的案例视频标准、合规边界、禁用表述和人工复核规则。'
+      },
+      {
+        id: 'screen_score_and_edit',
+        order: 3,
+        type: 'llm',
+        name: '批量筛选评分',
+        instruction: '按视频规格、ASR 质量、内容完整性逐级筛选；通过后再做表达质量评分，并按用户开关决定是否生成初剪。'
+      },
+      {
+        id: 'factory_output',
+        order: 4,
+        type: 'output',
+        name: '返回结果',
+        instruction: '返回筛选评分表、失败原因、需人工复核项和可选初剪视频。'
+      }
+    ],
+    workflowGraph: buildMedicalCaseVideoScreeningFactoryWorkflowGraph(),
+    dependencyManifestFactory: buildMedicalCaseVideoFactoryManifest(),
+    sampleInputs: [
+      '请筛选这批用户案例视频，普通话和方言自动识别，输出筛选评分表，不开启初剪。',
+      '请按医疗案例素材标准筛选视频，通过评分高的视频生成 30 秒以内初剪。'
+    ],
+    outputFormat: 'Excel 筛选评分表、失败原因、ASR 转写摘要、风险提示和可选 MP4 初剪视频。',
+    allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_PRO_MONTHLY'),
+    approvalPolicy: '只评价素材质量和表达质量，不做医疗诊断或疗效真实性判断；医疗相关内容发布前必须人工复核。'
+  }
+];
+
 const designedServerRoleTemplateCatalog: BaseServerRoleTemplateCatalogEntry[] = [
   ...freeBasicRoleTemplates,
   ...enterpriseCoreRoleTemplates,
+  ...digitalFactoryRoleTemplates,
   ...enterpriseSalesRoleTemplates
 ];
 

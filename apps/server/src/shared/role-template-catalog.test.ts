@@ -76,14 +76,34 @@ test('server role template catalog is focused and production-oriented', () => {
   assert.ok(salesTemplates.some((template) => template.industry.includes('制造工业')));
   assert.ok(salesTemplates.some((template) => template.industry.includes('政企项目')));
 
+  const factoryTemplateIds = [
+    'factory_cross_border_product_images_v1',
+    'factory_medical_case_video_screening_v1'
+  ];
+  const factoryManifestKinds = new Set([
+    'cross_border_product_image_factory',
+    'medical_case_video_screening_factory'
+  ]);
+
+  for (const templateId of factoryTemplateIds) {
+    const template = templateById.get(templateId);
+    assert.ok(template, `${templateId} must exist`);
+    assert.equal(template.applicationType, 'DIGITAL_FACTORY', `${templateId} must be listed as a digital factory`);
+  }
+
   for (const template of serverRoleTemplateCatalog) {
+    const isDigitalFactory = template.applicationType === 'DIGITAL_FACTORY';
+
     assert.equal(template.version, '1.1.1', `${template.templateId} must use the latest designed template version`);
     assert.ok(template.name.trim(), `${template.templateId} must have a name`);
     assert.ok(template.industry.trim(), `${template.templateId} must have an industry`);
     assert.ok(template.scenario.trim(), `${template.templateId} must have a scenario`);
     assert.ok(template.businessGoal.trim(), `${template.templateId} must have a business goal`);
     assert.ok(template.skills.length >= 3, `${template.templateId} must define at least 3 skills`);
-    assert.ok(template.workflowSteps.length >= 5, `${template.templateId} must define workflow steps`);
+    assert.ok(
+      template.workflowSteps.length >= (isDigitalFactory ? 4 : 5),
+      `${template.templateId} must define workflow steps`
+    );
     assert.equal(
       template.workflowSteps.some((step) => step.id === 'use_tools'),
       false,
@@ -97,17 +117,36 @@ test('server role template catalog is focused and production-oriented', () => {
       `${template.templateId} must define an LLM workflow node`
     );
     const artifactNode = template.workflowGraph.nodes.find((node) => node.type === 'artifact');
-    assert.ok(artifactNode, `${template.templateId} must define an artifact node`);
-    assert.ok(artifactNode.artifactType, `${template.templateId} artifact node must define artifact type`);
-    assert.equal(
-      artifactNode.toolId,
-      artifactNode.artifactType === 'mp4' ? 'video-processing' : 'office-document',
-      `${template.templateId} artifact node must use the matching writer tool`
-    );
-    assert.ok(
-      artifactNode.inputVariables?.length,
-      `${template.templateId} artifact node must define input variables`
-    );
+    if (isDigitalFactory) {
+      const factoryManifest = readRecord(template.dependencyManifestFactory);
+      assert.ok(factoryManifest, `${template.templateId} must define a factory dependency manifest`);
+      assert.ok(
+        factoryManifestKinds.has(String(factoryManifest.kind)),
+        `${template.templateId} must define a known factory manifest kind`
+      );
+      const batch = readRecord(factoryManifest.batch);
+      assert.equal(batch?.maxItems, 50, `${template.templateId} factory batch maxItems must be 50`);
+      assert.ok(
+        template.workflowGraph.nodes.some((node) => node.type === 'input'),
+        `${template.templateId} digital factory must define an input node`
+      );
+      assert.ok(
+        template.workflowGraph.nodes.some((node) => node.type === 'output'),
+        `${template.templateId} digital factory must define an output node`
+      );
+    } else {
+      assert.ok(artifactNode, `${template.templateId} must define an artifact node`);
+      assert.ok(artifactNode.artifactType, `${template.templateId} artifact node must define artifact type`);
+      assert.equal(
+        artifactNode.toolId,
+        artifactNode.artifactType === 'mp4' ? 'video-processing' : 'office-document',
+        `${template.templateId} artifact node must use the matching writer tool`
+      );
+      assert.ok(
+        artifactNode.inputVariables?.length,
+        `${template.templateId} artifact node must define input variables`
+      );
+    }
     assert.ok(template.sampleInputs.length >= 1, `${template.templateId} must define sample inputs`);
     assert.ok(template.outputFormat.trim(), `${template.templateId} must define an output format`);
     assert.ok(template.allowedPlanCodes.length >= 1, `${template.templateId} must define plan visibility`);
@@ -167,52 +206,55 @@ test('server role template catalog is focused and production-oriented', () => {
       );
     }
 
-    const artifactAction = artifactNode.config?.action;
-    assert.equal(typeof artifactAction, 'string', `${template.templateId} artifact must define a concrete tool action`);
-    assert.equal(
-      artifactAction,
-      expectedArtifactAction(artifactNode.artifactType),
-      `${template.templateId} artifact action must match artifact type`
-    );
-    const artifactInput = readRecord(artifactNode.config?.input);
-    assert.ok(artifactInput, `${template.templateId} artifact must define writer input`);
-    assert.equal(typeof artifactInput.folder, 'string', `${template.templateId} artifact must define output folder`);
-    assert.equal(typeof artifactInput.fileName, 'string', `${template.templateId} artifact must define file name`);
-    if (artifactNode.artifactType === 'docx' || artifactNode.artifactType === 'markdown') {
-      assert.equal(typeof artifactInput.title, 'string', `${template.templateId} document artifact must define title`);
-      assert.equal(typeof artifactInput.content, 'string', `${template.templateId} document artifact must define content`);
-    }
-    if (artifactNode.artifactType === 'xlsx' || artifactNode.artifactType === 'csv') {
-      assert.ok(
-        template.workflowSteps.some((step) => step.id === 'draft_deliverable' && step.instruction.includes('sheets')),
-        `${template.templateId} spreadsheet workflow steps must tell operators that sheets are required`
+    if (!isDigitalFactory) {
+      assert.ok(artifactNode, `${template.templateId} must define an artifact node`);
+      const artifactAction = artifactNode.config?.action;
+      assert.equal(typeof artifactAction, 'string', `${template.templateId} artifact must define a concrete tool action`);
+      assert.equal(
+        artifactAction,
+        expectedArtifactAction(artifactNode.artifactType),
+        `${template.templateId} artifact action must match artifact type`
       );
-      const hasStructuredSpreadsheetInput =
-        typeof artifactInput.rows === 'string' ||
-        Array.isArray(artifactInput.rows) ||
-        typeof artifactInput.sheets === 'string' ||
-        Array.isArray(artifactInput.sheets);
+      const artifactInput = readRecord(artifactNode.config?.input);
+      assert.ok(artifactInput, `${template.templateId} artifact must define writer input`);
+      assert.equal(typeof artifactInput.folder, 'string', `${template.templateId} artifact must define output folder`);
+      assert.equal(typeof artifactInput.fileName, 'string', `${template.templateId} artifact must define file name`);
+      if (artifactNode.artifactType === 'docx' || artifactNode.artifactType === 'markdown') {
+        assert.equal(typeof artifactInput.title, 'string', `${template.templateId} document artifact must define title`);
+        assert.equal(typeof artifactInput.content, 'string', `${template.templateId} document artifact must define content`);
+      }
+      if (artifactNode.artifactType === 'xlsx' || artifactNode.artifactType === 'csv') {
+        assert.ok(
+          template.workflowSteps.some((step) => step.id === 'draft_deliverable' && step.instruction.includes('sheets')),
+          `${template.templateId} spreadsheet workflow steps must tell operators that sheets are required`
+        );
+        const hasStructuredSpreadsheetInput =
+          typeof artifactInput.rows === 'string' ||
+          Array.isArray(artifactInput.rows) ||
+          typeof artifactInput.sheets === 'string' ||
+          Array.isArray(artifactInput.sheets);
 
-      assert.ok(
-        hasStructuredSpreadsheetInput,
-        `${template.templateId} spreadsheet artifact must bind rows or sheets instead of plain content only`
-      );
-      assert.ok(
-        template.workflowGraph.nodes.some(
-          (node) =>
-            node.type === 'llm' &&
-            node.outputVariables?.includes('deliverable_content') &&
-            readRecord(node.config)?.outputMode === 'json'
-        ),
-        `${template.templateId} spreadsheet draft node must request structured JSON output`
-      );
-    }
-    if (typeof artifactInput.content === 'string') {
-      assert.notEqual(
-        artifactInput.content,
-        '{{runtime.previous_text}}',
-        `${template.templateId} artifact must bind content to a stable upstream output`
-      );
+        assert.ok(
+          hasStructuredSpreadsheetInput,
+          `${template.templateId} spreadsheet artifact must bind rows or sheets instead of plain content only`
+        );
+        assert.ok(
+          template.workflowGraph.nodes.some(
+            (node) =>
+              node.type === 'llm' &&
+              node.outputVariables?.includes('deliverable_content') &&
+              readRecord(node.config)?.outputMode === 'json'
+          ),
+          `${template.templateId} spreadsheet draft node must request structured JSON output`
+        );
+      }
+      if (typeof artifactInput.content === 'string') {
+        assert.notEqual(
+          artifactInput.content,
+          '{{runtime.previous_text}}',
+          `${template.templateId} artifact must bind content to a stable upstream output`
+        );
+      }
     }
   }
 });

@@ -247,6 +247,29 @@ test('admin role template factory governs publication and workspace visibility',
       'content-type': 'application/json'
     };
 
+    const seededTemplatesResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/admin/role-templates',
+      headers: {
+        cookie
+      }
+    });
+    assert.equal(seededTemplatesResponse.statusCode, 200);
+    const seededTemplates = JSON.parse(seededTemplatesResponse.body).data as Array<{
+      id: string;
+      applicationType?: string;
+      status?: string;
+    }>;
+    for (const factoryTemplateId of [
+      'factory_cross_border_product_images_v1',
+      'factory_medical_case_video_screening_v1'
+    ]) {
+      const seededFactory = seededTemplates.find((template) => template.id === factoryTemplateId);
+      assert.ok(seededFactory, `${factoryTemplateId} must be available in the admin catalog`);
+      assert.equal(seededFactory.applicationType, 'digital_factory');
+      assert.equal(seededFactory.status, 'PUBLISHED');
+    }
+
     const createResponse = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/role-templates',
