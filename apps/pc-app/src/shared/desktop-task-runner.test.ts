@@ -3106,7 +3106,7 @@ const videoFactoryTask = await runDesktopTask({
     costCents: 0,
     executionContext: {
       modelProfileIds: ['qiu-general-default', 'qiu-asr-default'],
-      toolIds: ['video-processing', 'office-document'],
+      toolIds: ['video-processing', 'office-document', 'local-filesystem'],
       knowledgeBindingIds: [],
       attachmentPaths: ['C:\\QiuAI\\factory\\case-video-1.mp4']
     }
@@ -3145,7 +3145,7 @@ const videoFactoryTask = await runDesktopTask({
       ]
     },
     modelProfileIds: ['qiu-general-default', 'qiu-asr-default'],
-    toolIds: ['video-processing', 'office-document'],
+    toolIds: ['video-processing', 'office-document', 'local-filesystem'],
     requiredKnowledgeSources: [],
     defaultTaskTypes: ['factory_video_screening'],
     syncPolicy: 'summary_only'
@@ -3154,7 +3154,7 @@ const videoFactoryTask = await runDesktopTask({
   tools,
   workspaceId: 'workspace-video-factory',
   enabledModelProfileIds: ['qiu-general-default', 'qiu-asr-default'],
-  enabledToolIds: ['video-processing', 'office-document'],
+  enabledToolIds: ['video-processing', 'office-document', 'local-filesystem'],
   enabledKnowledgeBindingIds: [],
   modelInvoker: async (request) => {
     if (request.taskKind === 'audio_transcription') {
@@ -3228,16 +3228,33 @@ const videoFactoryTask = await runDesktopTask({
       };
     }
 
+    if (request.action === 'filesystem.write_text_file') {
+      assert.equal(request.toolId, 'local-filesystem');
+      assert.equal(request.input.folder, 'qualified-videos');
+      assert.match(String(request.input.fileName ?? ''), /合格视频地址清单/);
+      assert.match(String(request.input.content ?? ''), /合格视频地址清单/);
+      assert.match(String(request.input.content ?? ''), /C:\\QiuAI\\factory\\case-video-1\.mp4/);
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          localPath: 'C:\\QiuAI\\workspace\\qualified-videos\\qualified-list.md'
+        }
+      };
+    }
+
     assert.equal(request.action, 'video.compose_clips');
     assert.equal(request.toolId, 'video-processing');
     assert.equal(request.input.videoPath, 'C:\\QiuAI\\factory\\case-video-1.mp4');
     assert.ok(Array.isArray(request.input.cutPlan));
+    assert.match(String(request.input.folder ?? ''), /^video-cuts-/);
     return {
       toolId: request.toolId,
       action: request.action,
       ok: true,
       output: {
-        localPath: 'C:\\QiuAI\\workspace\\videos\\case-video-1-cut.mp4'
+        localPath: 'C:\\QiuAI\\workspace\\video-cuts\\case-video-1-cut.mp4'
       }
     };
   },
@@ -3247,12 +3264,16 @@ const videoFactoryTask = await runDesktopTask({
 assert.equal(videoFactoryTask.task.state, 'completed');
 assert.equal(videoFactoryAsrCalls, 1);
 assert.equal(videoFactoryScoringCalls, 1);
-assert.equal(videoFactoryTask.task.artifactCount, 2);
+assert.equal(videoFactoryTask.task.artifactCount, 3);
 assert.deepEqual(videoFactoryToolRequests, [
   { toolId: 'video-processing', action: 'video.probe' },
   { toolId: 'video-processing', action: 'video.compose_clips' },
+  { toolId: 'local-filesystem', action: 'filesystem.write_text_file' },
   { toolId: 'office-document', action: 'spreadsheet.write_xlsx' }
 ]);
+assert.ok(
+  videoFactoryTask.task.artifacts.some((artifact) => artifact.localPath?.endsWith('qualified-list.md'))
+);
 assert.ok(
   videoFactoryTask.task.artifacts.some((artifact) => artifact.localPath?.endsWith('video-screening.xlsx'))
 );

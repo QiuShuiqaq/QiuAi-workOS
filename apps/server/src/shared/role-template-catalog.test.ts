@@ -109,6 +109,7 @@ test('server role template catalog is focused and production-oriented', () => {
   );
   assert.ok(videoFactoryToolActions.has('video-processing/video.probe'));
   assert.ok(videoFactoryToolActions.has('video-processing/video.compose_clips'));
+  assert.ok(videoFactoryToolActions.has('local-filesystem/filesystem.write_text_file'));
   assert.ok(videoFactoryToolActions.has('office-document/spreadsheet.write_xlsx'));
 
   for (const template of serverRoleTemplateCatalog) {

@@ -1622,7 +1622,7 @@ function createWorkflowSteps(preset: WorkflowPreset): RoleWorkflowGraphSourceSte
         order: 5,
         type: 'output',
         name: '返回结果',
-        instruction: '返回筛选评分表、失败原因、需人工复核项和可选初剪视频。'
+        instruction: '返回合格视频地址清单、可选初剪视频合集文件夹、筛选评分明细表和风险提示。'
       }
     ];
   }
@@ -1815,13 +1815,20 @@ function createMedicalCaseVideoScreeningFactoryWorkflowGraph(): RoleWorkflowGrap
         '按 factory_request 对每个视频先做硬性筛选：视频比例、时长、音轨、ASR 可识别度、内容完整性；未通过的直接标记并停止后续处理。通过筛选的视频再按表达清晰度、使用前后完整性、改善表述具体度、自然度、剪辑价值评分。只评价素材质量和表达质量，不做医疗诊断，不判断疗效真实性。',
       modelProfileId: 'qiu-general-default',
       inputVariables: ['factory_request', 'video_batch', 'screening_gates', 'asr_config', 'edit_config', 'knowledge_context'],
-      outputVariables: ['video_screening_results', 'screening_summary'],
+      outputVariables: [
+        'video_screening_results',
+        'qualified_video_results',
+        'qualified_video_paths',
+        'edited_video_folder',
+        'screening_summary'
+      ],
       config: {
         llmTaskType: 'video_screening_batch',
         outputMode: 'json',
         concurrency: 3,
         requiredToolActions: [
           { toolId: 'video-processing', action: 'video.probe' },
+          { toolId: 'local-filesystem', action: 'filesystem.write_text_file' },
           { toolId: 'office-document', action: 'spreadsheet.write_xlsx' },
           { toolId: 'video-processing', action: 'video.compose_clips', optional: true }
         ],
@@ -1846,8 +1853,13 @@ function createMedicalCaseVideoScreeningFactoryWorkflowGraph(): RoleWorkflowGrap
       id: 'factory_output',
       type: 'output',
       name: '返回结果',
-      instruction: '返回筛选评分表、筛掉原因、评分摘要、风险提示和可选初剪视频；提醒用户医疗相关内容需人工复核。',
-      inputVariables: ['video_screening_results', 'screening_summary'],
+      instruction: '返回合格视频地址清单、可选初剪视频合集文件夹、筛选评分明细表和风险提示；提醒用户医疗相关内容需人工复核。',
+      inputVariables: [
+        'qualified_video_paths',
+        'edited_video_folder',
+        'video_screening_results',
+        'screening_summary'
+      ],
       outputVariables: ['final_answer']
     }
   ];
@@ -1870,6 +1882,9 @@ function createMedicalCaseVideoScreeningFactoryWorkflowGraph(): RoleWorkflowGrap
       { name: 'asr_config', type: 'json', description: 'ASR 模型、语言和方言配置。', required: true },
       { name: 'edit_config', type: 'json', description: '是否初剪和目标成片时长。', required: true },
       { name: 'video_screening_results', type: 'json', description: '每个视频的筛选、评分、转写、风险和初剪结果。', required: true },
+      { name: 'qualified_video_results', type: 'json', description: '通过筛选并完成评分的视频结果集合。', required: true },
+      { name: 'qualified_video_paths', type: 'json', description: '所有合格视频的本地地址清单。', required: true },
+      { name: 'edited_video_folder', type: 'text', description: '开启初剪后生成的本地初剪视频合集文件夹。' },
       { name: 'screening_summary', type: 'text', description: '批量处理统计摘要。', required: true },
       { name: 'transcript', type: 'text', description: 'ASR 转写文本。' }
     ],
@@ -5366,17 +5381,24 @@ function buildMedicalCaseVideoFactoryManifest() {
     },
     packages: [
       {
+        key: 'qualified_video_list',
+        label: '合格视频地址清单',
+        description: '输出所有通过筛选并完成评分的视频本地地址，开启初剪时同时标明对应初剪地址和初剪文件夹。',
+        outputType: 'markdown',
+        defaultSelected: true
+      },
+      {
         key: 'screening_score',
-        label: '筛选评分表',
-        description: '输出每个视频的筛选状态、失败原因、评分、等级、ASR 转写和风险提示。',
+        label: '筛选评分明细表',
+        description: '辅助输出每个视频的筛选状态、失败原因、评分、等级、ASR 转写和风险提示，方便人工复核。',
         outputType: 'xlsx',
         defaultSelected: true
       },
       {
         key: 'optional_edit',
-        label: '可选初剪视频',
-        description: '用户开启初剪后，只对通过筛选且评分较高的视频生成本地初剪视频。',
-        outputType: 'video',
+        label: '初剪视频合集文件夹',
+        description: '用户开启初剪后，只对通过筛选且评分较高的视频生成本地初剪视频，并集中放入同一个本地文件夹。',
+        outputType: 'folder',
         defaultSelected: false
       }
     ],
@@ -5629,10 +5651,10 @@ export function AdminCreateRoleTemplatePageClient({
           '面向企业视频素材团队的批量视频质检工厂，支持规格筛选、ASR 识别、内容质量评分和可选初剪。',
         businessGoal:
           form.getFieldValue('businessGoal') ||
-          '帮助团队快速剔除不合格视频，筛出表达清楚、内容完整、具备剪辑价值的素材，并输出可复核的评分表。',
+          '帮助团队快速剔除不合格视频，筛出表达清楚、内容完整、具备剪辑价值的素材，并输出合格视频地址和可复核明细。',
         outputFormat:
           form.getFieldValue('outputFormat') ||
-          'Excel 筛选评分表 + 可选本地初剪视频。'
+          '合格视频地址清单 + 可选初剪视频合集文件夹 + Excel 筛选评分明细表。'
       });
     }
     setPresetPickerOpen(false);

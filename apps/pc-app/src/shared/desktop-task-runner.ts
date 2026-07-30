@@ -2940,6 +2940,7 @@ async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
     1,
     8
   );
+  const editOutputFolder = `video-cuts-${buildWorkflowArtifactFileName(input.task.title, '初剪视频合集')}`;
   const startedLog = createLog(
     input.task.taskId,
     'info',
@@ -2962,6 +2963,7 @@ async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
       factoryRequest,
       editEnabled,
       editTargetSeconds,
+      editOutputFolder,
       createdAt: input.createdAt
     })
   );
@@ -2969,11 +2971,63 @@ async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
   const edited = results.filter((item) => item.status === 'edited').length;
   const scored = results.filter((item) => item.status === 'scored' || item.status === 'edited').length;
   const reviewRequired = results.filter((item) => item.status === 'review_required').length;
+  const qualifiedResults = results.filter(isQualifiedFactoryVideoResult);
+  const editedResults = results.filter((item) => item.editedVideoPath);
+  const editedVideoFolderPath = readCommonPathDirectory(editedResults.map((item) => item.editedVideoPath));
   const rows = buildFactoryVideoScreeningRows(results);
   const generatedArtifacts: DesktopArtifactSummary[] = [];
   const usedToolIds = new Set<string>();
+  const extraLogs: DesktopExecutionLogEntry[] = [];
   if (hasFactoryToolAction(input.binding, 'video-processing', 'video.probe')) {
     usedToolIds.add('video-processing');
+  }
+  if (input.desktopToolInvoker && input.workspaceId && hasFactoryToolAction(input.binding, 'local-filesystem', 'filesystem.write_text_file')) {
+    const qualifiedListResult = await input.desktopToolInvoker({
+      workspaceId: input.workspaceId,
+      toolId: 'local-filesystem',
+      action: 'filesystem.write_text_file',
+      input: {
+        folder: 'qualified-videos',
+        fileName: buildWorkflowArtifactFileName(input.task.title, '合格视频地址清单'),
+        content: buildFactoryQualifiedVideoAddressListContent({
+          taskTitle: input.task.title,
+          results,
+          qualifiedResults,
+          editedVideoFolderPath,
+          editEnabled,
+          createdAt: input.createdAt
+        })
+      },
+      allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+    });
+    usedToolIds.add('local-filesystem');
+    if (qualifiedListResult.ok) {
+      const artifact = buildGeneratedArtifactFromToolResult({
+        taskId: input.task.taskId,
+        toolId: 'local-filesystem',
+        action: 'filesystem.write_text_file',
+        output: qualifiedListResult.output,
+        createdAt: input.createdAt,
+        sequence: 1
+      });
+      if (artifact) {
+        generatedArtifacts.push({
+          ...artifact,
+          title: '合格视频地址清单.md'
+        });
+      }
+    } else {
+      extraLogs.push(
+        createLog(
+          input.task.taskId,
+          'warning',
+          'WORKFLOW_RUNTIME_VIDEO_FACTORY_QUALIFIED_LIST_FAILED',
+          `Qualified video address list could not be written: ${qualifiedListResult.message ?? 'unknown error'}.`,
+          input.createdAt,
+          sanitizeLogSuffix(`${input.node.id}-qualified-list`)
+        )
+      );
+    }
   }
   if (input.desktopToolInvoker && input.workspaceId && hasFactoryToolAction(input.binding, 'office-document', 'spreadsheet.write_xlsx')) {
     const toolResult = await input.desktopToolInvoker({
@@ -3001,16 +3055,16 @@ async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
         action: 'spreadsheet.write_xlsx',
         output: toolResult.output,
         createdAt: input.createdAt,
-        sequence: 1
+        sequence: 2
       });
       if (artifact) {
         generatedArtifacts.push(artifact);
       }
     }
   }
-  if (results.some((item) => item.editedVideoPath)) {
+  if (editedResults.length > 0) {
     usedToolIds.add('video-processing');
-    for (const [index, result] of results.filter((item) => item.editedVideoPath).entries()) {
+    for (const [index, result] of editedResults.entries()) {
       generatedArtifacts.push({
         id: `${input.task.taskId}-edited-video-${index + 1}-${Date.parse(input.createdAt) || Date.now()}`,
         type: 'video',
@@ -3025,11 +3079,13 @@ async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
   const summaryContent = [
     `视频筛选完成：共 ${results.length} 个视频`,
     `筛掉：${rejected}`,
+    `合格视频：${qualifiedResults.length}`,
     `进入评分：${scored}`,
     `需人工复核：${reviewRequired}`,
     `已生成初剪：${edited}`,
+    editedVideoFolderPath ? `初剪视频文件夹：${editedVideoFolderPath}` : '',
     asrProfile ? `ASR：${asrProfile.providerName}/${asrProfile.modelName}` : 'ASR：未配置，ASR 关卡会拦截视频'
-  ].join('\n');
+  ].filter(Boolean).join('\n');
   const outputVariables = writeWorkflowNodeOutputs({
     pool: input.pool,
     node: input.node,
@@ -3042,6 +3098,11 @@ async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
   input.pool.set('runtime.last_model_node', input.node.id);
   input.pool.set('video_screening_results', results as unknown as WorkflowRuntimeValue);
   input.pool.set('screening_summary', summaryContent);
+  input.pool.set('qualified_video_results', qualifiedResults as unknown as WorkflowRuntimeValue);
+  input.pool.set('qualified_video_paths', qualifiedResults.map((item) => item.localPath) as unknown as WorkflowRuntimeValue);
+  if (editedVideoFolderPath) {
+    input.pool.set('edited_video_folder', editedVideoFolderPath);
+  }
 
   return {
     response: mergeWorkflowRuntimeResponses(input.currentResponse, {
@@ -3052,6 +3113,7 @@ async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
     primaryProfile: input.profile,
     logs: [
       startedLog,
+      ...extraLogs,
       createLog(
         input.task.taskId,
         'info',
@@ -3065,7 +3127,14 @@ async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
     usedToolIds: [...usedToolIds],
     generatedArtifacts,
     inputVariables: ['factory_request', 'start.files'],
-    outputVariables,
+    outputVariables: [
+      ...new Set([
+        ...outputVariables,
+        'qualified_video_results',
+        'qualified_video_paths',
+        editedVideoFolderPath ? 'edited_video_folder' : ''
+      ].filter(Boolean))
+    ],
     message: `Video screening finished: rejected=${rejected}, scored=${scored}, edited=${edited}.`
   };
 }
@@ -3543,6 +3612,7 @@ async function runFactoryVideoScreeningItem(input: {
   factoryRequest?: Record<string, unknown>;
   editEnabled: boolean;
   editTargetSeconds: number;
+  editOutputFolder: string;
   createdAt: string;
 }): Promise<FactoryVideoScreeningResult> {
   const metrics: Record<string, unknown> = {};
@@ -3638,7 +3708,7 @@ async function runFactoryVideoScreeningItem(input: {
         input: {
           videoPath: input.video.localPath,
           cutPlan: editPlan,
-          folder: 'videos',
+          folder: input.editOutputFolder,
           fileName: `${input.video.name.replace(/\.[^.]+$/, '')}-初剪`
         },
         allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
@@ -3935,6 +4005,68 @@ function buildFactoryVideoScreeningRows(results: FactoryVideoScreeningResult[]):
       item.editedVideoPath ?? ''
     ])
   ];
+}
+
+function isQualifiedFactoryVideoResult(item: FactoryVideoScreeningResult): boolean {
+  return item.status === 'scored' || item.status === 'edited';
+}
+
+function buildFactoryQualifiedVideoAddressListContent(input: {
+  taskTitle: string;
+  results: FactoryVideoScreeningResult[];
+  qualifiedResults: FactoryVideoScreeningResult[];
+  editedVideoFolderPath?: string;
+  editEnabled: boolean;
+  createdAt: string;
+}): string {
+  const rejected = input.results.filter((item) => item.status === 'rejected').length;
+  const reviewRequired = input.results.filter((item) => item.status === 'review_required').length;
+  const edited = input.qualifiedResults.filter((item) => item.editedVideoPath).length;
+  const tableRows = input.qualifiedResults.map((item) =>
+    [
+      String(item.order),
+      escapeMarkdownTableCell(item.name),
+      item.grade ?? '',
+      item.score === undefined ? '' : String(item.score),
+      escapeMarkdownTableCell(item.localPath),
+      escapeMarkdownTableCell(item.editedVideoPath ?? ''),
+      escapeMarkdownTableCell(item.summary ?? '')
+    ].join(' | ')
+  );
+
+  const lines: Array<string | undefined> = [
+    `# ${input.taskTitle} - 合格视频地址清单`,
+    '',
+    `生成时间：${input.createdAt}`,
+    '',
+    '## 汇总',
+    '',
+    `- 视频总数：${input.results.length}`,
+    `- 合格视频：${input.qualifiedResults.length}`,
+    `- 筛掉视频：${rejected}`,
+    `- 需人工复核：${reviewRequired}`,
+    `- 已生成初剪：${edited}`,
+    `- 初剪开关：${input.editEnabled ? '开启' : '关闭'}`,
+    input.editedVideoFolderPath ? `- 初剪视频文件夹：${input.editedVideoFolderPath}` : undefined,
+    '',
+    '## 合格视频',
+    '',
+    input.qualifiedResults.length > 0
+      ? ['序号 | 文件名 | 等级 | 分数 | 原视频地址 | 初剪地址 | 摘要', '--- | --- | --- | --- | --- | --- | ---', ...tableRows].join('\n')
+      : '本批次没有自动判定为合格的视频。',
+    '',
+    '## 说明',
+    '',
+    '- 合格视频指通过硬性筛选并完成评分，且未进入“需人工复核”的视频。',
+    '- 医疗健康相关素材发布前仍需要人工复核合规风险。',
+    '- 初剪视频只在用户开启初剪且 PC 端 FFmpeg 可用时生成。'
+  ];
+
+  return lines.filter((line): line is string => line !== undefined).join('\n');
+}
+
+function escapeMarkdownTableCell(value: string): string {
+  return value.replace(/\r?\n/g, ' ').replace(/\|/g, '\\|').trim();
 }
 
 function formatFactoryVideoStatus(status: FactoryVideoScreeningResult['status']): string {
@@ -6795,6 +6927,31 @@ function getPathFileName(localPath: string): string | undefined {
   const normalizedPath = localPath.replace(/\\/g, '/');
   const fileName = normalizedPath.split('/').filter(Boolean).at(-1);
   return fileName?.trim() || undefined;
+}
+
+function getPathDirectory(localPath: string): string | undefined {
+  const trimmedPath = localPath.trim();
+  const separatorIndex = Math.max(trimmedPath.lastIndexOf('/'), trimmedPath.lastIndexOf('\\'));
+  return separatorIndex > 0 ? trimmedPath.slice(0, separatorIndex) : undefined;
+}
+
+function readCommonPathDirectory(paths: Array<string | undefined>): string | undefined {
+  const directories = paths.flatMap((localPath) => {
+    if (!localPath?.trim()) {
+      return [];
+    }
+    const directory = getPathDirectory(localPath);
+    return directory ? [directory] : [];
+  });
+  if (directories.length === 0) {
+    return undefined;
+  }
+
+  const [firstDirectory] = directories;
+  const normalizedFirstDirectory = firstDirectory.replace(/\\/g, '/').toLowerCase();
+  return directories.every((directory) => directory.replace(/\\/g, '/').toLowerCase() === normalizedFirstDirectory)
+    ? firstDirectory
+    : undefined;
 }
 
 function buildModelMessages(
