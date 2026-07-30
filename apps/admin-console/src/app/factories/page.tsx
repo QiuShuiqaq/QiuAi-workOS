@@ -20,9 +20,6 @@ export default async function FactoriesPage() {
       pageDescription="管理批量化、流程化的数字工厂模板。PC 端会同步已上架且有权限的数字工厂。"
       itemLabel="数字工厂"
       listTitle="工厂列表"
-      editHref={(template) =>
-        `/templates/canvas?applicationType=digital_factory&templateId=${encodeURIComponent(template.id)}`
-      }
     />
   );
 }

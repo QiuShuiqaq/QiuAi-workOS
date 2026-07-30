@@ -46,7 +46,6 @@ export interface AdminRoleTemplatesPageClientProps {
   pageDescription?: string;
   itemLabel?: string;
   listTitle?: string;
-  editHref?: (template: AdminRoleTemplateDetail) => string;
   createHref?: string;
 }
 
@@ -97,7 +96,6 @@ export function AdminRoleTemplatesPageClient({
   pageDescription,
   itemLabel,
   listTitle,
-  editHref,
   createHref
 }: AdminRoleTemplatesPageClientProps) {
   const [permissionForm] = Form.useForm<TemplatePermissionFormValues>();
@@ -298,6 +296,18 @@ export function AdminRoleTemplatesPageClient({
     );
   }
 
+  function buildEditHref(template: AdminRoleTemplateDetail) {
+    const params = new URLSearchParams({
+      templateId: template.id
+    });
+    const applicationType = template.applicationType ?? applicationTypeFilter;
+    if (applicationType === 'digital_factory') {
+      params.set('applicationType', 'digital_factory');
+    }
+
+    return `/templates/canvas?${params.toString()}`;
+  }
+
   const columns: ColumnsType<AdminRoleTemplateDetail> = [
     {
       title: resolvedItemLabel,
@@ -362,10 +372,7 @@ export function AdminRoleTemplatesPageClient({
         <Space wrap>
           <Button
             icon={<EditOutlined />}
-            href={
-              editHref?.(template) ??
-              `/templates/canvas?templateId=${encodeURIComponent(template.id)}`
-            }
+            href={buildEditHref(template)}
           >
             编辑
           </Button>
