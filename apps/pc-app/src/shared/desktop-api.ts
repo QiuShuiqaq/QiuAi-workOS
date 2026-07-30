@@ -190,13 +190,20 @@ export interface DesktopModelChatRequest {
   profile: ModelProfile;
   messages: DesktopModelChatMessage[];
   timeoutMs?: number;
-  taskKind?: 'chat' | 'image_generation';
+  taskKind?: 'chat' | 'image_generation' | 'audio_transcription';
   imageGeneration?: {
     prompt: string;
     negativePrompt?: string;
     sourceImagePath?: string;
     size?: string;
     responseFormat?: 'url';
+  };
+  audioTranscription?: {
+    audioPath: string;
+    language?: string;
+    dialect?: string;
+    prompt?: string;
+    responseFormat?: 'json' | 'text';
   };
 }
 

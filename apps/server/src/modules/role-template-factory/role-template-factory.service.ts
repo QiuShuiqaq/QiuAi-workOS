@@ -74,6 +74,7 @@ const factoryPackageKeys = new Set([
   'dimension_image',
   'selling_point_image'
 ]);
+const strictPackageFactoryKinds = new Set(['cross_border_product_image_factory']);
 
 type RoleTemplateDate = Date | string;
 type RoleTemplateStepType = (typeof workflowStepTypes)[number];
@@ -2373,10 +2374,15 @@ export class RoleTemplateFactoryService {
     if (packages.length === 0) {
       issues.push('Digital factory must define at least one selectable package.');
     }
+    const factoryKind = typeof factory.kind === 'string' ? factory.kind.trim() : '';
+    const requiresStrictPackageKeys = strictPackageFactoryKinds.has(factoryKind);
     for (const item of packages) {
       const packageRecord = this.toRecord(item);
       const key = typeof packageRecord?.key === 'string' ? packageRecord.key.trim() : '';
-      if (!factoryPackageKeys.has(key)) {
+      if (!key) {
+        issues.push('Digital factory package key is required.');
+      }
+      if (requiresStrictPackageKeys && !factoryPackageKeys.has(key)) {
         issues.push(`Digital factory package key is invalid: ${key || '(empty)'}.`);
       }
     }

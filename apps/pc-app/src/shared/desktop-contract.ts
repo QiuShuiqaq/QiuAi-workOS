@@ -4,7 +4,7 @@ export type KnowledgeBindingSource =
   | 'workspace_library'
   | 'server_summary';
 
-export type ModelPurpose = 'general' | 'reasoning' | 'vision' | 'embeddings' | 'document';
+export type ModelPurpose = 'general' | 'reasoning' | 'vision' | 'embeddings' | 'document' | 'audio';
 
 export type ModelCapability =
   | 'text'

@@ -17,7 +17,7 @@ export type KnowledgeBindingSource =
   | 'workspace_library'
   | 'server_summary';
 
-export type ModelPurpose = 'general' | 'reasoning' | 'vision' | 'embeddings' | 'document';
+export type ModelPurpose = 'general' | 'reasoning' | 'vision' | 'embeddings' | 'document' | 'audio';
 
 export type ModelCapability =
   | 'text'
@@ -172,7 +172,8 @@ export function validateModelProfile(input: unknown): ModelProfile {
       'reasoning',
       'vision',
       'embeddings',
-      'document'
+      'document',
+      'audio'
     ]),
     capabilities: requireStringEnumArray(record.capabilities, 'modelProfile.capabilities', [
       'text',

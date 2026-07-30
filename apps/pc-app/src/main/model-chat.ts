@@ -44,6 +44,15 @@ interface OpenAiCompatibleImageResponse {
   };
 }
 
+interface OpenAiCompatibleTranscriptionResponse {
+  text?: unknown;
+  result?: unknown;
+  transcript?: unknown;
+  error?: {
+    message?: unknown;
+  };
+}
+
 const defaultTimeoutMs = 45_000;
 
 export async function invokeOpenAiCompatibleModelChat(
@@ -71,6 +80,15 @@ export async function invokeOpenAiCompatibleModelChat(
 
   if (request.taskKind === 'image_generation' || request.imageGeneration) {
     return invokeOpenAiCompatibleImageGeneration({
+      request,
+      apiBaseUrl,
+      apiKey,
+      modelName
+    });
+  }
+
+  if (request.taskKind === 'audio_transcription' || request.audioTranscription) {
+    return invokeOpenAiCompatibleAudioTranscription({
       request,
       apiBaseUrl,
       apiKey,
@@ -184,6 +202,49 @@ async function invokeOpenAiCompatibleImageGeneration(input: {
   };
 }
 
+async function invokeOpenAiCompatibleAudioTranscription(input: {
+  request: DesktopModelChatRequest;
+  apiBaseUrl: string;
+  apiKey: string;
+  modelName: string;
+}): Promise<DesktopModelChatResponse> {
+  const audioPath = input.request.audioTranscription?.audioPath?.trim();
+  if (!audioPath) {
+    throw new Error('Audio transcription path is missing.');
+  }
+
+  if (!existsSync(audioPath)) {
+    throw new Error(`Audio file does not exist: ${audioPath}`);
+  }
+
+  const response = await fetch(`${input.apiBaseUrl}/audio/transcriptions`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${input.apiKey}`
+    },
+    body: buildAudioTranscriptionFormData(input.modelName, audioPath, input.request.audioTranscription),
+    signal: AbortSignal.timeout(input.request.timeoutMs ?? 180_000)
+  });
+  const bodyText = await response.text();
+  const body = parseTranscriptionJsonBody(bodyText);
+
+  if (!response.ok) {
+    const errorMessage = readProviderErrorMessage(body) ?? bodyText.slice(0, 500);
+    throw new Error(`Audio transcription API returned HTTP ${response.status}: ${errorMessage}`);
+  }
+
+  const content = readTranscriptionText(body) ?? bodyText.trim();
+  if (!content) {
+    throw new Error('Audio transcription API response did not include transcript text.');
+  }
+
+  return {
+    provider: input.request.profile.providerName,
+    modelName: input.modelName,
+    content
+  };
+}
+
 export async function listOpenAiCompatibleModels(
   request: DesktopModelListRequest
 ): Promise<DesktopModelListResponse> {
@@ -241,6 +302,32 @@ export async function listOpenAiCompatibleModels(
     fetchedAt: new Date().toISOString(),
     models
   };
+}
+
+function buildAudioTranscriptionFormData(
+  modelName: string,
+  audioPath: string,
+  options: DesktopModelChatRequest['audioTranscription']
+): FormData {
+  const form = new FormData();
+  const audioBuffer = readFileSync(audioPath);
+  const audioBytes = new Uint8Array(audioBuffer);
+  const audioBlob = new Blob([audioBytes], { type: inferAudioMimeType(audioPath) });
+
+  form.set('model', modelName);
+  form.set('file', audioBlob, path.basename(audioPath));
+  form.set('response_format', options?.responseFormat ?? 'json');
+  if (options?.language?.trim()) {
+    form.set('language', options.language.trim());
+  }
+  if (options?.dialect?.trim()) {
+    form.set('dialect', options.dialect.trim());
+  }
+  if (options?.prompt?.trim()) {
+    form.set('prompt', options.prompt.trim());
+  }
+
+  return form;
 }
 
 function buildImageGenerationPrompt(request: DesktopModelChatRequest): string {
@@ -321,10 +408,32 @@ function parseImageGenerationJsonBody(bodyText: string): OpenAiCompatibleImageRe
   }
 }
 
+function parseTranscriptionJsonBody(bodyText: string): OpenAiCompatibleTranscriptionResponse | undefined {
+  if (!bodyText.trim()) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(bodyText) as OpenAiCompatibleTranscriptionResponse;
+  } catch {
+    return undefined;
+  }
+}
+
 function readProviderErrorMessage(
   body: { error?: { message?: unknown } } | undefined
 ): string | undefined {
   return typeof body?.error?.message === 'string' ? body.error.message : undefined;
+}
+
+function readTranscriptionText(body: OpenAiCompatibleTranscriptionResponse | undefined): string | undefined {
+  for (const value of [body?.text, body?.result, body?.transcript]) {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return undefined;
 }
 
 function readImageResponseUrl(body: OpenAiCompatibleImageResponse | undefined): string | undefined {
@@ -343,6 +452,19 @@ function inferImageMimeType(filePath: string): string {
   if (extension === '.webp') return 'image/webp';
   if (extension === '.gif') return 'image/gif';
   return 'image/png';
+}
+
+function inferAudioMimeType(filePath: string): string {
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === '.mp3') return 'audio/mpeg';
+  if (extension === '.wav') return 'audio/wav';
+  if (extension === '.m4a') return 'audio/mp4';
+  if (extension === '.aac') return 'audio/aac';
+  if (extension === '.ogg') return 'audio/ogg';
+  if (extension === '.webm') return 'audio/webm';
+  if (extension === '.mp4') return 'video/mp4';
+  if (extension === '.mov') return 'video/quicktime';
+  return 'application/octet-stream';
 }
 
 function readAssistantContent(body: OpenAiCompatibleChatResponse | undefined): string | undefined {

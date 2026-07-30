@@ -87,7 +87,12 @@ export interface AdminCreateRoleTemplatePageClientProps {
   initialApplicationType?: RoleTemplateApplicationType;
 }
 
-type WorkflowPreset = 'standard' | 'document' | 'research' | 'cross_border_image_factory';
+type WorkflowPreset =
+  | 'standard'
+  | 'document'
+  | 'research'
+  | 'cross_border_image_factory'
+  | 'medical_case_video_factory';
 type WorkflowNodeType = RoleWorkflowGraphNode['type'];
 type WorkflowArtifactType = NonNullable<RoleWorkflowGraphNode['artifactType']>;
 type WorkflowVariableType = NonNullable<NonNullable<RoleWorkflowGraph['variables']>[number]['type']>;
@@ -105,7 +110,9 @@ type WorkflowLlmTaskType =
   | 'image_generation'
   | 'video_generation'
   | 'embedding'
-  | 'rerank';
+  | 'rerank'
+  | 'audio_transcription'
+  | 'video_screening_batch';
 type WorkflowDataMode = 'assign' | 'template' | 'code';
 type WorkflowCanvasPosition = { x: number; y: number };
 type WorkflowSelection = { type: 'node' | 'edge'; id: string };
@@ -132,6 +139,7 @@ type FactoryPackageKey =
   | 'model_replacement'
   | 'dimension_image'
   | 'selling_point_image';
+type MedicalCaseVideoScreeningGateKey = 'video_spec' | 'asr_quality' | 'content_minimum';
 type WorkflowCodePreviewResult = {
   status: 'passed' | 'failed';
   inputPreview: string;
@@ -254,6 +262,11 @@ const workflowPresetOptions: Array<{ value: WorkflowPreset; label: string; descr
     value: 'cross_border_image_factory',
     label: '跨境商品图工厂',
     description: '批量上传商品图，按平台和所选产物包生成图片 URL 预览结果。'
+  },
+  {
+    value: 'medical_case_video_factory',
+    label: '案例视频质检剪辑工厂',
+    description: '批量上传案例视频，先筛选不合格素材，再评分，并可选生成初剪视频。'
   }
 ];
 
@@ -328,6 +341,41 @@ const crossBorderFactoryDefaultPackageKeys: FactoryPackageKey[] = [
   'model_replacement',
   'dimension_image',
   'selling_point_image'
+];
+
+const medicalCaseVideoScreeningGates: Array<{
+  key: MedicalCaseVideoScreeningGateKey;
+  label: string;
+  description: string;
+  rules: Array<{ metric: string; operator: '>=' | '<=' | 'equals' | 'between'; value: unknown; failReason: string }>;
+}> = [
+  {
+    key: 'video_spec',
+    label: '视频规格筛选',
+    description: '先剔除比例、时长和音轨不达标的视频，减少后续模型成本。',
+    rules: [
+      { metric: 'portraitRatio', operator: 'between', value: [1.72, 1.86], failReason: '视频不是合格的 9:16 竖屏比例' },
+      { metric: 'durationSeconds', operator: '>=', value: 20, failReason: '视频时长小于 20 秒' },
+      { metric: 'hasAudio', operator: 'equals', value: true, failReason: '视频缺少可识别音轨' }
+    ]
+  },
+  {
+    key: 'asr_quality',
+    label: '语音质量筛选',
+    description: '用 ASR 转写结果判断是否存在说话听不清、识别失败或内容过短。',
+    rules: [
+      { metric: 'transcriptChars', operator: '>=', value: 80, failReason: '识别文本过短，说话内容不足' },
+      { metric: 'unclearTokenRatio', operator: '<=', value: 0.25, failReason: '语音含糊或识别失败比例过高' }
+    ]
+  },
+  {
+    key: 'content_minimum',
+    label: '内容完整性筛选',
+    description: '只让具备使用前、使用过程、使用后改善表达的视频进入评分。',
+    rules: [
+      { metric: 'beforeAfterCompleteness', operator: '>=', value: 0.6, failReason: '缺少清晰的使用前/使用后改善表述' }
+    ]
+  }
 ];
 
 const workflowNodeTypeOptions: Array<{ value: WorkflowNodeType; label: string }> = [
@@ -508,6 +556,20 @@ const llmTaskTypeOptions: Array<{
     label: '视频理解',
     description: '把视频地址或视频片段交给模型，输出分析、评分或剪辑建议。',
     requiredCapabilities: ['video', 'video_understanding', 'video_text'],
+    defaultOutputMode: 'json'
+  },
+  {
+    value: 'audio_transcription',
+    label: '语音转写',
+    description: '把音频或视频音轨转成文本，适合 ASR 节点和批量视频处理前置转写。',
+    requiredCapabilities: ['audio_to_text'],
+    defaultOutputMode: 'text'
+  },
+  {
+    value: 'video_screening_batch',
+    label: '视频筛选批处理',
+    description: '按筛选规则批量处理视频，输出筛选、评分、转写、风险和可选剪辑结果。',
+    requiredCapabilities: ['audio_to_text', 'text', 'video_processing', 'spreadsheet_edit'],
     defaultOutputMode: 'json'
   },
   {
@@ -1525,6 +1587,32 @@ function createWorkflowSteps(preset: WorkflowPreset): RoleWorkflowGraphSourceSte
     ];
   }
 
+  if (preset === 'medical_case_video_factory') {
+    return [
+      {
+        id: 'factory_input',
+        order: 1,
+        type: 'input',
+        name: '接收视频批次',
+        instruction: '接收用户上传的案例视频、筛选配置、ASR 方言设置和是否初剪。'
+      },
+      {
+        id: 'screen_score_and_edit',
+        order: 2,
+        type: 'llm',
+        name: '批量筛选评分',
+        instruction: '按视频规格、ASR 质量、内容完整性逐级筛选；通过后再做表达质量评分，并按用户开关决定是否生成初剪。'
+      },
+      {
+        id: 'factory_output',
+        order: 3,
+        type: 'output',
+        name: '返回结果',
+        instruction: '返回筛选评分表、失败原因、需人工复核项和可选初剪视频。'
+      }
+    ];
+  }
+
   if (preset === 'document') {
     return [
       {
@@ -1646,6 +1734,128 @@ function createWorkflowSteps(preset: WorkflowPreset): RoleWorkflowGraphSourceSte
       instruction: '总结完成情况、产物路径和建议的下一步动作。'
     }
   ];
+}
+
+function createMedicalCaseVideoScreeningFactoryWorkflowGraph(): RoleWorkflowGraph {
+  const nodes: RoleWorkflowGraphNode[] = [
+    {
+      id: 'start',
+      type: 'start',
+      name: '开始',
+      description: '工作流入口。'
+    },
+    {
+      id: 'factory_input',
+      type: 'input',
+      name: '接收视频批次',
+      instruction: '接收案例视频、筛选规则、ASR 语言/方言、是否启用初剪和目标成片时长；单批最多 50 个视频。',
+      inputVariables: ['start.text', 'start.files', 'start.videos'],
+      outputVariables: ['task_brief'],
+      config: {
+        acceptedFileKinds: ['video'],
+        maxItems: 50,
+        source: 'digital_factory'
+      }
+    },
+    {
+      id: 'screen_score_and_edit',
+      type: 'llm',
+      name: '批量筛选评分',
+      instruction:
+        '按 factory_request 对每个视频先做硬性筛选：视频比例、时长、音轨、ASR 可识别度、内容完整性；未通过的直接标记并停止后续处理。通过筛选的视频再按表达清晰度、使用前后完整性、改善表述具体度、自然度、剪辑价值评分。只评价素材质量和表达质量，不做医疗诊断，不判断疗效真实性。',
+      modelProfileId: 'qiu-general-default',
+      inputVariables: ['factory_request', 'start.files', 'start.videos'],
+      outputVariables: ['video_screening_results', 'screening_summary'],
+      config: {
+        llmTaskType: 'video_screening_batch',
+        outputMode: 'json',
+        concurrency: 3,
+        schema: {
+          summary: 'string',
+          results: [
+            {
+              fileName: 'string',
+              status: 'rejected | scored | review_required | edited',
+              rejectedGate: 'string',
+              rejectedReason: 'string',
+              score: 0,
+              grade: 'A | B | C | D',
+              transcript: 'string',
+              editPlan: [{ start: 0, end: 10, label: 'string', reason: 'string' }]
+            }
+          ]
+        }
+      }
+    },
+    {
+      id: 'factory_output',
+      type: 'output',
+      name: '返回结果',
+      instruction: '返回筛选评分表、筛掉原因、评分摘要、风险提示和可选初剪视频；提醒用户医疗相关内容需人工复核。',
+      inputVariables: ['video_screening_results', 'screening_summary'],
+      outputVariables: ['final_answer']
+    },
+    {
+      id: 'asr_dependency',
+      type: 'llm',
+      name: 'ASR 模型依赖',
+      description: '依赖声明节点，不接入主链路。',
+      instruction: '需要配置支持普通话、粤语、上海话、四川/重庆口音等常见中文方言的语音转文字模型。',
+      modelProfileId: 'qiu-asr-default',
+      inputVariables: ['start.videos'],
+      outputVariables: ['transcript'],
+      config: {
+        llmTaskType: 'audio_transcription',
+        dependencyOnly: true
+      }
+    },
+    {
+      id: 'video_tool_dependency',
+      type: 'tool',
+      name: '视频工具依赖',
+      description: '依赖声明节点，不接入主链路。',
+      instruction: '需要 PC 端视频处理工具读取比例、时长、音轨，并在用户开启初剪时调用 FFmpeg 生成视频片段。',
+      toolId: 'video-processing',
+      config: {
+        action: 'video.probe',
+        dependencyOnly: true
+      }
+    },
+    {
+      id: 'spreadsheet_tool_dependency',
+      type: 'tool',
+      name: '表格产物依赖',
+      description: '依赖声明节点，不接入主链路。',
+      instruction: '需要 Office 文档工具把筛选、评分、转写和风险信息写入 Excel 结果表。',
+      toolId: 'office-document',
+      config: {
+        action: 'spreadsheet.write_xlsx',
+        dependencyOnly: true
+      }
+    }
+  ];
+
+  return {
+    version: '1.0.0',
+    entryNodeId: 'start',
+    nodes,
+    edges: [
+      { id: 'start__factory_input', sourceNodeId: 'start', targetNodeId: 'factory_input', condition: { type: 'always' } },
+      { id: 'factory_input__screen_score_and_edit', sourceNodeId: 'factory_input', targetNodeId: 'screen_score_and_edit', condition: { type: 'always' } },
+      { id: 'screen_score_and_edit__factory_output', sourceNodeId: 'screen_score_and_edit', targetNodeId: 'factory_output', condition: { type: 'always' } }
+    ],
+    variables: [
+      { name: 'factory_request', type: 'json', description: '工厂面板提交的视频批量处理参数。', required: true },
+      { name: 'video_screening_results', type: 'json', description: '每个视频的筛选、评分、转写、风险和初剪结果。', required: true },
+      { name: 'screening_summary', type: 'text', description: '批量处理统计摘要。', required: true },
+      { name: 'transcript', type: 'text', description: 'ASR 转写文本。' }
+    ],
+    runtimePolicy: {
+      maxNodeExecutions: 180,
+      maxLoopIterations: 50,
+      requireApprovalBeforeTools: false
+    }
+  };
 }
 
 function createCrossBorderImageFactoryWorkflowGraph(): RoleWorkflowGraph {
@@ -1807,6 +2017,9 @@ function createCrossBorderImageFactoryWorkflowGraph(): RoleWorkflowGraph {
 function createWorkflowGraph(preset: WorkflowPreset): RoleWorkflowGraph {
   if (preset === 'cross_border_image_factory') {
     return createCrossBorderImageFactoryWorkflowGraph();
+  }
+  if (preset === 'medical_case_video_factory') {
+    return createMedicalCaseVideoScreeningFactoryWorkflowGraph();
   }
 
   const graph = buildRoleWorkflowGraphFromSteps(createWorkflowSteps(preset), {
@@ -5014,7 +5227,7 @@ function buildPayload(
     status: 'DRAFT',
     allowedPlanCodes: uniqueTags(values.allowedPlanCodes),
     visibleWorkspaceIds: uniqueTags(values.visibleWorkspaceIds),
-    dependencyManifest: buildDependencyManifestInput(applicationType)
+    dependencyManifest: buildDependencyManifestInput(applicationType, values.workflowPreset)
   };
 }
 
@@ -5046,12 +5259,13 @@ function buildUpdatePayload(
     approvalPolicy: values.approvalPolicy.trim(),
     allowedPlanCodes: uniqueTags(values.allowedPlanCodes),
     visibleWorkspaceIds: uniqueTags(values.visibleWorkspaceIds),
-    dependencyManifest: buildDependencyManifestInput(applicationType)
+    dependencyManifest: buildDependencyManifestInput(applicationType, values.workflowPreset)
   };
 }
 
 function buildDependencyManifestInput(
-  applicationType: RoleTemplateApplicationType
+  applicationType: RoleTemplateApplicationType,
+  workflowPreset: WorkflowPreset
 ): RoleTemplateDependencyManifest | undefined {
   if (applicationType !== 'digital_factory') {
     return undefined;
@@ -5066,7 +5280,9 @@ function buildDependencyManifestInput(
     toolActions: [],
     artifactTemplates: [],
     nodeTemplates: [],
-    factory: buildCrossBorderImageFactoryManifest(),
+    factory: workflowPreset === 'medical_case_video_factory'
+      ? buildMedicalCaseVideoFactoryManifest()
+      : buildCrossBorderImageFactoryManifest(),
     warnings: []
   };
 }
@@ -5114,7 +5330,92 @@ function buildCrossBorderImageFactoryManifest() {
   };
 }
 
+function buildMedicalCaseVideoFactoryManifest() {
+  return {
+    kind: 'medical_case_video_screening_factory',
+    version: '1.0.0',
+    title: '案例视频质检剪辑工厂',
+    batch: {
+      maxItems: 50,
+      itemUnit: 'video',
+      inputFileKinds: ['video'],
+      videoExtensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v']
+    },
+    packages: [
+      {
+        key: 'screening_score',
+        label: '筛选评分表',
+        description: '输出每个视频的筛选状态、失败原因、评分、等级、ASR 转写和风险提示。',
+        outputType: 'xlsx',
+        defaultSelected: true
+      },
+      {
+        key: 'optional_edit',
+        label: '可选初剪视频',
+        description: '用户开启初剪后，只对通过筛选且评分较高的视频生成本地初剪视频。',
+        outputType: 'video',
+        defaultSelected: false
+      }
+    ],
+    asr: {
+      defaultLanguage: 'zh',
+      defaultDialect: 'auto',
+      dialects: [
+        { key: 'auto', label: '自动识别' },
+        { key: 'mandarin', label: '普通话' },
+        { key: 'cantonese', label: '粤语' },
+        { key: 'shanghai', label: '上海话' },
+        { key: 'sichuan_chongqing', label: '四川/重庆口音' }
+      ]
+    },
+    screeningProfiles: [
+      {
+        key: 'default_medical_case',
+        label: '医疗案例素材标准',
+        description: '适合用户口述使用前后变化的视频素材筛选，不判断医学疗效。',
+        defaultSelected: true,
+        gates: medicalCaseVideoScreeningGates.map((gate) => ({
+          id: gate.key,
+          name: gate.label,
+          description: gate.description,
+          rules: gate.rules
+        }))
+      }
+    ],
+    editing: {
+      defaultEnabled: false,
+      targetSeconds: 30,
+      targetSecondOptions: [15, 30, 45],
+      requiresFfmpeg: true
+    },
+    output: {
+      cacheDays: 30,
+      folder: 'case-videos',
+      reportFormat: 'xlsx',
+      videoFormat: 'mp4'
+    },
+    requiredCapabilities: ['audio_to_text', 'text', 'video_processing', 'spreadsheet_edit'],
+    ui: {
+      primaryActionLabel: '开始筛选',
+      uploadHint: '上传案例视频，单批最多 50 个；大视频只在本机处理，不经过服务端。',
+      screeningSelection: 'select',
+      editingToggle: true
+    }
+  };
+}
+
 function inferInitialPreset(template?: AdminRoleTemplateDetail): WorkflowPreset {
+  const factory = template?.dependencyManifest?.factory;
+  const factoryKind = factory && typeof factory === 'object' && !Array.isArray(factory)
+    ? (factory as Record<string, unknown>).kind
+    : undefined;
+  if (factoryKind === 'medical_case_video_screening_factory') {
+    return 'medical_case_video_factory';
+  }
+  if (factoryKind === 'cross_border_product_image_factory') {
+    return 'cross_border_image_factory';
+  }
+
   const text = [
     template?.id,
     template?.name,
@@ -5292,6 +5593,23 @@ export function AdminCreateRoleTemplatePageClient({
         outputFormat:
           form.getFieldValue('outputFormat') ||
           '图片 URL 预览结果 + 任务摘要。'
+      });
+    }
+    if (preset === 'medical_case_video_factory') {
+      form.setFieldValue('applicationType', 'digital_factory');
+      form.setFieldsValue({
+        name: form.getFieldValue('name') || '案例视频质检剪辑工厂',
+        industry: form.getFieldValue('industry') || '医疗健康',
+        scenario: form.getFieldValue('scenario') || '批量筛选用户案例视频、评分并可选生成初剪',
+        description:
+          form.getFieldValue('description') ||
+          '面向医疗健康案例素材团队的批量视频质检工厂，支持规格筛选、ASR 识别、内容质量评分和可选初剪。',
+        businessGoal:
+          form.getFieldValue('businessGoal') ||
+          '帮助团队快速剔除不合格案例视频，筛出表达清楚、内容完整、具备剪辑价值的素材，并输出可复核的评分表。',
+        outputFormat:
+          form.getFieldValue('outputFormat') ||
+          'Excel 筛选评分表 + 可选本地初剪视频。'
       });
     }
     setPresetPickerOpen(false);

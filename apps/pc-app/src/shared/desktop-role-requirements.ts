@@ -313,6 +313,10 @@ function inferModelPurposeFromProfileId(profileId: string): ModelProfile['purpos
     return 'vision';
   }
 
+  if (normalized.includes('asr') || normalized.includes('audio') || normalized.includes('speech') || normalized.includes('transcribe')) {
+    return 'audio';
+  }
+
   if (normalized.includes('embedding') || normalized.includes('embed')) {
     return 'embeddings';
   }

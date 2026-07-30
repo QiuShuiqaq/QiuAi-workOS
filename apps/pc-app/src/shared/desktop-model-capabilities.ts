@@ -41,6 +41,10 @@ export function defaultCapabilitiesForPurpose(purpose: ModelPurpose): ModelCapab
     return ['embedding'];
   }
 
+  if (purpose === 'audio') {
+    return ['audio_to_text'];
+  }
+
   return ['text'];
 }
 
@@ -69,6 +73,10 @@ export function purposeForModelCapabilities(
 
   if (normalized.includes('embedding')) {
     return 'embeddings';
+  }
+
+  if (normalized.includes('audio_to_text') || normalized.includes('text_to_audio')) {
+    return 'audio';
   }
 
   if (normalized.includes('long_context')) {

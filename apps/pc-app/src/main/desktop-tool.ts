@@ -243,7 +243,7 @@ async function invokeVideoProcessingTool(
 ): Promise<DesktopToolInvocationResult> {
   switch (request.action) {
     case 'video.probe':
-      return probeVideo(request);
+      return await probeVideo(request);
     case 'video.compose_clips':
     case 'video.export_mp4':
       return await composeVideoClips(userDataPath, request);
@@ -254,7 +254,7 @@ async function invokeVideoProcessingTool(
   }
 }
 
-function probeVideo(request: DesktopToolInvocationRequest): DesktopToolInvocationResult {
+async function probeVideo(request: DesktopToolInvocationRequest): Promise<DesktopToolInvocationResult> {
   const videoPath = readVideoInputPath(request);
   assertReadPathAllowed(request, videoPath);
   const stats = statSync(videoPath);
@@ -268,18 +268,108 @@ function probeVideo(request: DesktopToolInvocationRequest): DesktopToolInvocatio
     return fail(request, `Unsupported video extension: ${extension || 'unknown'}.`);
   }
 
-  return {
-    toolId: request.toolId,
-    action: request.action,
-    ok: true,
-    output: {
-      localPath: videoPath,
-      fileName: path.basename(videoPath),
-      extension,
-      sizeBytes: stats.size,
-      modifiedAt: stats.mtime.toISOString()
-    }
+  const baseOutput = {
+    localPath: videoPath,
+    fileName: path.basename(videoPath),
+    extension,
+    sizeBytes: stats.size,
+    modifiedAt: stats.mtime.toISOString()
   };
+  const ffprobePath = readString(request.input.ffprobePath, process.env.QIUAI_FFPROBE_PATH?.trim() || 'ffprobe');
+
+  try {
+    const { stdout } = await execFileAsync(
+      ffprobePath,
+      [
+        '-v',
+        'error',
+        '-print_format',
+        'json',
+        '-show_format',
+        '-show_streams',
+        videoPath
+      ],
+      { windowsHide: true, timeout: readOptionalPositiveInteger(request.input.timeoutMs, 60_000) }
+    );
+    const metadata = normalizeFfprobeVideoMetadata(parseJson(stdout));
+
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        ...baseOutput,
+        ...metadata,
+        probeAvailable: true
+      }
+    };
+  } catch (error) {
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        ...baseOutput,
+        probeAvailable: false,
+        probeWarning: [
+          'ffprobe unavailable or failed; only basic file metadata is available.',
+          error instanceof Error ? error.message : ''
+        ].filter(Boolean).join(' ')
+      }
+    };
+  }
+}
+
+function normalizeFfprobeVideoMetadata(value: unknown): Record<string, unknown> {
+  const record = isRecord(value) ? value : {};
+  const streams = Array.isArray(record.streams) ? record.streams.filter(isRecord) : [];
+  const format = isRecord(record.format) ? record.format : {};
+  const videoStream = streams.find((stream) => stream.codec_type === 'video');
+  const audioStreams = streams.filter((stream) => stream.codec_type === 'audio');
+  const width = readPositiveNumber(videoStream?.width);
+  const height = readPositiveNumber(videoStream?.height);
+  const durationSeconds = readPositiveNumber(format.duration) ?? readPositiveNumber(videoStream?.duration);
+  const frameRate = readFrameRate(videoStream?.avg_frame_rate) ?? readFrameRate(videoStream?.r_frame_rate);
+  const aspectRatio = width && height ? `${width}:${height}` : undefined;
+
+  return {
+    width,
+    height,
+    durationSeconds,
+    frameRate,
+    aspectRatio,
+    orientation: width && height ? width > height ? 'landscape' : width < height ? 'portrait' : 'square' : undefined,
+    hasVideo: Boolean(videoStream),
+    hasAudio: audioStreams.length > 0,
+    videoCodec: readOptionalString(videoStream?.codec_name),
+    audioCodec: readOptionalString(audioStreams[0]?.codec_name),
+    audioStreamCount: audioStreams.length,
+    bitRate: readPositiveNumber(format.bit_rate),
+    formatName: readOptionalString(format.format_name)
+  };
+}
+
+function readFrameRate(value: unknown): number | undefined {
+  if (typeof value !== 'string' || !value.trim() || value === '0/0') {
+    return undefined;
+  }
+
+  const [left, right] = value.split('/').map((item) => Number(item));
+  if (right && Number.isFinite(left) && Number.isFinite(right)) {
+    return Math.round((left / right) * 1000) / 1000;
+  }
+
+  const directValue = Number(value);
+  return Number.isFinite(directValue) && directValue > 0 ? directValue : undefined;
+}
+
+function readPositiveNumber(value: unknown): number | undefined {
+  const numberValue = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  return Number.isFinite(numberValue) && numberValue > 0 ? Math.round(numberValue * 1000) / 1000 : undefined;
+}
+
+function readOptionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 async function composeVideoClips(

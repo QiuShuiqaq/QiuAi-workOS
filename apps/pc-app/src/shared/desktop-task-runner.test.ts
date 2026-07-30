@@ -3067,6 +3067,202 @@ assert.ok(
   factoryTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_RUNTIME_FACTORY_BATCH_COMPLETED')
 );
 
+const videoFactoryModelProfiles: ModelProfile[] = [
+  ...modelProfiles,
+  {
+    id: 'qiu-asr-default',
+    providerId: 'tencent-asr-compatible',
+    providerName: 'Tencent ASR Compatible',
+    modelName: '16k_zh_dialect',
+    purpose: 'audio',
+    capabilities: ['audio_to_text'],
+    apiBaseUrl: 'https://asr.example/v1',
+    apiKey: 'test-asr-key'
+  }
+];
+let videoFactoryAsrCalls = 0;
+let videoFactoryScoringCalls = 0;
+const videoFactoryToolRequests: Array<{ toolId: string; action: string }> = [];
+const videoFactoryTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-factory-video-screening-001',
+    roleCode: 'case-video-factory',
+    roleName: 'Case Video Factory',
+    title: 'Screen medical case videos',
+    input: JSON.stringify({
+      factory_request: {
+        factoryKind: 'medical_case_video_screening_factory',
+        asr: {
+          modelProfileId: 'qiu-asr-default',
+          language: 'zh',
+          dialect: 'sichuan_chongqing'
+        },
+        editEnabled: true,
+        editTargetSeconds: 30
+      }
+    }),
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0,
+    executionContext: {
+      modelProfileIds: ['qiu-general-default', 'qiu-asr-default'],
+      toolIds: ['video-processing', 'office-document'],
+      knowledgeBindingIds: [],
+      attachmentPaths: ['C:\\QiuAI\\factory\\case-video-1.mp4']
+    }
+  }),
+  rolePackage: {
+    roleCode: 'case-video-factory',
+    applicationType: 'digital_factory',
+    name: 'Case Video Factory',
+    version: '1.0.0',
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      runtimePolicy: {
+        maxNodeExecutions: 8,
+        maxLoopIterations: 4,
+        requireApprovalBeforeTools: false
+      },
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'screen_score_and_edit',
+          type: 'llm',
+          name: 'Screen score and edit',
+          modelProfileId: 'qiu-general-default',
+          inputVariables: ['factory_request', 'start.files'],
+          outputVariables: ['video_screening_results', 'screening_summary'],
+          config: {
+            llmTaskType: 'video_screening_batch',
+            outputMode: 'json',
+            concurrency: 2
+          }
+        }
+      ],
+      edges: [
+        { id: 'start-screen', sourceNodeId: 'start', targetNodeId: 'screen_score_and_edit' }
+      ]
+    },
+    modelProfileIds: ['qiu-general-default', 'qiu-asr-default'],
+    toolIds: ['video-processing', 'office-document'],
+    requiredKnowledgeSources: [],
+    defaultTaskTypes: ['factory_video_screening'],
+    syncPolicy: 'summary_only'
+  },
+  modelProfiles: videoFactoryModelProfiles,
+  tools,
+  workspaceId: 'workspace-video-factory',
+  enabledModelProfileIds: ['qiu-general-default', 'qiu-asr-default'],
+  enabledToolIds: ['video-processing', 'office-document'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    if (request.taskKind === 'audio_transcription') {
+      videoFactoryAsrCalls += 1;
+      assert.equal(request.profile.id, 'qiu-asr-default');
+      assert.equal(request.audioTranscription?.audioPath, 'C:\\QiuAI\\factory\\case-video-1.mp4');
+      assert.equal(request.audioTranscription?.dialect, 'sichuan_chongqing');
+      return {
+        provider: request.profile.providerName,
+        modelName: request.profile.modelName,
+        content:
+          '使用前我经常咳嗽不舒服，说话也没有精神。后来按要求使用产品一段时间后，咳嗽明显缓解，晚上睡觉更踏实，整个人状态改善很多。我能清楚说明使用前的问题、使用过程和使用后的变化。'
+      };
+    }
+
+    videoFactoryScoringCalls += 1;
+    assert.equal(request.profile.id, 'qiu-general-default');
+    const prompt = request.messages.map((message) => message.content).join('\n');
+    assert.match(prompt, /案例视频素材质检员/);
+    assert.match(prompt, /beforeAfterCompleteness/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: JSON.stringify({
+        score: 82,
+        beforeAfterCompleteness: 0.9,
+        summary: '表达清楚，包含使用前、使用过程和使用后变化，适合进入人工复核。',
+        risks: [],
+        editPlan: [
+          { start: 0, end: 8, label: '使用前症状', reason: '开头交代问题' },
+          { start: 22, end: 34, label: '使用过程', reason: '说明使用过程' },
+          { start: 48, end: 60, label: '使用后变化', reason: '保留改善表述' }
+        ]
+      })
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    videoFactoryToolRequests.push({ toolId: request.toolId, action: request.action });
+
+    if (request.action === 'video.probe') {
+      assert.equal(request.toolId, 'video-processing');
+      assert.equal(request.input.videoPath, 'C:\\QiuAI\\factory\\case-video-1.mp4');
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          probeAvailable: true,
+          width: 1080,
+          height: 1920,
+          durationSeconds: 60,
+          hasVideo: true,
+          hasAudio: true,
+          audioStreamCount: 1
+        }
+      };
+    }
+
+    if (request.action === 'spreadsheet.write_xlsx') {
+      assert.equal(request.toolId, 'office-document');
+      const sheets = request.input.sheets as Array<{ rows: string[][] }>;
+      assert.match(sheets[0]?.rows[1]?.[1] ?? '', /case-video-1/);
+      assert.equal(sheets[0]?.rows[1]?.[5], '82');
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          localPath: 'C:\\QiuAI\\workspace\\spreadsheets\\video-screening.xlsx'
+        }
+      };
+    }
+
+    assert.equal(request.action, 'video.compose_clips');
+    assert.equal(request.toolId, 'video-processing');
+    assert.equal(request.input.videoPath, 'C:\\QiuAI\\factory\\case-video-1.mp4');
+    assert.ok(Array.isArray(request.input.cutPlan));
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\videos\\case-video-1-cut.mp4'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:14.500Z'
+});
+
+assert.equal(videoFactoryTask.task.state, 'completed');
+assert.equal(videoFactoryAsrCalls, 1);
+assert.equal(videoFactoryScoringCalls, 1);
+assert.equal(videoFactoryTask.task.artifactCount, 2);
+assert.deepEqual(videoFactoryToolRequests, [
+  { toolId: 'video-processing', action: 'video.probe' },
+  { toolId: 'video-processing', action: 'video.compose_clips' },
+  { toolId: 'office-document', action: 'spreadsheet.write_xlsx' }
+]);
+assert.ok(
+  videoFactoryTask.task.artifacts.some((artifact) => artifact.localPath?.endsWith('video-screening.xlsx'))
+);
+assert.ok(
+  videoFactoryTask.task.artifacts.some((artifact) => artifact.localPath?.endsWith('case-video-1-cut.mp4'))
+);
+assert.ok(
+  videoFactoryTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_RUNTIME_VIDEO_FACTORY_COMPLETED')
+);
+
 const unconfiguredKnowledge = await runDesktopTask({
   task,
   modelProfiles,

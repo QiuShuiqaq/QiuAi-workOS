@@ -737,7 +737,8 @@ function validateModelProfile(value: unknown): ModelProfile {
       'reasoning',
       'vision',
       'embeddings',
-      'document'
+      'document',
+      'audio'
     ]),
     capabilities: requireStringEnumArray(record.capabilities, 'modelProfile.capabilities', [
       'text',

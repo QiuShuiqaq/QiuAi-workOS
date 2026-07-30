@@ -139,6 +139,47 @@ interface FactoryImageGenerationTask {
 
 type FactoryImageGenerationResult = FactoryArtifactPreviewItem;
 
+interface FactoryVideoScreeningRule {
+  metric: string;
+  operator: '>=' | '<=' | '>' | '<' | 'equals' | 'notEquals' | 'between';
+  value: unknown;
+  failReason: string;
+}
+
+interface FactoryVideoScreeningGate {
+  id: string;
+  name: string;
+  rules: FactoryVideoScreeningRule[];
+}
+
+interface FactoryVideoRuntimeItem {
+  id: string;
+  order: number;
+  name: string;
+  localPath: string;
+  size?: number;
+  type?: string;
+}
+
+interface FactoryVideoScreeningResult {
+  id: string;
+  order: number;
+  name: string;
+  localPath: string;
+  status: 'rejected' | 'scored' | 'edited' | 'review_required';
+  rejectedGate?: string;
+  rejectedReason?: string;
+  score?: number;
+  grade?: 'A' | 'B' | 'C' | 'D';
+  shouldEdit: boolean;
+  transcript?: string;
+  summary?: string;
+  risks: string[];
+  metrics: Record<string, unknown>;
+  editPlan?: Array<{ start: number; end: number; label?: string; reason?: string }>;
+  editedVideoPath?: string;
+}
+
 interface ModelInvocationSuccess {
   ok: true;
   profile: ModelProfile;
@@ -1254,8 +1295,9 @@ async function prepareWorkflowRuntimeFileContext(input: {
   logs: DesktopExecutionLogEntry[];
   usedToolIds: string[];
 }> {
-  const files = readWorkflowRuntimeFiles(input.pool.get('start.files')).slice(0, maxAttachmentContextFiles);
-  if (files.length === 0) {
+  const sourceFiles = readWorkflowRuntimeFiles(input.pool.get('start.files')).slice(0, maxAttachmentContextFiles);
+  const files = sourceFiles.filter(isWorkflowRuntimeTextExtractableFile);
+  if (sourceFiles.length === 0 || files.length === 0) {
     return { logs: [], usedToolIds: [] };
   }
 
@@ -1279,7 +1321,7 @@ async function prepareWorkflowRuntimeFileContext(input: {
 
   const logs: DesktopExecutionLogEntry[] = [];
   const usedToolIds: string[] = [];
-  const extractedFiles: WorkflowFileValue[] = [];
+  const extractedFilesById = new Map<string, WorkflowFileValue>();
 
   for (const [fileIndex, file] of files.entries()) {
     const action: DesktopToolInvocationAction =
@@ -1308,12 +1350,12 @@ async function prepareWorkflowRuntimeFileContext(input: {
             `file-${fileIndex + 1}`
           )
         );
-        extractedFiles.push(file);
+        extractedFilesById.set(file.id, file);
         continue;
       }
 
       const extractedText = readToolTextOutput(result.output);
-      extractedFiles.push({
+      extractedFilesById.set(file.id, {
         ...file,
         extractedText: extractedText
           ? truncateForPrompt(extractedText, Math.ceil(maxAttachmentContextChars / files.length))
@@ -1341,12 +1383,12 @@ async function prepareWorkflowRuntimeFileContext(input: {
           `file-${fileIndex + 1}`
         )
       );
-      extractedFiles.push(file);
+      extractedFilesById.set(file.id, file);
     }
   }
 
   const mergedFiles = [
-    ...extractedFiles,
+    ...sourceFiles.map((file) => extractedFilesById.get(file.id) ?? file),
     ...readWorkflowRuntimeFiles(input.pool.get('start.files')).slice(maxAttachmentContextFiles)
   ];
   input.pool.set('start.files', mergedFiles);
@@ -2758,6 +2800,8 @@ async function invokeWorkflowRuntimeModelNode(input: {
   rolePackage?: RolePackageManifest;
   profiles: ModelProfile[];
   modelInvoker: DesktopModelInvoker;
+  desktopToolInvoker?: DesktopToolInvoker;
+  workspaceId?: string;
   createdAt: string;
   currentResponse: DesktopModelChatResponse;
   primaryProfile: ModelProfile;
@@ -2772,6 +2816,16 @@ async function invokeWorkflowRuntimeModelNode(input: {
   message: string;
 }> {
   const profile = selectWorkflowRuntimeModelProfile(input.node, input.profiles, input.rolePackage);
+  if (readWorkflowRuntimeString(input.node.config?.llmTaskType) === 'video_screening_batch') {
+    const videoFactoryResult = await invokeWorkflowRuntimeFactoryVideoScreeningNode({
+      ...input,
+      profile
+    });
+    if (videoFactoryResult) {
+      return videoFactoryResult;
+    }
+  }
+
   if (readWorkflowRuntimeString(input.node.config?.llmTaskType) === 'image_generation') {
     const factoryResult = await invokeWorkflowRuntimeFactoryImageGenerationNode({
       ...input,
@@ -2834,6 +2888,185 @@ async function invokeWorkflowRuntimeModelNode(input: {
     inputVariables: variables.map((variable) => variable.ref),
     outputVariables,
     message: `Model response saved (${response.content.length} chars).`
+  };
+}
+
+async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
+  task: DesktopTaskDetail;
+  node: WorkflowGraphNode;
+  pool: WorkflowVariablePool;
+  binding: ResolvedRuntimeBinding;
+  rolePackage?: RolePackageManifest;
+  profiles: ModelProfile[];
+  modelInvoker: DesktopModelInvoker;
+  desktopToolInvoker?: DesktopToolInvoker;
+  workspaceId?: string;
+  createdAt: string;
+  currentResponse: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  profile: ModelProfile;
+}): Promise<{
+  response: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  logs: DesktopExecutionLogEntry[];
+  usedToolIds: string[];
+  generatedArtifacts: DesktopArtifactSummary[];
+  inputVariables: string[];
+  outputVariables: string[];
+  message: string;
+} | undefined> {
+  const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
+  if (readWorkflowRuntimeString(factoryRequest?.factoryKind) !== 'medical_case_video_screening_factory') {
+    return undefined;
+  }
+
+  const videos = readFactoryVideoRuntimeItems(factoryRequest, input.pool.get('start.files'));
+  if (videos.length === 0) {
+    return undefined;
+  }
+
+  const gates = readFactoryVideoScreeningGates(factoryRequest);
+  const asrProfile = selectFactoryAsrProfile(input.profiles, factoryRequest);
+  const editEnabled = readFactoryRuntimeBoolean(factoryRequest?.editEnabled);
+  const editTargetSeconds = clampWorkflowRuntimeLimit(
+    readFactoryRuntimeNumber(factoryRequest?.editTargetSeconds),
+    30,
+    10,
+    90
+  );
+  const concurrency = clampWorkflowRuntimeLimit(
+    readFactoryRuntimeNumber(input.node.config?.concurrency ?? factoryRequest?.concurrency),
+    3,
+    1,
+    8
+  );
+  const startedLog = createLog(
+    input.task.taskId,
+    'info',
+    'WORKFLOW_RUNTIME_VIDEO_FACTORY_STARTED',
+    `Video screening factory started: ${videos.length} video(s), concurrency=${concurrency}.`,
+    input.createdAt,
+    sanitizeLogSuffix(input.node.id)
+  );
+  const results = await runWorkflowRuntimeConcurrent(videos, concurrency, (video) =>
+    runFactoryVideoScreeningItem({
+      task: input.task,
+      video,
+      gates,
+      asrProfile,
+      scoringProfile: input.profile,
+      modelInvoker: input.modelInvoker,
+      desktopToolInvoker: input.desktopToolInvoker,
+      workspaceId: input.workspaceId,
+      binding: input.binding,
+      factoryRequest,
+      editEnabled,
+      editTargetSeconds,
+      createdAt: input.createdAt
+    })
+  );
+  const rejected = results.filter((item) => item.status === 'rejected').length;
+  const edited = results.filter((item) => item.status === 'edited').length;
+  const scored = results.filter((item) => item.status === 'scored' || item.status === 'edited').length;
+  const reviewRequired = results.filter((item) => item.status === 'review_required').length;
+  const rows = buildFactoryVideoScreeningRows(results);
+  const generatedArtifacts: DesktopArtifactSummary[] = [];
+  const usedToolIds = new Set<string>();
+  if (hasFactoryToolAction(input.binding, 'video-processing', 'video.probe')) {
+    usedToolIds.add('video-processing');
+  }
+  if (input.desktopToolInvoker && input.workspaceId && hasFactoryToolAction(input.binding, 'office-document', 'spreadsheet.write_xlsx')) {
+    const toolResult = await input.desktopToolInvoker({
+      workspaceId: input.workspaceId,
+      toolId: 'office-document',
+      action: 'spreadsheet.write_xlsx',
+      input: {
+        title: '视频筛选评分结果',
+        folder: 'spreadsheets',
+        fileName: `${buildWorkflowArtifactFileName(input.task.title, '筛选评分结果')}`,
+        sheets: [
+          {
+            name: '筛选评分',
+            rows
+          }
+        ]
+      },
+      allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+    });
+    usedToolIds.add('office-document');
+    if (toolResult.ok) {
+      const artifact = buildGeneratedArtifactFromToolResult({
+        taskId: input.task.taskId,
+        toolId: 'office-document',
+        action: 'spreadsheet.write_xlsx',
+        output: toolResult.output,
+        createdAt: input.createdAt,
+        sequence: 1
+      });
+      if (artifact) {
+        generatedArtifacts.push(artifact);
+      }
+    }
+  }
+  if (results.some((item) => item.editedVideoPath)) {
+    usedToolIds.add('video-processing');
+    for (const [index, result] of results.filter((item) => item.editedVideoPath).entries()) {
+      generatedArtifacts.push({
+        id: `${input.task.taskId}-edited-video-${index + 1}-${Date.parse(input.createdAt) || Date.now()}`,
+        type: 'video',
+        title: getPathFileName(result.editedVideoPath!) ?? `${result.name}-初剪视频.mp4`,
+        content: `初剪视频：${result.editedVideoPath}`,
+        localPath: result.editedVideoPath,
+        createdAt: input.createdAt
+      });
+    }
+  }
+
+  const summaryContent = [
+    `视频筛选完成：共 ${results.length} 个视频`,
+    `筛掉：${rejected}`,
+    `进入评分：${scored}`,
+    `需人工复核：${reviewRequired}`,
+    `已生成初剪：${edited}`,
+    asrProfile ? `ASR：${asrProfile.providerName}/${asrProfile.modelName}` : 'ASR：未配置，ASR 关卡会拦截视频'
+  ].join('\n');
+  const outputVariables = writeWorkflowNodeOutputs({
+    pool: input.pool,
+    node: input.node,
+    text: summaryContent,
+    json: results,
+    result: results,
+    outputValue: results
+  });
+  input.pool.set('runtime.previous_text', summaryContent);
+  input.pool.set('runtime.last_model_node', input.node.id);
+  input.pool.set('video_screening_results', results as unknown as WorkflowRuntimeValue);
+  input.pool.set('screening_summary', summaryContent);
+
+  return {
+    response: mergeWorkflowRuntimeResponses(input.currentResponse, {
+      provider: input.profile.providerName,
+      modelName: input.profile.modelName,
+      content: summaryContent
+    }),
+    primaryProfile: input.profile,
+    logs: [
+      startedLog,
+      createLog(
+        input.task.taskId,
+        'info',
+        'WORKFLOW_RUNTIME_VIDEO_FACTORY_COMPLETED',
+        `Video screening factory completed: rejected=${rejected}, scored=${scored}, edited=${edited}, total=${results.length}.`,
+        input.createdAt,
+        sanitizeLogSuffix(`${input.node.id}-video-factory`),
+        { rejected, scored, edited, reviewRequired, total: results.length }
+      )
+    ],
+    usedToolIds: [...usedToolIds],
+    generatedArtifacts,
+    inputVariables: ['factory_request', 'start.files'],
+    outputVariables,
+    message: `Video screening finished: rejected=${rejected}, scored=${scored}, edited=${edited}.`
   };
 }
 
@@ -3141,6 +3374,576 @@ function readFactoryRuntimeObject(value: WorkflowRuntimeValue | undefined): Reco
   return isWorkflowRuntimeRecord(normalizedValue) ? normalizedValue : undefined;
 }
 
+function readFactoryVideoRuntimeItems(
+  factoryRequest: Record<string, unknown> | undefined,
+  startFiles: WorkflowRuntimeValue | undefined
+): FactoryVideoRuntimeItem[] {
+  const requestAttachments = Array.isArray(factoryRequest?.attachments) ? factoryRequest.attachments : [];
+  const rawFiles = requestAttachments.length > 0 ? requestAttachments : readWorkflowRuntimeFiles(startFiles);
+  return rawFiles.flatMap((item, index) => {
+    if (!isWorkflowRuntimeRecord(item) && !isWorkflowFileValue(item)) {
+      return [];
+    }
+
+    const record = item as Record<string, unknown>;
+    const localPath = readWorkflowRuntimeString(record.localPath)
+      ?? readWorkflowRuntimeString(record.path)
+      ?? readWorkflowRuntimeString(record.filePath);
+    if (!localPath || !isFactoryVideoPath(localPath, readWorkflowRuntimeString(record.name))) {
+      return [];
+    }
+
+    const name = readWorkflowRuntimeString(record.name)
+      ?? getPathFileName(localPath)
+      ?? `video-${index + 1}`;
+    return [
+      {
+        id: readWorkflowRuntimeString(record.id) ?? `factory-video-${index + 1}-${sanitizeLogSuffix(name)}`,
+        order: index + 1,
+        name,
+        localPath,
+        size: readFactoryRuntimeNumber(record.size),
+        type: readWorkflowRuntimeString(record.type)
+      }
+    ];
+  });
+}
+
+function isFactoryVideoPath(localPath: string, name?: string): boolean {
+  const target = name || localPath;
+  const extension = target.split('.').at(-1)?.trim().toLowerCase();
+  return ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v'].includes(extension ?? '');
+}
+
+function readFactoryVideoScreeningGates(factoryRequest: Record<string, unknown> | undefined): FactoryVideoScreeningGate[] {
+  const profile = isWorkflowRuntimeRecord(factoryRequest?.screeningProfile)
+    ? factoryRequest.screeningProfile
+    : isWorkflowRuntimeRecord(factoryRequest?.screeningRules)
+      ? factoryRequest.screeningRules
+      : undefined;
+  const rawGates = isWorkflowRuntimeRecord(profile) && Array.isArray(profile.gates)
+    ? profile.gates
+    : Array.isArray(factoryRequest?.gates)
+      ? factoryRequest.gates
+      : [];
+  const gates = rawGates.flatMap((item) => readFactoryVideoScreeningGate(item));
+  return gates.length > 0 ? gates : defaultFactoryVideoScreeningGates();
+}
+
+function readFactoryVideoScreeningGate(value: unknown): FactoryVideoScreeningGate[] {
+  if (!isWorkflowRuntimeRecord(value)) {
+    return [];
+  }
+
+  const id = readWorkflowRuntimeString(value.id);
+  const name = readWorkflowRuntimeString(value.name) ?? id;
+  const rules = Array.isArray(value.rules)
+    ? value.rules.flatMap((item) => readFactoryVideoScreeningRule(item))
+    : [];
+  return id && name && rules.length > 0 ? [{ id, name, rules }] : [];
+}
+
+function readFactoryVideoScreeningRule(value: unknown): FactoryVideoScreeningRule[] {
+  if (!isWorkflowRuntimeRecord(value)) {
+    return [];
+  }
+
+  const metric = readWorkflowRuntimeString(value.metric);
+  const operator = readFactoryVideoScreeningOperator(value.operator);
+  const failReason = readWorkflowRuntimeString(value.failReason)
+    ?? readWorkflowRuntimeString(value.message)
+    ?? '未达到筛选标准';
+  if (!metric || !operator) {
+    return [];
+  }
+
+  return [
+    {
+      metric,
+      operator,
+      value: value.value,
+      failReason
+    }
+  ];
+}
+
+function readFactoryVideoScreeningOperator(value: unknown): FactoryVideoScreeningRule['operator'] | undefined {
+  return value === '>=' ||
+    value === '<=' ||
+    value === '>' ||
+    value === '<' ||
+    value === 'equals' ||
+    value === 'notEquals' ||
+    value === 'between'
+    ? value
+    : undefined;
+}
+
+function defaultFactoryVideoScreeningGates(): FactoryVideoScreeningGate[] {
+  return [
+    {
+      id: 'video_spec',
+      name: '视频规格',
+      rules: [
+        { metric: 'portraitRatio', operator: 'between', value: [1.72, 1.86], failReason: '视频不是合格的 9:16 竖屏比例' },
+        { metric: 'durationSeconds', operator: '>=', value: 20, failReason: '视频时长小于 20 秒' },
+        { metric: 'hasAudio', operator: 'equals', value: true, failReason: '视频缺少可识别音轨' }
+      ]
+    },
+    {
+      id: 'asr_quality',
+      name: '语音识别',
+      rules: [
+        { metric: 'transcriptChars', operator: '>=', value: 80, failReason: '识别文本过短，说话内容不足' },
+        { metric: 'unclearTokenRatio', operator: '<=', value: 0.25, failReason: '语音含糊或识别失败比例过高' }
+      ]
+    },
+    {
+      id: 'content_minimum',
+      name: '内容完整性',
+      rules: [
+        { metric: 'beforeAfterCompleteness', operator: '>=', value: 0.6, failReason: '缺少清晰的使用前/使用后改善表述' }
+      ]
+    }
+  ];
+}
+
+function selectFactoryAsrProfile(
+  profiles: ModelProfile[],
+  factoryRequest: Record<string, unknown> | undefined
+): ModelProfile | undefined {
+  const asr = isWorkflowRuntimeRecord(factoryRequest?.asr) ? factoryRequest.asr : undefined;
+  const requestedProfileId = readWorkflowRuntimeString(asr?.modelProfileId);
+  if (requestedProfileId) {
+    return profiles.find((profile) => profile.id === requestedProfileId);
+  }
+
+  return profiles.find((profile) => profile.capabilities?.includes('audio_to_text'));
+}
+
+function hasFactoryToolAction(
+  binding: ResolvedRuntimeBinding,
+  toolId: string,
+  action: DesktopToolInvocationAction
+): boolean {
+  const tool = binding.availableTools.find((item) => item.id === toolId);
+  return tool ? isToolActionEnabledForManifest(tool, action) : false;
+}
+
+async function runFactoryVideoScreeningItem(input: {
+  task: DesktopTaskDetail;
+  video: FactoryVideoRuntimeItem;
+  gates: FactoryVideoScreeningGate[];
+  asrProfile?: ModelProfile;
+  scoringProfile: ModelProfile;
+  modelInvoker: DesktopModelInvoker;
+  desktopToolInvoker?: DesktopToolInvoker;
+  workspaceId?: string;
+  binding: ResolvedRuntimeBinding;
+  factoryRequest?: Record<string, unknown>;
+  editEnabled: boolean;
+  editTargetSeconds: number;
+  createdAt: string;
+}): Promise<FactoryVideoScreeningResult> {
+  const metrics: Record<string, unknown> = {};
+  const risks: string[] = [];
+  const videoSpecGate = input.gates.find((gate) => gate.id === 'video_spec');
+  const asrGate = input.gates.find((gate) => gate.id === 'asr_quality');
+  const contentGate = input.gates.find((gate) => gate.id === 'content_minimum');
+
+  if (!input.desktopToolInvoker || !input.workspaceId || !hasFactoryToolAction(input.binding, 'video-processing', 'video.probe')) {
+    return rejectFactoryVideo(input.video, metrics, '视频规格', '视频处理工具不可用，无法检查比例、时长和音轨');
+  }
+
+  const probeResult = await input.desktopToolInvoker({
+    workspaceId: input.workspaceId,
+    toolId: 'video-processing',
+    action: 'video.probe',
+    input: {
+      videoPath: input.video.localPath
+    },
+    allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+  });
+  if (!probeResult.ok) {
+    return rejectFactoryVideo(input.video, metrics, '视频规格', probeResult.message ?? '视频基础信息读取失败');
+  }
+  Object.assign(metrics, normalizeFactoryVideoProbeMetrics(probeResult.output));
+  const videoSpecFailure = videoSpecGate ? evaluateFactoryVideoGate(videoSpecGate, metrics) : undefined;
+  if (videoSpecFailure) {
+    return rejectFactoryVideo(input.video, metrics, videoSpecGate?.name ?? '视频规格', videoSpecFailure);
+  }
+
+  if (!input.asrProfile) {
+    return rejectFactoryVideo(input.video, metrics, asrGate?.name ?? '语音识别', '未配置支持语音转文字的 ASR 模型');
+  }
+
+  let transcript = '';
+  try {
+    const asr: Record<string, unknown> = isWorkflowRuntimeRecord(input.factoryRequest?.asr)
+      ? input.factoryRequest.asr
+      : {};
+    const asrResponse = await input.modelInvoker({
+      profile: input.asrProfile,
+      taskKind: 'audio_transcription',
+      audioTranscription: {
+        audioPath: input.video.localPath,
+        language: readWorkflowRuntimeString(asr.language) ?? 'zh',
+        dialect: readWorkflowRuntimeString(asr.dialect) ?? 'auto',
+        prompt: '请转写医疗案例视频中的人物口述内容，保留使用前、使用后、症状变化等关键信息。'
+      },
+      messages: [{ role: 'user', content: `请转写视频音频：${input.video.name}` }],
+      timeoutMs: 180_000
+    });
+    transcript = asrResponse.content.trim();
+  } catch (error) {
+    return rejectFactoryVideo(input.video, metrics, asrGate?.name ?? '语音识别', `ASR 识别失败：${readErrorMessage(error)}`);
+  }
+
+  metrics.transcriptChars = transcript.length;
+  metrics.unclearTokenRatio = estimateUnclearTokenRatio(transcript);
+  const asrFailure = asrGate ? evaluateFactoryVideoGate(asrGate, metrics) : undefined;
+  if (asrFailure) {
+    return rejectFactoryVideo(input.video, metrics, asrGate?.name ?? '语音识别', asrFailure, transcript);
+  }
+
+  const analysis = await analyzeFactoryVideoTranscript({
+    video: input.video,
+    transcript,
+    metrics,
+    profile: input.scoringProfile,
+    modelInvoker: input.modelInvoker,
+    editTargetSeconds: input.editTargetSeconds
+  });
+  metrics.beforeAfterCompleteness = analysis.beforeAfterCompleteness;
+  const contentFailure = contentGate ? evaluateFactoryVideoGate(contentGate, metrics) : undefined;
+  if (contentFailure) {
+    return rejectFactoryVideo(input.video, metrics, contentGate?.name ?? '内容完整性', contentFailure, transcript);
+  }
+
+  risks.push(...analysis.risks);
+  const score = clampWorkflowRuntimeLimit(analysis.score, estimateFactoryVideoScore(transcript, metrics), 0, 100);
+  const grade = score >= 85 ? 'A' : score >= 75 ? 'B' : score >= 60 ? 'C' : 'D';
+  let editPlan = analysis.editPlan;
+  const shouldEdit = input.editEnabled && score >= 75 && grade !== 'C' && grade !== 'D';
+  let editedVideoPath: string | undefined;
+  if (shouldEdit && input.desktopToolInvoker && input.workspaceId && hasFactoryToolAction(input.binding, 'video-processing', 'video.compose_clips')) {
+    editPlan = editPlan.length > 0
+      ? editPlan
+      : buildFallbackFactoryVideoEditPlan(metrics, input.editTargetSeconds);
+    if (editPlan.length > 0) {
+      const editResult = await input.desktopToolInvoker({
+        workspaceId: input.workspaceId,
+        toolId: 'video-processing',
+        action: 'video.compose_clips',
+        input: {
+          videoPath: input.video.localPath,
+          cutPlan: editPlan,
+          folder: 'videos',
+          fileName: `${input.video.name.replace(/\.[^.]+$/, '')}-初剪`
+        },
+        allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+      });
+      if (editResult.ok) {
+        editedVideoPath = readWorkflowRuntimeString(editResult.output?.localPath);
+      } else {
+        risks.push(`剪辑失败：${editResult.message ?? '未知错误'}`);
+      }
+    }
+  }
+
+  return {
+    id: input.video.id,
+    order: input.video.order,
+    name: input.video.name,
+    localPath: input.video.localPath,
+    status: editedVideoPath ? 'edited' : risks.length > 0 ? 'review_required' : 'scored',
+    score,
+    grade,
+    shouldEdit,
+    transcript,
+    summary: analysis.summary,
+    risks,
+    metrics,
+    editPlan,
+    editedVideoPath
+  };
+}
+
+function normalizeFactoryVideoProbeMetrics(output: Record<string, unknown> | undefined): Record<string, unknown> {
+  const width = readFactoryRuntimeNumber(output?.width);
+  const height = readFactoryRuntimeNumber(output?.height);
+  return {
+    probeAvailable: output?.probeAvailable === true,
+    width,
+    height,
+    durationSeconds: readFactoryRuntimeNumber(output?.durationSeconds),
+    hasAudio: output?.hasAudio === true,
+    hasVideo: output?.hasVideo === true || Boolean(width && height),
+    portraitRatio: width && height ? Math.round((height / width) * 1000) / 1000 : undefined,
+    orientation: readWorkflowRuntimeString(output?.orientation),
+    audioStreamCount: readFactoryRuntimeNumber(output?.audioStreamCount),
+    probeWarning: readWorkflowRuntimeString(output?.probeWarning)
+  };
+}
+
+function evaluateFactoryVideoGate(
+  gate: FactoryVideoScreeningGate,
+  metrics: Record<string, unknown>
+): string | undefined {
+  for (const rule of gate.rules) {
+    if (!evaluateFactoryVideoRule(rule, metrics[rule.metric])) {
+      return rule.failReason;
+    }
+  }
+
+  return undefined;
+}
+
+function evaluateFactoryVideoRule(rule: FactoryVideoScreeningRule, actual: unknown): boolean {
+  if (actual === undefined || actual === null || actual === '') {
+    return false;
+  }
+
+  if (rule.operator === 'equals') {
+    return actual === rule.value;
+  }
+
+  if (rule.operator === 'notEquals') {
+    return actual !== rule.value;
+  }
+
+  const actualNumber = typeof actual === 'number' ? actual : typeof actual === 'string' ? Number(actual) : NaN;
+  if (!Number.isFinite(actualNumber)) {
+    return false;
+  }
+
+  if (rule.operator === 'between') {
+    const bounds = Array.isArray(rule.value) ? rule.value.map((item) => Number(item)) : [];
+    return bounds.length >= 2 &&
+      Number.isFinite(bounds[0]) &&
+      Number.isFinite(bounds[1]) &&
+      actualNumber >= bounds[0]! &&
+      actualNumber <= bounds[1]!;
+  }
+
+  const expectedNumber = typeof rule.value === 'number' ? rule.value : typeof rule.value === 'string' ? Number(rule.value) : NaN;
+  if (!Number.isFinite(expectedNumber)) {
+    return false;
+  }
+
+  if (rule.operator === '>=') return actualNumber >= expectedNumber;
+  if (rule.operator === '<=') return actualNumber <= expectedNumber;
+  if (rule.operator === '>') return actualNumber > expectedNumber;
+  if (rule.operator === '<') return actualNumber < expectedNumber;
+  return false;
+}
+
+function rejectFactoryVideo(
+  video: FactoryVideoRuntimeItem,
+  metrics: Record<string, unknown>,
+  gate: string,
+  reason: string,
+  transcript?: string
+): FactoryVideoScreeningResult {
+  return {
+    id: video.id,
+    order: video.order,
+    name: video.name,
+    localPath: video.localPath,
+    status: 'rejected',
+    rejectedGate: gate,
+    rejectedReason: reason,
+    shouldEdit: false,
+    transcript,
+    risks: [],
+    metrics
+  };
+}
+
+function estimateUnclearTokenRatio(transcript: string): number {
+  const normalized = transcript.trim();
+  if (!normalized) {
+    return 1;
+  }
+
+  const unclearMatches = normalized.match(/听不清|无法识别|不清楚|\?{2,}|-{3,}|\[.*?不.*?清.*?\]/g) ?? [];
+  return Math.min(1, Math.round((unclearMatches.length / Math.max(normalized.length / 40, 1)) * 1000) / 1000);
+}
+
+async function analyzeFactoryVideoTranscript(input: {
+  video: FactoryVideoRuntimeItem;
+  transcript: string;
+  metrics: Record<string, unknown>;
+  profile: ModelProfile;
+  modelInvoker: DesktopModelInvoker;
+  editTargetSeconds: number;
+}): Promise<{
+  score: number;
+  beforeAfterCompleteness: number;
+  summary: string;
+  risks: string[];
+  editPlan: Array<{ start: number; end: number; label?: string; reason?: string }>;
+}> {
+  try {
+    const response = await input.modelInvoker({
+      profile: input.profile,
+      messages: buildFactoryVideoScoringMessages(input.video, input.transcript, input.metrics, input.editTargetSeconds),
+      timeoutMs: 60_000
+    });
+    const parsed = parseWorkflowRuntimeJson(response.content);
+    const record = isWorkflowRuntimeRecord(parsed) ? parsed : {};
+    return {
+      score: clampWorkflowRuntimeLimit(readFactoryRuntimeNumber(record.score), estimateFactoryVideoScore(input.transcript, input.metrics), 0, 100),
+      beforeAfterCompleteness: Math.max(0, Math.min(readFactoryRuntimeNumber(record.beforeAfterCompleteness) ?? estimateBeforeAfterCompleteness(input.transcript), 1)),
+      summary: readWorkflowRuntimeString(record.summary) ?? buildFactoryVideoTranscriptSummary(input.transcript),
+      risks: Array.isArray(record.risks)
+        ? record.risks.flatMap((item) => readWorkflowRuntimeString(item) ? [readWorkflowRuntimeString(item)!] : [])
+        : [],
+      editPlan: readFactoryVideoEditPlan(record.editPlan ?? record.segments)
+    };
+  } catch (error) {
+    return {
+      score: estimateFactoryVideoScore(input.transcript, input.metrics),
+      beforeAfterCompleteness: estimateBeforeAfterCompleteness(input.transcript),
+      summary: buildFactoryVideoTranscriptSummary(input.transcript),
+      risks: [`评分模型调用失败，已使用规则估算：${readErrorMessage(error)}`],
+      editPlan: []
+    };
+  }
+}
+
+function buildFactoryVideoScoringMessages(
+  video: FactoryVideoRuntimeItem,
+  transcript: string,
+  metrics: Record<string, unknown>,
+  editTargetSeconds: number
+): DesktopModelChatMessage[] {
+  return [
+    {
+      role: 'system',
+      content: [
+        '你是 QiuAI WorkOS 的案例视频素材质检员。',
+        '只评价素材质量、表达完整度、剪辑价值和合规风险，不判断药物疗效真假，不输出医疗建议。',
+        '必须返回 JSON，不要 markdown。'
+      ].join('\n')
+    },
+    {
+      role: 'user',
+      content: JSON.stringify({
+        videoName: video.name,
+        metrics,
+        transcript,
+        scoringRules: {
+          expressionClarity: 20,
+          beforeAfterCompleteness: 25,
+          improvementSpecificity: 25,
+          naturalness: 15,
+          editPotential: 15
+        },
+        requiredOutput: {
+          score: '0-100 number',
+          beforeAfterCompleteness: '0-1 number',
+          summary: 'short Chinese summary',
+          risks: 'string[]; include privacy, medical advertising, exaggerated claim, unclear expression risks',
+          editPlan: `optional segments for about ${editTargetSeconds}s: [{"start":0,"end":8,"label":"使用前症状","reason":"..."}]`
+        }
+      })
+    }
+  ];
+}
+
+function estimateBeforeAfterCompleteness(transcript: string): number {
+  const before = /(使用前|之前|原来|以前|一开始|症状|疼|痛|不舒服|病症|问题)/.test(transcript);
+  const after = /(使用后|之后|后来|现在|改善|缓解|好了|减轻|恢复|变化)/.test(transcript);
+  const process = /(使用|服用|用了|吃了|产品|药|疗程|坚持)/.test(transcript);
+  return Math.round(([before, after, process].filter(Boolean).length / 3) * 1000) / 1000;
+}
+
+function estimateFactoryVideoScore(transcript: string, metrics: Record<string, unknown>): number {
+  const completeness = estimateBeforeAfterCompleteness(transcript);
+  const transcriptChars = readFactoryRuntimeNumber(metrics.transcriptChars) ?? transcript.length;
+  const lengthScore = Math.min(1, transcriptChars / 220);
+  const unclearPenalty = readFactoryRuntimeNumber(metrics.unclearTokenRatio) ?? 0;
+  const score = 45 + completeness * 35 + lengthScore * 20 - unclearPenalty * 40;
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function buildFactoryVideoTranscriptSummary(transcript: string): string {
+  return transcript.replace(/\s+/g, ' ').trim().slice(0, 140);
+}
+
+function readFactoryVideoEditPlan(value: unknown): Array<{ start: number; end: number; label?: string; reason?: string }> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!isWorkflowRuntimeRecord(item)) {
+      return [];
+    }
+
+    const start = readFactoryRuntimeNumber(item.start);
+    const end = readFactoryRuntimeNumber(item.end);
+    if (start === undefined || end === undefined || end <= start) {
+      return [];
+    }
+
+    return [{
+      start,
+      end,
+      label: readWorkflowRuntimeString(item.label),
+      reason: readWorkflowRuntimeString(item.reason)
+    }];
+  }).slice(0, 6);
+}
+
+function buildFallbackFactoryVideoEditPlan(
+  metrics: Record<string, unknown>,
+  targetSeconds: number
+): Array<{ start: number; end: number; label: string; reason: string }> {
+  const duration = readFactoryRuntimeNumber(metrics.durationSeconds);
+  if (!duration || duration < 20) {
+    return [];
+  }
+
+  const segmentLength = Math.max(5, Math.min(12, Math.round(targetSeconds / 3)));
+  const middleStart = Math.max(0, Math.round(duration / 2 - segmentLength / 2));
+  const tailStart = Math.max(0, Math.round(duration - segmentLength - 2));
+  return [
+    { start: 0, end: Math.min(segmentLength, duration), label: '开场', reason: '保留开头上下文' },
+    { start: middleStart, end: Math.min(middleStart + segmentLength, duration), label: '中段', reason: '保留使用过程或核心说明' },
+    { start: tailStart, end: Math.min(tailStart + segmentLength, duration), label: '结尾', reason: '保留改善结果表达' }
+  ];
+}
+
+function buildFactoryVideoScreeningRows(results: FactoryVideoScreeningResult[]): string[][] {
+  return [
+    ['序号', '文件名', '状态', '筛掉关卡', '筛掉原因', '总分', '等级', '建议剪辑', '摘要', '风险提示', '转写文本', '本地路径', '初剪路径'],
+    ...results.map((item) => [
+      String(item.order),
+      item.name,
+      formatFactoryVideoStatus(item.status),
+      item.rejectedGate ?? '',
+      item.rejectedReason ?? '',
+      item.score === undefined ? '' : String(item.score),
+      item.grade ?? '',
+      item.shouldEdit ? '是' : '否',
+      item.summary ?? '',
+      item.risks.join('；'),
+      item.transcript ?? '',
+      item.localPath,
+      item.editedVideoPath ?? ''
+    ])
+  ];
+}
+
+function formatFactoryVideoStatus(status: FactoryVideoScreeningResult['status']): string {
+  if (status === 'rejected') return '已筛掉';
+  if (status === 'edited') return '已剪辑';
+  if (status === 'review_required') return '需人工复核';
+  return '已评分';
+}
+
 function readFactoryRuntimeNumber(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;
@@ -3152,6 +3955,18 @@ function readFactoryRuntimeNumber(value: unknown): number | undefined {
   }
 
   return undefined;
+}
+
+function readFactoryRuntimeBoolean(value: unknown): boolean {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    return ['true', '1', 'yes', 'on', '开启', '是'].includes(value.trim().toLowerCase());
+  }
+
+  return false;
 }
 
 function readFactoryRuntimePackageInstructions(
@@ -4741,6 +5556,19 @@ function inferWorkflowRuntimeFileKind(localPath: string): WorkflowFileValue['kin
   return 'other';
 }
 
+function isWorkflowRuntimeTextExtractableFile(file: WorkflowFileValue): boolean {
+  return ['document', 'pdf', 'text', 'spreadsheet', 'presentation'].includes(file.kind);
+}
+
+function isWorkflowRuntimeTextExtractablePath(localPath: string): boolean {
+  return isWorkflowRuntimeTextExtractableFile({
+    id: 'path-check',
+    name: getPathFileName(localPath) ?? localPath,
+    kind: inferWorkflowRuntimeFileKind(localPath),
+    localPath
+  });
+}
+
 function parseWorkflowRuntimeJson(value: string): unknown | undefined {
   const candidates = [
     value.trim(),
@@ -4903,6 +5731,7 @@ async function prepareAttachmentContext(input: {
   const attachmentPaths = (input.task.executionContext?.attachmentPaths ?? [])
     .map((attachmentPath) => attachmentPath.trim())
     .filter(Boolean)
+    .filter(isWorkflowRuntimeTextExtractablePath)
     .slice(0, maxAttachmentContextFiles);
 
   if (attachmentPaths.length === 0) {

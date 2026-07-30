@@ -30,7 +30,8 @@ import {
   SettingOutlined,
   RollbackOutlined,
   ReloadOutlined,
-  ToolOutlined
+  ToolOutlined,
+  VideoCameraOutlined
 } from '@ant-design/icons';
 import { qiuAntTheme } from '@qiuai/design-tokens';
 import AppProvider from 'antd/es/app';
@@ -158,9 +159,14 @@ type RoleApplicationType = 'digital_employee' | 'digital_factory';
 
 interface FactoryRunFormValues {
   roleCode: string;
-  platform: string;
-  packageKeys: string[];
-  qualityCheckMode: 'none' | 'basic' | 'smart';
+  platform?: string;
+  packageKeys?: string[];
+  qualityCheckMode?: 'none' | 'basic' | 'smart';
+  asrModelProfileId?: string;
+  dialect?: string;
+  screeningProfileKey?: string;
+  editEnabled?: boolean;
+  editTargetSeconds?: number;
   instruction?: string;
 }
 
@@ -701,6 +707,74 @@ const knowledgeBindingOptions = [
 ];
 
 const modelProviderPresets: ModelProviderPreset[] = [
+  {
+    id: 'tencent-asr-compatible',
+    name: '腾讯云 ASR 兼容网关',
+    summary: '适合普通话、粤语、上海话、四川/重庆口音等中文语音转文字；API Base URL 按实际兼容网关填写。',
+    models: [
+      {
+        label: '多方言识别 / 普通话、粤语、上海话、四川重庆口音',
+        modelName: '16k_zh_dialect',
+        purpose: 'audio',
+        capabilities: ['audio_to_text'],
+        temperature: 0,
+        maxTokens: 0
+      },
+      {
+        label: '中文医疗场景识别',
+        modelName: '16k_zh_medical',
+        purpose: 'audio',
+        capabilities: ['audio_to_text'],
+        temperature: 0,
+        maxTokens: 0
+      }
+    ]
+  },
+  {
+    id: 'aliyun-asr-compatible',
+    name: '阿里云 ASR 兼容网关',
+    summary: '适合国内企业网络和中文方言转写；API Base URL 按实际兼容网关填写。',
+    models: [
+      {
+        label: 'Paraformer 中文多方言',
+        modelName: 'paraformer-v2',
+        purpose: 'audio',
+        capabilities: ['audio_to_text'],
+        temperature: 0,
+        maxTokens: 0
+      }
+    ]
+  },
+  {
+    id: 'xfyun-asr-compatible',
+    name: '讯飞 ASR 兼容网关',
+    summary: '适合普通话和常见中文方言语音识别；API Base URL 按实际兼容网关填写。',
+    models: [
+      {
+        label: '中文方言语音听写',
+        modelName: 'iat-dialect',
+        purpose: 'audio',
+        capabilities: ['audio_to_text'],
+        temperature: 0,
+        maxTokens: 0
+      }
+    ]
+  },
+  {
+    id: 'baidu-asr-compatible',
+    name: '百度 ASR 兼容网关',
+    summary: '适合普通话、粤语、四川话等中文转写；API Base URL 按实际兼容网关填写。',
+    models: [
+      {
+        label: '中文多方言识别',
+        modelName: 'zh-dialect-asr',
+        purpose: 'audio',
+        capabilities: ['audio_to_text'],
+        temperature: 0,
+        maxTokens: 0
+      }
+    ]
+  },
   {
     id: 'deepseek',
     name: 'DeepSeek',
@@ -4034,6 +4108,10 @@ export default function App() {
       ? desktopRoleTemplateByRoleCode.get(factoryRunRoleCode)
       : undefined;
     const factory = readFactoryManifest(template?.dependencyManifest);
+    if (isMedicalCaseVideoFactory(factory)) {
+      return renderMedicalCaseVideoFactoryRunModal(template, factory);
+    }
+
     const platformOptions = readFactoryPlatformOptions(factory);
     const packageOptions = readFactoryPackageOptions(factory);
     const qualityModes = readFactoryQualityModes(factory);
@@ -4145,6 +4223,179 @@ export default function App() {
                 </div>
               ) : (
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请添加商品参考图" />
+              )}
+            </div>
+          </Space>
+        ) : (
+          <Empty description="未找到数字工厂" />
+        )}
+      </Modal>
+    );
+  }
+
+  function renderMedicalCaseVideoFactoryRunModal(
+    template: DesktopRoleTemplate | undefined,
+    factory: DigitalFactoryManifest
+  ) {
+    const maxItems = readFactoryMaxItems(factory);
+    const dialectOptions = readFactoryAsrDialectOptions(factory);
+    const screeningProfiles = readFactoryScreeningProfiles(factory);
+    const targetSecondOptions = factory.editing?.targetSecondOptions?.length
+      ? factory.editing.targetSecondOptions
+      : [15, 30, 45];
+    const audioProfiles = runtimeState.modelProfiles.filter((profile) =>
+      readModelProfileCapabilities(profile).includes('audio_to_text')
+    );
+    const audioProfileOptions = audioProfiles.map((profile) => {
+      const enabled = runtimeState.localRuntime.enabledModelProfileIds.includes(profile.id);
+      const configured = isRuntimeModelProfileConfigured(profile, template?.roleCode);
+      const suffix = [
+        enabled ? '' : '未启用',
+        configured ? '' : '未配置'
+      ].filter(Boolean).join(' / ');
+
+      return {
+        value: profile.id,
+        label: `${profile.providerName} / ${profile.modelName}${suffix ? `（${suffix}）` : ''}`,
+        disabled: !enabled || !configured
+      };
+    });
+    const hasReadyAudioProfile = audioProfileOptions.some((option) => !option.disabled);
+
+    return (
+      <Modal
+        open={Boolean(factoryRunRoleCode)}
+        title={template ? `运行工厂：${template.name}` : '运行数字工厂'}
+        okText="开始筛选"
+        onCancel={closeFactoryRunModal}
+        onOk={() => factoryRunForm.submit()}
+        width={820}
+        destroyOnHidden
+      >
+        {template ? (
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Descriptions column={1} size="small" bordered>
+              <Descriptions.Item label="工厂">{template.name}</Descriptions.Item>
+              <Descriptions.Item label="单批上限">{maxItems} 个视频</Descriptions.Item>
+              <Descriptions.Item label="输出">{template.outputFormat || 'Excel 筛选评分表 + 可选本地初剪视频'}</Descriptions.Item>
+            </Descriptions>
+
+            {!hasReadyAudioProfile ? (
+              <Typography.Text type="warning">
+                请先在模型配置中启用并配置一个支持“语音转文字”的 ASR 模型，否则只能筛掉到 ASR 关卡，无法进入评分。
+              </Typography.Text>
+            ) : null}
+
+            <Form<FactoryRunFormValues>
+              form={factoryRunForm}
+              layout="vertical"
+              initialValues={{
+                roleCode: template.roleCode,
+                dialect: factory.asr?.defaultDialect ?? 'auto',
+                screeningProfileKey: screeningProfiles[0]?.key ?? 'default_medical_case',
+                editEnabled: factory.editing?.defaultEnabled ?? false,
+                editTargetSeconds: factory.editing?.targetSeconds ?? 30
+              }}
+              onFinish={submitFactoryRun}
+            >
+              <Form.Item name="roleCode" hidden>
+                <Input />
+              </Form.Item>
+              <div className="inline-form-grid">
+                <Form.Item
+                  name="asrModelProfileId"
+                  label="ASR 模型"
+                  rules={[{ required: true, message: '请选择可用的 ASR 模型' }]}
+                >
+                  <Select
+                    placeholder="选择语音转文字模型"
+                    options={audioProfileOptions}
+                    notFoundContent="暂无支持语音转文字的模型"
+                  />
+                </Form.Item>
+                <Form.Item name="dialect" label="语言 / 方言" rules={[{ required: true }]}>
+                  <Select
+                    options={dialectOptions.map((item) => ({
+                      value: item.key,
+                      label: item.label
+                    }))}
+                  />
+                </Form.Item>
+              </div>
+              <Form.Item
+                name="screeningProfileKey"
+                label="筛选标准"
+                rules={[{ required: true, message: '请选择筛选标准' }]}
+              >
+                <Select
+                  options={screeningProfiles.map((item) => ({
+                    value: item.key,
+                    label: item.label
+                  }))}
+                />
+              </Form.Item>
+              <Typography.Text type="secondary">
+                当前标准会依次检查 9:16 竖屏、20 秒以上、音轨可识别、转写文本长度和使用前后改善表达完整度。
+              </Typography.Text>
+
+              <div className="inline-form-grid">
+                <Form.Item name="editEnabled" label="生成初剪" valuePropName="checked">
+                  <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+                </Form.Item>
+                <Form.Item name="editTargetSeconds" label="目标时长">
+                  <Select
+                    options={targetSecondOptions.map((seconds) => ({
+                      value: seconds,
+                      label: `${seconds} 秒`
+                    }))}
+                  />
+                </Form.Item>
+              </div>
+              <Form.Item name="instruction" label="补充要求">
+                <Input.TextArea
+                  rows={3}
+                  placeholder="例如：优先保留用户说使用前症状和使用后改善的片段；夸张医疗承诺请标记风险。"
+                />
+              </Form.Item>
+            </Form>
+
+            <div className="factory-upload-panel">
+              <Flex align="center" justify="space-between" gap={12} wrap="wrap">
+                <Space direction="vertical" size={2}>
+                  <Typography.Text strong>案例视频</Typography.Text>
+                  <Typography.Text type="secondary">
+                    支持 mp4、mov、mkv、avi、webm、m4v；单批最多 {maxItems} 个视频，视频只在本机处理。
+                  </Typography.Text>
+                </Space>
+                <Button icon={<FileAddOutlined />} onClick={() => factoryFileInputRef.current?.click()}>
+                  添加视频
+                </Button>
+                <input
+                  ref={factoryFileInputRef}
+                  type="file"
+                  multiple
+                  accept=".mp4,.mov,.mkv,.avi,.webm,.m4v"
+                  hidden
+                  onChange={handleFactoryFileInputChange}
+                />
+              </Flex>
+              {factoryAttachments.length > 0 ? (
+                <div className="factory-attachment-list">
+                  {factoryAttachments.map((attachment) => (
+                    <div key={attachment.id} className="factory-attachment-item">
+                      <Space size={8}>
+                        <VideoCameraOutlined />
+                        <span>{attachment.name}</span>
+                        <Typography.Text type="secondary">{formatFileSize(attachment.size)}</Typography.Text>
+                      </Space>
+                      <Button size="small" type="text" danger onClick={() => removeFactoryAttachment(attachment.id)}>
+                        移除
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请添加案例视频" />
               )}
             </div>
           </Space>
@@ -5165,6 +5416,32 @@ export default function App() {
     }
 
     const factory = readFactoryManifest(template.dependencyManifest);
+    if (isMedicalCaseVideoFactory(factory)) {
+      const screeningProfiles = readFactoryScreeningProfiles(factory);
+      const defaultProfile = screeningProfiles.find((item) => item.defaultSelected) ?? screeningProfiles[0];
+      const audioProfiles = runtimeState.modelProfiles.filter((profile) =>
+        readModelProfileCapabilities(profile).includes('audio_to_text')
+      );
+      const readyAudioProfile = audioProfiles.find(
+        (profile) =>
+          runtimeState.localRuntime.enabledModelProfileIds.includes(profile.id) &&
+          isRuntimeModelProfileConfigured(profile, roleCode)
+      );
+
+      setFactoryRunRoleCode(roleCode);
+      setFactoryAttachments([]);
+      factoryRunForm.setFieldsValue({
+        roleCode,
+        asrModelProfileId: readyAudioProfile?.id ?? audioProfiles[0]?.id,
+        dialect: factory.asr?.defaultDialect ?? 'auto',
+        screeningProfileKey: defaultProfile?.key ?? 'default_medical_case',
+        editEnabled: factory.editing?.defaultEnabled ?? false,
+        editTargetSeconds: factory.editing?.targetSeconds ?? 30,
+        instruction: ''
+      });
+      return;
+    }
+
     const packageOptions = readFactoryPackageOptions(factory);
     const platformOptions = readFactoryPlatformOptions(factory);
     const qualityModes = readFactoryQualityModes(factory);
@@ -5198,6 +5475,57 @@ export default function App() {
 
     const factory = readFactoryManifest(template.dependencyManifest);
     const maxItems = readFactoryMaxItems(factory);
+    if (isMedicalCaseVideoFactory(factory)) {
+      const videoAttachments = factoryAttachments.filter((attachment) => isFactoryVideoAttachment(attachment));
+      if (videoAttachments.length === 0) {
+        message.warning('请至少添加一个案例视频。');
+        return;
+      }
+      if (videoAttachments.length > maxItems) {
+        message.warning(`单批最多处理 ${maxItems} 个视频，请拆分批次。`);
+        return;
+      }
+      if (videoAttachments.some((attachment) => !attachment.localPath)) {
+        message.warning('当前运行环境没有暴露视频本地路径，无法执行本机视频筛选。');
+        return;
+      }
+      if (!values.asrModelProfileId) {
+        message.warning('请选择一个可用的 ASR 模型。');
+        return;
+      }
+
+      const asrProfile = runtimeState.modelProfiles.find((profile) => profile.id === values.asrModelProfileId);
+      if (
+        !asrProfile ||
+        !readModelProfileCapabilities(asrProfile).includes('audio_to_text') ||
+        !runtimeState.localRuntime.enabledModelProfileIds.includes(asrProfile.id) ||
+        !isRuntimeModelProfileConfigured(asrProfile, values.roleCode)
+      ) {
+        message.warning('请选择已启用且已配置 API Key 的 ASR 模型。');
+        return;
+      }
+
+      const title = `${template.name} - ${videoAttachments.length} 个视频`;
+      const input = buildMedicalCaseVideoFactoryTaskInput({
+        template,
+        factory,
+        values,
+        attachments: videoAttachments
+      });
+      const created = createTask({
+        roleCode: values.roleCode,
+        title,
+        input,
+        attachments: videoAttachments,
+        extraModelProfileIds: [values.asrModelProfileId]
+      });
+      if (created) {
+        closeFactoryRunModal();
+        navigateToSection('workbench');
+      }
+      return;
+    }
+
     const imageAttachments = factoryAttachments.filter((attachment) => isFactoryImageAttachment(attachment));
     if (imageAttachments.length === 0) {
       message.warning('请至少上传一张商品参考图。');
@@ -5839,7 +6167,7 @@ export default function App() {
     return preparedState;
   }
 
-  function createTask(values: TaskFormValues & { attachments?: ComposerAttachment[] }): boolean {
+  function createTask(values: TaskFormValues & { attachments?: ComposerAttachment[]; extraModelProfileIds?: string[] }): boolean {
     const title = values.title.trim();
     if (!title) {
       return false;
@@ -5854,7 +6182,10 @@ export default function App() {
     const roleName = resolveRoleName(preparedState.rolePackages, roleCode);
     const input = values.input?.trim() || `请处理任务：${title}`;
     const executionContext = buildTaskExecutionContextWithAttachments(
-      buildExecutionContextForRole(preparedState.rolePackages, roleCode),
+      buildTaskExecutionContextWithExtraModels(
+        buildExecutionContextForRole(preparedState.rolePackages, roleCode),
+        values.extraModelProfileIds ?? []
+      ),
       values.attachments ?? []
     );
     const taskDetail = createMockTaskDetail({
@@ -6597,6 +6928,27 @@ function buildTaskExecutionContextWithAttachments(
   };
 }
 
+function buildTaskExecutionContextWithExtraModels(
+  executionContext: NonNullable<DesktopTaskDetail['executionContext']> | undefined,
+  modelProfileIds: string[]
+): NonNullable<DesktopTaskDetail['executionContext']> | undefined {
+  if (!executionContext) {
+    return undefined;
+  }
+
+  const extraModelProfileIds = modelProfileIds
+    .map((profileId) => profileId.trim())
+    .filter(Boolean);
+  if (extraModelProfileIds.length === 0) {
+    return executionContext;
+  }
+
+  return {
+    ...executionContext,
+    modelProfileIds: [...new Set([...executionContext.modelProfileIds, ...extraModelProfileIds])]
+  };
+}
+
 function roleAvatarText(name: string) {
   const normalized = name.trim();
   if (!normalized) {
@@ -7043,6 +7395,19 @@ interface DigitalFactoryQualityModeOption {
   description?: string;
 }
 
+interface DigitalFactoryAsrDialectOption {
+  key: string;
+  label: string;
+}
+
+interface DigitalFactoryScreeningProfileOption {
+  key: string;
+  label: string;
+  description?: string;
+  defaultSelected?: boolean;
+  gates?: unknown[];
+}
+
 interface DigitalFactoryManifest {
   kind?: string;
   title?: string;
@@ -7050,6 +7415,7 @@ interface DigitalFactoryManifest {
     maxItems?: number;
     imageExtensions?: string[];
     tableExtensions?: string[];
+    videoExtensions?: string[];
   };
   platforms?: DigitalFactoryPlatformOption[];
   packages?: DigitalFactoryPackageOption[];
@@ -7057,10 +7423,24 @@ interface DigitalFactoryManifest {
     defaultMode?: FactoryRunFormValues['qualityCheckMode'];
     modes?: DigitalFactoryQualityModeOption[];
   };
+  asr?: {
+    defaultLanguage?: string;
+    defaultDialect?: string;
+    dialects?: DigitalFactoryAsrDialectOption[];
+  };
+  screeningProfiles?: DigitalFactoryScreeningProfileOption[];
+  editing?: {
+    defaultEnabled?: boolean;
+    targetSeconds?: number;
+    targetSecondOptions?: number[];
+    requiresFfmpeg?: boolean;
+  };
   output?: {
     defaultImageFormat?: string;
     packageFormat?: string;
     folder?: string;
+    reportFormat?: string;
+    videoFormat?: string;
   };
 }
 
@@ -7136,6 +7516,24 @@ const defaultFactoryQualityModes: DigitalFactoryQualityModeOption[] = [
 ];
 
 const factoryImageExtensions = new Set(['png', 'jpg', 'jpeg', 'webp']);
+const factoryVideoExtensions = new Set(['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v']);
+
+const defaultFactoryAsrDialects: DigitalFactoryAsrDialectOption[] = [
+  { key: 'auto', label: '自动识别' },
+  { key: 'mandarin', label: '普通话' },
+  { key: 'cantonese', label: '粤语' },
+  { key: 'shanghai', label: '上海话' },
+  { key: 'sichuan_chongqing', label: '四川/重庆口音' }
+];
+
+const defaultFactoryScreeningProfiles: DigitalFactoryScreeningProfileOption[] = [
+  {
+    key: 'default_medical_case',
+    label: '医疗案例素材标准',
+    description: '先检查 9:16、20 秒以上、音轨可识别，再检查使用前后改善表述完整度。',
+    defaultSelected: true
+  }
+];
 
 function readRoleApplicationType(
   value:
@@ -7184,7 +7582,8 @@ function readFactoryManifest(manifest: RoleTemplateDependencyManifest | undefine
     batch: {
       maxItems: readNumber(batch?.maxItems),
       imageExtensions: readStringArray(batch?.imageExtensions),
-      tableExtensions: readStringArray(batch?.tableExtensions)
+      tableExtensions: readStringArray(batch?.tableExtensions),
+      videoExtensions: readStringArray(batch?.videoExtensions)
     },
     platforms: readFactoryPlatformOptionsFromValue(factory.platforms),
     packages: readFactoryPackageOptionsFromValue(factory.packages),
@@ -7192,10 +7591,28 @@ function readFactoryManifest(manifest: RoleTemplateDependencyManifest | undefine
       defaultMode: readFactoryQualityModeKey(qualityCheck?.defaultMode),
       modes: readFactoryQualityModeOptionsFromValue(qualityCheck?.modes)
     },
+    asr: {
+      defaultLanguage: readString(isPlainObject(factory.asr) ? factory.asr.defaultLanguage : undefined),
+      defaultDialect: readString(isPlainObject(factory.asr) ? factory.asr.defaultDialect : undefined),
+      dialects: readFactoryAsrDialectOptionsFromValue(isPlainObject(factory.asr) ? factory.asr.dialects : undefined)
+    },
+    screeningProfiles: readFactoryScreeningProfilesFromValue(factory.screeningProfiles),
+    editing: {
+      defaultEnabled: isPlainObject(factory.editing) && typeof factory.editing.defaultEnabled === 'boolean'
+        ? factory.editing.defaultEnabled
+        : undefined,
+      targetSeconds: readNumber(isPlainObject(factory.editing) ? factory.editing.targetSeconds : undefined),
+      targetSecondOptions: readNumberArray(isPlainObject(factory.editing) ? factory.editing.targetSecondOptions : undefined),
+      requiresFfmpeg: isPlainObject(factory.editing) && typeof factory.editing.requiresFfmpeg === 'boolean'
+        ? factory.editing.requiresFfmpeg
+        : undefined
+    },
     output: {
       defaultImageFormat: readString(output?.defaultImageFormat),
       packageFormat: readString(output?.packageFormat),
-      folder: readString(output?.folder)
+      folder: readString(output?.folder),
+      reportFormat: readString(output?.reportFormat),
+      videoFormat: readString(output?.videoFormat)
     }
   };
 }
@@ -7210,6 +7627,14 @@ function readFactoryPackageOptions(factory: DigitalFactoryManifest): DigitalFact
 
 function readFactoryQualityModes(factory: DigitalFactoryManifest): DigitalFactoryQualityModeOption[] {
   return factory.qualityCheck?.modes?.length ? factory.qualityCheck.modes : defaultFactoryQualityModes;
+}
+
+function readFactoryAsrDialectOptions(factory: DigitalFactoryManifest): DigitalFactoryAsrDialectOption[] {
+  return factory.asr?.dialects?.length ? factory.asr.dialects : defaultFactoryAsrDialects;
+}
+
+function readFactoryScreeningProfiles(factory: DigitalFactoryManifest): DigitalFactoryScreeningProfileOption[] {
+  return factory.screeningProfiles?.length ? factory.screeningProfiles : defaultFactoryScreeningProfiles;
 }
 
 function readFactoryMaxItems(factory: DigitalFactoryManifest) {
@@ -7230,6 +7655,23 @@ function isFactoryImageAttachment(attachment: ComposerAttachment) {
   return factoryImageExtensions.has(extension);
 }
 
+function isFactoryVideoAttachment(attachment: ComposerAttachment) {
+  if (attachment.type?.toLowerCase().startsWith('video/')) {
+    return true;
+  }
+
+  const extension = attachment.name.split('.').pop()?.trim().toLowerCase() ?? '';
+  return factoryVideoExtensions.has(extension);
+}
+
+function readFactoryKind(factory: DigitalFactoryManifest) {
+  return factory.kind ?? 'cross_border_product_image_factory';
+}
+
+function isMedicalCaseVideoFactory(factory: DigitalFactoryManifest) {
+  return readFactoryKind(factory) === 'medical_case_video_screening_factory';
+}
+
 function buildFactoryTaskInput({
   template,
   factory,
@@ -7243,7 +7685,8 @@ function buildFactoryTaskInput({
 }) {
   const platform = readFactoryPlatformOptions(factory).find((item) => item.key === values.platform);
   const packageOptions = readFactoryPackageOptions(factory);
-  const selectedPackages = packageOptions.filter((item) => values.packageKeys.includes(item.key));
+  const selectedPackageKeys = values.packageKeys ?? [];
+  const selectedPackages = packageOptions.filter((item) => selectedPackageKeys.includes(item.key));
   const qualityMode = readFactoryQualityModes(factory).find((item) => item.key === values.qualityCheckMode);
   const imageAttachments = attachments.filter((attachment) => isFactoryImageAttachment(attachment));
   const tableAttachments = attachments.filter((attachment) => !isFactoryImageAttachment(attachment));
@@ -7252,8 +7695,8 @@ function buildFactoryTaskInput({
     factoryKind: factory.kind ?? 'cross_border_product_image_factory',
     factoryName: template.name,
     platform: {
-      key: platform?.key ?? values.platform,
-      label: platform?.label ?? values.platform,
+      key: platform?.key ?? values.platform ?? 'amazon',
+      label: platform?.label ?? values.platform ?? 'Amazon',
       imageRatio: platform?.imageRatio,
       notes: platform?.notes
     },
@@ -7263,8 +7706,8 @@ function buildFactoryTaskInput({
       description: item.description,
       outputType: item.outputType ?? 'image'
     })),
-    qualityCheckMode: values.qualityCheckMode,
-    qualityCheckLabel: qualityMode?.label ?? values.qualityCheckMode,
+    qualityCheckMode: values.qualityCheckMode ?? 'basic',
+    qualityCheckLabel: qualityMode?.label ?? values.qualityCheckMode ?? 'basic',
     itemCount: imageAttachments.length,
     maxItems: readFactoryMaxItems(factory),
     output: {
@@ -7298,6 +7741,83 @@ function buildFactoryTaskInput({
         '只生成用户勾选的产物包；不要生成未勾选的图片类型。',
         '生成结果只保存图片 URL 元数据；大图片不经过服务端，PC 端按 URL 展示缩略图。',
         '如果质检方式为 none，跳过额外智能质检；如果为 basic，只做文件数量、格式、命名检查。'
+      ]
+    },
+    null,
+    2
+  );
+}
+
+function buildMedicalCaseVideoFactoryTaskInput({
+  template,
+  factory,
+  values,
+  attachments
+}: {
+  template: DesktopRoleTemplate;
+  factory: DigitalFactoryManifest;
+  values: FactoryRunFormValues;
+  attachments: ComposerAttachment[];
+}) {
+  const screeningProfiles = readFactoryScreeningProfiles(factory);
+  const screeningProfile =
+    screeningProfiles.find((item) => item.key === values.screeningProfileKey) ??
+    screeningProfiles.find((item) => item.defaultSelected) ??
+    screeningProfiles[0];
+  const dialect = readFactoryAsrDialectOptions(factory).find((item) => item.key === values.dialect);
+  const editTargetSeconds = values.editTargetSeconds ?? factory.editing?.targetSeconds ?? 30;
+  const factoryRequest = {
+    applicationType: 'digital_factory',
+    factoryKind: 'medical_case_video_screening_factory',
+    factoryName: template.name,
+    itemCount: attachments.length,
+    maxItems: readFactoryMaxItems(factory),
+    concurrency: 3,
+    screeningProfile: {
+      key: screeningProfile?.key ?? 'default_medical_case',
+      label: screeningProfile?.label ?? '医疗案例素材标准',
+      description: screeningProfile?.description,
+      gates: screeningProfile?.gates ?? []
+    },
+    asr: {
+      modelProfileId: values.asrModelProfileId,
+      language: factory.asr?.defaultLanguage ?? 'zh',
+      dialect: values.dialect ?? factory.asr?.defaultDialect ?? 'auto',
+      dialectLabel: dialect?.label ?? values.dialect ?? '自动识别'
+    },
+    editEnabled: Boolean(values.editEnabled),
+    editTargetSeconds,
+    output: {
+      folder: factory.output?.folder ?? 'case-videos',
+      reportFormat: factory.output?.reportFormat ?? 'xlsx',
+      videoFormat: factory.output?.videoFormat ?? 'mp4'
+    },
+    attachments: attachments.map((attachment, index) => ({
+      id: attachment.id,
+      name: attachment.name,
+      size: attachment.size,
+      type: attachment.type,
+      localPath: attachment.localPath,
+      order: index + 1,
+      kind: 'case_video'
+    })),
+    instruction: values.instruction?.trim() || undefined
+  };
+  const taskBrief = `请运行「${template.name}」，批量筛选 ${attachments.length} 个案例视频。`;
+
+  return JSON.stringify(
+    {
+      taskBrief,
+      factory_request: factoryRequest,
+      videoCount: attachments.length,
+      screeningProfile: factoryRequest.screeningProfile,
+      asr: factoryRequest.asr,
+      editEnabled: factoryRequest.editEnabled,
+      instructions: [
+        '只评价视频素材质量、表达清晰度、剪辑价值和合规风险，不做医疗诊断，不判断药物疗效真实性。',
+        '先做筛选，未通过视频直接标记失败原因，不进入评分和初剪。',
+        '通过筛选后再根据 ASR 转写内容评分，重点看使用前、使用过程、使用后改善表达是否完整具体。',
+        '只有用户开启初剪时才生成视频片段；大视频和生成视频都只保存在本机。'
       ]
     },
     null,
@@ -7386,6 +7906,50 @@ function readFactoryQualityModeOptionsFromValue(value: unknown): DigitalFactoryQ
   });
 }
 
+function readFactoryAsrDialectOptionsFromValue(value: unknown): DigitalFactoryAsrDialectOption[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!isPlainObject(item)) {
+      return [];
+    }
+
+    const key = readString(item.key);
+    const label = readString(item.label);
+    return key && label ? [{ key, label }] : [];
+  });
+}
+
+function readFactoryScreeningProfilesFromValue(value: unknown): DigitalFactoryScreeningProfileOption[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!isPlainObject(item)) {
+      return [];
+    }
+
+    const key = readString(item.key);
+    const label = readString(item.label);
+    if (!key || !label) {
+      return [];
+    }
+
+    return [
+      {
+        key,
+        label,
+        description: readString(item.description),
+        defaultSelected: typeof item.defaultSelected === 'boolean' ? item.defaultSelected : undefined,
+        gates: Array.isArray(item.gates) ? item.gates : undefined
+      }
+    ];
+  });
+}
+
 function readFactoryQualityModeKey(value: unknown): FactoryRunFormValues['qualityCheckMode'] | undefined {
   return value === 'none' || value === 'basic' || value === 'smart' ? value : undefined;
 }
@@ -7401,6 +7965,15 @@ function readStringArray(value: unknown): string[] | undefined {
 
 function readNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function readNumberArray(value: unknown): number[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const values = value.filter((item): item is number => typeof item === 'number' && Number.isFinite(item));
+  return values.length ? values : undefined;
 }
 
 function buildRoleFileContractSummary(
