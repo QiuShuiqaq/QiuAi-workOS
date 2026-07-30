@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import JSZip from 'jszip';
 
 import { invokeDesktopTool } from './desktop-tool.js';
 
@@ -134,6 +135,37 @@ const listResult = await invokeDesktopTool(tempDir, {
 
 assert.equal(listResult.ok, true);
 assert.ok(Array.isArray(listResult.output?.entries));
+
+const zipPackageResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'local-filesystem',
+  action: 'filesystem.package_zip',
+  input: {
+    folder: 'packages',
+    fileName: 'product-images',
+    files: [
+      {
+        localPath: allowedFilePath,
+        archivePath: 'SKU-1/source.txt'
+      }
+    ],
+    manifest: {
+      factory: 'cross_border_product_image_factory',
+      packageKeys: ['white_background']
+    }
+  },
+  allowedRootPaths: [allowedRootPath]
+});
+
+assert.equal(zipPackageResult.ok, true);
+assert.equal(typeof zipPackageResult.output?.localPath, 'string');
+assert.ok(String(zipPackageResult.output?.localPath).endsWith('.zip'));
+assert.ok(existsSync(String(zipPackageResult.output?.localPath)));
+
+const zipPackage = await JSZip.loadAsync(readFileSync(String(zipPackageResult.output?.localPath)));
+assert.ok(zipPackage.file('SKU-1/source.txt'));
+assert.ok(zipPackage.file('manifest.json'));
+assert.ok(zipPackage.file('README.txt'));
 
 const documentResult = await invokeDesktopTool(tempDir, {
   workspaceId,

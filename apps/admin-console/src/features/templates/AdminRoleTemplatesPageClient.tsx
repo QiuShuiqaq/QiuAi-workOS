@@ -6,6 +6,7 @@ import {
   EditOutlined,
   InboxOutlined,
   PlayCircleOutlined,
+  PlusCircleOutlined,
   SettingOutlined
 } from '@ant-design/icons';
 import type {
@@ -13,7 +14,8 @@ import type {
   AdminRoleTemplateDetail,
   AdminRoleTemplateTestGraphTrace,
   AdminWorkspaceSummary,
-  CurrentAccountResponse
+  CurrentAccountResponse,
+  RoleTemplateApplicationType
 } from '@qiuai/api-contract';
 import { QiuPage, QiuStatusTag } from '@qiuai/ui';
 import Alert from 'antd/es/alert';
@@ -39,6 +41,13 @@ export interface AdminRoleTemplatesPageClientProps {
   templates: AdminRoleTemplateDetail[];
   plans: AdminPlanDetail[];
   workspaces: AdminWorkspaceSummary[];
+  applicationTypeFilter?: RoleTemplateApplicationType;
+  pageTitle?: string;
+  pageDescription?: string;
+  itemLabel?: string;
+  listTitle?: string;
+  editHref?: (template: AdminRoleTemplateDetail) => string;
+  createHref?: string;
 }
 
 type TemplateTestNotice = {
@@ -82,10 +91,25 @@ export function AdminRoleTemplatesPageClient({
   currentAccount,
   templates,
   plans,
-  workspaces
+  workspaces,
+  applicationTypeFilter = 'digital_employee',
+  pageTitle,
+  pageDescription,
+  itemLabel,
+  listTitle,
+  editHref,
+  createHref
 }: AdminRoleTemplatesPageClientProps) {
   const [permissionForm] = Form.useForm<TemplatePermissionFormValues>();
-  const [rows, setRows] = useState(templates);
+  const filteredTemplates = useMemo(
+    () =>
+      templates.filter(
+        (template) => (template.applicationType ?? 'digital_employee') === applicationTypeFilter
+      ),
+    [applicationTypeFilter, templates]
+  );
+  const resolvedItemLabel = itemLabel ?? (applicationTypeFilter === 'digital_factory' ? '数字工厂' : '数字员工');
+  const [rows, setRows] = useState(filteredTemplates);
   const [testingTemplateId, setTestingTemplateId] = useState<string | null>(null);
   const [actionTemplateId, setActionTemplateId] = useState<string | null>(null);
   const [permissionTemplate, setPermissionTemplate] = useState<AdminRoleTemplateDetail | null>(null);
@@ -93,8 +117,8 @@ export function AdminRoleTemplatesPageClient({
   const [testNotice, setTestNotice] = useState<TemplateTestNotice | null>(null);
 
   useEffect(() => {
-    setRows(templates);
-  }, [templates]);
+    setRows(filteredTemplates);
+  }, [filteredTemplates]);
 
   const planNameByCode = useMemo(
     () => new Map(plans.map((plan) => [plan.code, plan.name] as const)),
@@ -227,6 +251,7 @@ export function AdminRoleTemplatesPageClient({
     try {
       const values = await permissionForm.validateFields();
       const response = await createBrowserApiClient().updateAdminRoleTemplate(permissionTemplate.id, {
+        applicationType: permissionTemplate.applicationType,
         recommendedPlanCode: activePlanCodes.has(values.recommendedPlanCode)
           ? values.recommendedPlanCode
           : defaultPlanCode,
@@ -275,7 +300,7 @@ export function AdminRoleTemplatesPageClient({
 
   const columns: ColumnsType<AdminRoleTemplateDetail> = [
     {
-      title: '数字员工',
+      title: resolvedItemLabel,
       key: 'template',
       width: 260,
       render: (_value, template) => (
@@ -335,7 +360,13 @@ export function AdminRoleTemplatesPageClient({
       width: 460,
       render: (_value, template) => (
         <Space wrap>
-          <Button icon={<EditOutlined />} href={`/templates/canvas?templateId=${encodeURIComponent(template.id)}`}>
+          <Button
+            icon={<EditOutlined />}
+            href={
+              editHref?.(template) ??
+              `/templates/canvas?templateId=${encodeURIComponent(template.id)}`
+            }
+          >
             编辑
           </Button>
           <Button icon={<SettingOutlined />} onClick={() => openPermissionModal(template)}>
@@ -350,7 +381,7 @@ export function AdminRoleTemplatesPageClient({
           </Button>
           {template.status === 'PUBLISHED' ? (
             <Popconfirm
-              title="确认下架这个数字员工？"
+              title={`确认下架这个${resolvedItemLabel}？`}
               okText="下架"
               cancelText="取消"
               onConfirm={() => handleArchive(template)}
@@ -370,7 +401,7 @@ export function AdminRoleTemplatesPageClient({
             </Button>
           )}
           <Popconfirm
-            title="确认删除这个数字员工？"
+            title={`确认删除这个${resolvedItemLabel}？`}
             description="删除后 PC 端将无法再安装该模板；已安装设备同步后会标记为已删除并停止执行。"
             okText="删除"
             cancelText="取消"
@@ -389,8 +420,20 @@ export function AdminRoleTemplatesPageClient({
   return (
     <AdminShell currentAccount={currentAccount}>
       <QiuPage
-        title="数字员工"
-        description="查看、测试、上架。PC 端会同步已上架且有权限的员工。"
+        title={pageTitle ?? resolvedItemLabel}
+        description={
+          pageDescription ??
+          `查看、测试、上架。PC 端会同步已上架且有权限的${resolvedItemLabel}。`
+        }
+        actions={
+          <Button
+            type="primary"
+            icon={<PlusCircleOutlined />}
+            href={createHref ?? `/templates/canvas?applicationType=${applicationTypeFilter}`}
+          >
+            新建{resolvedItemLabel}
+          </Button>
+        }
       >
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           <Card bordered={false}>
@@ -450,7 +493,7 @@ export function AdminRoleTemplatesPageClient({
             />
           ) : null}
 
-          <Card title="员工列表" bordered={false}>
+          <Card title={listTitle ?? `${resolvedItemLabel}列表`} bordered={false}>
             <Table
               rowKey="id"
               columns={columns}

@@ -34,6 +34,7 @@ export interface RoleTemplateWorkflowStep {
 
 export interface RoleTemplateCatalogEntry {
   templateId: string;
+  applicationType?: 'digital_employee' | 'digital_factory';
   roleCode: string;
   name: string;
   version: string;

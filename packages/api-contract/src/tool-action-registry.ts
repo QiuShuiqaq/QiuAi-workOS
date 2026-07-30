@@ -65,7 +65,7 @@ export interface ToolActionDefinition {
   uiFields: ToolActionUiField[];
   requiredConfig: string[];
   requiredDependencies: string[];
-  artifactFormat?: 'md' | 'docx' | 'xlsx' | 'csv' | 'pptx' | 'png' | 'jpg' | 'pdf' | 'mp4';
+  artifactFormat?: 'md' | 'docx' | 'xlsx' | 'csv' | 'pptx' | 'png' | 'jpg' | 'pdf' | 'mp4' | 'zip';
   maturity: 'stable' | 'experimental';
 }
 
@@ -421,6 +421,35 @@ export const qiuaiToolActions: ToolActionDefinition[] = [
     uiFields: [{ key: 'path', label: '目录路径' }],
     requiredConfig: [],
     requiredDependencies: [],
+    maturity: 'stable'
+  },
+  {
+    packageId: 'local-filesystem',
+    actionId: 'filesystem.package_zip',
+    name: '打包 ZIP',
+    category: 'file',
+    description: '把一组本地文件和可选 manifest 打包成本地 ZIP 产物。',
+    input: [
+      { key: 'files', label: '文件列表', type: 'files', required: true },
+      { key: 'manifest', label: '清单 JSON', type: 'json' },
+      { key: 'fileName', label: '文件名', type: 'text' }
+    ],
+    output: [{ key: 'artifact', label: 'ZIP 文件', type: 'artifact' }],
+    defaultInput: {
+      folder: 'packages',
+      fileName: '{{task.title}}',
+      files: '$runtime.previous_files',
+      manifest: {}
+    },
+    uiFields: [
+      { key: 'folder', label: '目录' },
+      { key: 'fileName', label: '文件名' },
+      { key: 'files', label: '文件列表 JSON', type: 'textarea', format: 'json', placeholder: '[{"localPath":"C:/path/image.png"}]' },
+      { key: 'manifest', label: '清单 JSON', type: 'textarea', format: 'json', placeholder: '{"task":"{{task.title}}"}' }
+    ],
+    requiredConfig: [],
+    requiredDependencies: [],
+    artifactFormat: 'zip',
     maturity: 'stable'
   },
   {

@@ -51,6 +51,9 @@ export class AdminRoleTemplateDetailDto {
   @ApiProperty({ example: 'template_sales_assist' })
   id!: string;
 
+  @ApiProperty({ enum: ['digital_employee', 'digital_factory'], example: 'digital_employee' })
+  applicationType!: 'digital_employee' | 'digital_factory';
+
   @ApiProperty({ example: '1.0.0' })
   version!: string;
 
@@ -191,6 +194,11 @@ export class CreateAdminRoleTemplateRequestDto {
   @MinLength(1)
   id!: string;
 
+  @ApiPropertyOptional({ enum: ['digital_employee', 'digital_factory'], example: 'digital_employee' })
+  @IsOptional()
+  @IsIn(['digital_employee', 'digital_factory'])
+  applicationType?: 'digital_employee' | 'digital_factory';
+
   @ApiProperty({ example: '1.0.0' })
   @IsString()
   @MinLength(1)
@@ -254,6 +262,11 @@ export class CreateAdminRoleTemplateRequestDto {
   @IsObject()
   workflowGraph?: Record<string, unknown>;
 
+  @ApiPropertyOptional({ type: Object })
+  @IsOptional()
+  @IsObject()
+  dependencyManifest?: Record<string, unknown>;
+
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()
   @IsArray()
@@ -289,6 +302,11 @@ export class CreateAdminRoleTemplateRequestDto {
 }
 
 export class UpdateAdminRoleTemplateRequestDto {
+  @ApiPropertyOptional({ enum: ['digital_employee', 'digital_factory'], example: 'digital_employee' })
+  @IsOptional()
+  @IsIn(['digital_employee', 'digital_factory'])
+  applicationType?: 'digital_employee' | 'digital_factory';
+
   @ApiPropertyOptional({ example: '1.0.1' })
   @IsOptional()
   @IsString()
@@ -361,6 +379,11 @@ export class UpdateAdminRoleTemplateRequestDto {
   @IsOptional()
   @IsObject()
   workflowGraph?: Record<string, unknown>;
+
+  @ApiPropertyOptional({ type: Object })
+  @IsOptional()
+  @IsObject()
+  dependencyManifest?: Record<string, unknown>;
 
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()

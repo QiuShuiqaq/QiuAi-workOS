@@ -119,6 +119,12 @@ const tools: ToolManifest[] = [
         name: 'List directory',
         inputTypes: ['file'],
         outputTypes: ['json']
+      },
+      {
+        action: 'filesystem.package_zip',
+        name: 'Package ZIP',
+        inputTypes: ['file', 'json'],
+        outputTypes: ['artifact']
       }
     ]
   },
@@ -1758,6 +1764,76 @@ assert.equal(
   'C:\\QiuAI\\workspace\\spreadsheets\\coded-lead-table.xlsx'
 );
 
+let workflowCodeMultiOutputModelInvocationCount = 0;
+const workflowCodeMultiOutputTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-workflow-code-multi-output-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Split code object output',
+    input: 'Split fields.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    toolIds: [],
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'split_payload',
+          type: 'data',
+          name: 'Split payload',
+          outputVariables: ['first_value', 'second_value'],
+          config: {
+            dataMode: 'code',
+            outputVariable: 'first_value',
+            code: 'return { first_value: "Alpha", second_value: "Beta" };'
+          }
+        },
+        {
+          id: 'final_output',
+          type: 'output',
+          name: 'Final output',
+          inputVariables: ['first_value', 'second_value'],
+          outputVariables: ['final_answer']
+        }
+      ],
+      edges: [
+        { id: 'start-split-payload', sourceNodeId: 'start', targetNodeId: 'split_payload', condition: { type: 'always' } },
+        { id: 'split-payload-final', sourceNodeId: 'split_payload', targetNodeId: 'final_output', condition: { type: 'always' } }
+      ]
+    }
+  },
+  workspaceId: 'workspace-workflow-code-multi-output',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: [],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    workflowCodeMultiOutputModelInvocationCount += 1;
+    const prompt = request.messages.map((message) => message.content).join('\n');
+    assert.match(prompt, /Variable: first_value/);
+    assert.match(prompt, /Alpha/);
+    assert.match(prompt, /Variable: second_value/);
+    assert.match(prompt, /Beta/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: 'Both values are available.'
+    };
+  },
+  completedAt: '2026-07-20T10:00:05.985Z'
+});
+
+assert.equal(workflowCodeMultiOutputModelInvocationCount, 1);
+assert.equal(workflowCodeMultiOutputTask.task.state, 'completed');
+
 const blockedCodeNodeTask = await runDesktopTask({
   task: createMockTaskDetail({
     taskId: 'task-runner-workflow-blocked-code-001',
@@ -2840,6 +2916,156 @@ assert.equal(multiToolTask.task.artifacts.length, 2);
 assert.equal(multiToolTask.task.artifacts[0]?.localPath, 'C:\\QiuAI\\workspace\\documents\\customer-summary.md');
 assert.match(multiToolTask.task.artifacts[1]?.content ?? '', /reading input and writing office document/);
 assert.ok(multiToolTask.task.executionLogs.some((log) => log.eventType === 'ATTACHMENT_CONTEXT_EXTRACTED'));
+
+let factoryActiveModelCalls = 0;
+let factoryMaxActiveModelCalls = 0;
+let factoryModelInvocationCount = 0;
+const factoryTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-factory-image-batch-001',
+    roleCode: 'cross-border-image-factory',
+    roleName: 'Cross Border Image Factory',
+    title: 'Generate marketplace product images',
+    input: JSON.stringify({
+      factory_request: {
+        platform: { key: 'amazon', label: 'Amazon', imageRatio: '1:1' },
+        packages: [
+          { key: 'main_image', label: 'Main image', description: 'Marketplace main product image.' },
+          { key: 'white_background', label: 'White background', description: 'Pure white product image.' }
+        ]
+      }
+    }),
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0,
+    executionContext: {
+      modelProfileIds: ['qiu-general-default'],
+      toolIds: [],
+      knowledgeBindingIds: [],
+      attachmentPaths: ['C:\\QiuAI\\factory\\sku-1.png', 'C:\\QiuAI\\factory\\sku-2.png']
+    }
+  }),
+  rolePackage: {
+    roleCode: 'cross-border-image-factory',
+    applicationType: 'digital_factory',
+    name: 'Cross Border Image Factory',
+    version: '1.0.0',
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      runtimePolicy: {
+        maxNodeExecutions: 8,
+        maxLoopIterations: 4,
+        requireApprovalBeforeTools: false
+      },
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'prepare_batch',
+          type: 'data',
+          name: 'Prepare batch',
+          inputVariables: ['start.files', 'factory_request'],
+          outputVariables: [
+            'factory_items',
+            'selected_packages',
+            'target_platform',
+            'package_instructions'
+          ],
+          config: {
+            dataMode: 'code',
+            outputVariable: 'factory_items',
+            code:
+              'const files = Array.isArray(input["start.files"]) ? input["start.files"] : [];\n' +
+              'const request = input.factory_request && typeof input.factory_request === "object" ? input.factory_request : {};\n' +
+              'const packages = Array.isArray(request.packages) ? request.packages : [];\n' +
+              'return {\n' +
+              '  factory_items: files.map((file, index) => ({ sku: `SKU-${index + 1}`, image: file, sourceName: file.name })),\n' +
+              '  selected_packages: packages,\n' +
+              '  target_platform: request.platform,\n' +
+              '  package_instructions: { items: files.map((file, index) => ({ sku: `SKU-${index + 1}`, packages: packages.map((item) => ({ key: item.key, prompt: `Generate ${item.label} for SKU-${index + 1}` })) })) }\n' +
+              '};'
+          }
+        },
+        {
+          id: 'generate_images',
+          type: 'llm',
+          name: 'Generate images',
+          modelProfileId: 'qiu-general-default',
+          inputVariables: ['factory_items', 'selected_packages', 'target_platform', 'package_instructions'],
+          outputVariables: ['factory_generated_images'],
+          config: {
+            llmTaskType: 'image_generation',
+            concurrency: 2,
+            maxRetries: 0,
+            timeoutMs: 20_000
+          }
+        }
+      ],
+      edges: [
+        { id: 'start-prepare', sourceNodeId: 'start', targetNodeId: 'prepare_batch' },
+        { id: 'prepare-generate', sourceNodeId: 'prepare_batch', targetNodeId: 'generate_images' }
+      ]
+    },
+    modelProfileIds: ['qiu-general-default'],
+    toolIds: [],
+    requiredKnowledgeSources: [],
+    defaultTaskTypes: ['factory_image_batch'],
+    syncPolicy: 'summary_only'
+  },
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: [],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    factoryActiveModelCalls += 1;
+    factoryMaxActiveModelCalls = Math.max(factoryMaxActiveModelCalls, factoryActiveModelCalls);
+    factoryModelInvocationCount += 1;
+    assert.equal(request.taskKind, 'image_generation');
+    assert.ok(request.imageGeneration?.prompt);
+    assert.match(request.imageGeneration?.sourceImagePath ?? '', /sku-[12]\.png/);
+    assert.match(request.messages[1]?.content ?? '', /Source image local path/);
+    assert.match(request.messages[1]?.content ?? '', /Package:/);
+    const invocationId = factoryModelInvocationCount;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    factoryActiveModelCalls -= 1;
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: JSON.stringify({
+        remoteUrl: `https://cdn.example.test/factory/image-${invocationId}.png`,
+        thumbnailPath: `https://cdn.example.test/factory/thumb-${invocationId}.png`
+      }),
+      artifacts: [
+        {
+          type: 'image',
+          remoteUrl: `https://cdn.example.test/factory/image-${invocationId}.png`,
+          thumbnailPath: `https://cdn.example.test/factory/thumb-${invocationId}.png`
+        }
+      ]
+    };
+  },
+  completedAt: '2026-07-20T10:00:14.000Z'
+});
+
+const factoryPreviewArtifact = factoryTask.task.artifacts.find((artifact) => artifact.factoryPreview);
+assert.equal(factoryTask.task.state, 'completed');
+assert.equal(factoryModelInvocationCount, 4);
+assert.equal(factoryMaxActiveModelCalls > 1, true);
+assert.equal(factoryMaxActiveModelCalls <= 2, true);
+assert.equal(factoryPreviewArtifact?.factoryPreview?.total, 4);
+assert.equal(factoryPreviewArtifact?.factoryPreview?.completed, 4);
+assert.equal(factoryPreviewArtifact?.factoryPreview?.failed, 0);
+assert.deepEqual(
+  factoryPreviewArtifact?.factoryPreview?.items.map((item) => item.order),
+  [1, 2, 3, 4]
+);
+assert.ok(
+  factoryPreviewArtifact?.factoryPreview?.items.every((item) => item.remoteUrl?.startsWith('https://cdn.example.test/'))
+);
+assert.ok(
+  factoryTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_RUNTIME_FACTORY_BATCH_COMPLETED')
+);
 
 const unconfiguredKnowledge = await runDesktopTask({
   task,

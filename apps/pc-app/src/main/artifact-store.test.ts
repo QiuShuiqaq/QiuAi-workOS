@@ -7,12 +7,14 @@ import {
   utimesSync,
   writeFileSync
 } from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 
 import {
   cleanupExpiredArtifactCache,
   saveArtifactFileAs,
+  saveRemoteFileAs,
   writeTaskArtifactFile
 } from './artifact-store.js';
 import { getDesktopStorageLayout } from './storage-layout.js';
@@ -62,6 +64,46 @@ assert.equal(directorySaveResult.canceled, false);
 assert.equal(directorySaveResult.savedPath, directorySavedCopyPath);
 assert.ok(existsSync(directorySavedCopyPath));
 assert.match(readFileSync(directorySavedCopyPath, 'utf8'), /Customer report content/);
+
+const remoteFileServer = http.createServer((request, response) => {
+  if (request.url !== '/generated/product-main.png') {
+    response.writeHead(404);
+    response.end('not found');
+    return;
+  }
+
+  response.writeHead(200, {
+    'content-type': 'image/png',
+    'content-length': '10'
+  });
+  response.end(Buffer.from('image-data'));
+});
+await new Promise<void>((resolve) => remoteFileServer.listen(0, '127.0.0.1', resolve));
+try {
+  const address = remoteFileServer.address();
+  assert.ok(address && typeof address === 'object');
+  const remoteSaveResult = await saveRemoteFileAs(
+    {
+      url: `http://127.0.0.1:${address.port}/generated/product-main.png`,
+      suggestedFileName: 'factory-main-image.png'
+    },
+    tempDir
+  );
+  const remoteSavedPath = path.join(tempDir, 'factory-main-image.png');
+  assert.equal(remoteSaveResult.canceled, false);
+  assert.equal(remoteSaveResult.savedPath, remoteSavedPath);
+  assert.equal(readFileSync(remoteSavedPath, 'utf8'), 'image-data');
+} finally {
+  await new Promise<void>((resolve, reject) => {
+    remoteFileServer.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
 
 const oldToolArtifactPath = path.join(layout.assetsPath, 'tools', 'office', 'documents', 'expired.docx');
 const freshToolArtifactPath = path.join(layout.assetsPath, 'tools', 'office', 'documents', 'fresh.docx');

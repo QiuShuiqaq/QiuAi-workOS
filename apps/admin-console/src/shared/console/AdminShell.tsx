@@ -38,6 +38,7 @@ function selectedKey(pathname: string) {
   if (pathname.startsWith('/desktop-releases')) return 'desktop-releases';
   if (pathname.startsWith('/assets')) return 'assets';
   if (pathname.startsWith('/audit')) return 'audit';
+  if (pathname.startsWith('/factories')) return 'factories';
   if (pathname.startsWith('/templates/canvas') || pathname.startsWith('/templates/new')) return 'templates-canvas';
   if (pathname.startsWith('/templates')) return 'templates';
   return 'dashboard';
@@ -116,6 +117,11 @@ export function AdminShell({ currentAccount, children }: AdminShellProps) {
               key: 'templates',
               icon: <AppstoreAddOutlined />,
               label: <Link href="/templates">数字员工</Link>
+            },
+            {
+              key: 'factories',
+              icon: <AppstoreAddOutlined />,
+              label: <Link href="/factories">数字工厂</Link>
             },
             {
               key: 'templates-canvas',

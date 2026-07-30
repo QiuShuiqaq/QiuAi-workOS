@@ -34,6 +34,7 @@ export interface MockPlanDetail {
 
 export interface MockRoleTemplateSummary {
   id: string;
+  applicationType?: 'DIGITAL_EMPLOYEE' | 'DIGITAL_FACTORY';
   version: string;
   name: string;
   industry: string;

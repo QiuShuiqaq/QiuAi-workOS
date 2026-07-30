@@ -12,6 +12,8 @@ import path from 'node:path';
 import type {
   DesktopArtifactSaveAsRequest,
   DesktopArtifactSaveAsResult,
+  DesktopRemoteFileSaveAsRequest,
+  DesktopRemoteFileSaveAsResult,
   DesktopTaskArtifactWriteRequest,
   DesktopTaskArtifactWriteResult
 } from '../shared/desktop-api.js';
@@ -22,6 +24,7 @@ import {
 } from './storage-layout.js';
 
 const artifactCacheRetentionMs = 30 * 24 * 60 * 60 * 1000;
+const maxRemoteArtifactBytes = 100 * 1024 * 1024;
 
 export function writeTaskArtifactFile(
   userDataPath: string,
@@ -61,6 +64,45 @@ export function saveArtifactFileAs(
 
   ensureParentDirectory(normalizedDestinationPath);
   copyFileSync(sourcePath, normalizedDestinationPath);
+
+  return {
+    canceled: false,
+    savedPath: normalizedDestinationPath
+  };
+}
+
+export async function saveRemoteFileAs(
+  request: DesktopRemoteFileSaveAsRequest,
+  destinationPath: string
+): Promise<DesktopRemoteFileSaveAsResult> {
+  const remoteUrl = normalizeRemoteFileUrl(request.url);
+  const normalizedDestinationPath = resolveRemoteSaveDestinationPath(
+    destinationPath,
+    request.suggestedFileName,
+    remoteUrl
+  );
+
+  const response = await fetch(remoteUrl, {
+    method: 'GET',
+    signal: AbortSignal.timeout(180_000)
+  });
+
+  if (!response.ok) {
+    throw new Error(`Remote file download failed: HTTP ${response.status}.`);
+  }
+
+  const contentLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(contentLength) && contentLength > maxRemoteArtifactBytes) {
+    throw new Error('Remote file is too large to save.');
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length > maxRemoteArtifactBytes) {
+    throw new Error('Remote file is too large to save.');
+  }
+
+  ensureParentDirectory(normalizedDestinationPath);
+  writeFileSync(normalizedDestinationPath, buffer);
 
   return {
     canceled: false,
@@ -191,10 +233,56 @@ function resolveArtifactSaveDestinationPath(
   return normalizedDestinationPath;
 }
 
+function resolveRemoteSaveDestinationPath(
+  destinationPath: string,
+  suggestedFileName: string | undefined,
+  remoteUrl: string
+): string {
+  const normalizedDestinationPath = normalizeRequiredLocalPath(destinationPath, 'Destination path');
+  if (isDirectoryLikePath(normalizedDestinationPath)) {
+    return path.join(
+      normalizedDestinationPath,
+      normalizeSuggestedFileName(suggestedFileName, getRemoteUrlFallbackPath(remoteUrl))
+    );
+  }
+
+  return normalizedDestinationPath;
+}
+
 function normalizeSuggestedFileName(value: string | undefined, sourcePath: string): string {
   const fallbackName = path.basename(sourcePath) || 'qiuai-result.md';
   const suggestedName = typeof value === 'string' ? path.basename(value.trim()) : '';
   return suggestedName || fallbackName;
+}
+
+function normalizeRemoteFileUrl(value: string): string {
+  const normalizedValue = typeof value === 'string' ? value.trim() : '';
+  if (!normalizedValue) {
+    throw new Error('Remote file URL is required.');
+  }
+
+  let url: URL;
+  try {
+    url = new URL(normalizedValue);
+  } catch {
+    throw new Error('Remote file URL is invalid.');
+  }
+
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new Error('Only HTTP and HTTPS remote files can be saved.');
+  }
+
+  return url.toString();
+}
+
+function getRemoteUrlFallbackPath(remoteUrl: string): string {
+  try {
+    const url = new URL(remoteUrl);
+    const fileName = decodeURIComponent(path.posix.basename(url.pathname));
+    return fileName ? path.join(path.sep, fileName) : path.join(path.sep, 'qiuai-image.png');
+  } catch {
+    return path.join(path.sep, 'qiuai-image.png');
+  }
 }
 
 function isDirectoryLikePath(targetPath: string): boolean {

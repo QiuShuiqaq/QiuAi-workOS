@@ -6,9 +6,11 @@ import type { RoleWorkflowGraph } from './workflow-graph';
 
 export type AdminRoleTemplateStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED' | 'DELETED';
 export type AdminRoleTemplateEditableStatus = Exclude<AdminRoleTemplateStatus, 'DELETED'>;
+export type RoleTemplateApplicationType = 'digital_employee' | 'digital_factory';
 
 export interface AdminRoleTemplateDetail {
   id: string;
+  applicationType: RoleTemplateApplicationType;
   version: string;
   name: string;
   industry: string;
@@ -46,6 +48,7 @@ export interface AdminRoleTemplateSkillInput extends RoleSkillSummary {}
 
 export interface CreateAdminRoleTemplateRequest {
   id: string;
+  applicationType?: RoleTemplateApplicationType;
   version: string;
   name: string;
   industry: string;
@@ -58,6 +61,7 @@ export interface CreateAdminRoleTemplateRequest {
   skills: AdminRoleTemplateSkillInput[];
   workflowSteps?: RoleTemplateWorkflowStep[];
   workflowGraph?: RoleWorkflowGraph;
+  dependencyManifest?: RoleTemplateDependencyManifest;
   sampleInputs?: string[];
   outputFormat?: string;
   approvalPolicy: string;
@@ -67,6 +71,7 @@ export interface CreateAdminRoleTemplateRequest {
 }
 
 export interface UpdateAdminRoleTemplateRequest {
+  applicationType?: RoleTemplateApplicationType;
   version?: string;
   name?: string;
   industry?: string;
@@ -79,6 +84,7 @@ export interface UpdateAdminRoleTemplateRequest {
   skills?: AdminRoleTemplateSkillInput[];
   workflowSteps?: RoleTemplateWorkflowStep[];
   workflowGraph?: RoleWorkflowGraph;
+  dependencyManifest?: RoleTemplateDependencyManifest;
   sampleInputs?: string[];
   outputFormat?: string;
   approvalPolicy?: string;

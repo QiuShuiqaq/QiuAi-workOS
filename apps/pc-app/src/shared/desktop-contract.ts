@@ -57,13 +57,44 @@ export interface DesktopToolSettings {
 
 export type DesktopTaskPriority = 'low' | 'normal' | 'high' | 'urgent';
 
+export type FactoryArtifactPreviewItemStatus = 'queued' | 'running' | 'completed' | 'failed' | 'retrying';
+
+export interface FactoryArtifactPreviewItem {
+  id: string;
+  order: number;
+  sku: string;
+  packageKey: string;
+  packageLabel: string;
+  status: FactoryArtifactPreviewItemStatus;
+  remoteUrl?: string;
+  localPath?: string;
+  thumbnailPath?: string;
+  sourceImagePath?: string;
+  prompt?: string;
+  error?: string;
+  createdAt: string;
+}
+
+export interface FactoryArtifactPreview {
+  kind: 'digital_factory_image_batch';
+  title: string;
+  platformLabel?: string;
+  concurrency: number;
+  total: number;
+  completed: number;
+  failed: number;
+  items: FactoryArtifactPreviewItem[];
+}
+
 export interface DesktopArtifactSummary {
   id: string;
   type: 'text' | 'report' | 'video' | 'image' | 'file';
   title: string;
   content: string;
   createdAt: string;
+  remoteUrl?: string;
   localPath?: string;
+  factoryPreview?: FactoryArtifactPreview;
 }
 
 export interface DesktopExecutionLogEntry {
@@ -347,17 +378,20 @@ export interface RoleTemplateDependencyNodeTemplate {
 
 export interface RoleTemplateDependencyManifest {
   version: '1.0.0';
+  applicationType?: 'digital_employee' | 'digital_factory';
   generatedAt: string;
   variables: RoleTemplateDependencyVariable[];
   modelAssets: RoleTemplateDependencyModelAsset[];
   toolActions: RoleTemplateDependencyToolAction[];
   artifactTemplates: RoleTemplateDependencyArtifactTemplate[];
   nodeTemplates: RoleTemplateDependencyNodeTemplate[];
+  factory?: unknown;
   warnings: string[];
 }
 
 export interface RolePackageManifest {
   roleCode: string;
+  applicationType?: 'digital_employee' | 'digital_factory';
   name: string;
   version: string;
   summary?: string;

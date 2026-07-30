@@ -20,6 +20,7 @@ import { selectKnowledgeSourcePath } from './knowledge-source.js';
 import {
   cleanupExpiredArtifactCache,
   saveArtifactFileAs,
+  saveRemoteFileAs,
   writeTaskArtifactFile
 } from './artifact-store.js';
 import { invokeDesktopTool } from './desktop-tool.js';
@@ -52,6 +53,7 @@ const channels = {
   selectKnowledgeSourcePath: 'qiuai:desktop:select-knowledge-source-path',
   writeTaskArtifact: 'qiuai:desktop:write-task-artifact',
   saveArtifactAs: 'qiuai:desktop:save-artifact-as',
+  saveRemoteFileAs: 'qiuai:desktop:save-remote-file-as',
   invokeDesktopTool: 'qiuai:desktop:invoke-desktop-tool',
   openLocalPath: 'qiuai:desktop:open-local-path',
   openExternalUrl: 'qiuai:desktop:open-external-url',
@@ -131,6 +133,31 @@ export function registerDesktopIpc() {
 
     return saveArtifactFileAs({ sourcePath, suggestedFileName }, result.filePath);
   });
+  ipcMain.handle(channels.saveRemoteFileAs, async (event, request) => {
+    const remoteUrl = typeof request?.url === 'string' ? request.url.trim() : '';
+    if (!remoteUrl) {
+      throw new Error('Remote file URL is required.');
+    }
+
+    const suggestedFileName = typeof request?.suggestedFileName === 'string' && request.suggestedFileName.trim()
+      ? request.suggestedFileName.trim()
+      : getRemoteFileNameFromUrl(remoteUrl);
+    const currentWindow = BrowserWindow.fromWebContents(event.sender);
+    const saveDialogOptions = {
+      title: '保存图片',
+      defaultPath: path.join(getPreferredArtifactExportDirectoryPath(), suggestedFileName),
+      buttonLabel: '保存'
+    };
+    const result = currentWindow
+      ? await dialog.showSaveDialog(currentWindow, saveDialogOptions)
+      : await dialog.showSaveDialog(saveDialogOptions);
+
+    if (result.canceled || !result.filePath) {
+      return { canceled: true };
+    }
+
+    return saveRemoteFileAs({ url: remoteUrl, suggestedFileName }, result.filePath);
+  });
   ipcMain.handle(channels.invokeDesktopTool, async (_, request) => {
     return invokeDesktopTool(getDesktopAppInfo().userDataPath, request);
   });
@@ -202,5 +229,15 @@ function getPreferredArtifactExportDirectoryPath(): string {
     return app.getPath('downloads');
   } catch {
     return process.cwd();
+  }
+}
+
+function getRemoteFileNameFromUrl(remoteUrl: string): string {
+  try {
+    const url = new URL(remoteUrl);
+    const fileName = decodeURIComponent(path.posix.basename(url.pathname));
+    return fileName || 'qiuai-image.png';
+  } catch {
+    return 'qiuai-image.png';
   }
 }

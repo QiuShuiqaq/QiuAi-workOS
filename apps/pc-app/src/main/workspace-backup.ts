@@ -30,6 +30,7 @@ import type {
   RoleModelCredentialBinding,
   DesktopRoleSkillSummary,
   DesktopRoleWorkflowStep,
+  FactoryArtifactPreview,
   RolePackageManifest,
   ToolManifest
 } from '../shared/desktop-contract.js';
@@ -577,7 +578,57 @@ function validateDesktopArtifactSummary(
     title: requireString(record.title, 'artifact.title'),
     content: requireString(record.content, 'artifact.content'),
     createdAt: requireString(record.createdAt, 'artifact.createdAt'),
-    localPath: optionalString(record.localPath, 'artifact.localPath')
+    remoteUrl: optionalString(record.remoteUrl, 'artifact.remoteUrl'),
+    localPath: optionalString(record.localPath, 'artifact.localPath'),
+    factoryPreview: validateFactoryArtifactPreview(record.factoryPreview)
+  };
+}
+
+function validateFactoryArtifactPreview(
+  value: unknown
+): FactoryArtifactPreview | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const record = requireRecord(value, 'artifact.factoryPreview');
+  if (record.kind !== 'digital_factory_image_batch') {
+    return undefined;
+  }
+
+  return {
+    kind: 'digital_factory_image_batch',
+    title: requireString(record.title, 'artifact.factoryPreview.title'),
+    platformLabel: optionalString(record.platformLabel, 'artifact.factoryPreview.platformLabel'),
+    concurrency: requireInteger(record.concurrency, 'artifact.factoryPreview.concurrency'),
+    total: requireInteger(record.total, 'artifact.factoryPreview.total'),
+    completed: requireInteger(record.completed, 'artifact.factoryPreview.completed'),
+    failed: requireInteger(record.failed, 'artifact.factoryPreview.failed'),
+    items: requireArray(record.items, 'artifact.factoryPreview.items').map((item, index) =>
+      validateFactoryArtifactPreviewItem(item, `artifact.factoryPreview.items[${index}]`)
+    )
+  };
+}
+
+function validateFactoryArtifactPreviewItem(
+  value: unknown,
+  fieldName: string
+): FactoryArtifactPreview['items'][number] {
+  const record = requireRecord(value, fieldName);
+  return {
+    id: requireString(record.id, `${fieldName}.id`),
+    order: requireInteger(record.order, `${fieldName}.order`),
+    sku: requireString(record.sku, `${fieldName}.sku`),
+    packageKey: requireString(record.packageKey, `${fieldName}.packageKey`),
+    packageLabel: requireString(record.packageLabel, `${fieldName}.packageLabel`),
+    status: requireEnum(record.status, `${fieldName}.status`, ['queued', 'running', 'completed', 'failed', 'retrying']),
+    remoteUrl: optionalString(record.remoteUrl, `${fieldName}.remoteUrl`),
+    localPath: optionalString(record.localPath, `${fieldName}.localPath`),
+    thumbnailPath: optionalString(record.thumbnailPath, `${fieldName}.thumbnailPath`),
+    sourceImagePath: optionalString(record.sourceImagePath, `${fieldName}.sourceImagePath`),
+    prompt: optionalString(record.prompt, `${fieldName}.prompt`),
+    error: optionalString(record.error, `${fieldName}.error`),
+    createdAt: requireString(record.createdAt, `${fieldName}.createdAt`)
   };
 }
 
@@ -880,6 +931,10 @@ function validateRolePackageManifest(value: unknown): RolePackageManifest {
 
   return {
     roleCode: requireString(record.roleCode, 'rolePackage.roleCode'),
+    applicationType:
+      record.applicationType === 'digital_factory' || record.applicationType === 'digital_employee'
+        ? record.applicationType
+        : undefined,
     name: requireString(record.name, 'rolePackage.name'),
     version: requireString(record.version, 'rolePackage.version'),
     summary: optionalString(record.summary, 'rolePackage.summary'),

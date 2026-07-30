@@ -29,6 +29,7 @@ interface InstallRoleInput {
 
 type DatabaseRoleTemplate = {
   id: string;
+  applicationType?: string | null;
   version: string;
   name: string;
   industry: string;
@@ -471,6 +472,7 @@ export class RoleService {
 
     return {
       id: template.id,
+      applicationType: template.applicationType === 'DIGITAL_FACTORY' ? 'digital_factory' : 'digital_employee',
       version: template.version,
       name: template.name,
       industry: template.industry,

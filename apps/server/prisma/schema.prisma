@@ -121,6 +121,11 @@ enum RoleTemplateStatus {
   DELETED
 }
 
+enum RoleTemplateApplicationType {
+  DIGITAL_EMPLOYEE
+  DIGITAL_FACTORY
+}
+
 enum AssetDefinitionType {
   VARIABLE
   MODEL
@@ -614,6 +619,7 @@ model PaymentTransaction {
 
 model RoleTemplate {
   id                  String   @id
+  applicationType     RoleTemplateApplicationType @default(DIGITAL_EMPLOYEE) @map("application_type")
   version             String
   name                String
   industry            String
@@ -640,6 +646,7 @@ model RoleTemplate {
 
   roleInstances RoleInstance[]
 
+  @@index([applicationType])
   @@index([recommendedPlanCode])
   @@index([status])
   @@index([version])

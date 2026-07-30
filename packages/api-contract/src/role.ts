@@ -27,6 +27,7 @@ export interface RoleTemplateWorkflowStep {
 
 export interface RoleTemplateSummary {
   id: string;
+  applicationType?: 'digital_employee' | 'digital_factory';
   version: string;
   name: string;
   industry: string;

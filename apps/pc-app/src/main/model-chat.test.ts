@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import { listOpenAiCompatibleModels } from './model-chat.js';
+import { invokeOpenAiCompatibleModelChat, listOpenAiCompatibleModels } from './model-chat.js';
 
 const originalFetch = globalThis.fetch;
 let capturedUrl = '';
@@ -43,6 +43,53 @@ try {
     catalog.models.find((model) => model.id === 'text-embedding-3-large')?.capabilities,
     ['embedding']
   );
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+let capturedImageUrl = '';
+let capturedImageBody: Record<string, unknown> | undefined;
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  capturedImageUrl = String(input);
+  capturedImageBody = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
+
+  return new Response(
+    JSON.stringify({
+      data: [
+        {
+          url: 'https://cdn.example.test/generated/product-main.png'
+        }
+      ]
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+}) as typeof fetch;
+
+try {
+  const response = await invokeOpenAiCompatibleModelChat({
+    profile: {
+      id: 'image-profile',
+      providerId: 'openai-compatible',
+      providerName: 'OpenAI Compatible',
+      modelName: 'gpt-image-2',
+      purpose: 'vision',
+      capabilities: ['image_generation'],
+      apiBaseUrl: 'https://api.example.test/v1',
+      apiKey: 'image-key'
+    },
+    taskKind: 'image_generation',
+    imageGeneration: {
+      prompt: 'Generate a marketplace product main image.',
+      responseFormat: 'url'
+    },
+    messages: [{ role: 'user', content: 'Generate image.' }]
+  });
+
+  assert.equal(capturedImageUrl, 'https://api.example.test/v1/images/generations');
+  assert.equal(capturedImageBody?.model, 'gpt-image-2');
+  assert.equal(capturedImageBody?.response_format, 'url');
+  assert.equal(response.artifacts?.[0]?.remoteUrl, 'https://cdn.example.test/generated/product-main.png');
+  assert.match(response.content, /product-main\.png/);
 } finally {
   globalThis.fetch = originalFetch;
 }

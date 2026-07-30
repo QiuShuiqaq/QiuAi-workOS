@@ -14,6 +14,8 @@ import type {
   DesktopServerConnectionStatus,
   DesktopArtifactSaveAsRequest,
   DesktopArtifactSaveAsResult,
+  DesktopRemoteFileSaveAsRequest,
+  DesktopRemoteFileSaveAsResult,
   DesktopTaskArtifactWriteRequest,
   DesktopTaskArtifactWriteResult,
   DesktopToolInvocationRequest,
@@ -46,6 +48,7 @@ const channels = {
   selectKnowledgeSourcePath: 'qiuai:desktop:select-knowledge-source-path',
   writeTaskArtifact: 'qiuai:desktop:write-task-artifact',
   saveArtifactAs: 'qiuai:desktop:save-artifact-as',
+  saveRemoteFileAs: 'qiuai:desktop:save-remote-file-as',
   invokeDesktopTool: 'qiuai:desktop:invoke-desktop-tool',
   openLocalPath: 'qiuai:desktop:open-local-path',
   openExternalUrl: 'qiuai:desktop:open-external-url',
@@ -89,6 +92,8 @@ const bridge: QiuDesktopBridge = {
     ipcRenderer.invoke(channels.writeTaskArtifact, request) as Promise<DesktopTaskArtifactWriteResult>,
   saveArtifactAs: (request: DesktopArtifactSaveAsRequest) =>
     ipcRenderer.invoke(channels.saveArtifactAs, request) as Promise<DesktopArtifactSaveAsResult>,
+  saveRemoteFileAs: (request: DesktopRemoteFileSaveAsRequest) =>
+    ipcRenderer.invoke(channels.saveRemoteFileAs, request) as Promise<DesktopRemoteFileSaveAsResult>,
   invokeDesktopTool: (request: DesktopToolInvocationRequest) =>
     ipcRenderer.invoke(channels.invokeDesktopTool, request) as Promise<DesktopToolInvocationResult>,
   getPathForFile: (file: unknown) => {

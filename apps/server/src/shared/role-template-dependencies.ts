@@ -3,6 +3,7 @@ import type { ServerRoleWorkflowGraph, ServerRoleWorkflowGraphNode } from './wor
 
 export interface ServerRoleTemplateDependencyManifest {
   version: '1.0.0';
+  applicationType?: 'digital_employee' | 'digital_factory';
   generatedAt: string;
   variables: Array<{
     key: string;
@@ -60,6 +61,7 @@ export interface ServerRoleTemplateDependencyManifest {
     outputVariables: string[];
     nodeIds: string[];
   }>;
+  factory?: unknown;
   warnings: string[];
 }
 

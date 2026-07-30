@@ -145,6 +145,7 @@ export interface DesktopAuthorizedRoleTemplateWorkflowStep {
 
 export interface DesktopAuthorizedRoleTemplateSummary {
   id: string;
+  applicationType?: 'digital_employee' | 'digital_factory';
   version: string;
   name: string;
   industry: string;
@@ -189,6 +190,14 @@ export interface DesktopModelChatRequest {
   profile: ModelProfile;
   messages: DesktopModelChatMessage[];
   timeoutMs?: number;
+  taskKind?: 'chat' | 'image_generation';
+  imageGeneration?: {
+    prompt: string;
+    negativePrompt?: string;
+    sourceImagePath?: string;
+    size?: string;
+    responseFormat?: 'url';
+  };
 }
 
 export interface DesktopModelChatResponse {
@@ -197,6 +206,14 @@ export interface DesktopModelChatResponse {
   content: string;
   inputTokens?: number;
   outputTokens?: number;
+  artifacts?: Array<{
+    type: 'image' | 'file';
+    title?: string;
+    remoteUrl?: string;
+    localPath?: string;
+    thumbnailPath?: string;
+    mimeType?: string;
+  }>;
 }
 
 export interface DesktopModelListRequest {
@@ -245,10 +262,18 @@ export interface DesktopArtifactSaveAsResult {
   savedPath?: string;
 }
 
+export interface DesktopRemoteFileSaveAsRequest {
+  url: string;
+  suggestedFileName?: string;
+}
+
+export type DesktopRemoteFileSaveAsResult = DesktopArtifactSaveAsResult;
+
 export type DesktopToolInvocationAction =
   | 'filesystem.write_text_file'
   | 'filesystem.read_text_file'
   | 'filesystem.list_directory'
+  | 'filesystem.package_zip'
   | 'document.extract_text'
   | 'web.fetch_url'
   | 'web.search'
@@ -303,6 +328,7 @@ export interface QiuDesktopBridge {
   selectKnowledgeSourcePath(source: KnowledgeBindingSource): Promise<DesktopKnowledgeSourcePathResult>;
   writeTaskArtifact(request: DesktopTaskArtifactWriteRequest): Promise<DesktopTaskArtifactWriteResult>;
   saveArtifactAs(request: DesktopArtifactSaveAsRequest): Promise<DesktopArtifactSaveAsResult>;
+  saveRemoteFileAs(request: DesktopRemoteFileSaveAsRequest): Promise<DesktopRemoteFileSaveAsResult>;
   invokeDesktopTool(request: DesktopToolInvocationRequest): Promise<DesktopToolInvocationResult>;
   getPathForFile(file: unknown): string | undefined;
   openLocalPath(path: string): Promise<void>;

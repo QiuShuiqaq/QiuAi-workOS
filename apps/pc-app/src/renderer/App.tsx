@@ -36,6 +36,7 @@ import { qiuAntTheme } from '@qiuai/design-tokens';
 import AppProvider from 'antd/es/app';
 import Button from 'antd/es/button';
 import Card from 'antd/es/card';
+import Checkbox from 'antd/es/checkbox';
 import ConfigProvider from 'antd/es/config-provider';
 import Descriptions from 'antd/es/descriptions';
 import Empty from 'antd/es/empty';
@@ -73,6 +74,8 @@ import type {
   DesktopTaskState,
   DesktopTaskDetail,
   DesktopTaskSummary,
+  FactoryArtifactPreview,
+  FactoryArtifactPreviewItem,
   DesktopKnowledgeSourceSummary,
   KnowledgeBindingSource,
   ModelCapability,
@@ -149,6 +152,16 @@ interface TaskFormValues {
   roleCode: string;
   title: string;
   input?: string;
+}
+
+type RoleApplicationType = 'digital_employee' | 'digital_factory';
+
+interface FactoryRunFormValues {
+  roleCode: string;
+  platform: string;
+  packageKeys: string[];
+  qualityCheckMode: 'none' | 'basic' | 'smart';
+  instruction?: string;
 }
 
 interface ComposerAttachment {
@@ -1106,6 +1119,7 @@ function toDesktopRoleTemplate(summary: DesktopAuthorizedRoleTemplateSummary): D
 
   return {
     templateId: summary.id,
+    applicationType: summary.applicationType ?? summary.dependencyManifest?.applicationType ?? 'digital_employee',
     roleCode,
     name: summary.name,
     version: summary.version,
@@ -1387,6 +1401,7 @@ export default function App() {
   const [isPullingProviderModels, setIsPullingProviderModels] = useState(false);
   const [localActionNotice, setLocalActionNotice] = useState('');
   const [savingArtifactId, setSavingArtifactId] = useState('');
+  const [savingFactoryImageId, setSavingFactoryImageId] = useState('');
   const [roleTemplateNotice, setRoleTemplateNotice] = useState('');
   const [isLoadingRoleTemplates, setIsLoadingRoleTemplates] = useState(false);
   const [authorizedRoleTemplateCatalog, setAuthorizedRoleTemplateCatalog] =
@@ -1395,7 +1410,9 @@ export default function App() {
   const [workspaceBackups, setWorkspaceBackups] = useState<DesktopBackupSummary[]>([]);
   const chatMessageListRef = useRef<HTMLDivElement | null>(null);
   const composerFileInputRef = useRef<HTMLInputElement | null>(null);
+  const factoryFileInputRef = useRef<HTMLInputElement | null>(null);
   const [taskForm] = Form.useForm<TaskFormValues>();
+  const [factoryRunForm] = Form.useForm<FactoryRunFormValues>();
   const [modelForm] = Form.useForm<ModelFormValues>();
   const [toolSettingsForm] = Form.useForm<ToolSettingsFormValues>();
   const [onboardingForm] = Form.useForm<OnboardingFormValues>();
@@ -1411,6 +1428,8 @@ export default function App() {
   const [toolConfigToolId, setToolConfigToolId] = useState('');
   const [toolSearchQuery, setToolSearchQuery] = useState('');
   const [selectedRoleCategory, setSelectedRoleCategory] = useState('全部');
+  const [selectedRoleApplicationType, setSelectedRoleApplicationType] =
+    useState<RoleApplicationType>('digital_employee');
   const [selectedToolCategory, setSelectedToolCategory] = useState('全部');
   const [selectedKnowledgeScope, setSelectedKnowledgeScope] = useState<'enterprise' | 'local'>(
     'enterprise'
@@ -1423,6 +1442,9 @@ export default function App() {
   const [isComposerDragOver, setIsComposerDragOver] = useState(false);
   const [taskHistoryOpen, setTaskHistoryOpen] = useState(false);
   const [pendingUninstallRoleCode, setPendingUninstallRoleCode] = useState('');
+  const [factoryRunRoleCode, setFactoryRunRoleCode] = useState('');
+  const [factoryAttachments, setFactoryAttachments] = useState<ComposerAttachment[]>([]);
+  const [previewFactoryImage, setPreviewFactoryImage] = useState<FactoryArtifactPreviewItem | null>(null);
 
   useEffect(() => {
     void loadRuntimeState();
@@ -1767,6 +1789,30 @@ export default function App() {
     }
   }
 
+  async function saveFactoryPreviewImage(item: FactoryArtifactPreviewItem) {
+    if (!item.remoteUrl || !window.qiuDesktop) {
+      return;
+    }
+
+    setLocalActionNotice('');
+    setSavingFactoryImageId(item.id);
+    try {
+      const result = await window.qiuDesktop.saveRemoteFileAs({
+        url: item.remoteUrl,
+        suggestedFileName: getFactoryPreviewImageFileName(item)
+      });
+      if (!result.canceled) {
+        message.success('图片已保存');
+      }
+    } catch (error) {
+      const errorMessage = `保存图片失败：${error instanceof Error ? error.message : 'unknown error'}`;
+      setLocalActionNotice(errorMessage);
+      message.error(errorMessage);
+    } finally {
+      setSavingFactoryImageId('');
+    }
+  }
+
   async function checkForUpdates() {
     if (!window.qiuDesktop) {
       return;
@@ -1809,8 +1855,26 @@ export default function App() {
       return;
     }
 
+    const attachments = buildComposerAttachments(files);
+
+    setComposerAttachments((current) => [...current, ...attachments]);
+    animateAttachmentReadiness(setComposerAttachments, attachments);
+  }
+
+  function stageFactoryFiles(fileList: FileList | File[]) {
+    const files = Array.from(fileList).filter((file) => file.size >= 0);
+    if (files.length === 0) {
+      return;
+    }
+
+    const attachments = buildComposerAttachments(files);
+    setFactoryAttachments((current) => [...current, ...attachments]);
+    animateAttachmentReadiness(setFactoryAttachments, attachments);
+  }
+
+  function buildComposerAttachments(files: File[]): ComposerAttachment[] {
     const stagedAt = new Date().toISOString();
-    const attachments = files.map((file, index): ComposerAttachment => ({
+    return files.map((file, index): ComposerAttachment => ({
       id: `attachment-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
       name: file.name || `附件 ${index + 1}`,
       size: file.size,
@@ -1820,9 +1884,12 @@ export default function App() {
       status: 'uploading',
       stagedAt
     }));
+  }
 
-    setComposerAttachments((current) => [...current, ...attachments]);
-
+  function animateAttachmentReadiness(
+    setter: typeof setComposerAttachments,
+    attachments: ComposerAttachment[]
+  ) {
     for (const attachment of attachments) {
       for (const [delay, progress] of [
         [120, 42],
@@ -1830,7 +1897,7 @@ export default function App() {
         [520, 100]
       ] as const) {
         window.setTimeout(() => {
-          setComposerAttachments((current) =>
+          setter((current) =>
             current.map((item) =>
               item.id === attachment.id
                 ? {
@@ -1848,6 +1915,10 @@ export default function App() {
 
   function removeComposerAttachment(attachmentId: string) {
     setComposerAttachments((current) => current.filter((attachment) => attachment.id !== attachmentId));
+  }
+
+  function removeFactoryAttachment(attachmentId: string) {
+    setFactoryAttachments((current) => current.filter((attachment) => attachment.id !== attachmentId));
   }
 
   function handleComposerDragOver(event: DragEvent<HTMLFormElement>) {
@@ -1882,6 +1953,14 @@ export default function App() {
   function handleComposerFileInputChange(event: ChangeEvent<HTMLInputElement>) {
     if (event.target.files) {
       stageComposerFiles(event.target.files);
+    }
+
+    event.target.value = '';
+  }
+
+  function handleFactoryFileInputChange(event: ChangeEvent<HTMLInputElement>) {
+    if (event.target.files) {
+      stageFactoryFiles(event.target.files);
     }
 
     event.target.value = '';
@@ -2240,6 +2319,7 @@ export default function App() {
         {renderOnboardingModal()}
         {renderAccountModal()}
         {renderRoleUninstallModal()}
+        {renderFactoryImagePreviewModal()}
         {renderUserAgreementModal()}
       </AppProvider>
     </ConfigProvider>
@@ -2784,6 +2864,52 @@ export default function App() {
     );
   }
 
+  function renderFactoryImagePreviewModal() {
+    const imageSrc = previewFactoryImage ? getFactoryPreviewImageSrc(previewFactoryImage) : '';
+    const title = previewFactoryImage
+      ? `${previewFactoryImage.sku} / ${previewFactoryImage.packageLabel}`
+      : '图片预览';
+
+    return (
+      <Modal
+        title={title}
+        open={Boolean(previewFactoryImage)}
+        footer={[
+          <Button key="close" onClick={() => setPreviewFactoryImage(null)}>
+            关闭
+          </Button>,
+          <Button
+            key="save"
+            type="primary"
+            icon={<DownloadOutlined />}
+            disabled={!previewFactoryImage?.remoteUrl}
+            loading={savingFactoryImageId === previewFactoryImage?.id}
+            onClick={() => previewFactoryImage && void saveFactoryPreviewImage(previewFactoryImage)}
+          >
+            保存图片
+          </Button>
+        ]}
+        width={760}
+        centered
+        destroyOnHidden
+        onCancel={() => setPreviewFactoryImage(null)}
+      >
+        <div className="factory-preview-modal-body">
+          {imageSrc ? (
+            <img className="factory-preview-modal-image" src={imageSrc} alt={title} />
+          ) : (
+            <Empty description="没有可预览的图片地址" />
+          )}
+          {previewFactoryImage?.remoteUrl ? (
+            <Typography.Paragraph className="factory-preview-url" copyable>
+              {previewFactoryImage.remoteUrl}
+            </Typography.Paragraph>
+          ) : null}
+        </div>
+      </Modal>
+    );
+  }
+
   function renderWorkbench() {
     const runningTaskCount = orderedTasks.filter((task) => task.state === 'running').length;
     const waitingTaskCount = orderedTasks.filter(
@@ -3088,6 +3214,58 @@ export default function App() {
                       <Typography.Text strong>结果已生成</Typography.Text>
                       <div className="chat-artifact-grid">
                         {conversationArtifacts.map((artifact) => {
+                          const factoryPreview = artifact.factoryPreview;
+                          if (factoryPreview?.kind === 'digital_factory_image_batch') {
+                            const previewItems = [...factoryPreview.items].sort((left, right) => left.order - right.order);
+                            return (
+                              <div key={artifact.id} className="chat-artifact-card factory-artifact-card">
+                                <div className="factory-artifact-header">
+                                  <div className="artifact-file-icon image">
+                                    <FileImageOutlined />
+                                  </div>
+                                  <div className="artifact-file-main">
+                                    <div className="artifact-file-title-row">
+                                      <Typography.Text strong ellipsis title={artifact.title}>
+                                        {artifact.title}
+                                      </Typography.Text>
+                                      <Tag className="artifact-file-type">图片批次</Tag>
+                                    </div>
+                                    <Typography.Text type="secondary" className="artifact-file-meta">
+                                      {formatFactoryPreviewMeta(factoryPreview)}
+                                    </Typography.Text>
+                                  </div>
+                                </div>
+                                <div className="factory-preview-grid">
+                                  {previewItems.map((item) => {
+                                    const imageSrc = getFactoryPreviewImageSrc(item);
+                                    return (
+                                      <button
+                                        key={item.id}
+                                        type="button"
+                                        className={`factory-preview-tile ${item.status}`}
+                                        disabled={!imageSrc}
+                                        title={item.error ?? `${item.sku} / ${item.packageLabel}`}
+                                        onClick={() => setPreviewFactoryImage(item)}
+                                      >
+                                        <span className="factory-preview-thumb">
+                                          {imageSrc ? (
+                                            <img src={imageSrc} alt={`${item.sku} ${item.packageLabel}`} loading="lazy" />
+                                          ) : (
+                                            <FileImageOutlined />
+                                          )}
+                                        </span>
+                                        <span className="factory-preview-caption">
+                                          <span>{item.sku}</span>
+                                          <span>{item.packageLabel}</span>
+                                        </span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          }
+
                           const fileName = getArtifactFileName(artifact);
                           return (
                           <div key={artifact.id} className="chat-artifact-card">
@@ -3481,11 +3659,19 @@ export default function App() {
     const roleConfigHasUnreadyModel = roleConfigModelRequirements.some(
       (requirement) => !requirement.ready
     );
+    const roleConfigApplicationLabel = roleConfigTemplate
+      ? roleApplicationTypeLabel(readRoleApplicationType(roleConfigTemplate))
+      : roleApplicationTypeLabel(selectedRoleApplicationType);
     const installedRoleCodes = new Set(runtimeState.rolePackages.map((rolePackage) => rolePackage.roleCode));
-    const roleCategories = buildRoleCategoryTabs(desktopRoleTemplates);
-    const filteredRoleTemplates = desktopRoleTemplates.filter(
+    const roleApplicationCounts = countRoleApplications(desktopRoleTemplates);
+    const selectedApplicationTemplates = desktopRoleTemplates.filter(
+      (template) => readRoleApplicationType(template) === selectedRoleApplicationType
+    );
+    const roleCategories = buildRoleCategoryTabs(selectedApplicationTemplates);
+    const filteredRoleTemplates = selectedApplicationTemplates.filter(
       (template) => selectedRoleCategory === '全部' || roleTemplateCategory(template) === selectedRoleCategory
     );
+    const selectedApplicationLabel = roleApplicationTypeLabel(selectedRoleApplicationType);
 
     return (
       <>
@@ -3493,16 +3679,35 @@ export default function App() {
           <Flex align="center" justify="space-between" gap={16} wrap="wrap" className="catalog-page-header">
             <div>
               <Typography.Title level={2} className="page-title">
-                数字员工
+                {selectedApplicationLabel}
               </Typography.Title>
               <Typography.Text type="secondary">
-                选择、安装和配置企业可用的数字员工。
+                {selectedRoleApplicationType === 'digital_factory'
+                  ? '选择、安装和运行批量化数字工厂。'
+                  : '选择、安装和配置企业可用的数字员工。'}
               </Typography.Text>
             </div>
             <Button icon={<ReloadOutlined />} loading={isLoadingRoleTemplates} onClick={loadAuthorizedRoleTemplates}>
               刷新
             </Button>
           </Flex>
+
+          <div className="category-tabs role-application-tabs">
+            {(['digital_employee', 'digital_factory'] as RoleApplicationType[]).map((applicationType) => (
+              <button
+                key={applicationType}
+                type="button"
+                className={selectedRoleApplicationType === applicationType ? 'category-tab active' : 'category-tab'}
+                onClick={() => {
+                  setSelectedRoleApplicationType(applicationType);
+                  setSelectedRoleCategory('全部');
+                }}
+              >
+                {roleApplicationTypeLabel(applicationType)}
+                <span className="category-tab-count">{roleApplicationCounts[applicationType]}</span>
+              </button>
+            ))}
+          </div>
 
           <div className="category-tabs">
             {roleCategories.map((category) => (
@@ -3523,9 +3728,20 @@ export default function App() {
             </Typography.Paragraph>
           ) : null}
 
+          {filteredRoleTemplates.length === 0 ? (
+            <Empty
+              className="catalog-empty-state"
+              description={
+                selectedRoleApplicationType === 'digital_factory'
+                  ? '当前还没有可安装的数字工厂，请先在管理后台创建并上架。'
+                  : '当前还没有可安装的数字员工，请先刷新或检查企业权限。'
+              }
+            />
+          ) : (
           <div className="catalog-grid role-catalog-grid">
             {filteredRoleTemplates.map((template) => {
               const installed = installedRoleCodes.has(template.roleCode);
+              const isFactory = readRoleApplicationType(template) === 'digital_factory';
               const active = runtimeState.localRuntime.activeRoleCode === template.roleCode;
               const summary = installedRoleSummaries.find((item) => item.roleCode === template.roleCode);
               const installedRolePackage = runtimeState.rolePackages.find(
@@ -3542,7 +3758,7 @@ export default function App() {
                   <Space direction="vertical" size={10} style={{ width: '100%' }} className="role-card-content">
                     <Flex align="flex-start" justify="space-between" gap={12}>
                       <span className="catalog-card-icon">
-                        <RobotOutlined />
+                        {isFactory ? <ControlOutlined /> : <RobotOutlined />}
                       </span>
                       <Space size={6} wrap>
                         <Tag color={active ? 'green' : installed ? 'blue' : 'default'}>
@@ -3554,6 +3770,7 @@ export default function App() {
                           </Tooltip>
                         ) : null}
                         {hasTemplateUpdate ? <Tag color="orange">有新版</Tag> : null}
+                        {isFactory ? <Tag color="purple">工厂</Tag> : null}
                         <Tag>{roleTemplateCategory(template)}</Tag>
                       </Space>
                     </Flex>
@@ -3596,11 +3813,15 @@ export default function App() {
                           size="small"
                           type={active ? 'default' : 'primary'}
                           onClick={() => {
-                            activateRole(template.roleCode);
-                            navigateToSection('workbench');
+                            if (isFactory) {
+                              openFactoryRunModal(template.roleCode);
+                            } else {
+                              activateRole(template.roleCode);
+                              navigateToSection('workbench');
+                            }
                           }}
                         >
-                          {active ? '进入对话' : '开始使用'}
+                          {isFactory ? '运行工厂' : active ? '进入对话' : '开始使用'}
                         </Button>
                       ) : (
                         <Button size="small" type="primary" onClick={() => openRoleConfig(template.roleCode, 'install')}>
@@ -3631,6 +3852,7 @@ export default function App() {
               );
             })}
           </div>
+          )}
         </div>
 
         <Modal
@@ -3639,8 +3861,8 @@ export default function App() {
             roleConfigTemplate
               ? `${roleConfigMode === 'install' ? '安装' : '配置'}：${roleConfigTemplate.name}`
               : roleConfigMode === 'install'
-                ? '安装数字员工'
-                : '配置数字员工'
+                ? `安装${roleConfigApplicationLabel}`
+                : `配置${roleConfigApplicationLabel}`
           }
           okText={roleConfigMode === 'install' ? '安装' : '保存'}
           onCancel={closeRoleConfig}
@@ -3674,7 +3896,7 @@ export default function App() {
                   <List
                     size="small"
                     dataSource={roleConfigModelRequirements}
-                    locale={{ emptyText: '当前数字员工没有声明模型需求' }}
+                    locale={{ emptyText: `当前${roleConfigApplicationLabel}没有声明模型需求` }}
                     renderItem={(requirement) => (
                       <List.Item
                         actions={[
@@ -3722,7 +3944,7 @@ export default function App() {
                     )}
                   />
                   <Typography.Text type="secondary">
-                    API Key 只保存在当前电脑；从 admin-console 上架的员工如果声明了多个 LLM，这里会逐项列出。
+                    API Key 只保存在当前电脑；从 admin-console 上架的模板如果声明了多个 LLM，这里会逐项列出。
                   </Typography.Text>
                 </Space>
               </Card>
@@ -3742,7 +3964,7 @@ export default function App() {
                 <Space direction="vertical" size={12} style={{ width: '100%' }}>
                   <Typography.Text strong>API Key 使用方式</Typography.Text>
                   {roleConfigModelRequirements.length === 0 ? (
-                    <Empty description="当前数字员工没有声明模型需求" />
+                    <Empty description={`当前${roleConfigApplicationLabel}没有声明模型需求`} />
                   ) : (
                     roleConfigModelRequirements.map((requirement) =>
                       renderRoleModelCredentialEditor(requirement.profile)
@@ -3784,7 +4006,7 @@ export default function App() {
                     <Space direction="vertical" size={2}>
                       <Typography.Text strong>本机卸载</Typography.Text>
                       <Typography.Text type="secondary">
-                        从当前电脑移除该数字员工，历史任务和已生成产物仍会保留。
+                        从当前电脑移除该{roleConfigApplicationLabel}，历史任务和已生成产物仍会保留。
                       </Typography.Text>
                     </Space>
                     <Button
@@ -3792,17 +4014,144 @@ export default function App() {
                       icon={<DeleteOutlined />}
                       onClick={() => confirmUninstallRole(roleConfigRolePackage.roleCode)}
                     >
-                      卸载数字员工
+                      卸载{roleConfigApplicationLabel}
                     </Button>
                   </Flex>
                 </div>
               ) : null}
             </Space>
           ) : (
-            <Empty description="未找到数字员工" />
+            <Empty description={`未找到${roleConfigApplicationLabel}`} />
           )}
         </Modal>
+        {renderFactoryRunModal()}
       </>
+    );
+  }
+
+  function renderFactoryRunModal() {
+    const template = factoryRunRoleCode
+      ? desktopRoleTemplateByRoleCode.get(factoryRunRoleCode)
+      : undefined;
+    const factory = readFactoryManifest(template?.dependencyManifest);
+    const platformOptions = readFactoryPlatformOptions(factory);
+    const packageOptions = readFactoryPackageOptions(factory);
+    const qualityModes = readFactoryQualityModes(factory);
+    const maxItems = readFactoryMaxItems(factory);
+
+    return (
+      <Modal
+        open={Boolean(factoryRunRoleCode)}
+        title={template ? `运行工厂：${template.name}` : '运行数字工厂'}
+        okText="开始生成"
+        onCancel={closeFactoryRunModal}
+        onOk={() => factoryRunForm.submit()}
+        width={780}
+        destroyOnHidden
+      >
+        {template ? (
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Descriptions column={1} size="small" bordered>
+              <Descriptions.Item label="工厂">{template.name}</Descriptions.Item>
+              <Descriptions.Item label="单批上限">{maxItems} 个商品</Descriptions.Item>
+              <Descriptions.Item label="输出">{template.outputFormat || '图片 URL 预览结果 + 任务摘要'}</Descriptions.Item>
+            </Descriptions>
+
+            <Form<FactoryRunFormValues>
+              form={factoryRunForm}
+              layout="vertical"
+              initialValues={{
+                roleCode: template.roleCode,
+                platform: platformOptions[0]?.key ?? 'amazon',
+                packageKeys: packageOptions.map((item) => item.key),
+                qualityCheckMode: 'basic'
+              }}
+              onFinish={submitFactoryRun}
+            >
+              <Form.Item name="roleCode" hidden>
+                <Input />
+              </Form.Item>
+              <Form.Item name="platform" label="目标平台" rules={[{ required: true, message: '请选择目标平台' }]}>
+                <Select
+                  options={platformOptions.map((item) => ({
+                    value: item.key,
+                    label: `${item.label}${item.imageRatio ? ` / ${item.imageRatio}` : ''}`
+                  }))}
+                />
+              </Form.Item>
+              <Form.Item
+                name="packageKeys"
+                label="选择产物包"
+                rules={[{ required: true, message: '请至少选择一个产物包' }]}
+              >
+                <Checkbox.Group className="factory-package-checks">
+                  {packageOptions.map((item) => (
+                    <Tooltip key={item.key} title={item.description}>
+                      <Checkbox value={item.key}>{item.label}</Checkbox>
+                    </Tooltip>
+                  ))}
+                </Checkbox.Group>
+              </Form.Item>
+              <Form.Item name="qualityCheckMode" label="质检方式" rules={[{ required: true }]}>
+                <Select
+                  options={qualityModes.map((item) => ({
+                    value: item.key,
+                    label: item.label
+                  }))}
+                />
+              </Form.Item>
+              <Form.Item name="instruction" label="补充要求">
+                <Input.TextArea
+                  rows={3}
+                  placeholder="例如：面向美国站，风格干净高级；白底图不要文字；卖点图突出防水和安装便捷。"
+                />
+              </Form.Item>
+            </Form>
+
+            <div className="factory-upload-panel">
+              <Flex align="center" justify="space-between" gap={12} wrap="wrap">
+                <Space direction="vertical" size={2}>
+                  <Typography.Text strong>商品图片 / SKU 表格</Typography.Text>
+                  <Typography.Text type="secondary">
+                    支持 png、jpg、webp、xlsx、csv；图片按商品计数，单批最多 {maxItems} 张。
+                  </Typography.Text>
+                </Space>
+                <Button icon={<FileAddOutlined />} onClick={() => factoryFileInputRef.current?.click()}>
+                  添加文件
+                </Button>
+                <input
+                  ref={factoryFileInputRef}
+                  type="file"
+                  multiple
+                  accept=".png,.jpg,.jpeg,.webp,.xlsx,.csv"
+                  hidden
+                  onChange={handleFactoryFileInputChange}
+                />
+              </Flex>
+              {factoryAttachments.length > 0 ? (
+                <div className="factory-attachment-list">
+                  {factoryAttachments.map((attachment) => (
+                    <div key={attachment.id} className="factory-attachment-item">
+                      <Space size={8}>
+                        {isFactoryImageAttachment(attachment) ? <FileImageOutlined /> : <FileExcelOutlined />}
+                        <span>{attachment.name}</span>
+                        <Typography.Text type="secondary">{formatFileSize(attachment.size)}</Typography.Text>
+                      </Space>
+                      <Button size="small" type="text" danger onClick={() => removeFactoryAttachment(attachment.id)}>
+                        移除
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请添加商品参考图" />
+              )}
+            </div>
+          </Space>
+        ) : (
+          <Empty description="未找到数字工厂" />
+        )}
+      </Modal>
     );
   }
 
@@ -4808,6 +5157,82 @@ export default function App() {
     message.success(`${rolePackage.name} 已从当前电脑卸载，历史任务和产物已保留。`);
   }
 
+  function openFactoryRunModal(roleCode: string) {
+    const template = desktopRoleTemplateByRoleCode.get(roleCode);
+    if (!template) {
+      message.warning('未找到这个数字工厂。');
+      return;
+    }
+
+    const factory = readFactoryManifest(template.dependencyManifest);
+    const packageOptions = readFactoryPackageOptions(factory);
+    const platformOptions = readFactoryPlatformOptions(factory);
+    const qualityModes = readFactoryQualityModes(factory);
+    const defaultPackages = packageOptions
+      .filter((item) => item.defaultSelected !== false)
+      .map((item) => item.key);
+
+    setFactoryRunRoleCode(roleCode);
+    setFactoryAttachments([]);
+    factoryRunForm.setFieldsValue({
+      roleCode,
+      platform: platformOptions[0]?.key ?? 'amazon',
+      packageKeys: defaultPackages.length ? defaultPackages : packageOptions.map((item) => item.key),
+      qualityCheckMode: qualityModes[0]?.key ?? 'basic',
+      instruction: ''
+    });
+  }
+
+  function closeFactoryRunModal() {
+    setFactoryRunRoleCode('');
+    setFactoryAttachments([]);
+    factoryRunForm.resetFields();
+  }
+
+  function submitFactoryRun(values: FactoryRunFormValues) {
+    const template = desktopRoleTemplateByRoleCode.get(values.roleCode);
+    if (!template) {
+      message.warning('未找到这个数字工厂。');
+      return;
+    }
+
+    const factory = readFactoryManifest(template.dependencyManifest);
+    const maxItems = readFactoryMaxItems(factory);
+    const imageAttachments = factoryAttachments.filter((attachment) => isFactoryImageAttachment(attachment));
+    if (imageAttachments.length === 0) {
+      message.warning('请至少上传一张商品参考图。');
+      return;
+    }
+    if (imageAttachments.length > maxItems) {
+      message.warning(`单批最多处理 ${maxItems} 张商品图，请拆分批次。`);
+      return;
+    }
+    if (!values.packageKeys?.length) {
+      message.warning('请至少选择一个产物包。');
+      return;
+    }
+
+    const platform = readFactoryPlatformOptions(factory).find((item) => item.key === values.platform);
+    const title = `${template.name} - ${platform?.label ?? values.platform} - ${imageAttachments.length} 个商品`;
+    const input = buildFactoryTaskInput({
+      template,
+      factory,
+      values,
+      attachments: factoryAttachments
+    });
+
+    const created = createTask({
+      roleCode: values.roleCode,
+      title,
+      input,
+      attachments: factoryAttachments
+    });
+    if (created) {
+      closeFactoryRunModal();
+      navigateToSection('workbench');
+    }
+  }
+
   function activateRole(roleCode: string) {
     setRuntimeState((current) => {
       if (current.localRuntime.activeRoleCode === roleCode) {
@@ -5414,16 +5839,16 @@ export default function App() {
     return preparedState;
   }
 
-  function createTask(values: TaskFormValues & { attachments?: ComposerAttachment[] }) {
+  function createTask(values: TaskFormValues & { attachments?: ComposerAttachment[] }): boolean {
     const title = values.title.trim();
     if (!title) {
-      return;
+      return false;
     }
 
     const roleCode = values.roleCode;
     const preparedState = prepareRoleForTaskRun(roleCode);
     if (!preparedState) {
-      return;
+      return false;
     }
 
     const roleName = resolveRoleName(preparedState.rolePackages, roleCode);
@@ -5453,6 +5878,7 @@ export default function App() {
     void runTaskDetail(nextState, startTaskRun(taskDetail, startedAt)).catch(() => {
       // runTaskDetail already writes the failed task state; avoid an unhandled rejection in the renderer.
     });
+    return true;
   }
 
   function navigateToSection(section: SectionKey) {
@@ -6001,6 +6427,58 @@ function formatArtifactMeta(artifact: DesktopTaskDetail['artifacts'][number]) {
   return `${getArtifactTypeLabel(artifact)} · ${createdLabel} · 本地缓存 30 天`;
 }
 
+function formatFactoryPreviewMeta(preview: FactoryArtifactPreview) {
+  const failedText = preview.failed > 0 ? `，失败 ${preview.failed}` : '';
+  const platformText = preview.platformLabel ? ` · ${preview.platformLabel}` : '';
+  return `完成 ${preview.completed}/${preview.total}${failedText} · 并发 ${preview.concurrency}${platformText}`;
+}
+
+function getFactoryPreviewImageSrc(item: FactoryArtifactPreviewItem) {
+  return toFactoryPreviewImageSrc(item.thumbnailPath)
+    ?? toFactoryPreviewImageSrc(item.localPath)
+    ?? toFactoryPreviewImageSrc(item.remoteUrl)
+    ?? '';
+}
+
+function getFactoryPreviewImageFileName(item: FactoryArtifactPreviewItem) {
+  const extension = getFactoryPreviewImageExtension(item.remoteUrl ?? item.thumbnailPath ?? item.localPath) ?? 'png';
+  const sku = sanitizeFactoryPreviewFileNamePart(item.sku) || 'SKU';
+  const packageLabel = sanitizeFactoryPreviewFileNamePart(item.packageLabel) || item.packageKey || 'image';
+  return `${sku}-${packageLabel}.${extension}`;
+}
+
+function getFactoryPreviewImageExtension(value: string | undefined) {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  const pathPart = normalized.split('?')[0]?.split('#')[0] ?? normalized;
+  const extension = pathPart.match(/\.([a-zA-Z0-9]+)$/)?.[1]?.toLowerCase();
+  return extension && ['png', 'jpg', 'jpeg', 'webp'].includes(extension) ? extension : undefined;
+}
+
+function sanitizeFactoryPreviewFileNamePart(value: string | undefined) {
+  return (value ?? '')
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '_')
+    .replace(/\s+/g, '_')
+    .slice(0, 48);
+}
+
+function toFactoryPreviewImageSrc(value: string | undefined) {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (/^https?:\/\//i.test(normalized) || /^data:/i.test(normalized) || /^file:\/\//i.test(normalized)) {
+    return normalized;
+  }
+
+  return `file:///${normalized.replace(/\\/g, '/').replace(/^\/+/, '')}`;
+}
+
 function createChatTaskTitle(input: string) {
   const normalized = input
     .split('\n')
@@ -6488,6 +6966,7 @@ function readMessageDetails(message: string) {
 function toInstalledRolePackage(template: DesktopRoleTemplate): RolePackageManifest {
   return {
     roleCode: template.roleCode,
+    applicationType: template.applicationType ?? 'digital_employee',
     name: template.name,
     version: template.version,
     summary: template.summary,
@@ -6541,6 +7020,387 @@ interface RoleRuntimeReadinessSummary {
   issueText: string;
   missingToolIds: string[];
   disabledToolIds: string[];
+}
+
+interface DigitalFactoryPlatformOption {
+  key: string;
+  label: string;
+  imageRatio?: string;
+  notes?: string;
+}
+
+interface DigitalFactoryPackageOption {
+  key: string;
+  label: string;
+  description?: string;
+  outputType?: string;
+  defaultSelected?: boolean;
+}
+
+interface DigitalFactoryQualityModeOption {
+  key: FactoryRunFormValues['qualityCheckMode'];
+  label: string;
+  description?: string;
+}
+
+interface DigitalFactoryManifest {
+  kind?: string;
+  title?: string;
+  batch?: {
+    maxItems?: number;
+    imageExtensions?: string[];
+    tableExtensions?: string[];
+  };
+  platforms?: DigitalFactoryPlatformOption[];
+  packages?: DigitalFactoryPackageOption[];
+  qualityCheck?: {
+    defaultMode?: FactoryRunFormValues['qualityCheckMode'];
+    modes?: DigitalFactoryQualityModeOption[];
+  };
+  output?: {
+    defaultImageFormat?: string;
+    packageFormat?: string;
+    folder?: string;
+  };
+}
+
+const defaultFactoryPlatforms: DigitalFactoryPlatformOption[] = [
+  { key: 'amazon', label: 'Amazon', imageRatio: '1:1', notes: '主图简洁，避免夸张文字和过度装饰。' },
+  { key: 'temu', label: 'Temu', imageRatio: '1:1', notes: '强调直观卖点、价格感和清晰主体。' },
+  { key: 'aliexpress', label: '速卖通', imageRatio: '1:1', notes: '适合主图、场景图和参数卖点图组合。' },
+  { key: 'tiktok_shop', label: 'TikTok Shop', imageRatio: '1:1', notes: '画面更生活化，适合短视频封面和场景图。' },
+  { key: 'ozon', label: 'Ozon', imageRatio: '1:1', notes: '主体清晰，参数和尺寸信息需要可读。' },
+  { key: 'shopee', label: 'Shopee', imageRatio: '1:1', notes: '适合醒目、轻促销风格的商品图。' },
+  { key: 'lazada', label: 'Lazada', imageRatio: '1:1', notes: '重视商品主体和卖点信息层级。' },
+  { key: 'ebay', label: 'eBay', imageRatio: '1:1', notes: '真实、清晰、少修饰，便于买家检查商品。' },
+  { key: 'walmart', label: 'Walmart', imageRatio: '1:1', notes: '偏干净、规范的零售商品图。' },
+  { key: 'shein', label: 'SHEIN', imageRatio: '3:4', notes: '服饰类可突出模特、穿搭和风格。' }
+];
+
+const defaultFactoryPackages: DigitalFactoryPackageOption[] = [
+  {
+    key: 'white_background',
+    label: '白底图',
+    description: '保留商品主体，生成干净白底商品图。',
+    outputType: 'image',
+    defaultSelected: true
+  },
+  {
+    key: 'main_image',
+    label: '商品主图',
+    description: '突出商品卖点，适合平台列表和首图。',
+    outputType: 'image',
+    defaultSelected: true
+  },
+  {
+    key: 'scene_image',
+    label: '场景图',
+    description: '把商品放入真实使用场景，增强购买代入感。',
+    outputType: 'image',
+    defaultSelected: true
+  },
+  {
+    key: 'background_replacement',
+    label: '换背景',
+    description: '替换背景风格，同时保持商品主体一致。',
+    outputType: 'image',
+    defaultSelected: true
+  },
+  {
+    key: 'model_replacement',
+    label: '换模特',
+    description: '适合服饰、配饰、家居等需要人物展示的商品图。',
+    outputType: 'image',
+    defaultSelected: true
+  },
+  {
+    key: 'dimension_image',
+    label: '尺寸图',
+    description: '生成带尺寸、规格或关键参数标注的说明图。',
+    outputType: 'image',
+    defaultSelected: true
+  },
+  {
+    key: 'selling_point_image',
+    label: '卖点图',
+    description: '围绕核心卖点生成电商详情页可用图片。',
+    outputType: 'image',
+    defaultSelected: true
+  }
+];
+
+const defaultFactoryQualityModes: DigitalFactoryQualityModeOption[] = [
+  { key: 'none', label: '不质检', description: '不额外调用模型，只生成图片。' },
+  { key: 'basic', label: '基础质检', description: '检查文件数量、命名、格式和基础规则。' },
+  { key: 'smart', label: '智能质检', description: '调用多模态模型检查主体一致性、平台合规和卖点可读性。' }
+];
+
+const factoryImageExtensions = new Set(['png', 'jpg', 'jpeg', 'webp']);
+
+function readRoleApplicationType(
+  value:
+    | Pick<DesktopRoleTemplate, 'applicationType' | 'dependencyManifest'>
+    | Pick<RolePackageManifest, 'applicationType' | 'dependencyManifest'>
+    | undefined
+): RoleApplicationType {
+  if (value?.applicationType === 'digital_factory' || value?.applicationType === 'digital_employee') {
+    return value.applicationType;
+  }
+
+  const manifestApplicationType = value?.dependencyManifest?.applicationType;
+  return manifestApplicationType === 'digital_factory' ? 'digital_factory' : 'digital_employee';
+}
+
+function roleApplicationTypeLabel(applicationType: RoleApplicationType) {
+  return applicationType === 'digital_factory' ? '数字工厂' : '数字员工';
+}
+
+function countRoleApplications(templates: DesktopRoleTemplate[]): Record<RoleApplicationType, number> {
+  return templates.reduce<Record<RoleApplicationType, number>>(
+    (counts, template) => {
+      counts[readRoleApplicationType(template)] += 1;
+      return counts;
+    },
+    {
+      digital_employee: 0,
+      digital_factory: 0
+    }
+  );
+}
+
+function readFactoryManifest(manifest: RoleTemplateDependencyManifest | undefined): DigitalFactoryManifest {
+  const factory = manifest?.factory;
+  if (!isPlainObject(factory)) {
+    return {};
+  }
+
+  const batch = isPlainObject(factory.batch) ? factory.batch : undefined;
+  const qualityCheck = isPlainObject(factory.qualityCheck) ? factory.qualityCheck : undefined;
+  const output = isPlainObject(factory.output) ? factory.output : undefined;
+
+  return {
+    kind: readString(factory.kind),
+    title: readString(factory.title),
+    batch: {
+      maxItems: readNumber(batch?.maxItems),
+      imageExtensions: readStringArray(batch?.imageExtensions),
+      tableExtensions: readStringArray(batch?.tableExtensions)
+    },
+    platforms: readFactoryPlatformOptionsFromValue(factory.platforms),
+    packages: readFactoryPackageOptionsFromValue(factory.packages),
+    qualityCheck: {
+      defaultMode: readFactoryQualityModeKey(qualityCheck?.defaultMode),
+      modes: readFactoryQualityModeOptionsFromValue(qualityCheck?.modes)
+    },
+    output: {
+      defaultImageFormat: readString(output?.defaultImageFormat),
+      packageFormat: readString(output?.packageFormat),
+      folder: readString(output?.folder)
+    }
+  };
+}
+
+function readFactoryPlatformOptions(factory: DigitalFactoryManifest): DigitalFactoryPlatformOption[] {
+  return factory.platforms?.length ? factory.platforms : defaultFactoryPlatforms;
+}
+
+function readFactoryPackageOptions(factory: DigitalFactoryManifest): DigitalFactoryPackageOption[] {
+  return factory.packages?.length ? factory.packages : defaultFactoryPackages;
+}
+
+function readFactoryQualityModes(factory: DigitalFactoryManifest): DigitalFactoryQualityModeOption[] {
+  return factory.qualityCheck?.modes?.length ? factory.qualityCheck.modes : defaultFactoryQualityModes;
+}
+
+function readFactoryMaxItems(factory: DigitalFactoryManifest) {
+  const rawMaxItems = factory.batch?.maxItems;
+  if (typeof rawMaxItems !== 'number' || !Number.isInteger(rawMaxItems)) {
+    return 50;
+  }
+
+  return Math.max(1, Math.min(rawMaxItems, 50));
+}
+
+function isFactoryImageAttachment(attachment: ComposerAttachment) {
+  if (attachment.type?.toLowerCase().startsWith('image/')) {
+    return true;
+  }
+
+  const extension = attachment.name.split('.').pop()?.trim().toLowerCase() ?? '';
+  return factoryImageExtensions.has(extension);
+}
+
+function buildFactoryTaskInput({
+  template,
+  factory,
+  values,
+  attachments
+}: {
+  template: DesktopRoleTemplate;
+  factory: DigitalFactoryManifest;
+  values: FactoryRunFormValues;
+  attachments: ComposerAttachment[];
+}) {
+  const platform = readFactoryPlatformOptions(factory).find((item) => item.key === values.platform);
+  const packageOptions = readFactoryPackageOptions(factory);
+  const selectedPackages = packageOptions.filter((item) => values.packageKeys.includes(item.key));
+  const qualityMode = readFactoryQualityModes(factory).find((item) => item.key === values.qualityCheckMode);
+  const imageAttachments = attachments.filter((attachment) => isFactoryImageAttachment(attachment));
+  const tableAttachments = attachments.filter((attachment) => !isFactoryImageAttachment(attachment));
+  const factoryRequest = {
+    applicationType: 'digital_factory',
+    factoryKind: factory.kind ?? 'cross_border_product_image_factory',
+    factoryName: template.name,
+    platform: {
+      key: platform?.key ?? values.platform,
+      label: platform?.label ?? values.platform,
+      imageRatio: platform?.imageRatio,
+      notes: platform?.notes
+    },
+    packages: selectedPackages.map((item) => ({
+      key: item.key,
+      label: item.label,
+      description: item.description,
+      outputType: item.outputType ?? 'image'
+    })),
+    qualityCheckMode: values.qualityCheckMode,
+    qualityCheckLabel: qualityMode?.label ?? values.qualityCheckMode,
+    itemCount: imageAttachments.length,
+    maxItems: readFactoryMaxItems(factory),
+    output: {
+      imageFormat: factory.output?.defaultImageFormat ?? 'png',
+      packageFormat: factory.output?.packageFormat ?? 'url_manifest',
+      folder: factory.output?.folder ?? 'product-images'
+    },
+    attachments: attachments.map((attachment) => ({
+      name: attachment.name,
+      size: attachment.size,
+      type: attachment.type,
+      localPath: attachment.localPath,
+      kind: isFactoryImageAttachment(attachment) ? 'product_image' : 'sku_table'
+    })),
+    instruction: values.instruction?.trim() || undefined
+  };
+  const taskBrief = `请运行「${template.name}」，为 ${platform?.label ?? values.platform} 批量生成跨境商品图。`;
+
+  return JSON.stringify(
+    {
+      taskBrief,
+      factory_request: factoryRequest,
+      platform: factoryRequest.platform,
+      selectedPackages: factoryRequest.packages,
+      qualityCheckMode: factoryRequest.qualityCheckMode,
+      imageCount: imageAttachments.length,
+      tableCount: tableAttachments.length,
+      instructions: [
+        '按 factory_request 逐项处理每张商品图片。',
+        '图片理解和提示词生成在同一个多模态 LLM 节点内完成。',
+        '只生成用户勾选的产物包；不要生成未勾选的图片类型。',
+        '生成结果只保存图片 URL 元数据；大图片不经过服务端，PC 端按 URL 展示缩略图。',
+        '如果质检方式为 none，跳过额外智能质检；如果为 basic，只做文件数量、格式、命名检查。'
+      ]
+    },
+    null,
+    2
+  );
+}
+
+function readFactoryPlatformOptionsFromValue(value: unknown): DigitalFactoryPlatformOption[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!isPlainObject(item)) {
+      return [];
+    }
+
+    const key = readString(item.key);
+    const label = readString(item.label);
+    if (!key || !label) {
+      return [];
+    }
+
+    return [
+      {
+        key,
+        label,
+        imageRatio: readString(item.imageRatio),
+        notes: readString(item.notes)
+      }
+    ];
+  });
+}
+
+function readFactoryPackageOptionsFromValue(value: unknown): DigitalFactoryPackageOption[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!isPlainObject(item)) {
+      return [];
+    }
+
+    const key = readString(item.key);
+    const label = readString(item.label);
+    if (!key || !label) {
+      return [];
+    }
+
+    return [
+      {
+        key,
+        label,
+        description: readString(item.description),
+        outputType: readString(item.outputType),
+        defaultSelected: typeof item.defaultSelected === 'boolean' ? item.defaultSelected : undefined
+      }
+    ];
+  });
+}
+
+function readFactoryQualityModeOptionsFromValue(value: unknown): DigitalFactoryQualityModeOption[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!isPlainObject(item)) {
+      return [];
+    }
+
+    const key = readFactoryQualityModeKey(item.key);
+    const label = readString(item.label);
+    if (!key || !label) {
+      return [];
+    }
+
+    return [
+      {
+        key,
+        label,
+        description: readString(item.description)
+      }
+    ];
+  });
+}
+
+function readFactoryQualityModeKey(value: unknown): FactoryRunFormValues['qualityCheckMode'] | undefined {
+  return value === 'none' || value === 'basic' || value === 'smart' ? value : undefined;
+}
+
+function readStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const values = value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  return values.length ? values.map((item) => item.trim()) : undefined;
+}
+
+function readNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 function buildRoleFileContractSummary(

@@ -22,6 +22,8 @@ import type {
   RoleWorkflowGraph,
   RoleWorkflowGraphNode,
   RoleWorkflowGraphSourceStep,
+  RoleTemplateApplicationType,
+  RoleTemplateDependencyManifest,
   ToolActionCatalog,
   UpdateAdminRoleTemplateRequest
 } from '@qiuai/api-contract';
@@ -82,9 +84,10 @@ export interface AdminCreateRoleTemplatePageClientProps {
   toolCatalog: ToolActionCatalog;
   assets: AssetDefinitionDetail[];
   templateId?: string;
+  initialApplicationType?: RoleTemplateApplicationType;
 }
 
-type WorkflowPreset = 'standard' | 'document' | 'research';
+type WorkflowPreset = 'standard' | 'document' | 'research' | 'cross_border_image_factory';
 type WorkflowNodeType = RoleWorkflowGraphNode['type'];
 type WorkflowArtifactType = NonNullable<RoleWorkflowGraphNode['artifactType']>;
 type WorkflowVariableType = NonNullable<NonNullable<RoleWorkflowGraph['variables']>[number]['type']>;
@@ -121,6 +124,14 @@ type WorkflowContextMenu =
     };
 type WorkflowContextEvent = MouseEvent | ReactMouseEvent<Element>;
 type WorkflowTableColumnConfig = { header: string; path: string };
+type FactoryPackageKey =
+  | 'white_background'
+  | 'main_image'
+  | 'scene_image'
+  | 'background_replacement'
+  | 'model_replacement'
+  | 'dimension_image'
+  | 'selling_point_image';
 type WorkflowCodePreviewResult = {
   status: 'passed' | 'failed';
   inputPreview: string;
@@ -207,6 +218,7 @@ type CreateRoleTemplateFormValues = {
   approvalPolicy: string;
   outputFormat?: string;
   workflowPreset: WorkflowPreset;
+  applicationType: RoleTemplateApplicationType;
   knowledgeSources?: string[];
   tools?: string[];
   skills?: SkillForm[];
@@ -237,7 +249,85 @@ const workflowPresetOptions: Array<{ value: WorkflowPreset; label: string; descr
     value: 'research',
     label: '调研任务',
     description: '先做网页搜索，再综合分析，输出调研报告。'
+  },
+  {
+    value: 'cross_border_image_factory',
+    label: '跨境商品图工厂',
+    description: '批量上传商品图，按平台和所选产物包生成图片 URL 预览结果。'
   }
+];
+
+const factoryPackageOptions: Array<{
+  key: FactoryPackageKey;
+  label: string;
+  description: string;
+  outputType: 'image';
+}> = [
+  {
+    key: 'white_background',
+    label: '白底图',
+    description: '保留商品主体，生成干净白底商品图。',
+    outputType: 'image'
+  },
+  {
+    key: 'main_image',
+    label: '商品主图',
+    description: '突出商品卖点，适合平台列表和首图。',
+    outputType: 'image'
+  },
+  {
+    key: 'scene_image',
+    label: '场景图',
+    description: '把商品放入真实使用场景，增强购买代入感。',
+    outputType: 'image'
+  },
+  {
+    key: 'background_replacement',
+    label: '换背景',
+    description: '替换背景风格，同时保持商品主体一致。',
+    outputType: 'image'
+  },
+  {
+    key: 'model_replacement',
+    label: '换模特',
+    description: '适合服饰、配饰、家居等需要人物展示的商品图。',
+    outputType: 'image'
+  },
+  {
+    key: 'dimension_image',
+    label: '尺寸图',
+    description: '生成带尺寸、规格或关键参数标注的说明图。',
+    outputType: 'image'
+  },
+  {
+    key: 'selling_point_image',
+    label: '卖点图',
+    description: '围绕核心卖点生成电商详情页可用图片。',
+    outputType: 'image'
+  }
+];
+
+const crossBorderFactoryPlatforms = [
+  { key: 'amazon', label: 'Amazon', imageRatio: '1:1', notes: '主图简洁，避免夸张文字和过度装饰。' },
+  { key: 'temu', label: 'Temu', imageRatio: '1:1', notes: '强调直观卖点、价格感和清晰主体。' },
+  { key: 'aliexpress', label: '速卖通', imageRatio: '1:1', notes: '适合主图、场景图和参数卖点图组合。' },
+  { key: 'tiktok_shop', label: 'TikTok Shop', imageRatio: '1:1', notes: '画面更生活化，适合短视频封面和场景图。' },
+  { key: 'ozon', label: 'Ozon', imageRatio: '1:1', notes: '主体清晰，参数和尺寸信息需要可读。' },
+  { key: 'shopee', label: 'Shopee', imageRatio: '1:1', notes: '适合醒目、轻促销风格的商品图。' },
+  { key: 'lazada', label: 'Lazada', imageRatio: '1:1', notes: '重视商品主体和卖点信息层级。' },
+  { key: 'ebay', label: 'eBay', imageRatio: '1:1', notes: '真实、清晰、少修饰，便于买家检查商品。' },
+  { key: 'walmart', label: 'Walmart', imageRatio: '1:1', notes: '偏干净、规范的零售商品图。' },
+  { key: 'shein', label: 'SHEIN', imageRatio: '3:4', notes: '服饰类可突出模特、穿搭和风格。' }
+];
+
+const crossBorderFactoryDefaultPackageKeys: FactoryPackageKey[] = [
+  'white_background',
+  'main_image',
+  'scene_image',
+  'background_replacement',
+  'model_replacement',
+  'dimension_image',
+  'selling_point_image'
 ];
 
 const workflowNodeTypeOptions: Array<{ value: WorkflowNodeType; label: string }> = [
@@ -323,12 +413,21 @@ const modelProfileOptions = [
   { value: 'deepseek-v4-pro', label: 'DeepSeek / deepseek-v4-pro（深度推理）' },
   { value: 'openai-gpt-4o', label: 'OpenAI / gpt-4o（多模态）' },
   { value: 'openai-gpt-4o-mini', label: 'OpenAI / gpt-4o-mini（轻量通用）' },
+  { value: 'openai-gpt-image-1', label: 'OpenAI / gpt-image-1（生成图片/改图）' },
+  { value: 'openai-gpt-image-2', label: 'OpenAI / gpt-image-2（生成图片/改图）' },
   { value: 'openai-gpt-5.6-terra', label: 'OpenAI / gpt-5.6-terra（平衡）' },
   { value: 'openai-gpt-5.6-sol', label: 'OpenAI / gpt-5.6-sol（高质量）' },
+  { value: 'anthropic-claude-opus-4-6', label: 'Anthropic / claude-opus-4.6（复杂推理/图文分析）' },
   { value: 'qwen-plus', label: '通义千问 / qwen-plus（通用生成）' },
   { value: 'qwen-max', label: '通义千问 / qwen-max（高质量）' },
   { value: 'qwen-long', label: '通义千问 / qwen-long（长文档）' },
   { value: 'qwen-vl-max', label: '通义千问 / qwen-vl-max（图片理解）' },
+  { value: 'qwen-image', label: '通义千问 / qwen-image（生成图片/改图）' },
+  { value: 'google-nano-banana-2', label: 'Google / nano-banana-2（生成图片/编辑图片）' },
+  { value: 'google-imagen-4', label: 'Google / imagen-4（生成图片）' },
+  { value: 'doubao-seedream', label: '豆包 / Seedream（生成图片/改图）' },
+  { value: 'bytedance-seedance-2-0', label: '豆包 / Seedance 2.0（生成视频）' },
+  { value: 'minimax-image-01', label: 'MiniMax / image-01（生成图片）' },
   { value: 'moonshot-v1-32k', label: 'Kimi / moonshot-v1-32k（长文档）' },
   { value: 'moonshot-v1-128k', label: 'Kimi / moonshot-v1-128k（超长文档）' },
   { value: 'qiu-general-default', label: '企业默认通用模型（兜底，PC 端配置）' },
@@ -342,6 +441,9 @@ const artifactTypeOptions: Array<{ value: WorkflowArtifactType; label: string }>
   'xlsx',
   'pptx',
   'mp4',
+  'png',
+  'jpg',
+  'zip',
   'markdown',
   'csv'
 ].map((value) => ({ value: value as WorkflowArtifactType, label: value }));
@@ -1383,6 +1485,46 @@ function deriveWorkflowStepsFromGraph(graph: RoleWorkflowGraph): RoleWorkflowGra
 }
 
 function createWorkflowSteps(preset: WorkflowPreset): RoleWorkflowGraphSourceStep[] {
+  if (preset === 'cross_border_image_factory') {
+    return [
+      {
+        id: 'factory_input',
+        order: 1,
+        type: 'input',
+        name: '接收商品批次',
+        instruction: '接收商品图片、SKU 表格、目标平台、勾选产物包和质检模式。'
+      },
+      {
+        id: 'generate_package_prompts',
+        order: 2,
+        type: 'llm',
+        name: '理解图片并生成提示词',
+        instruction: '用多模态模型理解商品图，同时生成各产物包的稳定生图提示词。'
+      },
+      {
+        id: 'generate_images',
+        order: 3,
+        type: 'llm',
+        name: '批量生成商品图',
+        instruction: '按商品批次和所选产物包调用图片生成模型，输出图片远程 URL 元数据。'
+      },
+      {
+        id: 'quality_check',
+        order: 4,
+        type: 'llm',
+        name: '可选质检',
+        instruction: '按用户选择执行基础规则检查或多模态质检。'
+      },
+      {
+        id: 'factory_output',
+        order: 5,
+        type: 'output',
+        name: '返回结果',
+        instruction: '返回批量任务统计、失败项和图片预览结果。'
+      }
+    ];
+  }
+
   if (preset === 'document') {
     return [
       {
@@ -1506,7 +1648,167 @@ function createWorkflowSteps(preset: WorkflowPreset): RoleWorkflowGraphSourceSte
   ];
 }
 
+function createCrossBorderImageFactoryWorkflowGraph(): RoleWorkflowGraph {
+  const nodes: RoleWorkflowGraphNode[] = [
+    {
+      id: 'start',
+      type: 'start',
+      name: '开始',
+      description: '工作流入口。'
+    },
+    {
+      id: 'factory_input',
+      type: 'input',
+      name: '接收商品批次',
+      instruction: '接收商品图片、SKU 表格、目标平台、勾选产物包和质检模式；单批最多 50 个商品。',
+      inputVariables: ['start.text', 'start.files', 'start.images', 'start.spreadsheets'],
+      outputVariables: ['task_brief'],
+      config: {
+        acceptedFileKinds: ['image', 'spreadsheet', 'csv'],
+        maxItems: 50,
+        source: 'digital_factory'
+      }
+    },
+    {
+      id: 'prepare_batch',
+      type: 'data',
+      name: '整理批次参数',
+      instruction: '把用户输入、附件和工厂面板参数整理成稳定 JSON，供后续节点读取。',
+      inputVariables: ['start.files', 'factory_request'],
+      outputVariables: ['factory_request', 'factory_items', 'selected_packages', 'target_platform', 'quality_check_mode'],
+      config: {
+        dataMode: 'code',
+        outputVariable: 'factory_items',
+        timeoutMs: 2_000,
+        code:
+          'const request = input.factory_request && typeof input.factory_request === "object" ? input.factory_request : {};\n' +
+          'const files = Array.isArray(input["start.files"]) ? input["start.files"] : [];\n' +
+          'const images = files.filter((file) => file && file.kind === "image");\n' +
+          'const selectedPackages = Array.isArray(request.packages) ? request.packages : [];\n' +
+          'const platform = request.platform && typeof request.platform === "object" ? request.platform : { key: "amazon", label: "Amazon" };\n' +
+          'const qualityCheckMode = typeof request.qualityCheckMode === "string" ? request.qualityCheckMode : "basic";\n' +
+          'return {\n' +
+          '  factory_request: request,\n' +
+          '  factory_items: images.slice(0, 50).map((file, index) => ({ sku: `SKU-${index + 1}`, image: file, sourceName: file.name || `image-${index + 1}` })),\n' +
+          '  selected_packages: selectedPackages,\n' +
+          '  target_platform: platform,\n' +
+          '  quality_check_mode: qualityCheckMode\n' +
+          '};'
+      }
+    },
+    {
+      id: 'generate_package_prompts',
+      type: 'llm',
+      name: '理解图片并生成提示词',
+      instruction:
+        '使用多模态模型读取商品参考图和平台规则，直接输出每个商品、每个所选产物包的生图提示词。不要生成图片，只输出 JSON。',
+      modelProfileId: 'openai-gpt-4o',
+      inputVariables: ['factory_request', 'factory_items', 'selected_packages', 'target_platform'],
+      outputVariables: ['package_instructions'],
+      config: {
+        llmTaskType: 'vision',
+        outputMode: 'json',
+        schema: {
+          items: [
+            {
+              sku: 'string',
+              productName: 'string',
+              packages: [
+                {
+                  key: 'white_background',
+                  prompt: 'string',
+                  negativePrompt: 'string',
+                  referenceImagePath: 'string'
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      id: 'generate_images',
+      type: 'llm',
+      name: '批量生成商品图',
+      instruction:
+        '按 package_instructions 调用图片生成模型。只处理用户勾选的产物包，保持商品主体一致，输出图片远程 URL 元数据；大图片不经过服务端。',
+      modelProfileId: 'openai-gpt-image-2',
+      inputVariables: ['package_instructions', 'start.images'],
+      outputVariables: ['factory_generated_images'],
+      config: {
+        llmTaskType: 'image_generation',
+        outputMode: 'json',
+        packageKeys: crossBorderFactoryDefaultPackageKeys,
+        output: {
+          folder: 'product-images',
+          imageFormat: 'png'
+        }
+      }
+    },
+    {
+      id: 'quality_check',
+      type: 'llm',
+      name: '可选质检',
+      instruction:
+        '如果 quality_check_mode 为 none，则输出 skipped。basic 只做文件数量、命名、尺寸规则检查；smart 再用多模态模型检查主体一致性、平台合规和卖点可读性。',
+      modelProfileId: 'openai-gpt-4o',
+      inputVariables: ['factory_generated_images', 'factory_items', 'quality_check_mode', 'target_platform'],
+      outputVariables: ['quality_report'],
+      config: {
+        llmTaskType: 'vision',
+        outputMode: 'json',
+        schema: {
+          mode: 'basic',
+          passed: true,
+          issues: [{ sku: 'string', packageKey: 'string', message: 'string' }]
+        }
+      }
+    },
+    {
+      id: 'factory_output',
+      type: 'output',
+      name: '返回结果',
+      instruction: '返回批量完成数量、失败项、图片 URL 结果和质检摘要。',
+      inputVariables: ['factory_generated_images', 'quality_report'],
+      outputVariables: ['final_answer']
+    }
+  ];
+
+  return {
+    version: '1.0.0',
+    entryNodeId: 'start',
+    nodes,
+    edges: [
+      { id: 'start__factory_input', sourceNodeId: 'start', targetNodeId: 'factory_input', condition: { type: 'always' } },
+      { id: 'factory_input__prepare_batch', sourceNodeId: 'factory_input', targetNodeId: 'prepare_batch', condition: { type: 'always' } },
+      { id: 'prepare_batch__generate_package_prompts', sourceNodeId: 'prepare_batch', targetNodeId: 'generate_package_prompts', condition: { type: 'always' } },
+      { id: 'generate_package_prompts__generate_images', sourceNodeId: 'generate_package_prompts', targetNodeId: 'generate_images', condition: { type: 'always' } },
+      { id: 'generate_images__quality_check', sourceNodeId: 'generate_images', targetNodeId: 'quality_check', condition: { type: 'always' } },
+      { id: 'quality_check__factory_output', sourceNodeId: 'quality_check', targetNodeId: 'factory_output', condition: { type: 'always' } }
+    ],
+    variables: [
+      { name: 'factory_request', type: 'json', description: '工厂面板提交的批量运行参数。', required: true },
+      { name: 'factory_items', type: 'json', description: '待处理商品列表，单批最多 50 个。', required: true },
+      { name: 'selected_packages', type: 'json', description: '用户勾选的产物包 key。', required: true },
+      { name: 'target_platform', type: 'text', description: '目标电商平台。', required: true },
+      { name: 'quality_check_mode', type: 'text', description: 'none/basic/smart。', required: true },
+      { name: 'package_instructions', type: 'json', description: '多模态模型生成的分包生图提示词。', required: true },
+      { name: 'factory_generated_images', type: 'asset[]', description: '图片结果元数据，包含 remoteUrl、thumbnailPath、SKU 和产物包信息。', required: true },
+      { name: 'quality_report', type: 'json', description: '质检报告或跳过记录。' }
+    ],
+    runtimePolicy: {
+      maxNodeExecutions: 160,
+      maxLoopIterations: 50,
+      requireApprovalBeforeTools: false
+    }
+  };
+}
+
 function createWorkflowGraph(preset: WorkflowPreset): RoleWorkflowGraph {
+  if (preset === 'cross_border_image_factory') {
+    return createCrossBorderImageFactoryWorkflowGraph();
+  }
+
   const graph = buildRoleWorkflowGraphFromSteps(createWorkflowSteps(preset), {
     runtimePolicy: {
       maxNodeExecutions: 64,
@@ -4689,9 +4991,11 @@ function buildPayload(
   const normalizedWorkflowGraph = normalizeWorkflowGraphForCanvas(workflowGraph);
   const workflowSteps = deriveWorkflowStepsFromGraph(normalizedWorkflowGraph);
   const inferredTools = workflowSteps.flatMap((step) => step.toolIds ?? []);
+  const applicationType = values.applicationType ?? 'digital_employee';
 
   return {
     id: values.id.trim(),
+    applicationType,
     version: values.version.trim(),
     name: values.name.trim(),
     industry: values.industry.trim(),
@@ -4709,7 +5013,8 @@ function buildPayload(
     approvalPolicy: values.approvalPolicy.trim(),
     status: 'DRAFT',
     allowedPlanCodes: uniqueTags(values.allowedPlanCodes),
-    visibleWorkspaceIds: uniqueTags(values.visibleWorkspaceIds)
+    visibleWorkspaceIds: uniqueTags(values.visibleWorkspaceIds),
+    dependencyManifest: buildDependencyManifestInput(applicationType)
   };
 }
 
@@ -4720,8 +5025,10 @@ function buildUpdatePayload(
   const normalizedWorkflowGraph = normalizeWorkflowGraphForCanvas(workflowGraph);
   const workflowSteps = deriveWorkflowStepsFromGraph(normalizedWorkflowGraph);
   const inferredTools = workflowSteps.flatMap((step) => step.toolIds ?? []);
+  const applicationType = values.applicationType ?? 'digital_employee';
 
   return {
+    applicationType,
     version: values.version.trim(),
     name: values.name.trim(),
     industry: values.industry.trim(),
@@ -4738,7 +5045,72 @@ function buildUpdatePayload(
     outputFormat: values.outputFormat?.trim(),
     approvalPolicy: values.approvalPolicy.trim(),
     allowedPlanCodes: uniqueTags(values.allowedPlanCodes),
-    visibleWorkspaceIds: uniqueTags(values.visibleWorkspaceIds)
+    visibleWorkspaceIds: uniqueTags(values.visibleWorkspaceIds),
+    dependencyManifest: buildDependencyManifestInput(applicationType)
+  };
+}
+
+function buildDependencyManifestInput(
+  applicationType: RoleTemplateApplicationType
+): RoleTemplateDependencyManifest | undefined {
+  if (applicationType !== 'digital_factory') {
+    return undefined;
+  }
+
+  return {
+    version: '1.0.0',
+    applicationType: 'digital_factory',
+    generatedAt: new Date().toISOString(),
+    variables: [],
+    modelAssets: [],
+    toolActions: [],
+    artifactTemplates: [],
+    nodeTemplates: [],
+    factory: buildCrossBorderImageFactoryManifest(),
+    warnings: []
+  };
+}
+
+function buildCrossBorderImageFactoryManifest() {
+  return {
+    kind: 'cross_border_product_image_factory',
+    version: '1.0.0',
+    title: '跨境商品图工厂',
+    batch: {
+      maxItems: 50,
+      itemUnit: 'product',
+      inputFileKinds: ['image', 'spreadsheet', 'csv'],
+      imageExtensions: ['png', 'jpg', 'jpeg', 'webp'],
+      tableExtensions: ['xlsx', 'csv']
+    },
+    platforms: crossBorderFactoryPlatforms,
+    packages: factoryPackageOptions.map((item) => ({
+      key: item.key,
+      label: item.label,
+      description: item.description,
+      outputType: item.outputType,
+      defaultSelected: crossBorderFactoryDefaultPackageKeys.includes(item.key)
+    })),
+    qualityCheck: {
+      defaultMode: 'basic',
+      modes: [
+        { key: 'none', label: '不质检', description: '不额外调用模型，只生成图片。' },
+        { key: 'basic', label: '基础质检', description: '检查文件数量、命名、格式和基础规则。' },
+        { key: 'smart', label: '智能质检', description: '调用多模态模型检查主体一致性、平台合规和卖点可读性。' }
+      ]
+    },
+    output: {
+      cacheDays: 30,
+      defaultImageFormat: 'png',
+      packageFormat: 'url_manifest',
+      folder: 'product-images'
+    },
+    requiredCapabilities: ['vision', 'image_generation', 'image_editing'],
+    ui: {
+      primaryActionLabel: '开始生成',
+      uploadHint: '上传商品参考图，可选上传 SKU 表格；单批最多 50 个商品。',
+      packageSelection: 'checkbox'
+    }
   };
 }
 
@@ -4754,6 +5126,9 @@ function inferInitialPreset(template?: AdminRoleTemplateDetail): WorkflowPreset 
     .join(' ')
     .toLowerCase();
 
+  if ((template?.applicationType ?? 'digital_employee') === 'digital_factory' || text.includes('factory') || text.includes('工厂')) {
+    return 'cross_border_image_factory';
+  }
   if (text.includes('web-search') || text.includes('research') || text.includes('调研')) {
     return 'research';
   }
@@ -4770,7 +5145,8 @@ export function AdminCreateRoleTemplatePageClient({
   workspaces,
   toolCatalog,
   assets,
-  templateId
+  templateId,
+  initialApplicationType = 'digital_employee'
 }: AdminCreateRoleTemplatePageClientProps) {
   const router = useRouter();
   const [form] = Form.useForm<CreateRoleTemplateFormValues>();
@@ -4790,6 +5166,8 @@ export function AdminCreateRoleTemplatePageClient({
   );
   const watchedName = Form.useWatch('name', form);
   const watchedIndustry = Form.useWatch('industry', form);
+  const watchedApplicationType = Form.useWatch('applicationType', form) ?? initialApplicationType;
+  const applicationLabel = watchedApplicationType === 'digital_factory' ? '数字工厂' : '数字员工';
   const persistedTemplateId = savedTemplateId ?? editingTemplate?.id;
   const initialGraph = useMemo(
     () => normalizeWorkflowGraphForCanvas(editingTemplate?.workflowGraph ?? createBlankWorkflowGraph()),
@@ -4849,6 +5227,7 @@ export function AdminCreateRoleTemplatePageClient({
         scenario: editingTemplate.scenario,
         description: editingTemplate.description,
         businessGoal: editingTemplate.businessGoal,
+        applicationType: editingTemplate.applicationType ?? 'digital_employee',
         recommendedPlanCode: activePlanCodes.has(editingTemplate.recommendedPlanCode)
           ? editingTemplate.recommendedPlanCode
           : defaultPlanCode,
@@ -4865,9 +5244,10 @@ export function AdminCreateRoleTemplatePageClient({
     }
 
     return {
-      id: `template_custom_${Date.now()}`,
+      id: `${initialApplicationType === 'digital_factory' ? 'factory' : 'template'}_custom_${Date.now()}`,
       version: '1.0.0',
-      workflowPreset: 'standard',
+      applicationType: initialApplicationType,
+      workflowPreset: initialApplicationType === 'digital_factory' ? 'cross_border_image_factory' : 'standard',
       recommendedPlanCode: defaultPlanCode,
       allowedPlanCodes: activeEnterprisePlans.map((plan) => plan.code),
       knowledgeSources: ['workspace_library', 'local_folder'],
@@ -4879,7 +5259,7 @@ export function AdminCreateRoleTemplatePageClient({
       outputFormat: '对话摘要 + 可下载的业务文档/表格/演示稿。',
       approvalPolicy: '涉及对外发布、合同、财务、医疗、法律或重大经营决策时必须人工确认。'
     } as CreateRoleTemplateFormValues;
-  }, [activeEnterprisePlans, activePlanCodes, defaultPlanCode, editingTemplate]);
+  }, [activeEnterprisePlans, activePlanCodes, defaultPlanCode, editingTemplate, initialApplicationType]);
 
   useEffect(() => {
     setEditableGraph(initialGraph);
@@ -4897,6 +5277,23 @@ export function AdminCreateRoleTemplatePageClient({
   function applyWorkflowPreset(preset: WorkflowPreset) {
     setEditableGraph(normalizeWorkflowGraphForCanvas(createWorkflowGraph(preset)));
     form.setFieldValue('workflowPreset', preset);
+    if (preset === 'cross_border_image_factory') {
+      form.setFieldValue('applicationType', 'digital_factory');
+      form.setFieldsValue({
+        name: form.getFieldValue('name') || '跨境商品图工厂',
+        industry: form.getFieldValue('industry') || '跨境电商',
+        scenario: form.getFieldValue('scenario') || '批量生成商品主图、白底图、场景图、尺寸图和卖点图',
+        description:
+          form.getFieldValue('description') ||
+          '面向跨境电商团队的批量商品图生产工厂，支持按平台和产物包生成图片 URL 预览结果。',
+        businessGoal:
+          form.getFieldValue('businessGoal') ||
+          '帮助运营人员批量把商品参考图转化为可上架、可复用的跨境电商图片素材。',
+        outputFormat:
+          form.getFieldValue('outputFormat') ||
+          '图片 URL 预览结果 + 任务摘要。'
+      });
+    }
     setPresetPickerOpen(false);
     setTestResult(null);
     message.success('已应用模板，可以继续拖拽节点调整');
@@ -4933,10 +5330,13 @@ export function AdminCreateRoleTemplatePageClient({
     try {
       const apiClient = createBrowserApiClient();
       const wasUpdate = Boolean(savedTemplateId ?? editingTemplate?.id);
-      const response = await persistTemplateDraft(apiClient, readFormValues(values));
+      const resolvedValues = readFormValues(values);
+      const response = await persistTemplateDraft(apiClient, resolvedValues);
       setSavedTemplateId(response.data.id);
-      message.success(wasUpdate ? '工作画布已保存' : '数字员工草稿已创建');
-      router.push(`/templates?${wasUpdate ? 'updated' : 'created'}=${encodeURIComponent(response.data.id)}`);
+      const nextListPath = resolvedValues.applicationType === 'digital_factory' ? '/factories' : '/templates';
+      const nextLabel = resolvedValues.applicationType === 'digital_factory' ? '数字工厂' : '数字员工';
+      message.success(wasUpdate ? '工作画布已保存' : `${nextLabel}草稿已创建`);
+      router.push(`${nextListPath}?${wasUpdate ? 'updated' : 'created'}=${encodeURIComponent(response.data.id)}`);
       router.refresh();
     } catch (error) {
       message.error(error instanceof Error ? error.message : '创建失败');
@@ -4988,8 +5388,9 @@ export function AdminCreateRoleTemplatePageClient({
       setSavedTemplateId(response.data.id);
       await apiClient.publishAdminRoleTemplate(response.data.id);
       setPublishOpen(false);
-      message.success('数字员工已保存并上架');
-      router.push(`/templates?published=${encodeURIComponent(response.data.id)}`);
+      const nextValues = readFormValues(values);
+      message.success(`${nextValues.applicationType === 'digital_factory' ? '数字工厂' : '数字员工'}已保存并上架`);
+      router.push(`${nextValues.applicationType === 'digital_factory' ? '/factories' : '/templates'}?published=${encodeURIComponent(response.data.id)}`);
       router.refresh();
     } catch (error) {
       if (error instanceof Error) {
@@ -5004,21 +5405,21 @@ export function AdminCreateRoleTemplatePageClient({
 
   function handleFormFinishFailed() {
     setSettingsOpen(true);
-    message.warning('请先补全员工基础信息');
+    message.warning(`请先补全${applicationLabel}基础信息`);
   }
 
   return (
     <AdminShell currentAccount={currentAccount}>
       <QiuPage
         title="工作画布"
-        description={editingTemplate ? `编辑：${editingTemplate.name}` : '创建一个可测试、可上架、可被 PC 端同步安装的数字员工模板。'}
+        description={editingTemplate ? `编辑：${editingTemplate.name}` : `创建一个可测试、可上架、可被 PC 端同步安装的${applicationLabel}模板。`}
         actions={
           <Space>
-            <Button icon={<ArrowLeftOutlined />} href="/templates">
+            <Button icon={<ArrowLeftOutlined />} href={watchedApplicationType === 'digital_factory' ? '/factories' : '/templates'}>
               返回列表
             </Button>
             <Button icon={<SettingOutlined />} onClick={() => setSettingsOpen(true)}>
-              员工设置
+              {applicationLabel}设置
             </Button>
             <Button icon={<PlayCircleOutlined />} loading={testing} onClick={() => setTestOpen(true)}>
               试运行
@@ -5043,7 +5444,8 @@ export function AdminCreateRoleTemplatePageClient({
             <div className="workflow-studio-topbar">
               <Space direction="vertical" size={2}>
                 <Space wrap>
-                  <Typography.Text strong>{watchedName || editingTemplate?.name || '未命名数字员工'}</Typography.Text>
+                  <Typography.Text strong>{watchedName || editingTemplate?.name || `未命名${applicationLabel}`}</Typography.Text>
+                  <Tag color={watchedApplicationType === 'digital_factory' ? 'purple' : 'blue'}>{applicationLabel}</Tag>
                   <Tag color={editingTemplate?.status === 'PUBLISHED' ? 'green' : 'blue'}>
                     {editingTemplate?.status ?? 'DRAFT'}
                   </Tag>
@@ -5103,7 +5505,7 @@ export function AdminCreateRoleTemplatePageClient({
                 showIcon
                 type="info"
                 message="模板只在你主动选择时应用"
-                description="应用模板会替换当前画布。新建数字员工默认从空白画布开始，你也可以直接拖拽节点自己搭建。"
+                description="应用模板会替换当前画布。新建模板默认从空白画布开始，你也可以直接拖拽节点自己搭建。"
               />
               <div className="workflow-preset-picker-grid">
                 {workflowPresetOptions.map((option) => (
@@ -5123,7 +5525,7 @@ export function AdminCreateRoleTemplatePageClient({
           </Modal>
 
           <Drawer
-            title="员工设置"
+            title={`${applicationLabel}设置`}
             placement="right"
             width={520}
             open={settingsOpen}
@@ -5138,9 +5540,33 @@ export function AdminCreateRoleTemplatePageClient({
             <Space direction="vertical" size={18} style={{ width: '100%' }}>
               <section>
                 <Typography.Title level={5}>基础信息</Typography.Title>
+                <Form.Item name="applicationType" label="类型" rules={[{ required: true, message: '请选择类型' }]}>
+                  <Select
+                    options={[
+                      { value: 'digital_employee', label: '数字员工' },
+                      { value: 'digital_factory', label: '数字工厂' }
+                    ]}
+                    onChange={(applicationType) => {
+                      if (applicationType === 'digital_factory') {
+                        form.setFieldValue('workflowPreset', 'cross_border_image_factory');
+                      } else {
+                        form.setFieldValue('workflowPreset', 'standard');
+                      }
+                    }}
+                  />
+                </Form.Item>
+                {watchedApplicationType === 'digital_factory' ? (
+                  <Alert
+                    showIcon
+                    type="info"
+                    message="数字工厂用于批量化流程"
+                    description="建议点击画布顶部的“选择模板”，应用“跨境商品图工厂”后再按业务调整节点。"
+                    style={{ marginBottom: 12 }}
+                  />
+                ) : null}
                 <div className="workflow-form-grid two">
-                  <Form.Item name="id" label="员工 ID" rules={[{ required: true, message: '请输入员工 ID' }]}>
-                    <Input disabled={Boolean(persistedTemplateId)} placeholder="template_sales_assistant" />
+                  <Form.Item name="id" label={`${applicationLabel} ID`} rules={[{ required: true, message: `请输入${applicationLabel} ID` }]}>
+                    <Input disabled={Boolean(persistedTemplateId)} placeholder={watchedApplicationType === 'digital_factory' ? 'factory_product_image' : 'template_sales_assistant'} />
                   </Form.Item>
                   <Form.Item name="version" label="版本" rules={[{ required: true, message: '请输入版本号' }]}>
                     <Input placeholder="1.0.0" />
@@ -5270,7 +5696,7 @@ export function AdminCreateRoleTemplatePageClient({
           </Drawer>
 
           <Modal
-            title="发布数字员工"
+            title={`发布${applicationLabel}`}
             open={publishOpen}
             forceRender
             width={640}

@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 export default async function TemplateCanvasPage({
   searchParams
 }: {
-  searchParams?: Promise<{ templateId?: string }>;
+  searchParams?: Promise<{ applicationType?: string; templateId?: string }>;
 }) {
   const { currentAccount, isAdminOperator } = await loadAdminSession('/templates/canvas');
   if (!isAdminOperator) {
@@ -33,6 +33,7 @@ export default async function TemplateCanvasPage({
       workspaces={workspaces.data}
       toolCatalog={toolCatalog.data}
       assets={assets.data}
+      initialApplicationType={resolvedSearchParams?.applicationType === 'digital_factory' ? 'digital_factory' : undefined}
       templateId={resolvedSearchParams?.templateId}
     />
   );

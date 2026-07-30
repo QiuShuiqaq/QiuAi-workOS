@@ -63,11 +63,13 @@ export interface RoleTemplateDependencyNodeTemplate {
 
 export interface RoleTemplateDependencyManifest {
   version: '1.0.0';
+  applicationType?: 'digital_employee' | 'digital_factory';
   generatedAt: string;
   variables: RoleTemplateDependencyVariable[];
   modelAssets: RoleTemplateDependencyModelAsset[];
   toolActions: RoleTemplateDependencyToolAction[];
   artifactTemplates: RoleTemplateDependencyArtifactTemplate[];
   nodeTemplates: RoleTemplateDependencyNodeTemplate[];
+  factory?: unknown;
   warnings: string[];
 }

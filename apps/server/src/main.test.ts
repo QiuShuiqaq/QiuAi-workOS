@@ -589,6 +589,125 @@ test('admin role template factory governs publication and workspace visibility',
       )
     );
 
+    const invalidFactoryTemplateId = `${templateId}_invalid_factory`;
+    const createInvalidFactoryResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/role-templates',
+      headers,
+      payload: {
+        id: invalidFactoryTemplateId,
+        version: '1.0.0',
+        applicationType: 'digital_factory',
+        name: 'Invalid Product Image Factory',
+        industry: 'Cross-border Ecommerce',
+        scenario: 'Invalid factory publish smoke test',
+        description: 'Verifies that digital factories cannot publish invalid package manifests.',
+        recommendedPlanCode: 'PERSONAL_FREE',
+        businessGoal: 'Validate digital factory publish guardrails.',
+        knowledgeSources: [],
+        tools: ['local-filesystem'],
+        skills: [
+          {
+            code: 'invalid_factory_check',
+            name: 'Invalid Factory Check',
+            summary: 'Checks digital factory validation.'
+          }
+        ],
+        workflowSteps: [
+          {
+            id: 'factory_input',
+            order: 1,
+            type: 'input',
+            name: 'Factory Input',
+            instruction: 'Receive factory request.'
+          },
+          {
+            id: 'factory_output',
+            order: 2,
+            type: 'output',
+            name: 'Factory Output',
+            instruction: 'Return factory output.'
+          }
+        ],
+        workflowGraph: {
+          version: '1.0.0',
+          entryNodeId: 'start',
+          nodes: [
+            { id: 'start', type: 'start', name: 'Start' },
+            {
+              id: 'factory_input',
+              type: 'input',
+              name: 'Factory Input',
+              instruction: 'Receive factory request.',
+              outputVariables: ['factory_request']
+            },
+            {
+              id: 'factory_output',
+              type: 'output',
+              name: 'Factory Output',
+              instruction: 'Return factory output.',
+              inputVariables: ['factory_request'],
+              outputVariables: ['final_answer']
+            }
+          ],
+          edges: [
+            { id: 'start__factory_input', sourceNodeId: 'start', targetNodeId: 'factory_input', condition: { type: 'always' } },
+            { id: 'factory_input__factory_output', sourceNodeId: 'factory_input', targetNodeId: 'factory_output', condition: { type: 'always' } }
+          ]
+        },
+        sampleInputs: ['Generate product images.'],
+        outputFormat: 'ZIP image package.',
+        approvalPolicy: 'No approval required for validation test.',
+        allowedPlanCodes: ['PERSONAL_FREE'],
+        visibleWorkspaceIds: [],
+        dependencyManifest: {
+          version: '1.0.0',
+          applicationType: 'digital_factory',
+          generatedAt: new Date().toISOString(),
+          variables: [],
+          modelAssets: [],
+          toolActions: [],
+          artifactTemplates: [],
+          nodeTemplates: [],
+          factory: {
+            kind: 'cross_border_product_image_factory',
+            batch: {
+              maxItems: 51
+            },
+            packages: [
+              {
+                key: 'unsupported_package',
+                label: 'Unsupported Package',
+                outputType: 'image'
+              }
+            ]
+          },
+          warnings: []
+        }
+      }
+    });
+    assert.equal(createInvalidFactoryResponse.statusCode, 201);
+
+    const invalidFactoryPublishResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v1/admin/role-templates/${encodeURIComponent(invalidFactoryTemplateId)}/publish`,
+      headers,
+      payload: {}
+    });
+    assert.equal(invalidFactoryPublishResponse.statusCode, 400);
+    const invalidFactoryPublishData = JSON.parse(invalidFactoryPublishResponse.body);
+    assert.equal(invalidFactoryPublishData.error.code, 'VALIDATION_ERROR');
+    assert.ok(
+      invalidFactoryPublishData.error.details.issues.some((issue: string) =>
+        issue.includes('batch.maxItems')
+      )
+    );
+    assert.ok(
+      invalidFactoryPublishData.error.details.issues.some((issue: string) =>
+        issue.includes('package key is invalid')
+      )
+    );
+
     const publishResponse = await app.inject({
       method: 'POST',
       url: `/api/v1/admin/role-templates/${encodeURIComponent(templateId)}/publish`,

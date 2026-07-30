@@ -1,6 +1,7 @@
 ﻿import type {
   DesktopArtifactSummary,
   DesktopExecutionLogEntry,
+  FactoryArtifactPreviewItem,
   DesktopKnowledgeSourceSummary,
   DesktopTaskDetail,
   ModelCredential,
@@ -93,6 +94,51 @@ interface ResolvedRuntimeBinding {
   unconfiguredKnowledgeBindingIds: string[];
 }
 
+interface FactoryRuntimeItem {
+  sku: string;
+  image: WorkflowFileValue;
+  sourceName?: string;
+  order: number;
+}
+
+interface FactoryRuntimePackage {
+  key: string;
+  label: string;
+  description?: string;
+}
+
+interface FactoryRuntimePlatform {
+  key?: string;
+  label?: string;
+  imageRatio?: string;
+  notes?: string;
+}
+
+interface FactoryRuntimePackageInstruction {
+  sku?: string;
+  packageKey?: string;
+  prompt: string;
+  negativePrompt?: string;
+  referenceImagePath?: string;
+}
+
+interface FactoryImageGenerationTask {
+  id: string;
+  order: number;
+  sku: string;
+  sourceName?: string;
+  sourceImage: WorkflowFileValue;
+  packageKey: string;
+  packageLabel: string;
+  packageDescription?: string;
+  prompt: string;
+  negativePrompt?: string;
+  targetPlatform: FactoryRuntimePlatform;
+  createdAt: string;
+}
+
+type FactoryImageGenerationResult = FactoryArtifactPreviewItem;
+
 interface ModelInvocationSuccess {
   ok: true;
   profile: ModelProfile;
@@ -136,6 +182,7 @@ const supportedToolActions: DesktopToolInvocationAction[] = [
   'filesystem.write_text_file',
   'filesystem.read_text_file',
   'filesystem.list_directory',
+  'filesystem.package_zip',
   'document.extract_text',
   'web.fetch_url',
   'web.search',
@@ -2104,12 +2151,48 @@ async function completeWorkflowRuntimeCodeNode(input: {
   const codeInput = buildWorkflowRuntimeCodeInput(variables);
   const timeoutMs = normalizeWorkflowRuntimeCodeTimeout(input.node.config?.timeoutMs);
   const result = await executeRestrictedWorkflowRuntimeCode(code, codeInput, timeoutMs);
+  const resultObject = readWorkflowRuntimeObjectValue(result);
+  const outputValue =
+    resultObject && Object.prototype.hasOwnProperty.call(resultObject, outputVariable)
+      ? resultObject[outputVariable]
+      : result;
   const text = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+  const outputVariables = new Set<string>();
 
-  input.pool.set(outputVariable, result as WorkflowRuntimeValue);
+  input.pool.set(outputVariable, outputValue as WorkflowRuntimeValue);
+  outputVariables.add(outputVariable);
+  if (resultObject) {
+    for (const outputRef of input.node.outputVariables ?? []) {
+      const normalizedOutputRef = outputRef.trim();
+      if (!normalizedOutputRef) {
+        continue;
+      }
+
+      const leafKey = normalizedOutputRef.split('.').map((part) => part.trim()).filter(Boolean).at(-1);
+      const value =
+        Object.prototype.hasOwnProperty.call(resultObject, normalizedOutputRef)
+          ? resultObject[normalizedOutputRef]
+          : leafKey && Object.prototype.hasOwnProperty.call(resultObject, leafKey)
+            ? resultObject[leafKey]
+            : undefined;
+      if (value === undefined) {
+        continue;
+      }
+
+      input.pool.set(normalizedOutputRef, value as WorkflowRuntimeValue);
+      outputVariables.add(normalizedOutputRef);
+      if (!normalizedOutputRef.includes('.')) {
+        input.pool.set(`${input.node.id}.${normalizedOutputRef}`, value as WorkflowRuntimeValue);
+        outputVariables.add(`${input.node.id}.${normalizedOutputRef}`);
+      }
+    }
+  }
   input.pool.set(`${input.node.id}.text`, text);
+  outputVariables.add(`${input.node.id}.text`);
   input.pool.set(`${input.node.id}.json`, result as WorkflowRuntimeValue);
+  outputVariables.add(`${input.node.id}.json`);
   input.pool.set(`${input.node.id}.result`, result as WorkflowRuntimeValue);
+  outputVariables.add(`${input.node.id}.result`);
   input.pool.set('runtime.previous_text', text);
 
   return Promise.resolve({
@@ -2122,9 +2205,15 @@ async function completeWorkflowRuntimeCodeNode(input: {
     usedToolIds: [],
     generatedArtifacts: [],
     inputVariables: variables.map((variable) => variable.ref),
-    outputVariables: [...new Set([outputVariable, `${input.node.id}.text`, `${input.node.id}.json`, `${input.node.id}.result`])],
+    outputVariables: [...outputVariables],
     message: `Code transform completed with ${variables.length} input variable(s), timeout=${timeoutMs}ms.`
   });
+}
+
+function readWorkflowRuntimeObjectValue(value: WorkflowRuntimeValue): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 
 function buildWorkflowRuntimeCodeInput(
@@ -2137,6 +2226,9 @@ function buildWorkflowRuntimeCodeInput(
 
   for (const variable of variables) {
     variablesByRef[variable.ref] = variable.value;
+    if (input[variable.ref] === undefined) {
+      input[variable.ref] = variable.value;
+    }
     writeWorkflowRuntimeCodeInputPath(input, variable.ref, variable.value);
 
     const alias = variable.ref.split('.').map((part) => part.trim()).filter(Boolean).at(-1);
@@ -2680,6 +2772,16 @@ async function invokeWorkflowRuntimeModelNode(input: {
   message: string;
 }> {
   const profile = selectWorkflowRuntimeModelProfile(input.node, input.profiles, input.rolePackage);
+  if (readWorkflowRuntimeString(input.node.config?.llmTaskType) === 'image_generation') {
+    const factoryResult = await invokeWorkflowRuntimeFactoryImageGenerationNode({
+      ...input,
+      profile
+    });
+    if (factoryResult) {
+      return factoryResult;
+    }
+  }
+
   const variables = appendWorkflowOutputAssistantMessageVariable(
     input.node,
     input.pool,
@@ -2733,6 +2835,668 @@ async function invokeWorkflowRuntimeModelNode(input: {
     outputVariables,
     message: `Model response saved (${response.content.length} chars).`
   };
+}
+
+async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
+  task: DesktopTaskDetail;
+  node: WorkflowGraphNode;
+  pool: WorkflowVariablePool;
+  binding: ResolvedRuntimeBinding;
+  rolePackage?: RolePackageManifest;
+  profiles: ModelProfile[];
+  modelInvoker: DesktopModelInvoker;
+  createdAt: string;
+  currentResponse: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  profile: ModelProfile;
+}): Promise<{
+  response: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  logs: DesktopExecutionLogEntry[];
+  usedToolIds: string[];
+  generatedArtifacts: DesktopArtifactSummary[];
+  inputVariables: string[];
+  outputVariables: string[];
+  message: string;
+} | undefined> {
+  const items = readFactoryRuntimeItems(input.pool.get('factory_items'));
+  const packages = readFactoryRuntimePackages(input.pool.get('selected_packages'));
+  if (items.length === 0 || packages.length === 0) {
+    return undefined;
+  }
+
+  const targetPlatform = readFactoryRuntimePlatform(input.pool.get('target_platform'));
+  const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
+  const packageInstructions = readFactoryRuntimePackageInstructions(input.pool.get('package_instructions'));
+  const concurrency = clampWorkflowRuntimeLimit(
+    readFactoryRuntimeNumber(input.node.config?.concurrency ?? factoryRequest?.concurrency),
+    8,
+    1,
+    16
+  );
+  const maxRetries = clampWorkflowRuntimeLimit(
+    readFactoryRuntimeNumber(input.node.config?.maxRetries ?? factoryRequest?.maxRetries),
+    2,
+    0,
+    5
+  );
+  const batchTasks = createFactoryImageGenerationTasks({
+    items,
+    packages,
+    targetPlatform,
+    packageInstructions,
+    createdAt: input.createdAt
+  });
+
+  const startedLog = createLog(
+    input.task.taskId,
+    'info',
+    'WORKFLOW_RUNTIME_FACTORY_BATCH_STARTED',
+    `Factory image batch started: ${batchTasks.length} image task(s), concurrency=${concurrency}.`,
+    input.createdAt,
+    sanitizeLogSuffix(input.node.id)
+  );
+  const results = await runWorkflowRuntimeConcurrent(batchTasks, concurrency, (task) =>
+    runFactoryImageGenerationTask({
+      task,
+      node: input.node,
+      profile: input.profile,
+      modelInvoker: input.modelInvoker,
+      maxRetries
+    })
+  );
+  const completed = results.filter((item) => item.status === 'completed').length;
+  const failed = results.filter((item) => item.status === 'failed').length;
+  const generatedImages = results.map((item) => ({
+    id: item.id,
+    name: `${item.sku}-${item.packageLabel}`,
+    kind: 'image',
+    uri: item.localPath ? `local://${item.localPath}` : item.remoteUrl,
+    mimeType: 'image/png',
+    remoteUrl: item.remoteUrl,
+    localPath: item.localPath,
+    thumbnailPath: item.thumbnailPath,
+    sourceImagePath: item.sourceImagePath,
+    sku: item.sku,
+    packageKey: item.packageKey,
+    packageLabel: item.packageLabel,
+    status: item.status,
+    error: item.error
+  }));
+  const outputVariables = writeWorkflowNodeOutputs({
+    pool: input.pool,
+    node: input.node,
+    text: JSON.stringify(results, null, 2),
+    json: results,
+    result: results,
+    outputValue: generatedImages
+  });
+  const summaryContent = [
+    `数字工厂图片批次完成：${completed}/${batchTasks.length}`,
+    failed > 0 ? `失败：${failed}` : '失败：0',
+    `并发数：${concurrency}`,
+    targetPlatform.label ? `平台：${targetPlatform.label}` : undefined
+  ].filter(Boolean).join('\n');
+  const preview = {
+    kind: 'digital_factory_image_batch' as const,
+    title: input.task.title,
+    platformLabel: targetPlatform.label,
+    concurrency,
+    total: batchTasks.length,
+    completed,
+    failed,
+    items: results
+  };
+  const artifact: DesktopArtifactSummary = {
+    id: `${input.task.taskId}-factory-preview-${Date.parse(input.createdAt) || Date.now()}`,
+    type: 'image',
+    title: `${input.task.title} 图片结果`,
+    content: summaryContent,
+    createdAt: input.createdAt,
+    remoteUrl: results.find((item) => item.remoteUrl)?.remoteUrl,
+    localPath: results.find((item) => item.localPath)?.localPath,
+    factoryPreview: preview
+  };
+  const completedLog = createLog(
+    input.task.taskId,
+    failed > 0 ? 'warning' : 'info',
+    'WORKFLOW_RUNTIME_FACTORY_BATCH_COMPLETED',
+    `Factory image batch completed: completed=${completed}, failed=${failed}, total=${batchTasks.length}.`,
+    input.createdAt,
+    sanitizeLogSuffix(`${input.node.id}-factory-batch`),
+    {
+      concurrency,
+      completed,
+      failed,
+      total: batchTasks.length,
+      failedItems: results.filter((item) => item.status === 'failed').map((item) => ({
+        sku: item.sku,
+        packageKey: item.packageKey,
+        error: item.error
+      }))
+    }
+  );
+
+  input.pool.set('runtime.previous_text', summaryContent);
+  input.pool.set('runtime.last_model_node', input.node.id);
+
+  return {
+    response: mergeWorkflowRuntimeResponses(input.currentResponse, {
+      provider: input.profile.providerName,
+      modelName: input.profile.modelName,
+      content: summaryContent
+    }),
+    primaryProfile: input.profile,
+    logs: [startedLog, completedLog],
+    usedToolIds: [],
+    generatedArtifacts: [artifact],
+    inputVariables: ['factory_request', 'factory_items', 'selected_packages', 'target_platform', 'package_instructions'],
+    outputVariables,
+    message: `Factory image generation finished: ${completed}/${batchTasks.length}, concurrency=${concurrency}.`
+  };
+}
+
+function readFactoryRuntimeItems(value: WorkflowRuntimeValue | undefined): FactoryRuntimeItem[] {
+  const normalizedValue = readFactoryRuntimeJsonValue(value);
+  const rawItems = Array.isArray(normalizedValue)
+    ? normalizedValue
+    : isWorkflowRuntimeRecord(normalizedValue) && Array.isArray(normalizedValue.items)
+      ? normalizedValue.items
+      : isWorkflowRuntimeRecord(normalizedValue) && Array.isArray(normalizedValue.files)
+        ? normalizedValue.files
+        : [];
+
+  return rawItems.flatMap((item, index) => {
+    const image = readFactoryRuntimeItemImage(item);
+    if (!image) {
+      return [];
+    }
+
+    const record = isWorkflowRuntimeRecord(item) ? item : {};
+    const sku = readWorkflowRuntimeString(record.sku)
+      ?? readWorkflowRuntimeString(record.code)
+      ?? readWorkflowRuntimeString(record.id)
+      ?? `SKU-${index + 1}`;
+    const sourceName = readWorkflowRuntimeString(record.sourceName)
+      ?? readWorkflowRuntimeString(record.name)
+      ?? image.name;
+
+    return [
+      {
+        sku,
+        image,
+        sourceName,
+        order: index + 1
+      }
+    ];
+  });
+}
+
+function readFactoryRuntimeItemImage(value: unknown): WorkflowFileValue | undefined {
+  if (isWorkflowFileValue(value)) {
+    return value;
+  }
+
+  if (!isWorkflowRuntimeRecord(value)) {
+    return undefined;
+  }
+
+  const imageValue = value.image ?? value.file ?? value.sourceImage ?? value.referenceImage;
+  if (isWorkflowFileValue(imageValue)) {
+    return imageValue;
+  }
+
+  const localPath = readWorkflowRuntimeString(imageValue)
+    ?? readWorkflowRuntimeString(value.localPath)
+    ?? readWorkflowRuntimeString(value.path)
+    ?? readWorkflowRuntimeString(value.filePath);
+  if (!localPath) {
+    return undefined;
+  }
+
+  const name = readWorkflowRuntimeString(value.name)
+    ?? readWorkflowRuntimeString(value.sourceName)
+    ?? getPathFileName(localPath)
+    ?? 'source-image';
+
+  return {
+    id: readWorkflowRuntimeString(value.id) ?? `factory-image-${sanitizeLogSuffix(name)}`,
+    name,
+    kind: 'image',
+    uri: localPath.startsWith('http://') || localPath.startsWith('https://') ? localPath : `local://${localPath}`,
+    localPath,
+    mimeType: readWorkflowRuntimeString(value.mimeType) ?? inferFactoryImageMimeType(name)
+  };
+}
+
+function readFactoryRuntimePackages(value: WorkflowRuntimeValue | undefined): FactoryRuntimePackage[] {
+  const normalizedValue = readFactoryRuntimeJsonValue(value);
+  const rawPackages = Array.isArray(normalizedValue)
+    ? normalizedValue
+    : isWorkflowRuntimeRecord(normalizedValue) && Array.isArray(normalizedValue.packages)
+      ? normalizedValue.packages
+      : [];
+  const packages: FactoryRuntimePackage[] = [];
+  const seenKeys = new Set<string>();
+
+  for (const [index, item] of rawPackages.entries()) {
+    const packageItem = readFactoryRuntimePackage(item, index);
+    if (!packageItem || seenKeys.has(packageItem.key)) {
+      continue;
+    }
+
+    seenKeys.add(packageItem.key);
+    packages.push(packageItem);
+  }
+
+  return packages;
+}
+
+function readFactoryRuntimePackage(value: unknown, index: number): FactoryRuntimePackage | undefined {
+  if (typeof value === 'string') {
+    const key = value.trim();
+    return key ? { key, label: key } : undefined;
+  }
+
+  if (!isWorkflowRuntimeRecord(value)) {
+    return undefined;
+  }
+
+  const key = readWorkflowRuntimeString(value.key)
+    ?? readWorkflowRuntimeString(value.packageKey)
+    ?? readWorkflowRuntimeString(value.id)
+    ?? `package-${index + 1}`;
+  const label = readWorkflowRuntimeString(value.label)
+    ?? readWorkflowRuntimeString(value.name)
+    ?? key;
+
+  return {
+    key,
+    label,
+    description: readWorkflowRuntimeString(value.description)
+  };
+}
+
+function readFactoryRuntimePlatform(value: WorkflowRuntimeValue | undefined): FactoryRuntimePlatform {
+  const normalizedValue = readFactoryRuntimeJsonValue(value);
+  if (typeof normalizedValue === 'string') {
+    const label = normalizedValue.trim();
+    return label ? { key: label, label } : {};
+  }
+
+  if (!isWorkflowRuntimeRecord(normalizedValue)) {
+    return {};
+  }
+
+  return {
+    key: readWorkflowRuntimeString(normalizedValue.key),
+    label: readWorkflowRuntimeString(normalizedValue.label) ?? readWorkflowRuntimeString(normalizedValue.name),
+    imageRatio: readWorkflowRuntimeString(normalizedValue.imageRatio),
+    notes: readWorkflowRuntimeString(normalizedValue.notes)
+  };
+}
+
+function readFactoryRuntimeObject(value: WorkflowRuntimeValue | undefined): Record<string, unknown> | undefined {
+  const normalizedValue = readFactoryRuntimeJsonValue(value);
+  return isWorkflowRuntimeRecord(normalizedValue) ? normalizedValue : undefined;
+}
+
+function readFactoryRuntimeNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  return undefined;
+}
+
+function readFactoryRuntimePackageInstructions(
+  value: WorkflowRuntimeValue | undefined
+): FactoryRuntimePackageInstruction[] {
+  const normalizedValue = readFactoryRuntimeJsonValue(value);
+  const items = Array.isArray(normalizedValue)
+    ? normalizedValue
+    : isWorkflowRuntimeRecord(normalizedValue) && Array.isArray(normalizedValue.items)
+      ? normalizedValue.items
+      : isWorkflowRuntimeRecord(normalizedValue) && Array.isArray(normalizedValue.instructions)
+        ? normalizedValue.instructions
+        : isWorkflowRuntimeRecord(normalizedValue) && Array.isArray(normalizedValue.packages)
+          ? [normalizedValue]
+          : [];
+
+  return items.flatMap((item) => readFactoryRuntimeInstructionItem(item));
+}
+
+function readFactoryRuntimeInstructionItem(value: unknown): FactoryRuntimePackageInstruction[] {
+  if (!isWorkflowRuntimeRecord(value)) {
+    return [];
+  }
+
+  const sku = readWorkflowRuntimeString(value.sku) ?? readWorkflowRuntimeString(value.itemSku);
+  const packages = Array.isArray(value.packages)
+    ? value.packages
+    : Array.isArray(value.packagePrompts)
+      ? value.packagePrompts
+      : undefined;
+
+  if (packages) {
+    return packages.flatMap((item) => {
+      const instruction = readFactoryRuntimePackageInstruction(item, sku);
+      return instruction ? [instruction] : [];
+    });
+  }
+
+  const directInstruction = readFactoryRuntimePackageInstruction(value, sku);
+  return directInstruction ? [directInstruction] : [];
+}
+
+function readFactoryRuntimePackageInstruction(
+  value: unknown,
+  sku?: string
+): FactoryRuntimePackageInstruction | undefined {
+  if (!isWorkflowRuntimeRecord(value)) {
+    return undefined;
+  }
+
+  const prompt = readWorkflowRuntimeString(value.prompt)
+    ?? readWorkflowRuntimeString(value.instruction)
+    ?? readWorkflowRuntimeString(value.text);
+  if (!prompt) {
+    return undefined;
+  }
+
+  return {
+    sku: sku ?? readWorkflowRuntimeString(value.sku) ?? readWorkflowRuntimeString(value.itemSku),
+    packageKey: readWorkflowRuntimeString(value.key)
+      ?? readWorkflowRuntimeString(value.packageKey)
+      ?? readWorkflowRuntimeString(value.id),
+    prompt,
+    negativePrompt: readWorkflowRuntimeString(value.negativePrompt),
+    referenceImagePath: readWorkflowRuntimeString(value.referenceImagePath)
+  };
+}
+
+function createFactoryImageGenerationTasks(input: {
+  items: FactoryRuntimeItem[];
+  packages: FactoryRuntimePackage[];
+  targetPlatform: FactoryRuntimePlatform;
+  packageInstructions: FactoryRuntimePackageInstruction[];
+  createdAt: string;
+}): FactoryImageGenerationTask[] {
+  const instructions = new Map<string, FactoryRuntimePackageInstruction>();
+  for (const instruction of input.packageInstructions) {
+    if (!instruction.packageKey) {
+      continue;
+    }
+
+    if (instruction.sku) {
+      instructions.set(`${instruction.sku}::${instruction.packageKey}`, instruction);
+    }
+    instructions.set(`*::${instruction.packageKey}`, instruction);
+  }
+
+  const tasks: FactoryImageGenerationTask[] = [];
+  for (const item of input.items) {
+    for (const packageItem of input.packages) {
+      const order = tasks.length + 1;
+      const instruction =
+        instructions.get(`${item.sku}::${packageItem.key}`) ?? instructions.get(`*::${packageItem.key}`);
+      tasks.push({
+        id: `factory-image-${order}-${sanitizeLogSuffix(item.sku)}-${sanitizeLogSuffix(packageItem.key)}`,
+        order,
+        sku: item.sku,
+        sourceName: item.sourceName,
+        sourceImage: item.image,
+        packageKey: packageItem.key,
+        packageLabel: packageItem.label,
+        packageDescription: packageItem.description,
+        prompt: instruction?.prompt ?? buildFactoryImageGenerationFallbackPrompt(item, packageItem, input.targetPlatform),
+        negativePrompt: instruction?.negativePrompt,
+        targetPlatform: input.targetPlatform,
+        createdAt: input.createdAt
+      });
+    }
+  }
+
+  return tasks;
+}
+
+async function runWorkflowRuntimeConcurrent<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) {
+    return [];
+  }
+
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, Math.floor(concurrency)), items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        results[currentIndex] = await worker(items[currentIndex]!, currentIndex);
+      }
+    })
+  );
+
+  return results;
+}
+
+async function runFactoryImageGenerationTask(input: {
+  task: FactoryImageGenerationTask;
+  node: WorkflowGraphNode;
+  profile: ModelProfile;
+  modelInvoker: DesktopModelInvoker;
+  maxRetries: number;
+}): Promise<FactoryImageGenerationResult> {
+  let lastError = '';
+  for (let attempt = 0; attempt <= input.maxRetries; attempt += 1) {
+    try {
+      const response = await input.modelInvoker({
+        profile: input.profile,
+        taskKind: 'image_generation',
+        imageGeneration: {
+          prompt: input.task.prompt,
+          negativePrompt: input.task.negativePrompt,
+          sourceImagePath: input.task.sourceImage.localPath,
+          responseFormat: 'url'
+        },
+        messages: buildFactoryImageGenerationMessages(input.task),
+        timeoutMs: readWorkflowRuntimeModelTimeoutMs(input.node.config?.timeoutMs ?? 180_000)
+      });
+      const imageResult = readFactoryImageGenerationResponse(response);
+      if (!imageResult.remoteUrl && !imageResult.localPath) {
+        throw new Error('Image generation response did not include a remoteUrl or localPath.');
+      }
+
+      return {
+        id: input.task.id,
+        order: input.task.order,
+        sku: input.task.sku,
+        packageKey: input.task.packageKey,
+        packageLabel: input.task.packageLabel,
+        status: 'completed',
+        remoteUrl: imageResult.remoteUrl,
+        localPath: imageResult.localPath,
+        thumbnailPath: imageResult.thumbnailPath,
+        sourceImagePath: input.task.sourceImage.localPath,
+        prompt: input.task.prompt,
+        createdAt: input.task.createdAt
+      };
+    } catch (error) {
+      lastError = readErrorMessage(error);
+    }
+  }
+
+  return {
+    id: input.task.id,
+    order: input.task.order,
+    sku: input.task.sku,
+    packageKey: input.task.packageKey,
+    packageLabel: input.task.packageLabel,
+    status: 'failed',
+    sourceImagePath: input.task.sourceImage.localPath,
+    prompt: input.task.prompt,
+    error: lastError || 'Image generation failed.',
+    createdAt: input.task.createdAt
+  };
+}
+
+function buildFactoryImageGenerationMessages(task: FactoryImageGenerationTask): DesktopModelChatMessage[] {
+  return [
+    {
+      role: 'system',
+      content: [
+        'You are a QiuAI WorkOS digital factory image generation executor.',
+        'Generate exactly one image for the requested SKU and package.',
+        'Return JSON only: {"remoteUrl":"https://...","thumbnailPath":"https://..."} or {"localPath":"C:\\\\...\\\\image.png"}.',
+        'Do not return image binary data, base64, or markdown.'
+      ].join('\n')
+    },
+    {
+      role: 'user',
+      content: [
+        `SKU: ${task.sku}`,
+        task.sourceName ? `Source name: ${task.sourceName}` : undefined,
+        `Source image local path: ${task.sourceImage.localPath}`,
+        task.sourceImage.uri ? `Source image URI: ${task.sourceImage.uri}` : undefined,
+        `Package: ${task.packageLabel} (${task.packageKey})`,
+        task.packageDescription ? `Package description: ${task.packageDescription}` : undefined,
+        task.targetPlatform.label ? `Target platform: ${task.targetPlatform.label}` : undefined,
+        task.targetPlatform.imageRatio ? `Platform image ratio: ${task.targetPlatform.imageRatio}` : undefined,
+        task.targetPlatform.notes ? `Platform notes: ${task.targetPlatform.notes}` : undefined,
+        'Prompt:',
+        task.prompt,
+        task.negativePrompt ? `Negative prompt: ${task.negativePrompt}` : undefined
+      ].filter(Boolean).join('\n')
+    }
+  ];
+}
+
+function readFactoryImageGenerationResponse(
+  response: DesktopModelChatResponse
+): { remoteUrl?: string; localPath?: string; thumbnailPath?: string } {
+  const artifact = response.artifacts?.find((item) => item.remoteUrl || item.localPath);
+  if (artifact) {
+    return {
+      remoteUrl: readWorkflowRuntimeString(artifact.remoteUrl),
+      localPath: readWorkflowRuntimeString(artifact.localPath),
+      thumbnailPath: readWorkflowRuntimeString(artifact.thumbnailPath)
+    };
+  }
+
+  const parsed = parseWorkflowRuntimeJson(response.content);
+  const fromJson = readFactoryImageResultFromValue(parsed);
+  if (fromJson.remoteUrl || fromJson.localPath) {
+    return fromJson;
+  }
+
+  return {
+    remoteUrl: extractFirstHttpUrl(response.content)
+  };
+}
+
+function readFactoryImageResultFromValue(value: unknown): {
+  remoteUrl?: string;
+  localPath?: string;
+  thumbnailPath?: string;
+} {
+  if (typeof value === 'string') {
+    return value.startsWith('http://') || value.startsWith('https://')
+      ? { remoteUrl: value }
+      : { localPath: value };
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const result = readFactoryImageResultFromValue(item);
+      if (result.remoteUrl || result.localPath) {
+        return result;
+      }
+    }
+    return {};
+  }
+
+  if (!isWorkflowRuntimeRecord(value)) {
+    return {};
+  }
+
+  const directRemoteUrl =
+    readWorkflowRuntimeString(value.remoteUrl)
+    ?? readWorkflowRuntimeString(value.url)
+    ?? readWorkflowRuntimeString(value.imageUrl)
+    ?? readWorkflowRuntimeString(value.outputUrl);
+  const directLocalPath =
+    readWorkflowRuntimeString(value.localPath)
+    ?? readWorkflowRuntimeString(value.path)
+    ?? readWorkflowRuntimeString(value.filePath);
+  if (directRemoteUrl || directLocalPath) {
+    return {
+      remoteUrl: directRemoteUrl,
+      localPath: directLocalPath,
+      thumbnailPath: readWorkflowRuntimeString(value.thumbnailPath)
+        ?? readWorkflowRuntimeString(value.thumbnailUrl)
+    };
+  }
+
+  for (const key of ['image', 'images', 'artifact', 'artifacts', 'data', 'result', 'output']) {
+    const nested = readFactoryImageResultFromValue(value[key]);
+    if (nested.remoteUrl || nested.localPath) {
+      return nested;
+    }
+  }
+
+  return {};
+}
+
+function buildFactoryImageGenerationFallbackPrompt(
+  item: FactoryRuntimeItem,
+  packageItem: FactoryRuntimePackage,
+  platform: FactoryRuntimePlatform
+): string {
+  return [
+    `Use the source product image ${item.image.localPath} as the reference.`,
+    `Create a ${packageItem.label} image for SKU ${item.sku}.`,
+    packageItem.description ? `Package requirement: ${packageItem.description}.` : undefined,
+    platform.label ? `Target platform: ${platform.label}.` : undefined,
+    platform.imageRatio ? `Required ratio: ${platform.imageRatio}.` : undefined,
+    platform.notes ? `Platform notes: ${platform.notes}.` : undefined,
+    'Preserve the product identity, shape, color, material, logo, and important details.'
+  ].filter(Boolean).join('\n')
+}
+
+function readFactoryRuntimeJsonValue(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return parseWorkflowRuntimeJson(value) ?? value;
+  }
+
+  return value;
+}
+
+function isWorkflowRuntimeRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function inferFactoryImageMimeType(fileName: string): string | undefined {
+  const extension = fileName.split('.').at(-1)?.trim().toLocaleLowerCase();
+  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg';
+  if (extension === 'webp') return 'image/webp';
+  if (extension === 'gif') return 'image/gif';
+  if (extension === 'png') return 'image/png';
+  return undefined;
+}
+
+function extractFirstHttpUrl(value: string): string | undefined {
+  return value.match(/https?:\/\/[^\s"'<>，。)）\]]+/)?.[0];
 }
 
 function appendWorkflowOutputAssistantMessageVariable(
@@ -4923,6 +5687,22 @@ function buildWorkflowFallbackArtifactToolRequest(input: {
     };
   }
 
+  if (input.artifactNode.artifactType === 'zip' && input.availableToolIds.has('local-filesystem')) {
+    return {
+      toolId: 'local-filesystem',
+      action: 'filesystem.package_zip',
+      input: {
+        folder: 'packages',
+        fileName,
+        files: [],
+        manifest: {
+          title,
+          note: content
+        }
+      }
+    };
+  }
+
   if (input.artifactNode.artifactType === 'mp4' && input.availableToolIds.has('video-processing')) {
     const videoPath = findFirstVideoAttachmentPath(input.task.executionContext?.attachmentPaths ?? []);
     const cutPlan = readWorkflowArtifactCutPlan(content);
@@ -5008,6 +5788,7 @@ function workflowArtifactTypeForToolRequest(
   if (request.toolId === 'office-document' && request.action === 'spreadsheet.write_xlsx') return 'xlsx';
   if (request.toolId === 'office-document' && request.action === 'spreadsheet.write_csv') return 'csv';
   if (request.toolId === 'office-document' && request.action === 'presentation.write_pptx') return 'pptx';
+  if (request.toolId === 'local-filesystem' && request.action === 'filesystem.package_zip') return 'zip';
   if (request.toolId === 'local-filesystem' && request.action === 'filesystem.write_text_file') return 'markdown';
   if (request.toolId === 'video-processing' && ['video.compose_clips', 'video.export_mp4'].includes(request.action)) {
     return 'mp4';
@@ -5021,6 +5802,7 @@ function defaultWorkflowArtifactFolder(
   if (artifactType === 'xlsx' || artifactType === 'csv') return 'spreadsheets';
   if (artifactType === 'pptx') return 'presentations';
   if (artifactType === 'mp4') return 'videos';
+  if (artifactType === 'zip') return 'packages';
   return 'documents';
 }
 
@@ -5313,6 +6095,10 @@ function buildArtifactToolActionHint(
 
   if (artifactType === 'mp4' && hasAction('video-processing', 'video.compose_clips')) {
     return 'video-processing/video.compose_clips';
+  }
+
+  if (artifactType === 'zip' && hasAction('local-filesystem', 'filesystem.package_zip')) {
+    return 'local-filesystem/filesystem.package_zip';
   }
 
   return undefined;

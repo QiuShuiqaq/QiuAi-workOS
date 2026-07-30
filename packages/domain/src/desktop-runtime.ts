@@ -121,6 +121,7 @@ export interface RoleWorkflowStep {
 
 export interface RolePackageManifest {
   roleCode: string;
+  applicationType?: 'digital_employee' | 'digital_factory';
   name: string;
   version: string;
   summary?: string;
@@ -272,6 +273,10 @@ export function validateRolePackageManifest(input: unknown): RolePackageManifest
 
   return {
     roleCode: requireString(record.roleCode, 'rolePackage.roleCode'),
+    applicationType:
+      record.applicationType === 'digital_factory' || record.applicationType === 'digital_employee'
+        ? record.applicationType
+        : undefined,
     name: requireString(record.name, 'rolePackage.name'),
     version: requireString(record.version, 'rolePackage.version'),
     summary: optionalString(record.summary, 'rolePackage.summary'),

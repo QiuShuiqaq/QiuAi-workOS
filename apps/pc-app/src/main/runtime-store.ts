@@ -563,6 +563,9 @@ function isRolePackageManifest(value: unknown): value is RolePackageManifest {
   const record = value as Record<string, unknown>;
   return (
     typeof record.roleCode === 'string' &&
+    (record.applicationType === undefined ||
+      record.applicationType === 'digital_employee' ||
+      record.applicationType === 'digital_factory') &&
     typeof record.name === 'string' &&
     typeof record.version === 'string' &&
     (record.summary === undefined || typeof record.summary === 'string') &&

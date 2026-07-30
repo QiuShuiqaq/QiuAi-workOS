@@ -304,6 +304,18 @@ function buildRoleWorkflowArtifactWriterConfig(
     };
   }
 
+  if (artifactType === 'zip') {
+    return {
+      action: 'filesystem.package_zip',
+      input: {
+        folder: 'packages',
+        fileName,
+        files: '$runtime.previous_files',
+        manifest: {}
+      }
+    };
+  }
+
   return {
     input: { title, folder: 'documents', fileName, content: contentRef }
   };

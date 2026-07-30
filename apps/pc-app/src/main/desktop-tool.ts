@@ -47,7 +47,7 @@ export async function invokeDesktopTool(
 
   try {
     if (request.toolId === localFilesystemToolId) {
-      return invokeLocalFilesystemTool(userDataPath, request);
+      return await invokeLocalFilesystemTool(userDataPath, request);
     }
 
     if (request.toolId === webSearchToolId) {
@@ -76,10 +76,10 @@ export async function invokeDesktopTool(
   }
 }
 
-function invokeLocalFilesystemTool(
+async function invokeLocalFilesystemTool(
   userDataPath: string,
   request: DesktopToolInvocationRequest
-): DesktopToolInvocationResult {
+): Promise<DesktopToolInvocationResult> {
   switch (request.action) {
     case 'filesystem.write_text_file':
       return writeTextFile(userDataPath, request);
@@ -87,6 +87,8 @@ function invokeLocalFilesystemTool(
       return readTextFile(request);
     case 'filesystem.list_directory':
       return listDirectory(request);
+    case 'filesystem.package_zip':
+      return await packageZipFile(userDataPath, request);
     default:
       return fail(request, `Unsupported local filesystem action: ${request.action}`);
   }
@@ -588,6 +590,147 @@ function listDirectory(request: DesktopToolInvocationRequest): DesktopToolInvoca
       truncated: readdirSync(directoryPath).length > maxDirectoryEntries
     }
   };
+}
+
+async function packageZipFile(
+  userDataPath: string,
+  request: DesktopToolInvocationRequest
+): Promise<DesktopToolInvocationResult> {
+  const layout = getDesktopStorageLayout(userDataPath, request.workspaceId);
+  ensureDesktopStorageLayout(layout);
+
+  const folder = readString(request.input.folder, 'packages');
+  const fileName = readString(request.input.fileName, 'artifact-package');
+  const zip = new JSZip();
+  const entries = readZipFileEntries(request.input.files);
+
+  for (const entry of entries) {
+    const sourcePath = entry.localPath;
+    if (!existsSync(sourcePath)) {
+      continue;
+    }
+
+    const stats = statSync(sourcePath);
+    if (!stats.isFile()) {
+      continue;
+    }
+
+    if (!isPathInsideRoot(sourcePath, layout.assetsPath)) {
+      assertReadPathAllowed(request, sourcePath);
+    }
+
+    zip.file(entry.archivePath ?? path.basename(sourcePath), readFileSync(sourcePath));
+  }
+
+  const manifest = request.input.manifest;
+  if (manifest !== undefined) {
+    zip.file('manifest.json', JSON.stringify(manifest, null, 2));
+  }
+
+  zip.file(
+    'README.txt',
+    [
+      'QiuAI WorkOS artifact package',
+      `Created at: ${new Date().toISOString()}`,
+      `File count: ${entries.length}`
+    ].join('\n')
+  );
+
+  const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  return writeToolAssetBinaryFile(userDataPath, request, {
+    category: 'packages',
+    folder,
+    fileName,
+    extension: 'zip',
+    content: buffer
+  });
+}
+
+function readZipFileEntries(value: unknown): Array<{ localPath: string; archivePath?: string }> {
+  const rawValue = typeof value === 'string' && value.trim().startsWith('[')
+    ? parseJson(value)
+    : value;
+  const values = Array.isArray(rawValue)
+    ? rawValue
+    : isRecord(rawValue) && Array.isArray(rawValue.files)
+      ? rawValue.files
+      : [];
+  const usedArchivePaths = new Set<string>();
+
+  return values.flatMap((item, index) => {
+    const entry = readZipFileEntry(item, index);
+    if (!entry) {
+      return [];
+    }
+
+    const archivePath = makeUniqueArchivePath(
+      entry.archivePath ?? path.basename(entry.localPath),
+      usedArchivePaths
+    );
+    return [{ ...entry, archivePath }];
+  });
+}
+
+function readZipFileEntry(
+  value: unknown,
+  index: number
+): { localPath: string; archivePath?: string } | undefined {
+  if (typeof value === 'string') {
+    const localPath = value.trim();
+    return localPath ? { localPath } : undefined;
+  }
+
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const localPath = readString(
+    value.localPath ?? value.path ?? value.filePath ?? value.outputPath,
+    ''
+  );
+  if (!localPath) {
+    return undefined;
+  }
+
+  const archivePath = normalizeZipArchivePath(
+    readString(
+      value.archivePath ?? value.relativePath ?? value.fileName ?? value.name,
+      `file-${index + 1}${path.extname(localPath)}`
+    )
+  );
+
+  return {
+    localPath,
+    archivePath
+  };
+}
+
+function normalizeZipArchivePath(value: string): string | undefined {
+  const segments = value
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((segment) => normalizePathSegment(segment))
+    .filter(Boolean);
+
+  return segments.length ? segments.join('/') : undefined;
+}
+
+function makeUniqueArchivePath(value: string, usedArchivePaths: Set<string>): string {
+  const normalized = normalizeZipArchivePath(value) ?? 'file';
+  if (!usedArchivePaths.has(normalized)) {
+    usedArchivePaths.add(normalized);
+    return normalized;
+  }
+
+  const extension = path.extname(normalized);
+  const baseName = extension ? normalized.slice(0, -extension.length) : normalized;
+  let suffix = 2;
+  while (usedArchivePaths.has(`${baseName}-${suffix}${extension}`)) {
+    suffix += 1;
+  }
+  const next = `${baseName}-${suffix}${extension}`;
+  usedArchivePaths.add(next);
+  return next;
 }
 
 async function fetchUrl(
