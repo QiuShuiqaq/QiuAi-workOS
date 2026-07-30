@@ -278,6 +278,7 @@ export async function listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRo
         workspaceId,
         loadedAt: new Date().toISOString(),
         templates: response.data,
+        deviceCapacity: response.deviceCapacity,
         deletedTemplateIds: response.deletedTemplateIds,
         message: `已同步 ${response.data.length} 个免费数字员工。`
       };
@@ -307,6 +308,7 @@ export async function listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRo
       workspaceId,
       loadedAt: new Date().toISOString(),
       templates: response.data,
+      deviceCapacity: response.deviceCapacity,
       deletedTemplateIds: response.deletedTemplateIds
     };
   } catch (error) {

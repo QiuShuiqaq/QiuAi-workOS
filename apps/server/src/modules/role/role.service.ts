@@ -7,7 +7,6 @@ import {
   normalizeWorkflowGraphOrFallback,
   type WorkflowStepLike
 } from '../../shared/workflow-graph';
-import { EntitlementService } from '../entitlement/entitlement.service';
 
 const workflowStepTypeSet = new Set<string>([
   'input',
@@ -91,9 +90,7 @@ export class RoleService {
     @Inject(MockPlatformStore)
     private readonly store: MockPlatformStore,
     @Inject(PrismaService)
-    private readonly prismaService: PrismaService,
-    @Inject(EntitlementService)
-    private readonly entitlementService: EntitlementService
+    private readonly prismaService: PrismaService
   ) {}
 
   async listTemplates(workspaceId: string) {
@@ -309,20 +306,6 @@ export class RoleService {
     if (!workspace) {
       return undefined;
     }
-
-    const existingRoleCount = await this.prismaService.roleInstance.count({
-      where: {
-        workspaceId
-      }
-    });
-    await this.entitlementService.requireAllowed(
-      {
-        workspaceId,
-        featureKey: 'maxRoleInstances',
-        requestedAmount: existingRoleCount + 1
-      },
-      'AI role quota requires a higher plan.'
-    );
 
     const [department, ownerMember] = await Promise.all([
       this.resolveDepartment(workspaceId, input.departmentName),

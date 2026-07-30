@@ -68,10 +68,11 @@ function planTone(plan: AdminPlanDetail): 'default' | 'processing' | 'warning' {
 
 const capacityFeatureLabels: Record<string, string> = {
   maxDesktopDevices: '设备',
-  maxRoleInstances: '数字员工'
+  maxRoleInstances: '单设备数字员工',
+  maxDigitalFactories: '单设备数字工厂'
 };
 
-const capacityFeatureOrder = ['maxDesktopDevices', 'maxRoleInstances'];
+const capacityFeatureOrder = ['maxDesktopDevices', 'maxRoleInstances', 'maxDigitalFactories'];
 
 function capacityEntitlements(plan: AdminPlanDetail) {
   return plan.entitlements
@@ -236,7 +237,7 @@ export function AdminPlansPageClient({ currentAccount, plans }: AdminPlansPageCl
                       ))}
                     </Space>
                     <Typography.Text type="secondary">
-                      企业版基础能力保持一致；套餐差异只按设备和数字员工数量区分。
+                      企业版基础能力保持一致；设备数量按企业计算，数字员工和数字工厂容量按每台绑定设备分别计算。
                     </Typography.Text>
                   </Space>
                 )
@@ -260,7 +261,7 @@ export function AdminPlansPageClient({ currentAccount, plans }: AdminPlansPageCl
             showIcon
             type="info"
             message="公开套餐只建议调整容量权益"
-            description="当前建议只把 maxDesktopDevices、maxRoleInstances 作为套餐差异；其他 featureKey 保持企业版一致，用于系统内部兜底。"
+            description="当前建议只把 maxDesktopDevices、maxRoleInstances、maxDigitalFactories 作为套餐差异；maxDesktopDevices 是企业可绑定设备数，maxRoleInstances 和 maxDigitalFactories 是每台设备容量。其他 featureKey 保持企业版一致，用于系统内部兜底。"
             style={{ marginBottom: 16 }}
           />
 

@@ -247,6 +247,35 @@ test('admin role template factory governs publication and workspace visibility',
       'content-type': 'application/json'
     };
 
+    const factoryQuotaAllowedResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/entitlements/check',
+      headers,
+      payload: {
+        workspaceId: 'enterprise',
+        featureKey: 'maxDigitalFactories',
+        requestedAmount: 1
+      }
+    });
+    assert.equal(factoryQuotaAllowedResponse.statusCode, 200);
+    assert.equal(JSON.parse(factoryQuotaAllowedResponse.body).allowed, true);
+
+    const factoryQuotaExceededResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/entitlements/check',
+      headers,
+      payload: {
+        workspaceId: 'enterprise',
+        featureKey: 'maxDigitalFactories',
+        requestedAmount: 2
+      }
+    });
+    assert.equal(factoryQuotaExceededResponse.statusCode, 200);
+    const factoryQuotaExceeded = JSON.parse(factoryQuotaExceededResponse.body);
+    assert.equal(factoryQuotaExceeded.allowed, false);
+    assert.equal(factoryQuotaExceeded.reason, 'quota_exceeded');
+    assert.equal(factoryQuotaExceeded.requiredPlan, 'ENTERPRISE_STANDARD_MONTHLY');
+
     const seededTemplatesResponse = await app.inject({
       method: 'GET',
       url: '/api/v1/admin/role-templates',
@@ -909,6 +938,115 @@ test('admin role template factory governs publication and workspace visibility',
     );
     assert.equal(desktopTemplate?.workflowSteps.length, 2);
     assert.equal(desktopTemplate?.canInstall, true);
+
+    const capacityFactoryTemplateIds = [
+      'factory_cross_border_product_images_v1',
+      'factory_medical_case_video_screening_v1'
+    ];
+    for (const factoryTemplateId of capacityFactoryTemplateIds) {
+      const allowBasicFactoryResponse = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/admin/role-templates/${encodeURIComponent(factoryTemplateId)}`,
+        headers,
+        payload: {
+          recommendedPlanCode: 'ENTERPRISE_BASIC_MONTHLY',
+          allowedPlanCodes: ['ENTERPRISE_BASIC_MONTHLY']
+        }
+      });
+      assert.equal(allowBasicFactoryResponse.statusCode, 200);
+    }
+
+    const factoryCapacityCatalogResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/workspaces/enterprise/desktop/role-templates',
+      headers: {
+        'x-qiuai-device-token': deviceToken
+      }
+    });
+    assert.equal(factoryCapacityCatalogResponse.statusCode, 200);
+    const factoryCapacityCatalog = JSON.parse(factoryCapacityCatalogResponse.body) as {
+      data: Array<{ id: string; canInstall?: boolean }>;
+      deviceCapacity?: { maxDigitalFactories?: number };
+    };
+    assert.equal(factoryCapacityCatalog.deviceCapacity?.maxDigitalFactories, 1);
+    for (const factoryTemplateId of capacityFactoryTemplateIds) {
+      assert.equal(
+        factoryCapacityCatalog.data.find((template) => template.id === factoryTemplateId)?.canInstall,
+        true
+      );
+    }
+
+    const overFactoryCapacitySyncResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/workspaces/enterprise/desktop/runtimes/sync',
+      headers: {
+        'content-type': 'application/json',
+        'x-qiuai-device-token': deviceToken
+      },
+      payload: {
+        data: {
+          runtimeId: redeemedDevice.runtimeId,
+          deviceId: redeemedDevice.deviceId,
+          deviceName: redeemedDevice.deviceName,
+          platform: redeemedDevice.platform,
+          workspaceId: 'enterprise',
+          appVersion: redeemedDevice.appVersion,
+          rolePackages: [
+            {
+              roleCode: 'factory-cross-border-product-images',
+              version: '1.0.0',
+              state: 'installed',
+              installedAt: '2026-07-20T00:00:00.000Z',
+              templateId: capacityFactoryTemplateIds[0],
+              templateVersion: '1.0.0'
+            },
+            {
+              roleCode: 'factory-medical-case-video-screening',
+              version: '1.0.0',
+              state: 'installed',
+              installedAt: '2026-07-20T00:00:01.000Z',
+              templateId: capacityFactoryTemplateIds[1],
+              templateVersion: '1.0.0'
+            }
+          ],
+          tools: [],
+          tasks: [
+            {
+              taskId: 'task-factory-capacity-kept',
+              roleCode: 'factory-cross-border-product-images',
+              title: 'Factory capacity kept',
+              state: 'completed',
+              updatedAt: '2026-07-20T01:00:00.000Z'
+            },
+            {
+              taskId: 'task-factory-capacity-filtered',
+              roleCode: 'factory-medical-case-video-screening',
+              title: 'Factory capacity filtered',
+              state: 'completed',
+              updatedAt: '2026-07-20T01:01:00.000Z'
+            }
+          ]
+        }
+      }
+    });
+    assert.equal(overFactoryCapacitySyncResponse.statusCode, 201);
+    const overFactoryCapacitySync = store.getDesktopRuntimeSync(redeemedDevice.runtimeId);
+    const overFactoryCapacitySnapshot = overFactoryCapacitySync?.runtimeSnapshot as
+      | { rolePackages: Array<{ templateId?: string }>; tasks: Array<{ taskId: string }> }
+      | undefined;
+    assert.ok(overFactoryCapacitySnapshot);
+    assert.deepEqual(
+      overFactoryCapacitySnapshot.rolePackages.map((rolePackage) => rolePackage.templateId),
+      [capacityFactoryTemplateIds[0]]
+    );
+    assert.equal(
+      overFactoryCapacitySnapshot.tasks.some((task) => task.taskId === 'task-factory-capacity-kept'),
+      true
+    );
+    assert.equal(
+      overFactoryCapacitySnapshot.tasks.some((task) => task.taskId === 'task-factory-capacity-filtered'),
+      false
+    );
 
     assert.ok(
       store.updateSubscription('enterprise', {

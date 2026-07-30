@@ -67,6 +67,13 @@ export interface DesktopAuthorizedRoleTemplateSummary {
   approvalPolicy: string;
 }
 
+export interface DesktopDeviceCapacitySummary {
+  planCode: string;
+  maxDesktopDevices?: number;
+  maxRoleInstances?: number;
+  maxDigitalFactories?: number;
+}
+
 export interface DesktopToolSummary {
   toolId: string;
   enabled: boolean;

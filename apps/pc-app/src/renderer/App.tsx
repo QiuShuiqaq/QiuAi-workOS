@@ -66,6 +66,7 @@ import type {
   DesktopAuthorizedRoleTemplateCatalog,
   DesktopAuthorizedRoleTemplateSummary,
   DesktopBackupSummary,
+  DesktopDeviceCapacitySummary,
   DesktopRuntimeState,
   DesktopUpdateCheckResult,
   DesktopWindowControlAction
@@ -1408,6 +1409,112 @@ function roleTemplateAccessReason(template: Pick<DesktopRoleTemplate, 'accessRea
   return template.accessReason?.trim() || '\u5f53\u524d\u7248\u672c\u6682\u4e0d\u652f\u6301\u5b89\u88c5\u8be5\u6a21\u677f\u3002';
 }
 
+type RoleApplicationUsage = Record<RoleApplicationType, number>;
+
+interface RoleInstallAvailability {
+  canInstall: boolean;
+  label: string;
+  reason: string;
+  usedValue?: number;
+  limitValue?: number;
+}
+
+function countInstalledRoleApplications(rolePackages: RolePackageManifest[]): RoleApplicationUsage {
+  return rolePackages.reduce<RoleApplicationUsage>(
+    (counts, rolePackage) => {
+      counts[readRoleApplicationType(rolePackage)] += 1;
+      return counts;
+    },
+    {
+      digital_employee: 0,
+      digital_factory: 0
+    }
+  );
+}
+
+function roleApplicationCapacityLimit(
+  applicationType: RoleApplicationType,
+  deviceCapacity: DesktopDeviceCapacitySummary | undefined
+): number | undefined {
+  return applicationType === 'digital_factory'
+    ? deviceCapacity?.maxDigitalFactories
+    : deviceCapacity?.maxRoleInstances;
+}
+
+function resolveRoleInstallAvailability(
+  template: DesktopRoleTemplate,
+  installedUsage: RoleApplicationUsage,
+  deviceCapacity: DesktopDeviceCapacitySummary | undefined
+): RoleInstallAvailability {
+  if (!canInstallRoleTemplate(template)) {
+    return {
+      canInstall: false,
+      label: roleTemplateAccessLabel(template),
+      reason: roleTemplateAccessReason(template)
+    };
+  }
+
+  const applicationType = readRoleApplicationType(template);
+  const limitValue = roleApplicationCapacityLimit(applicationType, deviceCapacity);
+  const usedValue = installedUsage[applicationType];
+  if (limitValue !== undefined && usedValue >= limitValue) {
+    const applicationLabel = roleApplicationTypeLabel(applicationType);
+    return {
+      canInstall: false,
+      label: '额度已满',
+      reason: `当前套餐每台设备最多可安装 ${limitValue} 个${applicationLabel}，这台电脑已安装 ${usedValue} 个。请先卸载不需要的${applicationLabel}，或在购买中心升级套餐。`,
+      usedValue,
+      limitValue
+    };
+  }
+
+  return {
+    canInstall: true,
+    label: '可安装',
+    reason: '',
+    usedValue,
+    limitValue
+  };
+}
+
+function formatRoleApplicationCapacityUsage(
+  applicationType: RoleApplicationType,
+  installedUsage: RoleApplicationUsage,
+  deviceCapacity: DesktopDeviceCapacitySummary | undefined
+): string {
+  const usedValue = installedUsage[applicationType];
+  const limitValue = roleApplicationCapacityLimit(applicationType, deviceCapacity);
+
+  return limitValue === undefined
+    ? `本机已安装 ${usedValue} 个`
+    : `本机已安装 ${usedValue}/${limitValue} 个`;
+}
+
+function restrictInstalledRolePackagesByDeviceCapacity(
+  rolePackages: RolePackageManifest[],
+  deviceCapacity: DesktopDeviceCapacitySummary | undefined
+): RolePackageManifest[] {
+  const limits: Record<RoleApplicationType, number | undefined> = {
+    digital_employee: deviceCapacity?.maxRoleInstances,
+    digital_factory: deviceCapacity?.maxDigitalFactories
+  };
+  const used: RoleApplicationUsage = {
+    digital_employee: 0,
+    digital_factory: 0
+  };
+
+  return rolePackages.filter((rolePackage) => {
+    const applicationType = readRoleApplicationType(rolePackage);
+    const limitValue = limits[applicationType];
+    if (limitValue !== undefined && used[applicationType] >= limitValue) {
+      return false;
+    }
+
+    used[applicationType] += 1;
+    return true;
+  });
+}
+
 function isSectionKey(value: string): value is SectionKey {
   return sectionItems.some((item) => item.key === value);
 }
@@ -1746,7 +1853,12 @@ export default function App() {
       if (catalog.source === 'server') {
         const authorizedTemplates = catalog.templates.map(toDesktopRoleTemplate);
         setRuntimeState((current) =>
-          pruneUnauthorizedRolePackages(current, authorizedTemplates, catalog.deletedTemplateIds ?? [])
+          pruneUnauthorizedRolePackages(
+            current,
+            authorizedTemplates,
+            catalog.deletedTemplateIds ?? [],
+            catalog.deviceCapacity
+          )
         );
       }
       setRoleTemplateNotice(
@@ -2329,6 +2441,10 @@ export default function App() {
 
     return authorizedByRoleCode;
   }, [authorizedRoleTemplateCatalog.source, desktopRoleTemplates]);
+
+  const installedRoleApplicationUsage = useMemo(() => {
+    return countInstalledRoleApplications(runtimeState.rolePackages);
+  }, [runtimeState.rolePackages]);
 
   const enabledModelCount = runtimeState.localRuntime.enabledModelProfileIds.length;
   const enabledToolCount = runtimeState.localRuntime.enabledToolIds.length;
@@ -3766,6 +3882,11 @@ export default function App() {
       (template) => selectedRoleCategory === '全部' || roleTemplateCategory(template) === selectedRoleCategory
     );
     const selectedApplicationLabel = roleApplicationTypeLabel(selectedRoleApplicationType);
+    const selectedApplicationCapacityText = formatRoleApplicationCapacityUsage(
+      selectedRoleApplicationType,
+      installedRoleApplicationUsage,
+      authorizedRoleTemplateCatalog.deviceCapacity
+    );
 
     return (
       <>
@@ -3816,6 +3937,10 @@ export default function App() {
             ))}
           </div>
 
+          <Typography.Paragraph type="secondary" className="catalog-capacity-hint">
+            {selectedApplicationCapacityText}
+          </Typography.Paragraph>
+
           {roleTemplateNotice ? (
             <Typography.Paragraph type="secondary">
               {roleTemplateNotice}
@@ -3847,9 +3972,11 @@ export default function App() {
               const hasTemplateUpdate = isInstalledRoleTemplateOutdated(template, installedRolePackage);
               const fileContract = buildRoleFileContractSummary(template);
               const freeTemplate = isFreeRoleTemplate(template);
-              const canInstallTemplate = canInstallRoleTemplate(template);
-              const accessLabel = roleTemplateAccessLabel(template);
-              const accessReason = roleTemplateAccessReason(template);
+              const installAvailability = resolveRoleInstallAvailability(
+                template,
+                installedRoleApplicationUsage,
+                authorizedRoleTemplateCatalog.deviceCapacity
+              );
 
               return (
                 <Card key={template.roleCode} bordered={false} className="catalog-card role-catalog-card">
@@ -3862,8 +3989,8 @@ export default function App() {
                         {freeTemplate ? <Tag color="green">免费</Tag> : null}
                       </Flex>
                       <Space size={6} wrap>
-                        <Tag color={active ? 'green' : installed ? 'blue' : canInstallTemplate ? 'default' : 'orange'}>
-                          {active ? '当前' : installed ? '已安装' : canInstallTemplate ? '可安装' : accessLabel}
+                        <Tag color={active ? 'green' : installed ? 'blue' : installAvailability.canInstall ? 'default' : 'orange'}>
+                          {active ? '当前' : installed ? '已安装' : installAvailability.canInstall ? '可安装' : installAvailability.label}
                         </Tag>
                         {readiness ? (
                           <Tooltip title={readiness.issueText}>
@@ -3924,11 +4051,11 @@ export default function App() {
                         >
                           {isFactory ? '运行工厂' : active ? '进入对话' : '开始使用'}
                         </Button>
-                      ) : !canInstallTemplate ? (
-                        <Tooltip title={accessReason}>
+                      ) : !installAvailability.canInstall ? (
+                        <Tooltip title={installAvailability.reason}>
                           <span>
                             <Button size="small" type="primary" disabled>
-                              升级后可安装
+                              {installAvailability.label}
                             </Button>
                           </span>
                         </Tooltip>
@@ -3942,8 +4069,8 @@ export default function App() {
                           更新
                         </Button>
                       ) : null}
-                      {!installed && !canInstallTemplate ? (
-                        <Tooltip title={accessReason}>
+                      {!installed && !installAvailability.canInstall ? (
+                        <Tooltip title={installAvailability.reason}>
                           <span>
                             <Button size="small" disabled>
                               配置
@@ -6063,9 +6190,16 @@ export default function App() {
     if (!template) {
       return;
     }
-    if (mode === 'install' && !canInstallRoleTemplate(template)) {
-      message.warning(roleTemplateAccessReason(template));
-      return;
+    if (mode === 'install') {
+      const installAvailability = resolveRoleInstallAvailability(
+        template,
+        installedRoleApplicationUsage,
+        authorizedRoleTemplateCatalog.deviceCapacity
+      );
+      if (!installAvailability.canInstall) {
+        message.warning(installAvailability.reason);
+        return;
+      }
     }
 
     const currentRolePackage =
@@ -6101,10 +6235,17 @@ export default function App() {
     if (!template) {
       return;
     }
-    if (roleConfigMode === 'install' && !canInstallRoleTemplate(template)) {
-      message.warning(roleTemplateAccessReason(template));
-      closeRoleConfig();
-      return;
+    if (roleConfigMode === 'install') {
+      const installAvailability = resolveRoleInstallAvailability(
+        template,
+        installedRoleApplicationUsage,
+        authorizedRoleTemplateCatalog.deviceCapacity
+      );
+      if (!installAvailability.canInstall) {
+        message.warning(installAvailability.reason);
+        closeRoleConfig();
+        return;
+      }
     }
 
     const previewRolePackage: RolePackageManifest = {
@@ -8445,7 +8586,8 @@ function isRolePackageTemplateDeleted(
 function pruneUnauthorizedRolePackages(
   state: DesktopRuntimeState,
   authorizedTemplates: DesktopRoleTemplate[],
-  deletedTemplateIds: string[] = []
+  deletedTemplateIds: string[] = [],
+  deviceCapacity?: DesktopDeviceCapacitySummary
 ): DesktopRuntimeState {
   const authorizedRoleCodes = new Set(
     authorizedTemplates
@@ -8453,9 +8595,12 @@ function pruneUnauthorizedRolePackages(
       .map((template) => template.roleCode)
   );
   const deletedTemplateIdSet = new Set(deletedTemplateIds);
-  const rolePackages = state.rolePackages.filter((rolePackage) =>
-    authorizedRoleCodes.has(rolePackage.roleCode) ||
-    isRolePackageTemplateDeleted(rolePackage, deletedTemplateIdSet)
+  const rolePackages = restrictInstalledRolePackagesByDeviceCapacity(
+    state.rolePackages.filter((rolePackage) =>
+      authorizedRoleCodes.has(rolePackage.roleCode) ||
+      isRolePackageTemplateDeleted(rolePackage, deletedTemplateIdSet)
+    ),
+    deviceCapacity
   );
   const deletedRoleCodes = new Set(
     rolePackages

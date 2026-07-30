@@ -168,11 +168,19 @@ export interface DesktopAuthorizedRoleTemplateSummary {
   approvalPolicy: string;
 }
 
+export interface DesktopDeviceCapacitySummary {
+  planCode: string;
+  maxDesktopDevices?: number;
+  maxRoleInstances?: number;
+  maxDigitalFactories?: number;
+}
+
 export interface DesktopAuthorizedRoleTemplateCatalog {
   source: 'server' | 'local_fallback';
   workspaceId: string;
   loadedAt: string;
   templates: DesktopAuthorizedRoleTemplateSummary[];
+  deviceCapacity?: DesktopDeviceCapacitySummary;
   deletedTemplateIds?: string[];
   message?: string;
 }

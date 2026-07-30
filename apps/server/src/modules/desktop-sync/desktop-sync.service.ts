@@ -10,6 +10,7 @@ import {
 import { Prisma } from '@prisma/client';
 
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
+import { demoPlans } from '../../shared/mock/platform-seed';
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { listServerToolActionCatalog } from '../../shared/tool-action-catalog';
@@ -96,6 +97,29 @@ type DesktopAgreementAcceptanceRecord = {
   acceptedAt: DesktopReleaseDate;
 };
 
+type DesktopApplicationType = 'digital_employee' | 'digital_factory';
+
+type DesktopDeviceCapacitySummary = {
+  planCode: string;
+  maxDesktopDevices?: number;
+  maxRoleInstances?: number;
+  maxDigitalFactories?: number;
+};
+
+type PlanEntitlementForCapacity = {
+  featureKey: string;
+  enabled: boolean;
+  limitValue?: number | null;
+};
+
+type PlanForCapacity = {
+  code: string;
+  entitlements: PlanEntitlementForCapacity[];
+};
+
+const freePlanCode = 'PERSONAL_FREE';
+const usableDesktopCapacitySubscriptionStatuses = new Set(['FREE', 'TRIALING', 'ACTIVE']);
+
 @Injectable()
 export class DesktopSyncService {
   private readonly mockBindingCodes: MockDesktopBindingCodeRecord[] = [];
@@ -138,9 +162,13 @@ export class DesktopSyncService {
 
     if (isDatabasePersistenceEnabled()) {
       await this.requireDatabaseDeviceTokenForWorkspace(workspaceId, deviceToken);
-      const response = await this.roleService.listPublishedTemplatesForDesktop(workspaceId);
+      const [response, deviceCapacity] = await Promise.all([
+        this.roleService.listPublishedTemplatesForDesktop(workspaceId),
+        this.resolveDesktopDeviceCapacity(workspaceId)
+      ]);
       return {
         ...response,
+        deviceCapacity,
         deletedTemplateIds
       };
     }
@@ -157,20 +185,26 @@ export class DesktopSyncService {
       });
     }
     this.requireMockDeviceTokenForWorkspace(workspaceId, deviceToken, new Date());
-    const response = await this.roleService.listPublishedTemplatesForDesktop(workspaceId);
+    const [response, deviceCapacity] = await Promise.all([
+      this.roleService.listPublishedTemplatesForDesktop(workspaceId),
+      this.resolveDesktopDeviceCapacity(workspaceId)
+    ]);
     return {
       ...response,
+      deviceCapacity,
       deletedTemplateIds
     };
   }
 
   async listPublicFreeRoleTemplates(installedTemplateIds: string[] = []) {
-    const [response, deletedTemplateIds] = await Promise.all([
+    const [response, deletedTemplateIds, deviceCapacity] = await Promise.all([
       this.roleService.listPublicFreeTemplatesForDesktop(),
-      this.roleService.listDeletedTemplateIds(installedTemplateIds)
+      this.roleService.listDeletedTemplateIds(installedTemplateIds),
+      this.resolvePublicFreeDesktopDeviceCapacity()
     ]);
     return {
       ...response,
+      deviceCapacity,
       deletedTemplateIds
     };
   }
@@ -929,14 +963,21 @@ export class DesktopSyncService {
     workspaceId: string,
     snapshot: DesktopRuntimeSnapshot
   ): Promise<DesktopRuntimeSnapshot> {
-    const authorizedTemplates = await this.roleService.listPublishedTemplatesForDesktop(workspaceId);
-    const authorizedTemplateIds = new Set(
+    const [authorizedTemplates, deviceCapacity] = await Promise.all([
+      this.roleService.listPublishedTemplatesForDesktop(workspaceId),
+      this.resolveDesktopDeviceCapacity(workspaceId)
+    ]);
+    const authorizedTemplateById = new Map(
       authorizedTemplates.data
         .filter((template) => template.canInstall !== false)
-        .map((template) => template.id)
+        .map((template) => [template.id, template] as const)
     );
-    const rolePackages = snapshot.rolePackages.filter(
-      (rolePackage) => rolePackage.templateId && authorizedTemplateIds.has(rolePackage.templateId)
+    const rolePackages = this.restrictRolePackagesByDeviceCapacity(
+      snapshot.rolePackages.filter(
+        (rolePackage) => rolePackage.templateId && authorizedTemplateById.has(rolePackage.templateId)
+      ),
+      authorizedTemplateById,
+      deviceCapacity
     );
 
     if (rolePackages.length === snapshot.rolePackages.length) {
@@ -949,6 +990,151 @@ export class DesktopSyncService {
       rolePackages,
       tasks: snapshot.tasks.filter((task) => authorizedRoleCodes.has(task.roleCode))
     };
+  }
+
+  private restrictRolePackagesByDeviceCapacity(
+    rolePackages: DesktopRuntimeSnapshot['rolePackages'],
+    authorizedTemplateById: Map<string, { applicationType?: string }>,
+    deviceCapacity?: DesktopDeviceCapacitySummary
+  ): DesktopRuntimeSnapshot['rolePackages'] {
+    const limits: Record<DesktopApplicationType, number | undefined> = {
+      digital_employee: deviceCapacity?.maxRoleInstances,
+      digital_factory: deviceCapacity?.maxDigitalFactories
+    };
+    const used: Record<DesktopApplicationType, number> = {
+      digital_employee: 0,
+      digital_factory: 0
+    };
+
+    return rolePackages.filter((rolePackage) => {
+      if (rolePackage.state === 'deleted') {
+        return true;
+      }
+
+      const template = rolePackage.templateId ? authorizedTemplateById.get(rolePackage.templateId) : undefined;
+      const applicationType = this.toDesktopApplicationType(template?.applicationType);
+      const limit = limits[applicationType];
+      if (limit !== undefined && used[applicationType] >= limit) {
+        return false;
+      }
+
+      used[applicationType] += 1;
+      return true;
+    });
+  }
+
+  private async resolveDesktopDeviceCapacity(workspaceId: string): Promise<DesktopDeviceCapacitySummary | undefined> {
+    if (!isDatabasePersistenceEnabled()) {
+      const subscription = this.store.getSubscription(workspaceId);
+      const plan =
+        subscription &&
+        this.isDesktopCapacitySubscriptionUsable(subscription.status, subscription.currentPeriodEnd)
+          ? demoPlans.find((item) => item.code === subscription.planCode)
+          : demoPlans.find((item) => item.code === freePlanCode);
+
+      return this.toDesktopDeviceCapacity(plan);
+    }
+
+    const subscription = await this.prismaService.subscription.findFirst({
+      where: {
+        workspaceId
+      },
+      include: {
+        plan: {
+          include: {
+            entitlements: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    if (
+      subscription &&
+      this.isDesktopCapacitySubscriptionUsable(subscription.status, subscription.currentPeriodEnd)
+    ) {
+      return this.toDesktopDeviceCapacity(subscription.plan);
+    }
+
+    const freePlan = await this.prismaService.plan.findUnique({
+      where: {
+        code: freePlanCode
+      },
+      include: {
+        entitlements: true
+      }
+    });
+
+    return this.toDesktopDeviceCapacity(freePlan ?? undefined);
+  }
+
+  private async resolvePublicFreeDesktopDeviceCapacity(): Promise<DesktopDeviceCapacitySummary | undefined> {
+    if (!isDatabasePersistenceEnabled()) {
+      return this.toDesktopDeviceCapacity(demoPlans.find((plan) => plan.code === freePlanCode));
+    }
+
+    const freePlan = await this.prismaService.plan.findUnique({
+      where: {
+        code: freePlanCode
+      },
+      include: {
+        entitlements: true
+      }
+    });
+
+    return this.toDesktopDeviceCapacity(freePlan ?? undefined);
+  }
+
+  private toDesktopDeviceCapacity(plan: PlanForCapacity | undefined): DesktopDeviceCapacitySummary | undefined {
+    if (!plan) {
+      return undefined;
+    }
+
+    return {
+      planCode: plan.code,
+      maxDesktopDevices: this.readCapacityLimit(plan.entitlements, 'maxDesktopDevices'),
+      maxRoleInstances: this.readCapacityLimit(plan.entitlements, 'maxRoleInstances'),
+      maxDigitalFactories: this.readCapacityLimit(plan.entitlements, 'maxDigitalFactories')
+    };
+  }
+
+  private readCapacityLimit(entitlements: PlanEntitlementForCapacity[], featureKey: string): number | undefined {
+    const entitlement = entitlements.find((item) => item.featureKey === featureKey);
+    if (!entitlement) {
+      return undefined;
+    }
+
+    if (!entitlement.enabled) {
+      return 0;
+    }
+
+    return entitlement.limitValue ?? undefined;
+  }
+
+  private isDesktopCapacitySubscriptionUsable(
+    status: string,
+    currentPeriodEnd?: string | Date | null
+  ): boolean {
+    if (!usableDesktopCapacitySubscriptionStatuses.has(status.toUpperCase())) {
+      return false;
+    }
+
+    if (!currentPeriodEnd) {
+      return true;
+    }
+
+    const periodEnd = currentPeriodEnd instanceof Date ? currentPeriodEnd.getTime() : Date.parse(currentPeriodEnd);
+    if (Number.isNaN(periodEnd)) {
+      return true;
+    }
+
+    return periodEnd > Date.now();
+  }
+
+  private toDesktopApplicationType(value: string | undefined): DesktopApplicationType {
+    return value === 'digital_factory' ? 'digital_factory' : 'digital_employee';
   }
 
   private async requireDesktopDeviceManagementAccess(workspaceId: string, cookieHeader?: string) {

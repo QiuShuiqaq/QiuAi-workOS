@@ -1,5 +1,6 @@
 ﻿import type {
   DesktopAuthorizedRoleTemplateSummary,
+  DesktopDeviceCapacitySummary,
   DesktopUpdateCheckResult,
   DesktopAgreementAcceptanceSummary
 } from './desktop-api.js';
@@ -51,6 +52,7 @@ interface SyncDesktopRuntimeResponse {
 
 interface ListAuthorizedRoleTemplatesResponse {
   data: DesktopAuthorizedRoleTemplateSummary[];
+  deviceCapacity?: DesktopDeviceCapacitySummary;
   deletedTemplateIds?: string[];
 }
 

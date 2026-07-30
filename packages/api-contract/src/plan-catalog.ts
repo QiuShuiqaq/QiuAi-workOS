@@ -2,6 +2,7 @@ import type { PlanDetail } from './commercial';
 
 const personalFreeEntitlements = [
   { featureKey: 'maxRoleInstances', enabled: true, limitValue: 3, limitUnit: 'count' },
+  { featureKey: 'maxDigitalFactories', enabled: true, limitValue: 0, limitUnit: 'count' },
   { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100, limitUnit: 'count' },
   { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 1, limitUnit: 'count' },
   { featureKey: 'maxMembers', enabled: true, limitValue: 1, limitUnit: 'count' },
@@ -16,6 +17,7 @@ const personalFreeEntitlements = [
 
 const enterpriseBasicEntitlements = [
   { featureKey: 'maxRoleInstances', enabled: true, limitValue: 10, limitUnit: 'count' },
+  { featureKey: 'maxDigitalFactories', enabled: true, limitValue: 1, limitUnit: 'count' },
   { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100000, limitUnit: 'count' },
   { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 3, limitUnit: 'count' },
   { featureKey: 'maxMembers', enabled: true, limitValue: 5, limitUnit: 'count' },
@@ -30,6 +32,7 @@ const enterpriseBasicEntitlements = [
 
 const enterpriseStandardEntitlements = [
   { featureKey: 'maxRoleInstances', enabled: true, limitValue: 30, limitUnit: 'count' },
+  { featureKey: 'maxDigitalFactories', enabled: true, limitValue: 3, limitUnit: 'count' },
   { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100000, limitUnit: 'count' },
   { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 10, limitUnit: 'count' },
   { featureKey: 'maxMembers', enabled: true, limitValue: 20, limitUnit: 'count' },
@@ -44,6 +47,7 @@ const enterpriseStandardEntitlements = [
 
 const enterpriseProEntitlements = [
   { featureKey: 'maxRoleInstances', enabled: true, limitValue: 100, limitUnit: 'count' },
+  { featureKey: 'maxDigitalFactories', enabled: true, limitValue: 10, limitUnit: 'count' },
   { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100000, limitUnit: 'count' },
   { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 50, limitUnit: 'count' },
   { featureKey: 'maxMembers', enabled: true, limitValue: 100, limitUnit: 'count' },
@@ -58,6 +62,7 @@ const enterpriseProEntitlements = [
 
 const enterpriseCustomEntitlements = [
   { featureKey: 'maxRoleInstances', enabled: true },
+  { featureKey: 'maxDigitalFactories', enabled: true },
   { featureKey: 'maxTasksPerMonth', enabled: true },
   { featureKey: 'maxDesktopDevices', enabled: true },
   { featureKey: 'maxMembers', enabled: true },
@@ -86,7 +91,7 @@ export const qiuaiPlanCatalog: PlanDetail[] = [
     billingCycle: 'MONTHLY',
     priceCents: 58800,
     currency: 'CNY',
-    description: '适合小团队试点，按设备和数字员工容量授权。',
+    description: '适合小团队试点，按企业设备数和单设备数字员工、数字工厂容量授权。',
     entitlements: enterpriseBasicEntitlements
   },
   {
@@ -104,7 +109,7 @@ export const qiuaiPlanCatalog: PlanDetail[] = [
     billingCycle: 'MONTHLY',
     priceCents: 108800,
     currency: 'CNY',
-    description: '适合正常企业团队使用，按设备和数字员工容量授权。',
+    description: '适合正常企业团队使用，按企业设备数和单设备数字员工、数字工厂容量授权。',
     entitlements: enterpriseStandardEntitlements
   },
   {
@@ -122,7 +127,7 @@ export const qiuaiPlanCatalog: PlanDetail[] = [
     billingCycle: 'MONTHLY',
     priceCents: 288800,
     currency: 'CNY',
-    description: '适合多团队或高频数字员工使用，按设备和数字员工容量授权。',
+    description: '适合多团队或高频生产使用，按企业设备数和单设备数字员工、数字工厂容量授权。',
     entitlements: enterpriseProEntitlements
   },
   {

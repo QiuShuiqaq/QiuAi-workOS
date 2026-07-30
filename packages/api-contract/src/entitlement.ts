@@ -12,6 +12,7 @@ export type PlanCode =
 
 export const ENTITLEMENT_KEYS = [
   'maxRoleInstances',
+  'maxDigitalFactories',
   'maxTasksPerMonth',
   'maxDesktopDevices',
   'maxMembers',
