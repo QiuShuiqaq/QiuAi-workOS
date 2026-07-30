@@ -5,6 +5,7 @@ import {
   retiredServerRoleTemplateIds,
   serverRoleTemplateCatalog
 } from './role-template-catalog';
+import { buildRoleTemplateDependencyManifest } from './role-template-dependencies';
 
 test('server role template catalog is focused and production-oriented', () => {
   const freeTemplateIds = [
@@ -89,7 +90,26 @@ test('server role template catalog is focused and production-oriented', () => {
     const template = templateById.get(templateId);
     assert.ok(template, `${templateId} must exist`);
     assert.equal(template.applicationType, 'DIGITAL_FACTORY', `${templateId} must be listed as a digital factory`);
+    assert.deepEqual(findUnreachableNodeIds(template.workflowGraph), [], `${templateId} must not define detached nodes`);
   }
+
+  assert.equal(
+    templateById.get('factory_medical_case_video_screening_v1')?.name,
+    '视频质检剪辑工厂',
+    'video factory must use the generic product name'
+  );
+  const videoFactoryTemplate = templateById.get('factory_medical_case_video_screening_v1');
+  assert.ok(videoFactoryTemplate, 'video factory template must exist');
+  const videoFactoryDependencyManifest = buildRoleTemplateDependencyManifest({
+    workflowGraph: videoFactoryTemplate.workflowGraph,
+    generatedAt: '2026-07-30T00:00:00.000Z'
+  });
+  const videoFactoryToolActions = new Set(
+    videoFactoryDependencyManifest.toolActions.map((action) => `${action.packageId}/${action.actionId}`)
+  );
+  assert.ok(videoFactoryToolActions.has('video-processing/video.probe'));
+  assert.ok(videoFactoryToolActions.has('video-processing/video.compose_clips'));
+  assert.ok(videoFactoryToolActions.has('office-document/spreadsheet.write_xlsx'));
 
   for (const template of serverRoleTemplateCatalog) {
     const isDigitalFactory = template.applicationType === 'DIGITAL_FACTORY';
@@ -282,4 +302,27 @@ function readRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+function findUnreachableNodeIds(graph: {
+  entryNodeId: string;
+  nodes: Array<{ id: string }>;
+  edges: Array<{ sourceNodeId: string; targetNodeId: string }>;
+}) {
+  const reachable = new Set<string>([graph.entryNodeId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const edge of graph.edges) {
+      if (!reachable.has(edge.sourceNodeId) || reachable.has(edge.targetNodeId)) {
+        continue;
+      }
+      reachable.add(edge.targetNodeId);
+      changed = true;
+    }
+  }
+
+  return graph.nodes
+    .map((node) => node.id)
+    .filter((nodeId) => !reachable.has(nodeId));
 }

@@ -142,6 +142,23 @@ export function buildRoleTemplateDependencyManifest(input: {
       upsertToolAction(toolActions, node, assetByTypeAndKey, warnings);
     }
 
+    for (const requiredToolAction of readConfigToolActions(node.config)) {
+      upsertToolAction(
+        toolActions,
+        {
+          ...node,
+          type: 'tool',
+          toolId: requiredToolAction.toolId,
+          config: {
+            action: requiredToolAction.action,
+            ...(requiredToolAction.assetKey ? { toolActionAssetKey: requiredToolAction.assetKey } : {})
+          }
+        },
+        assetByTypeAndKey,
+        warnings
+      );
+    }
+
     if (node.type === 'artifact') {
       upsertArtifactTemplate(artifactTemplates, node, assetByTypeAndKey, warnings);
     }
@@ -453,6 +470,24 @@ function readConfigStringArray(config: Record<string, unknown> | undefined, key:
   const value = config?.[key];
   if (!Array.isArray(value)) return [];
   return uniqueStrings(value.filter((item): item is string => typeof item === 'string'));
+}
+
+function readConfigToolActions(
+  config: Record<string, unknown> | undefined
+): Array<{ toolId: string; action: string; assetKey?: string }> {
+  const value = config?.requiredToolActions;
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((item) => {
+    const record = readRecord(item);
+    const toolId = typeof record?.toolId === 'string' ? record.toolId.trim() : '';
+    const action = typeof record?.action === 'string' ? record.action.trim() : '';
+    const assetKey = typeof record?.assetKey === 'string' ? record.assetKey.trim() : '';
+    if (!toolId || !action) {
+      return [];
+    }
+    return [{ toolId, action, ...(assetKey ? { assetKey } : {}) }];
+  });
 }
 
 function readRecord(value: unknown): Record<string, unknown> | undefined {

@@ -265,8 +265,8 @@ const workflowPresetOptions: Array<{ value: WorkflowPreset; label: string; descr
   },
   {
     value: 'medical_case_video_factory',
-    label: '案例视频质检剪辑工厂',
-    description: '批量上传案例视频，先筛选不合格素材，再评分，并可选生成初剪视频。'
+    label: '视频质检剪辑工厂',
+    description: '批量上传视频，先筛选不合格素材，再评分，并可选生成初剪视频。'
   }
 ];
 
@@ -1594,18 +1594,32 @@ function createWorkflowSteps(preset: WorkflowPreset): RoleWorkflowGraphSourceSte
         order: 1,
         type: 'input',
         name: '接收视频批次',
-        instruction: '接收用户上传的案例视频、筛选配置、ASR 方言设置和是否初剪。'
+        instruction: '接收用户上传的视频、筛选配置、ASR 方言设置和是否初剪。'
+      },
+      {
+        id: 'load_screening_rules',
+        order: 2,
+        type: 'knowledge',
+        name: '读取筛选标准',
+        instruction: '读取企业知识库中的视频筛选标准、合规边界、禁用表述和人工复核规则。'
+      },
+      {
+        id: 'prepare_video_batch',
+        order: 3,
+        type: 'llm',
+        name: '整理视频批次参数',
+        instruction: '整理视频附件、筛选关卡、ASR 方言、初剪开关和目标时长，形成 PC 端可执行的批量参数。'
       },
       {
         id: 'screen_score_and_edit',
-        order: 2,
+        order: 4,
         type: 'llm',
         name: '批量筛选评分',
         instruction: '按视频规格、ASR 质量、内容完整性逐级筛选；通过后再做表达质量评分，并按用户开关决定是否生成初剪。'
       },
       {
         id: 'factory_output',
-        order: 3,
+        order: 5,
         type: 'output',
         name: '返回结果',
         instruction: '返回筛选评分表、失败原因、需人工复核项和可选初剪视频。'
@@ -1748,7 +1762,7 @@ function createMedicalCaseVideoScreeningFactoryWorkflowGraph(): RoleWorkflowGrap
       id: 'factory_input',
       type: 'input',
       name: '接收视频批次',
-      instruction: '接收案例视频、筛选规则、ASR 语言/方言、是否启用初剪和目标成片时长；单批最多 50 个视频。',
+      instruction: '接收视频、筛选规则、ASR 语言/方言、是否启用初剪和目标成片时长；单批最多 50 个视频。',
       inputVariables: ['start.text', 'start.files', 'start.videos'],
       outputVariables: ['task_brief'],
       config: {
@@ -1758,18 +1772,59 @@ function createMedicalCaseVideoScreeningFactoryWorkflowGraph(): RoleWorkflowGrap
       }
     },
     {
+      id: 'load_screening_rules',
+      type: 'knowledge',
+      name: '读取筛选标准',
+      instruction: '读取企业知识库中的视频筛选标准、合规边界、禁用表述和人工复核规则。',
+      inputVariables: ['task_brief', 'factory_request'],
+      outputVariables: ['knowledge_context']
+    },
+    {
+      id: 'prepare_video_batch',
+      type: 'data',
+      name: '整理视频批次参数',
+      instruction: '把工厂面板参数、视频附件、筛选标准、ASR 方言和初剪开关整理成稳定 JSON，供 PC 端按同一协议执行。',
+      inputVariables: ['factory_request', 'start.files', 'start.videos', 'knowledge_context'],
+      outputVariables: ['factory_request', 'video_batch', 'screening_gates', 'asr_config', 'edit_config'],
+      config: {
+        dataMode: 'code',
+        outputVariable: 'video_batch',
+        timeoutMs: 2_000,
+        code:
+          'const request = input.factory_request && typeof input.factory_request === "object" ? input.factory_request : {};\n' +
+          'const files = Array.isArray(input["start.files"]) ? input["start.files"] : [];\n' +
+          'const videos = files.filter((file) => file && file.kind === "video").slice(0, 50);\n' +
+          'const profile = request.screeningProfile && typeof request.screeningProfile === "object" ? request.screeningProfile : {};\n' +
+          'const asr = request.asr && typeof request.asr === "object" ? request.asr : {};\n' +
+          'const editEnabled = Boolean(request.editEnabled);\n' +
+          'const editTargetSeconds = Number(request.editTargetSeconds) || 30;\n' +
+          'return {\n' +
+          '  factory_request: { ...request, itemCount: videos.length, editEnabled, editTargetSeconds },\n' +
+          '  video_batch: videos.map((file, index) => ({ order: index + 1, name: file.name || `video-${index + 1}`, localPath: file.localPath || file.path || "", size: file.size || 0, type: file.type || "", file })),\n' +
+          '  screening_gates: Array.isArray(profile.gates) ? profile.gates : [],\n' +
+          '  asr_config: { modelProfileId: asr.modelProfileId || "", language: asr.language || "zh", dialect: asr.dialect || "auto" },\n' +
+          '  edit_config: { enabled: editEnabled, targetSeconds: editTargetSeconds }\n' +
+          '};'
+      }
+    },
+    {
       id: 'screen_score_and_edit',
       type: 'llm',
       name: '批量筛选评分',
       instruction:
         '按 factory_request 对每个视频先做硬性筛选：视频比例、时长、音轨、ASR 可识别度、内容完整性；未通过的直接标记并停止后续处理。通过筛选的视频再按表达清晰度、使用前后完整性、改善表述具体度、自然度、剪辑价值评分。只评价素材质量和表达质量，不做医疗诊断，不判断疗效真实性。',
       modelProfileId: 'qiu-general-default',
-      inputVariables: ['factory_request', 'start.files', 'start.videos'],
+      inputVariables: ['factory_request', 'video_batch', 'screening_gates', 'asr_config', 'edit_config', 'knowledge_context'],
       outputVariables: ['video_screening_results', 'screening_summary'],
       config: {
         llmTaskType: 'video_screening_batch',
         outputMode: 'json',
         concurrency: 3,
+        requiredToolActions: [
+          { toolId: 'video-processing', action: 'video.probe' },
+          { toolId: 'office-document', action: 'spreadsheet.write_xlsx' },
+          { toolId: 'video-processing', action: 'video.compose_clips', optional: true }
+        ],
         schema: {
           summary: 'string',
           results: [
@@ -1794,44 +1849,6 @@ function createMedicalCaseVideoScreeningFactoryWorkflowGraph(): RoleWorkflowGrap
       instruction: '返回筛选评分表、筛掉原因、评分摘要、风险提示和可选初剪视频；提醒用户医疗相关内容需人工复核。',
       inputVariables: ['video_screening_results', 'screening_summary'],
       outputVariables: ['final_answer']
-    },
-    {
-      id: 'asr_dependency',
-      type: 'llm',
-      name: 'ASR 模型依赖',
-      description: '依赖声明节点，不接入主链路。',
-      instruction: '需要配置支持普通话、粤语、上海话、四川/重庆口音等常见中文方言的语音转文字模型。',
-      modelProfileId: 'qiu-asr-default',
-      inputVariables: ['start.videos'],
-      outputVariables: ['transcript'],
-      config: {
-        llmTaskType: 'audio_transcription',
-        dependencyOnly: true
-      }
-    },
-    {
-      id: 'video_tool_dependency',
-      type: 'tool',
-      name: '视频工具依赖',
-      description: '依赖声明节点，不接入主链路。',
-      instruction: '需要 PC 端视频处理工具读取比例、时长、音轨，并在用户开启初剪时调用 FFmpeg 生成视频片段。',
-      toolId: 'video-processing',
-      config: {
-        action: 'video.probe',
-        dependencyOnly: true
-      }
-    },
-    {
-      id: 'spreadsheet_tool_dependency',
-      type: 'tool',
-      name: '表格产物依赖',
-      description: '依赖声明节点，不接入主链路。',
-      instruction: '需要 Office 文档工具把筛选、评分、转写和风险信息写入 Excel 结果表。',
-      toolId: 'office-document',
-      config: {
-        action: 'spreadsheet.write_xlsx',
-        dependencyOnly: true
-      }
     }
   ];
 
@@ -1841,11 +1858,17 @@ function createMedicalCaseVideoScreeningFactoryWorkflowGraph(): RoleWorkflowGrap
     nodes,
     edges: [
       { id: 'start__factory_input', sourceNodeId: 'start', targetNodeId: 'factory_input', condition: { type: 'always' } },
-      { id: 'factory_input__screen_score_and_edit', sourceNodeId: 'factory_input', targetNodeId: 'screen_score_and_edit', condition: { type: 'always' } },
+      { id: 'factory_input__load_screening_rules', sourceNodeId: 'factory_input', targetNodeId: 'load_screening_rules', condition: { type: 'always' } },
+      { id: 'load_screening_rules__prepare_video_batch', sourceNodeId: 'load_screening_rules', targetNodeId: 'prepare_video_batch', condition: { type: 'always' } },
+      { id: 'prepare_video_batch__screen_score_and_edit', sourceNodeId: 'prepare_video_batch', targetNodeId: 'screen_score_and_edit', condition: { type: 'always' } },
       { id: 'screen_score_and_edit__factory_output', sourceNodeId: 'screen_score_and_edit', targetNodeId: 'factory_output', condition: { type: 'always' } }
     ],
     variables: [
       { name: 'factory_request', type: 'json', description: '工厂面板提交的视频批量处理参数。', required: true },
+      { name: 'video_batch', type: 'json', description: '待处理视频批次，单批最多 50 个。', required: true },
+      { name: 'screening_gates', type: 'json', description: '用户选择的筛选标准和逐级关卡。', required: true },
+      { name: 'asr_config', type: 'json', description: 'ASR 模型、语言和方言配置。', required: true },
+      { name: 'edit_config', type: 'json', description: '是否初剪和目标成片时长。', required: true },
       { name: 'video_screening_results', type: 'json', description: '每个视频的筛选、评分、转写、风险和初剪结果。', required: true },
       { name: 'screening_summary', type: 'text', description: '批量处理统计摘要。', required: true },
       { name: 'transcript', type: 'text', description: 'ASR 转写文本。' }
@@ -5334,7 +5357,7 @@ function buildMedicalCaseVideoFactoryManifest() {
   return {
     kind: 'medical_case_video_screening_factory',
     version: '1.0.0',
-    title: '案例视频质检剪辑工厂',
+    title: '视频质检剪辑工厂',
     batch: {
       maxItems: 50,
       itemUnit: 'video',
@@ -5390,14 +5413,14 @@ function buildMedicalCaseVideoFactoryManifest() {
     },
     output: {
       cacheDays: 30,
-      folder: 'case-videos',
+      folder: 'videos',
       reportFormat: 'xlsx',
       videoFormat: 'mp4'
     },
     requiredCapabilities: ['audio_to_text', 'text', 'video_processing', 'spreadsheet_edit'],
     ui: {
       primaryActionLabel: '开始筛选',
-      uploadHint: '上传案例视频，单批最多 50 个；大视频只在本机处理，不经过服务端。',
+      uploadHint: '上传待质检视频，单批最多 50 个；大视频只在本机处理，不经过服务端。',
       screeningSelection: 'select',
       editingToggle: true
     }
@@ -5598,15 +5621,15 @@ export function AdminCreateRoleTemplatePageClient({
     if (preset === 'medical_case_video_factory') {
       form.setFieldValue('applicationType', 'digital_factory');
       form.setFieldsValue({
-        name: form.getFieldValue('name') || '案例视频质检剪辑工厂',
+        name: form.getFieldValue('name') || '视频质检剪辑工厂',
         industry: form.getFieldValue('industry') || '医疗健康',
-        scenario: form.getFieldValue('scenario') || '批量筛选用户案例视频、评分并可选生成初剪',
+        scenario: form.getFieldValue('scenario') || '批量筛选视频、评分并可选生成初剪',
         description:
           form.getFieldValue('description') ||
-          '面向医疗健康案例素材团队的批量视频质检工厂，支持规格筛选、ASR 识别、内容质量评分和可选初剪。',
+          '面向企业视频素材团队的批量视频质检工厂，支持规格筛选、ASR 识别、内容质量评分和可选初剪。',
         businessGoal:
           form.getFieldValue('businessGoal') ||
-          '帮助团队快速剔除不合格案例视频，筛出表达清楚、内容完整、具备剪辑价值的素材，并输出可复核的评分表。',
+          '帮助团队快速剔除不合格视频，筛出表达清楚、内容完整、具备剪辑价值的素材，并输出可复核的评分表。',
         outputFormat:
           form.getFieldValue('outputFormat') ||
           'Excel 筛选评分表 + 可选本地初剪视频。'
