@@ -783,24 +783,23 @@ test('admin role template factory governs publication and workspace visibility',
       }
     });
     assert.equal(proOnlyDesktopTemplatesResponse.statusCode, 200);
-    assert.equal(
-      JSON.parse(proOnlyDesktopTemplatesResponse.body).data.some(
-        (template: { id: string }) => template.id === templateId
-      ),
-      false
+    const proOnlyDesktopTemplate = JSON.parse(proOnlyDesktopTemplatesResponse.body).data.find(
+      (template: { id: string }) => template.id === templateId
     );
+    assert.ok(proOnlyDesktopTemplate);
+    assert.equal(proOnlyDesktopTemplate.canInstall, false);
+    assert.deepEqual(proOnlyDesktopTemplate.allowedPlanCodes, ['ENTERPRISE_PRO_MONTHLY']);
 
     const proOnlyPublicFreeTemplatesResponse = await app.inject({
       method: 'GET',
       url: '/api/v1/desktop/role-templates/free'
     });
     assert.equal(proOnlyPublicFreeTemplatesResponse.statusCode, 200);
-    assert.equal(
-      JSON.parse(proOnlyPublicFreeTemplatesResponse.body).data.some(
-        (template: { id: string }) => template.id === templateId
-      ),
-      false
+    const proOnlyPublicTemplate = JSON.parse(proOnlyPublicFreeTemplatesResponse.body).data.find(
+      (template: { id: string }) => template.id === templateId
     );
+    assert.ok(proOnlyPublicTemplate);
+    assert.equal(proOnlyPublicTemplate.canInstall, false);
 
     const privateFreeUpdateResponse = await app.inject({
       method: 'PATCH',
@@ -841,12 +840,12 @@ test('admin role template factory governs publication and workspace visibility',
       url: '/api/v1/desktop/role-templates/free'
     });
     assert.equal(publicFreeTemplatesResponse.statusCode, 200);
-    assert.equal(
-      JSON.parse(publicFreeTemplatesResponse.body).data.some(
-        (template: { id: string }) => template.id === templateId
-      ),
-      true
+    const publicFreeTemplate = JSON.parse(publicFreeTemplatesResponse.body).data.find(
+      (template: { id: string }) => template.id === templateId
     );
+    assert.ok(publicFreeTemplate);
+    assert.equal(publicFreeTemplate.canInstall, true);
+    assert.deepEqual(publicFreeTemplate.allowedPlanCodes, ['PERSONAL_FREE']);
 
     const updateResponse = await app.inject({
       method: 'PATCH',
@@ -882,12 +881,11 @@ test('admin role template factory governs publication and workspace visibility',
       }
     });
     assert.equal(desktopTemplatesResponse.statusCode, 200);
-    assert.equal(
-      JSON.parse(desktopTemplatesResponse.body).data.find(
-        (template: { id: string }) => template.id === templateId
-      )?.workflowSteps.length,
-      2
+    const desktopTemplate = JSON.parse(desktopTemplatesResponse.body).data.find(
+      (template: { id: string }) => template.id === templateId
     );
+    assert.equal(desktopTemplate?.workflowSteps.length, 2);
+    assert.equal(desktopTemplate?.canInstall, true);
 
     assert.ok(
       store.updateSubscription('enterprise', {
@@ -904,10 +902,11 @@ test('admin role template factory governs publication and workspace visibility',
     });
     assert.equal(downgradedDesktopTemplatesResponse.statusCode, 200);
     const downgradedDesktopTemplates = JSON.parse(downgradedDesktopTemplatesResponse.body).data;
-    assert.equal(
-      downgradedDesktopTemplates.some((template: { id: string }) => template.id === templateId),
-      false
+    const downgradedDesktopTemplate = downgradedDesktopTemplates.find(
+      (template: { id: string }) => template.id === templateId
     );
+    assert.ok(downgradedDesktopTemplate);
+    assert.equal(downgradedDesktopTemplate.canInstall, false);
     assert.equal(
       downgradedDesktopTemplates.some(
         (template: { recommendedPlanCode: string }) =>

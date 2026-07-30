@@ -930,7 +930,11 @@ export class DesktopSyncService {
     snapshot: DesktopRuntimeSnapshot
   ): Promise<DesktopRuntimeSnapshot> {
     const authorizedTemplates = await this.roleService.listPublishedTemplatesForDesktop(workspaceId);
-    const authorizedTemplateIds = new Set(authorizedTemplates.data.map((template) => template.id));
+    const authorizedTemplateIds = new Set(
+      authorizedTemplates.data
+        .filter((template) => template.canInstall !== false)
+        .map((template) => template.id)
+    );
     const rolePackages = snapshot.rolePackages.filter(
       (rolePackage) => rolePackage.templateId && authorizedTemplateIds.has(rolePackage.templateId)
     );

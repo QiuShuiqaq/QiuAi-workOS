@@ -1202,6 +1202,10 @@ function toDesktopRoleTemplate(summary: DesktopAuthorizedRoleTemplateSummary): D
     scenario: summary.scenario,
     description: summary.description,
     recommendedPlanCode: summary.recommendedPlanCode,
+    allowedPlanCodes: [...(summary.allowedPlanCodes ?? [])],
+    canInstall: summary.canInstall ?? true,
+    accessLabel: summary.accessLabel,
+    accessReason: summary.accessReason,
     businessGoal: summary.businessGoal,
     knowledgeSources: [...summary.knowledgeSources],
     tools: [...summary.tools],
@@ -1386,6 +1390,22 @@ function roleTemplateSearchText(summary: DesktopAuthorizedRoleTemplateSummary): 
 function includesAny(text: string, tokens: string[]): boolean {
   const normalizedText = text.toLowerCase();
   return tokens.some((token) => normalizedText.includes(token.toLowerCase()));
+}
+
+function isFreeRoleTemplate(template: Pick<DesktopRoleTemplate, 'allowedPlanCodes'>): boolean {
+  return (template.allowedPlanCodes ?? []).includes('PERSONAL_FREE');
+}
+
+function canInstallRoleTemplate(template: Pick<DesktopRoleTemplate, 'canInstall'>): boolean {
+  return template.canInstall !== false;
+}
+
+function roleTemplateAccessLabel(template: Pick<DesktopRoleTemplate, 'accessLabel'>): string {
+  return template.accessLabel?.trim() || '\u5347\u7ea7\u540e\u53ef\u5b89\u88c5';
+}
+
+function roleTemplateAccessReason(template: Pick<DesktopRoleTemplate, 'accessReason'>): string {
+  return template.accessReason?.trim() || '\u5f53\u524d\u7248\u672c\u6682\u4e0d\u652f\u6301\u5b89\u88c5\u8be5\u6a21\u677f\u3002';
 }
 
 function isSectionKey(value: string): value is SectionKey {
@@ -3826,17 +3846,24 @@ export default function App() {
                 : undefined;
               const hasTemplateUpdate = isInstalledRoleTemplateOutdated(template, installedRolePackage);
               const fileContract = buildRoleFileContractSummary(template);
+              const freeTemplate = isFreeRoleTemplate(template);
+              const canInstallTemplate = canInstallRoleTemplate(template);
+              const accessLabel = roleTemplateAccessLabel(template);
+              const accessReason = roleTemplateAccessReason(template);
 
               return (
                 <Card key={template.roleCode} bordered={false} className="catalog-card role-catalog-card">
                   <Space direction="vertical" size={10} style={{ width: '100%' }} className="role-card-content">
                     <Flex align="flex-start" justify="space-between" gap={12}>
-                      <span className="catalog-card-icon">
-                        {isFactory ? <ControlOutlined /> : <RobotOutlined />}
-                      </span>
+                      <Flex align="center" gap={8}>
+                        <span className="catalog-card-icon">
+                          {isFactory ? <ControlOutlined /> : <RobotOutlined />}
+                        </span>
+                        {freeTemplate ? <Tag color="green">免费</Tag> : null}
+                      </Flex>
                       <Space size={6} wrap>
-                        <Tag color={active ? 'green' : installed ? 'blue' : 'default'}>
-                          {active ? '当前' : installed ? '已安装' : '可安装'}
+                        <Tag color={active ? 'green' : installed ? 'blue' : canInstallTemplate ? 'default' : 'orange'}>
+                          {active ? '当前' : installed ? '已安装' : canInstallTemplate ? '可安装' : accessLabel}
                         </Tag>
                         {readiness ? (
                           <Tooltip title={readiness.issueText}>
@@ -3897,6 +3924,14 @@ export default function App() {
                         >
                           {isFactory ? '运行工厂' : active ? '进入对话' : '开始使用'}
                         </Button>
+                      ) : !canInstallTemplate ? (
+                        <Tooltip title={accessReason}>
+                          <span>
+                            <Button size="small" type="primary" disabled>
+                              升级后可安装
+                            </Button>
+                          </span>
+                        </Tooltip>
                       ) : (
                         <Button size="small" type="primary" onClick={() => openRoleConfig(template.roleCode, 'install')}>
                           安装
@@ -3907,9 +3942,19 @@ export default function App() {
                           更新
                         </Button>
                       ) : null}
-                      <Button size="small" onClick={() => openRoleConfig(template.roleCode, installed ? 'configure' : 'install')}>
-                        配置
-                      </Button>
+                      {!installed && !canInstallTemplate ? (
+                        <Tooltip title={accessReason}>
+                          <span>
+                            <Button size="small" disabled>
+                              配置
+                            </Button>
+                          </span>
+                        </Tooltip>
+                      ) : (
+                        <Button size="small" onClick={() => openRoleConfig(template.roleCode, installed ? 'configure' : 'install')}>
+                          配置
+                        </Button>
+                      )}
                       {installed ? (
                         <Button
                           size="small"
@@ -6018,6 +6063,10 @@ export default function App() {
     if (!template) {
       return;
     }
+    if (mode === 'install' && !canInstallRoleTemplate(template)) {
+      message.warning(roleTemplateAccessReason(template));
+      return;
+    }
 
     const currentRolePackage =
       toConfiguredRolePackagePreview(
@@ -6050,6 +6099,11 @@ export default function App() {
   function submitRoleConfig(values: RoleConfigFormValues) {
     const template = desktopRoleTemplateByRoleCode.get(roleConfigRoleCode);
     if (!template) {
+      return;
+    }
+    if (roleConfigMode === 'install' && !canInstallRoleTemplate(template)) {
+      message.warning(roleTemplateAccessReason(template));
+      closeRoleConfig();
       return;
     }
 
@@ -8393,7 +8447,11 @@ function pruneUnauthorizedRolePackages(
   authorizedTemplates: DesktopRoleTemplate[],
   deletedTemplateIds: string[] = []
 ): DesktopRuntimeState {
-  const authorizedRoleCodes = new Set(authorizedTemplates.map((template) => template.roleCode));
+  const authorizedRoleCodes = new Set(
+    authorizedTemplates
+      .filter((template) => canInstallRoleTemplate(template))
+      .map((template) => template.roleCode)
+  );
   const deletedTemplateIdSet = new Set(deletedTemplateIds);
   const rolePackages = state.rolePackages.filter((rolePackage) =>
     authorizedRoleCodes.has(rolePackage.roleCode) ||

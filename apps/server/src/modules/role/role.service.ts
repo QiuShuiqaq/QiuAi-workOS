@@ -79,6 +79,12 @@ type DatabaseRoleInstance = {
   }>;
 };
 
+type TemplateAccessSummary = {
+  canInstall?: boolean;
+  accessLabel?: string;
+  accessReason?: string;
+};
+
 @Injectable()
 export class RoleService {
   constructor(
@@ -134,11 +140,11 @@ export class RoleService {
           .listRoleTemplates()
           .filter((template) => template.status === 'PUBLISHED')
           .filter((template) =>
-            this.canWorkspaceUseTemplate(template, workspaceId, access.planCode, {
+            this.canWorkspaceSeeDesktopTemplate(template, workspaceId, {
               includeWorkspaceVisibility: access.includeWorkspaceVisibility
             })
           )
-          .map((template) => this.toTemplateSummary(template))
+          .map((template) => this.toDesktopTemplateSummary(template, workspaceId, access))
       };
     }
 
@@ -159,11 +165,11 @@ export class RoleService {
     return {
       data: templates
         .filter((template) =>
-          this.canWorkspaceUseTemplate(template, workspaceId, access.planCode, {
+          this.canWorkspaceSeeDesktopTemplate(template, workspaceId, {
             includeWorkspaceVisibility: access.includeWorkspaceVisibility
           })
         )
-        .map((template) => this.toTemplateSummary(template))
+        .map((template) => this.toDesktopTemplateSummary(template, workspaceId, access))
     };
   }
 
@@ -172,8 +178,8 @@ export class RoleService {
       return {
         data: this.store
           .listRoleTemplates()
-          .filter((template) => this.isPublicFreeDesktopTemplate(template))
-          .map((template) => this.toTemplateSummary(template))
+          .filter((template) => this.isPublicDesktopTemplate(template))
+          .map((template) => this.toPublicDesktopTemplateSummary(template))
       };
     }
 
@@ -193,8 +199,8 @@ export class RoleService {
 
     return {
       data: templates
-        .filter((template) => this.isPublicFreeDesktopTemplate(template))
-        .map((template) => this.toTemplateSummary(template))
+        .filter((template) => this.isPublicDesktopTemplate(template))
+        .map((template) => this.toPublicDesktopTemplateSummary(template))
     };
   }
 
@@ -467,7 +473,10 @@ export class RoleService {
     });
   }
 
-  private toTemplateSummary(template: DatabaseRoleTemplate) {
+  private toTemplateSummary(
+    template: DatabaseRoleTemplate,
+    access: TemplateAccessSummary = {}
+  ) {
     const workflowSteps = this.toWorkflowSteps(template.workflowSteps);
 
     return {
@@ -479,6 +488,10 @@ export class RoleService {
       scenario: template.scenario,
       description: template.description,
       recommendedPlanCode: template.recommendedPlanCode,
+      allowedPlanCodes: this.toStringArray(template.allowedPlanCodes),
+      canInstall: access.canInstall ?? true,
+      accessLabel: access.accessLabel,
+      accessReason: access.accessReason,
       businessGoal: template.businessGoal,
       knowledgeSources: this.toStringArray(template.knowledgeSources),
       tools: this.toStringArray(template.tools),
@@ -490,6 +503,36 @@ export class RoleService {
       outputFormat: template.outputFormat?.trim() || '',
       approvalPolicy: template.approvalPolicy
     };
+  }
+
+  private toDesktopTemplateSummary(
+    template: DatabaseRoleTemplate,
+    workspaceId: string,
+    access: { planCode: string; includeWorkspaceVisibility: boolean }
+  ) {
+    const canInstall = this.canWorkspaceUseTemplate(template, workspaceId, access.planCode, {
+      includeWorkspaceVisibility: access.includeWorkspaceVisibility
+    });
+
+    return this.toTemplateSummary(template, {
+      canInstall,
+      accessLabel: canInstall ? undefined : '\u5347\u7ea7\u53ef\u7528',
+      accessReason: canInstall
+        ? undefined
+        : '\u5f53\u524d\u5957\u9910\u6682\u4e0d\u652f\u6301\u5b89\u88c5\uff0c\u8bf7\u5728\u8d2d\u4e70\u4e2d\u5fc3\u5347\u7ea7\u540e\u4f7f\u7528\u3002'
+    });
+  }
+
+  private toPublicDesktopTemplateSummary(template: DatabaseRoleTemplate) {
+    const canInstall = this.toStringArray(template.allowedPlanCodes).includes(freePlanCode);
+
+    return this.toTemplateSummary(template, {
+      canInstall,
+      accessLabel: canInstall ? undefined : '\u5347\u7ea7\u53ef\u7528',
+      accessReason: canInstall
+        ? undefined
+        : '\u5f53\u524d\u4e3a\u514d\u8d39\u7248\uff0c\u5347\u7ea7\u6216\u7ed1\u5b9a\u4f01\u4e1a\u540e\u53ef\u5b89\u88c5\u3002'
+    });
   }
 
   private async resolveWorkspacePlanCode(workspaceId: string): Promise<string | null> {
@@ -650,14 +693,32 @@ export class RoleService {
     return this.toStringArray(template.allowedPlanCodes).includes(planCode);
   }
 
-  private isPublicFreeDesktopTemplate(template: {
+  private canWorkspaceSeeDesktopTemplate(
+    template: {
+      status: string;
+      visibleWorkspaceIds: unknown;
+    },
+    workspaceId: string,
+    options: { includeWorkspaceVisibility?: boolean } = {}
+  ): boolean {
+    if (template.status !== 'PUBLISHED') {
+      return false;
+    }
+
+    const visibleWorkspaceIds = this.toStringArray(template.visibleWorkspaceIds);
+    if (visibleWorkspaceIds.length === 0) {
+      return true;
+    }
+
+    return options.includeWorkspaceVisibility !== false && visibleWorkspaceIds.includes(workspaceId);
+  }
+
+  private isPublicDesktopTemplate(template: {
     status: string;
-    allowedPlanCodes: unknown;
     visibleWorkspaceIds: unknown;
   }): boolean {
     return (
       template.status === 'PUBLISHED' &&
-      this.toStringArray(template.allowedPlanCodes).includes(freePlanCode) &&
       this.toStringArray(template.visibleWorkspaceIds).length === 0
     );
   }

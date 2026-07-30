@@ -43,6 +43,10 @@ export interface DesktopAuthorizedRoleTemplateSummary {
   scenario: string;
   description: string;
   recommendedPlanCode: string;
+  allowedPlanCodes?: string[];
+  canInstall?: boolean;
+  accessLabel?: string;
+  accessReason?: string;
   businessGoal: string;
   knowledgeSources: string[];
   tools: string[];
