@@ -116,6 +116,27 @@ test('server role template catalog is focused and production-oriented', () => {
   assert.ok(videoFactoryToolActions.has('video-processing/video.compose_clips'));
   assert.ok(videoFactoryToolActions.has('local-filesystem/filesystem.write_text_file'));
   assert.ok(videoFactoryToolActions.has('office-document/spreadsheet.write_xlsx'));
+  const videoFactoryManifest = videoFactoryTemplate.dependencyManifestFactory as {
+    screeningProfiles?: Array<{
+      gates?: Array<{
+        id?: string;
+        rules?: Array<{ metric?: string; operator?: string; value?: unknown; failReason?: string }>;
+      }>;
+    }>;
+  };
+  const videoSpecAspectRule = videoFactoryManifest.screeningProfiles?.[0]?.gates
+    ?.find((gate) => gate.id === 'video_spec')
+    ?.rules?.find((rule) => rule.metric === 'portraitRatio');
+  assert.deepEqual(
+    videoSpecAspectRule,
+    {
+      metric: 'portraitRatio',
+      operator: '<',
+      value: 1,
+      failReason: '视频为竖屏或非横屏比例，不符合横屏要求'
+    },
+    'video factory must reject vertical 9:16 videos and allow landscape videos'
+  );
 
   for (const template of serverRoleTemplateCatalog) {
     const isDigitalFactory = template.applicationType === 'DIGITAL_FACTORY';

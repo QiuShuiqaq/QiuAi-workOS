@@ -240,8 +240,11 @@ export function buildWorkflowExecutionPlan(input: {
       ? manifestToolIds
       : [...new Set(graph.nodes.flatMap((node) => readWorkflowNodeToolIds(node)))];
   const orderedNodeSummaries = selection.orderedNodes.map(toWorkflowExecutionNodeSummary);
+  const firstExplicitModelProfileId = selection.orderedNodes.find(
+    (node) => node.modelProfileId
+  )?.modelProfileId;
   const preferredModelProfileId =
-    requiredModelProfileIds[0] ?? selection.orderedNodes.find((node) => node.modelProfileId)?.modelProfileId;
+    firstExplicitModelProfileId ?? requiredModelProfileIds[0];
   const promptContext = buildWorkflowPromptContext({
     graph,
     orderedNodes: selection.orderedNodes,

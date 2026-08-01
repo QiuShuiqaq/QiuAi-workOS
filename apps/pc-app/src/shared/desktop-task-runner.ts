@@ -11,6 +11,7 @@
   ToolManifest
 } from './desktop-contract.js';
 import { resolveModelProfileCredential } from './desktop-model-credentials.js';
+import { readModelProfileCapabilities } from './desktop-model-capabilities.js';
 import type {
   DesktopModelChatMessage,
   DesktopModelChatRequest,
@@ -3556,7 +3557,7 @@ function defaultFactoryVideoScreeningGates(): FactoryVideoScreeningGate[] {
       id: 'video_spec',
       name: '视频规格',
       rules: [
-        { metric: 'portraitRatio', operator: 'between', value: [1.72, 1.86], failReason: '视频不是合格的 9:16 竖屏比例' },
+        { metric: 'portraitRatio', operator: '<', value: 1, failReason: '视频为竖屏或非横屏比例，不符合横屏要求' },
         { metric: 'durationSeconds', operator: '>=', value: 20, failReason: '视频时长小于 20 秒' },
         { metric: 'hasAudio', operator: 'equals', value: true, failReason: '视频缺少可识别音轨' }
       ]
@@ -5491,7 +5492,22 @@ function selectWorkflowRuntimeModelProfile(
     );
   }
 
-  return profiles[0]!;
+  return profiles.find(isWorkflowTextModelProfile) ?? profiles[0]!;
+}
+
+function isWorkflowTextModelProfile(profile: ModelProfile): boolean {
+  const capabilities = readModelProfileCapabilities(profile);
+  return capabilities.some((capability) =>
+    [
+      'text',
+      'reasoning_text',
+      'vision_text',
+      'video_text',
+      'long_context',
+      'vision_understanding',
+      'video_understanding'
+    ].includes(capability)
+  );
 }
 
 function readDependencyManifestModelProfileIdForNode(

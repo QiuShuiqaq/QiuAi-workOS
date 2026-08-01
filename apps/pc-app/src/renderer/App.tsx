@@ -8557,7 +8557,7 @@ const defaultFactoryScreeningProfiles: DigitalFactoryScreeningProfileOption[] = 
   {
     key: 'default_medical_case',
     label: '医疗案例素材标准',
-    description: '先检查 9:16、20 秒以上、音轨可识别，再检查使用前后改善表述完整度。',
+    description: '先检查横屏、20 秒以上、音轨可识别，再检查使用前后改善表述完整度。',
     defaultSelected: true
   }
 ];

@@ -3068,7 +3068,6 @@ assert.ok(
 );
 
 const videoFactoryModelProfiles: ModelProfile[] = [
-  ...modelProfiles,
   {
     id: 'qiu-asr-default',
     providerId: 'tencent-asr-compatible',
@@ -3078,10 +3077,12 @@ const videoFactoryModelProfiles: ModelProfile[] = [
     capabilities: ['audio_to_text'],
     apiBaseUrl: 'https://asr.example/v1',
     apiKey: 'test-asr-key'
-  }
+  },
+  ...modelProfiles
 ];
 let videoFactoryAsrCalls = 0;
 let videoFactoryScoringCalls = 0;
+let videoFactoryOutputCalls = 0;
 const videoFactoryToolRequests: Array<{ toolId: string; action: string }> = [];
 const videoFactoryTask = await runDesktopTask({
   task: createMockTaskDetail({
@@ -3105,7 +3106,7 @@ const videoFactoryTask = await runDesktopTask({
     artifactCount: 0,
     costCents: 0,
     executionContext: {
-      modelProfileIds: ['qiu-general-default', 'qiu-asr-default'],
+      modelProfileIds: ['qiu-asr-default', 'qiu-general-default'],
       toolIds: ['video-processing', 'office-document', 'local-filesystem'],
       knowledgeBindingIds: [],
       attachmentPaths: ['C:\\QiuAI\\factory\\case-video-1.mp4']
@@ -3138,13 +3139,26 @@ const videoFactoryTask = await runDesktopTask({
             outputMode: 'json',
             concurrency: 2
           }
+        },
+        {
+          id: 'factory_output',
+          type: 'output',
+          name: 'Return result',
+          inputVariables: [
+            'qualified_video_paths',
+            'edited_video_folder',
+            'video_screening_results',
+            'screening_summary'
+          ],
+          outputVariables: ['final_answer']
         }
       ],
       edges: [
-        { id: 'start-screen', sourceNodeId: 'start', targetNodeId: 'screen_score_and_edit' }
+        { id: 'start-screen', sourceNodeId: 'start', targetNodeId: 'screen_score_and_edit' },
+        { id: 'screen-output', sourceNodeId: 'screen_score_and_edit', targetNodeId: 'factory_output' }
       ]
     },
-    modelProfileIds: ['qiu-general-default', 'qiu-asr-default'],
+    modelProfileIds: ['qiu-asr-default', 'qiu-general-default'],
     toolIds: ['video-processing', 'office-document', 'local-filesystem'],
     requiredKnowledgeSources: [],
     defaultTaskTypes: ['factory_video_screening'],
@@ -3173,6 +3187,16 @@ const videoFactoryTask = await runDesktopTask({
     videoFactoryScoringCalls += 1;
     assert.equal(request.profile.id, 'qiu-general-default');
     const prompt = request.messages.map((message) => message.content).join('\n');
+    if (!/beforeAfterCompleteness/.test(prompt)) {
+      videoFactoryScoringCalls -= 1;
+      videoFactoryOutputCalls += 1;
+      assert.match(prompt, /qualified_video_paths|screening_summary|Return result/);
+      return {
+        provider: request.profile.providerName,
+        modelName: request.profile.modelName,
+        content: 'Video screening completed. Qualified list, report and optional edited clips are ready.'
+      };
+    }
     assert.match(prompt, /案例视频素材质检员/);
     assert.match(prompt, /beforeAfterCompleteness/);
     return {
@@ -3203,8 +3227,8 @@ const videoFactoryTask = await runDesktopTask({
         ok: true,
         output: {
           probeAvailable: true,
-          width: 1080,
-          height: 1920,
+          width: 1920,
+          height: 1080,
           durationSeconds: 60,
           hasVideo: true,
           hasAudio: true,
@@ -3264,6 +3288,7 @@ const videoFactoryTask = await runDesktopTask({
 assert.equal(videoFactoryTask.task.state, 'completed');
 assert.equal(videoFactoryAsrCalls, 1);
 assert.equal(videoFactoryScoringCalls, 1);
+assert.equal(videoFactoryOutputCalls, 1);
 assert.equal(videoFactoryTask.task.artifactCount, 3);
 assert.deepEqual(videoFactoryToolRequests, [
   { toolId: 'video-processing', action: 'video.probe' },
