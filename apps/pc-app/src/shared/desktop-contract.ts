@@ -86,6 +86,48 @@ export interface FactoryArtifactPreview {
   items: FactoryArtifactPreviewItem[];
 }
 
+export type FactoryOutputItemKind = 'video' | 'image' | 'document' | 'table' | 'record' | 'folder' | 'artifact';
+
+export type FactoryOutputItemStatus =
+  | 'qualified'
+  | 'rejected'
+  | 'review_required'
+  | 'processing_error'
+  | 'excluded';
+
+export interface FactoryOutputItemAuditEntry {
+  id: string;
+  action: 'status_changed' | 'excluded' | 'restored';
+  fromStatus?: FactoryOutputItemStatus;
+  toStatus?: FactoryOutputItemStatus;
+  reason?: string;
+  createdAt: string;
+}
+
+export interface FactoryOutputItem {
+  id: string;
+  factoryKind: string;
+  kind: FactoryOutputItemKind;
+  title: string;
+  status: FactoryOutputItemStatus;
+  originalStatus: FactoryOutputItemStatus;
+  sourcePath?: string;
+  sourceUrl?: string;
+  outputPath?: string;
+  outputUrl?: string;
+  thumbnailPath?: string;
+  score?: number;
+  grade?: string;
+  summary?: string;
+  reason?: string;
+  risks?: string[];
+  transcript?: string;
+  metadata?: Record<string, unknown>;
+  auditTrail?: FactoryOutputItemAuditEntry[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DesktopArtifactSummary {
   id: string;
   type: 'text' | 'report' | 'video' | 'image' | 'file';
@@ -495,6 +537,7 @@ export interface DesktopTaskDetail {
   costRecords: DesktopCostRecordSummary[];
   currentRun?: DesktopExecutionRunSummary;
   executionContext?: DesktopTaskExecutionContext;
+  factoryOutputs?: FactoryOutputItem[];
 }
 
 export interface DesktopRuntimeSnapshot {

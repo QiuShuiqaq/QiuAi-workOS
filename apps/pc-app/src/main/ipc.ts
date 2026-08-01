@@ -23,6 +23,7 @@ import {
 import { selectKnowledgeSourcePath } from './knowledge-source.js';
 import {
   cleanupExpiredArtifactCache,
+  exportLocalFilesToDirectory,
   saveArtifactFileAs,
   saveRemoteFileAs,
   writeTaskArtifactFile
@@ -58,6 +59,7 @@ const channels = {
   selectKnowledgeSourcePath: 'qiuai:desktop:select-knowledge-source-path',
   writeTaskArtifact: 'qiuai:desktop:write-task-artifact',
   saveArtifactAs: 'qiuai:desktop:save-artifact-as',
+  exportLocalFiles: 'qiuai:desktop:export-local-files',
   saveRemoteFileAs: 'qiuai:desktop:save-remote-file-as',
   invokeDesktopTool: 'qiuai:desktop:invoke-desktop-tool',
   openLocalPath: 'qiuai:desktop:open-local-path',
@@ -140,6 +142,27 @@ export function registerDesktopIpc() {
     }
 
     return saveArtifactFileAs({ sourcePath, suggestedFileName }, result.filePath);
+  });
+  ipcMain.handle(channels.exportLocalFiles, async (_, request) => {
+    const files = Array.isArray(request?.files) ? request.files : [];
+    if (files.length === 0) {
+      throw new Error('At least one local file is required.');
+    }
+
+    const result = await dialog.showOpenDialog({
+      title: '选择导出文件夹',
+      properties: ['openDirectory'],
+      buttonLabel: '导出到这里'
+    });
+
+    if (result.canceled || !result.filePaths[0]) {
+      return {
+        canceled: true,
+        exportedFiles: []
+      };
+    }
+
+    return exportLocalFilesToDirectory(request, result.filePaths[0]);
   });
   ipcMain.handle(channels.saveRemoteFileAs, async (event, request) => {
     const remoteUrl = typeof request?.url === 'string' ? request.url.trim() : '';

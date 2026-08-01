@@ -299,6 +299,23 @@ export interface DesktopArtifactSaveAsResult {
   savedPath?: string;
 }
 
+export interface DesktopLocalFileExportRequest {
+  files: Array<{
+    sourcePath: string;
+    suggestedFileName?: string;
+  }>;
+  targetFolderName?: string;
+}
+
+export interface DesktopLocalFileExportResult {
+  canceled: boolean;
+  exportDirectoryPath?: string;
+  exportedFiles: Array<{
+    sourcePath: string;
+    savedPath: string;
+  }>;
+}
+
 export interface DesktopRemoteFileSaveAsRequest {
   url: string;
   suggestedFileName?: string;
@@ -367,6 +384,7 @@ export interface QiuDesktopBridge {
   selectKnowledgeSourcePath(source: KnowledgeBindingSource): Promise<DesktopKnowledgeSourcePathResult>;
   writeTaskArtifact(request: DesktopTaskArtifactWriteRequest): Promise<DesktopTaskArtifactWriteResult>;
   saveArtifactAs(request: DesktopArtifactSaveAsRequest): Promise<DesktopArtifactSaveAsResult>;
+  exportLocalFiles(request: DesktopLocalFileExportRequest): Promise<DesktopLocalFileExportResult>;
   saveRemoteFileAs(request: DesktopRemoteFileSaveAsRequest): Promise<DesktopRemoteFileSaveAsResult>;
   invokeDesktopTool(request: DesktopToolInvocationRequest): Promise<DesktopToolInvocationResult>;
   getPathForFile(file: unknown): string | undefined;

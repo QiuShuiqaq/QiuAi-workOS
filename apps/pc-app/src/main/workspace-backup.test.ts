@@ -72,6 +72,35 @@ backupTask.artifacts = [
     localPath: artifactWriteResult.localPath
   }
 ];
+backupTask.factoryOutputs = [
+  {
+    id: 'factory-output-backup-video-1',
+    factoryKind: 'medical_case_video_screening_factory',
+    kind: 'video',
+    title: 'case-video.mp4',
+    status: 'qualified',
+    originalStatus: 'review_required',
+    sourcePath: 'C:\\QiuAI\\factory\\case-video.mp4',
+    outputPath: 'C:\\QiuAI\\factory\\case-video-cut.mp4',
+    score: 88,
+    grade: 'A',
+    summary: '人工复核后设为合格。',
+    risks: ['发布前复核合规风险'],
+    metadata: { order: 1 },
+    auditTrail: [
+      {
+        id: 'factory-output-backup-audit-1',
+        action: 'status_changed',
+        fromStatus: 'review_required',
+        toStatus: 'qualified',
+        reason: '测试备份恢复',
+        createdAt: '2026-07-20T02:01:30.000Z'
+      }
+    ],
+    createdAt: '2026-07-20T02:01:00.000Z',
+    updatedAt: '2026-07-20T02:01:30.000Z'
+  }
+];
 initialState.taskDetails = [backupTask];
 initialState.runtimeSnapshot.tasks = [toDesktopTaskSummary(backupTask)];
 
@@ -106,6 +135,8 @@ assert.equal(restoredState?.knowledgeSources[0]?.localPath, 'C:\\QiuAI\\SalesSOP
 assert.equal(restoredState?.tools.length, initialState.tools.length);
 assert.ok(restoredState?.taskDetails?.[0].executionContext);
 assert.equal(restoredState?.taskDetails?.[0].executionContext?.knowledgeBindingIds.length, 2);
+assert.equal(restoredState?.taskDetails?.[0].factoryOutputs?.[0]?.status, 'qualified');
+assert.equal(restoredState?.taskDetails?.[0].factoryOutputs?.[0]?.auditTrail?.[0]?.toStatus, 'qualified');
 
 const restoredTempDir = mkdtempSync(path.join(os.tmpdir(), 'qiuai-workos-backup-restore-'));
 await restoreWorkspaceBackupBundle(restoredTempDir, createdBackup.bundlePath);

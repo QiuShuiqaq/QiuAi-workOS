@@ -3190,11 +3190,9 @@ const videoFactoryTask = await runDesktopTask({
       };
     }
 
-    videoFactoryScoringCalls += 1;
     assert.equal(request.profile.id, 'qiu-general-default');
     const prompt = request.messages.map((message) => message.content).join('\n');
-    if (!/beforeAfterCompleteness/.test(prompt)) {
-      videoFactoryScoringCalls -= 1;
+    if (!/scoringRules|案例视频素材质检员/.test(prompt)) {
       videoFactoryOutputCalls += 1;
       assert.match(prompt, /qualified_video_paths|screening_summary|Return result/);
       return {
@@ -3203,6 +3201,7 @@ const videoFactoryTask = await runDesktopTask({
         content: 'Video screening completed. Qualified list, report and optional edited clips are ready.'
       };
     }
+    videoFactoryScoringCalls += 1;
     assert.match(prompt, /案例视频素材质检员/);
     assert.match(prompt, /beforeAfterCompleteness/);
     return {
@@ -3262,8 +3261,7 @@ const videoFactoryTask = await runDesktopTask({
       const sheets = request.input.sheets as Array<{ rows: string[][] }>;
       assert.match(sheets[0]?.rows[1]?.[1] ?? '', /case-video-1/);
       assert.equal(sheets[0]?.rows[1]?.[2], '已剪辑');
-      assert.equal(sheets[0]?.rows[1]?.[5], '82');
-      assert.match(sheets[0]?.rows[1]?.[9] ?? '', /使用前\/使用后改善表述较简略/);
+      assert.equal(sheets[0]?.rows[1]?.[5], '88');
       return {
         toolId: request.toolId,
         action: request.action,
@@ -3307,11 +3305,20 @@ const videoFactoryTask = await runDesktopTask({
   completedAt: '2026-07-20T10:00:14.500Z'
 });
 
-assert.equal(videoFactoryTask.task.state, 'completed');
+assert.equal(
+  videoFactoryTask.task.state,
+  'completed',
+  JSON.stringify(videoFactoryTask.task.executionLogs.slice(-6), null, 2)
+);
 assert.equal(videoFactoryAsrCalls, 1);
-assert.equal(videoFactoryScoringCalls, 1);
-assert.equal(videoFactoryOutputCalls, 1);
+assert.equal(videoFactoryScoringCalls, 0);
+assert.equal(videoFactoryOutputCalls, 0);
 assert.equal(videoFactoryTask.task.artifactCount, 3);
+assert.equal(videoFactoryTask.task.factoryOutputs?.length, 1);
+assert.equal(videoFactoryTask.task.factoryOutputs?.[0]?.status, 'qualified');
+assert.equal(videoFactoryTask.task.factoryOutputs?.[0]?.sourcePath, 'C:\\QiuAI\\factory\\case-video-1.mp4');
+assert.equal(videoFactoryTask.task.factoryOutputs?.[0]?.outputPath, 'C:\\QiuAI\\workspace\\video-cuts\\case-video-1-cut.mp4');
+assert.equal(videoFactoryTask.task.factoryOutputs?.[0]?.score, 88);
 assert.deepEqual(videoFactoryToolRequests, [
   { toolId: 'video-processing', action: 'video.probe' },
   { toolId: 'video-processing', action: 'video.extract_audio' },
@@ -3474,7 +3481,7 @@ const videoFactoryFailureTask = await runDesktopTask({
     assert.equal(request.action, 'spreadsheet.write_xlsx');
     const sheets = request.input.sheets as Array<{ rows: string[][] }>;
     videoFactoryFailureRows.push(sheets[0]?.rows ?? []);
-    assert.equal(sheets[0]?.rows[1]?.[2], '需人工复核');
+    assert.equal(sheets[0]?.rows[1]?.[2], '处理异常');
     assert.equal(sheets[0]?.rows[1]?.[3], '语音识别');
     assert.match(sheets[0]?.rows[1]?.[4] ?? '', /ASR 服务调用失败/);
     assert.doesNotMatch(sheets[0]?.rows[1]?.[4] ?? '', /Error invoking/);
@@ -3493,9 +3500,14 @@ const videoFactoryFailureTask = await runDesktopTask({
 
 assert.equal(videoFactoryFailureTask.task.state, 'completed');
 assert.equal(videoFactoryAsrFailureCalls, 1);
-assert.equal(videoFactoryFailureOutputCalls, 1);
+assert.equal(videoFactoryFailureOutputCalls, 0);
 assert.equal(videoFactoryFailureTask.task.artifactCount, 2);
 assert.equal(videoFactoryFailureRows.length, 1);
+assert.equal(videoFactoryFailureTask.task.factoryOutputs?.[0]?.status, 'processing_error');
+assert.equal(
+  videoFactoryFailureTask.task.factoryOutputs?.[0]?.reason,
+  'ASR 服务调用失败，已标记为处理异常，建议检查配置后重试'
+);
 
 const unconfiguredKnowledge = await runDesktopTask({
   task,

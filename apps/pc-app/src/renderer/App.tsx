@@ -80,6 +80,8 @@ import type {
   DesktopTaskSummary,
   FactoryArtifactPreview,
   FactoryArtifactPreviewItem,
+  FactoryOutputItem,
+  FactoryOutputItemStatus,
   DesktopKnowledgeSourceSummary,
   KnowledgeBindingSource,
   ModelCapability,
@@ -1622,6 +1624,8 @@ export default function App() {
   const [localActionNotice, setLocalActionNotice] = useState('');
   const [savingArtifactId, setSavingArtifactId] = useState('');
   const [savingFactoryImageId, setSavingFactoryImageId] = useState('');
+  const [exportingFactoryOutputId, setExportingFactoryOutputId] = useState('');
+  const [exportingFactoryOutputBatch, setExportingFactoryOutputBatch] = useState('');
   const [roleTemplateNotice, setRoleTemplateNotice] = useState('');
   const [isLoadingRoleTemplates, setIsLoadingRoleTemplates] = useState(false);
   const [authorizedRoleTemplateCatalog, setAuthorizedRoleTemplateCatalog] =
@@ -2120,6 +2124,144 @@ export default function App() {
     } finally {
       setSavingFactoryImageId('');
     }
+  }
+
+  async function exportFactoryOutputItems(
+    task: DesktopTaskDetail,
+    items: FactoryOutputItem[],
+    batchKey: string
+  ) {
+    if (!window.qiuDesktop) {
+      return;
+    }
+
+    const exportableFiles = items
+      .filter((item) => item.status !== 'excluded')
+      .map((item) => {
+        const sourcePath = getFactoryOutputLocalPath(item);
+        return sourcePath
+          ? {
+              sourcePath,
+              suggestedFileName: getFactoryOutputSuggestedFileName(item, sourcePath)
+            }
+          : undefined;
+      })
+      .filter((item): item is { sourcePath: string; suggestedFileName: string } => Boolean(item));
+
+    if (exportableFiles.length === 0) {
+      message.warning('没有可导出的本地文件。');
+      return;
+    }
+
+    setLocalActionNotice('');
+    setExportingFactoryOutputBatch(batchKey);
+    try {
+      const result = await window.qiuDesktop.exportLocalFiles({
+        targetFolderName: `${task.title}-${batchKey === 'qualified' ? '合格输出' : '输出物'}`,
+        files: exportableFiles
+      });
+      if (!result.canceled) {
+        message.success(`已导出 ${result.exportedFiles.length} 个文件。`);
+      }
+    } catch (error) {
+      const errorMessage = `导出输出物失败：${error instanceof Error ? error.message : 'unknown error'}`;
+      setLocalActionNotice(errorMessage);
+      message.error(errorMessage);
+    } finally {
+      setExportingFactoryOutputBatch('');
+    }
+  }
+
+  async function exportSingleFactoryOutputItem(task: DesktopTaskDetail, item: FactoryOutputItem) {
+    if (!window.qiuDesktop) {
+      return;
+    }
+
+    const sourcePath = getFactoryOutputLocalPath(item);
+    if (!sourcePath) {
+      message.warning('这个输出物没有可导出的本地文件。');
+      return;
+    }
+
+    setLocalActionNotice('');
+    setExportingFactoryOutputId(item.id);
+    try {
+      const result = await window.qiuDesktop.exportLocalFiles({
+        targetFolderName: `${task.title}-输出物`,
+        files: [
+          {
+            sourcePath,
+            suggestedFileName: getFactoryOutputSuggestedFileName(item, sourcePath)
+          }
+        ]
+      });
+      if (!result.canceled) {
+        message.success('输出物已导出。');
+      }
+    } catch (error) {
+      const errorMessage = `导出输出物失败：${error instanceof Error ? error.message : 'unknown error'}`;
+      setLocalActionNotice(errorMessage);
+      message.error(errorMessage);
+    } finally {
+      setExportingFactoryOutputId('');
+    }
+  }
+
+  function updateFactoryOutputItemStatus(
+    taskId: string,
+    itemId: string,
+    nextStatus: FactoryOutputItemStatus,
+    reason: string
+  ) {
+    const updatedAt = new Date().toISOString();
+    const taskDetail = getRuntimeTaskDetails(runtimeState).find((task) => task.taskId === taskId);
+    if (!taskDetail?.factoryOutputs?.length) {
+      return;
+    }
+
+    let changed = false;
+    const factoryOutputs = taskDetail.factoryOutputs.map((item) => {
+      if (item.id !== itemId || item.status === nextStatus) {
+        return item;
+      }
+
+      changed = true;
+      const auditAction: NonNullable<FactoryOutputItem['auditTrail']>[number]['action'] =
+        item.status === 'excluded' ? 'restored' : 'status_changed';
+      return {
+        ...item,
+        status: nextStatus,
+        updatedAt,
+        auditTrail: [
+          ...(item.auditTrail ?? []),
+          {
+            id: `${item.id}-audit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+            action: auditAction,
+            fromStatus: item.status,
+            toStatus: nextStatus,
+            reason,
+            createdAt: updatedAt
+          }
+        ]
+      };
+    });
+
+    if (!changed) {
+      return;
+    }
+
+    const nextState = upsertTaskDetailInRuntimeState(runtimeState, {
+      ...taskDetail,
+      factoryOutputs,
+      updatedAt
+    });
+    setRuntimeState(nextState);
+    void window.qiuDesktop?.saveRuntimeState(nextState);
+    message.success('输出物状态已更新。');
+  }
+
+  function excludeFactoryOutputItem(taskId: string, itemId: string) {
+    updateFactoryOutputItemStatus(taskId, itemId, 'excluded', '人工从输出队列移除');
   }
 
   async function checkForUpdates() {
@@ -3907,6 +4049,8 @@ export default function App() {
     const invalidFactoryAttachmentCount = factoryAttachments.length - validFactoryAttachments.length;
     const latestFactoryLogs = focusedFactoryTask ? selectFactoryVisibleLogs(focusedFactoryTask) : [];
     const focusedFactoryArtifacts = focusedFactoryTask?.artifacts.filter(isUserDeliverableArtifact) ?? [];
+    const focusedFactoryOutputs =
+      focusedFactoryTask?.factoryOutputs?.filter((item) => item.status !== 'excluded') ?? [];
     const focusedFactoryCostCents =
       focusedFactoryTask?.costCents ??
       focusedFactoryTask?.costRecords.reduce((total, record) => total + record.costCents, 0);
@@ -4327,6 +4471,7 @@ export default function App() {
                                   {batchStats.qualified !== undefined ? <span>合格 {batchStats.qualified}</span> : null}
                                   {batchStats.rejected !== undefined ? <span>筛掉 {batchStats.rejected}</span> : null}
                                   {batchStats.review !== undefined ? <span>复核 {batchStats.review}</span> : null}
+                                  {batchStats.processingError !== undefined ? <span>异常 {batchStats.processingError}</span> : null}
                                   {batchStats.edited !== undefined ? <span>初剪 {batchStats.edited}</span> : null}
                                 </span>
                                 <span className="factory-progress-bar" aria-label={`进度 ${progress}%`}>
@@ -4354,8 +4499,8 @@ export default function App() {
                           <Typography.Text strong>输出队列</Typography.Text>
                           <Typography.Text type="secondary">结果文件和本地位置。</Typography.Text>
                         </Space>
-                        <Tag color={focusedFactoryArtifacts.length > 0 ? 'green' : 'default'}>
-                          产物 {focusedFactoryArtifacts.length}
+                        <Tag color={focusedFactoryArtifacts.length + focusedFactoryOutputs.length > 0 ? 'green' : 'default'}>
+                          产物 {focusedFactoryArtifacts.length} / 输出物 {focusedFactoryOutputs.length}
                         </Tag>
                       </Flex>
 
@@ -4402,7 +4547,10 @@ export default function App() {
                               </Typography.Paragraph>
                             </div>
                           ) : null}
-                          {renderFactoryTaskArtifacts(focusedFactoryTask)}
+                          {renderFactoryOutputItems(focusedFactoryTask)}
+                          {renderFactoryTaskArtifacts(focusedFactoryTask, {
+                            showEmpty: focusedFactoryOutputs.length === 0
+                          })}
                         </div>
                       ) : (
                         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择一个批次查看产物" />
@@ -4540,10 +4688,161 @@ export default function App() {
     );
   }
 
-  function renderFactoryTaskArtifacts(task: DesktopTaskDetail) {
+  function renderFactoryOutputItems(task: DesktopTaskDetail) {
+    const outputItems = [...(task.factoryOutputs ?? [])]
+      .filter((item) => item.status !== 'excluded')
+      .sort((left, right) => getFactoryOutputOrder(left) - getFactoryOutputOrder(right));
+
+    if (outputItems.length === 0) {
+      return null;
+    }
+
+    const qualifiedItems = outputItems.filter((item) => item.status === 'qualified');
+
+    return (
+      <div className="factory-output-item-panel">
+        <Flex align="center" justify="space-between" gap={10} wrap="wrap">
+          <Space size={8} wrap>
+            <Typography.Text strong>输出物</Typography.Text>
+            <Tag color="blue">{outputItems.length} 条</Tag>
+            {qualifiedItems.length > 0 ? <Tag color="green">合格 {qualifiedItems.length}</Tag> : null}
+          </Space>
+          <Space size={6} wrap>
+            <Button
+              size="small"
+              icon={<DownloadOutlined />}
+              loading={exportingFactoryOutputBatch === 'qualified'}
+              disabled={qualifiedItems.length === 0}
+              onClick={() => void exportFactoryOutputItems(task, qualifiedItems, 'qualified')}
+            >
+              导出合格
+            </Button>
+            <Button
+              size="small"
+              icon={<DownloadOutlined />}
+              loading={exportingFactoryOutputBatch === 'all'}
+              onClick={() => void exportFactoryOutputItems(task, outputItems, 'all')}
+            >
+              导出全部
+            </Button>
+          </Space>
+        </Flex>
+
+        <div className="factory-output-item-list">
+          {outputItems.map((item) => {
+            const previewPath = getFactoryOutputLocalPath(item);
+            const scoreLabel = item.score === undefined ? undefined : `${item.score} 分${item.grade ? ` / ${item.grade}` : ''}`;
+            return (
+              <div key={item.id} className={`factory-output-item-card ${item.status}`}>
+                <div className="factory-output-item-icon">
+                  {item.kind === 'video' ? <VideoCameraOutlined /> : renderFactoryOutputKindIcon(item.kind)}
+                </div>
+                <div className="factory-output-item-main">
+                  <Flex align="center" justify="space-between" gap={8} wrap="wrap">
+                    <Space size={6} wrap>
+                      <Typography.Text strong ellipsis title={item.title}>
+                        {item.title}
+                      </Typography.Text>
+                      <Tag color={factoryOutputStatusColor(item.status)}>
+                        {factoryOutputStatusLabel(item.status)}
+                      </Tag>
+                      {scoreLabel ? <Tag>{scoreLabel}</Tag> : null}
+                    </Space>
+                    <Typography.Text type="secondary" className="factory-output-item-time">
+                      {formatShortTime(item.updatedAt)}
+                    </Typography.Text>
+                  </Flex>
+
+                  {item.summary || item.reason ? (
+                    <Typography.Text type="secondary" className="factory-output-item-summary" ellipsis>
+                      {item.reason ?? item.summary}
+                    </Typography.Text>
+                  ) : null}
+
+                  {item.risks?.length ? (
+                    <Typography.Text type="secondary" className="factory-output-item-risk" ellipsis>
+                      {item.risks.slice(0, 2).join('；')}
+                    </Typography.Text>
+                  ) : null}
+
+                  {previewPath ? (
+                    <Typography.Text type="secondary" className="factory-output-item-path" ellipsis copyable>
+                      {previewPath}
+                    </Typography.Text>
+                  ) : null}
+
+                  <Space size={6} wrap className="factory-output-item-actions">
+                    <Button
+                      size="small"
+                      icon={<PlayCircleOutlined />}
+                      disabled={!previewPath}
+                      onClick={() => void openLocalPath(previewPath)}
+                    >
+                      预览
+                    </Button>
+                    <Button
+                      size="small"
+                      icon={<DownloadOutlined />}
+                      loading={exportingFactoryOutputId === item.id}
+                      disabled={!previewPath}
+                      onClick={() => void exportSingleFactoryOutputItem(task, item)}
+                    >
+                      导出
+                    </Button>
+                    <Button
+                      size="small"
+                      disabled={item.status === 'qualified'}
+                      onClick={() =>
+                        updateFactoryOutputItemStatus(task.taskId, item.id, 'qualified', '人工设为合格')
+                      }
+                    >
+                      设为合格
+                    </Button>
+                    <Button
+                      size="small"
+                      disabled={item.status === 'rejected'}
+                      onClick={() =>
+                        updateFactoryOutputItemStatus(task.taskId, item.id, 'rejected', '人工设为不通过')
+                      }
+                    >
+                      设为不通过
+                    </Button>
+                    <Button
+                      size="small"
+                      disabled={item.status === 'review_required'}
+                      onClick={() =>
+                        updateFactoryOutputItemStatus(task.taskId, item.id, 'review_required', '人工设为需复核')
+                      }
+                    >
+                      设为需复核
+                    </Button>
+                    <Button
+                      size="small"
+                      danger
+                      icon={<DeleteOutlined />}
+                      onClick={() => excludeFactoryOutputItem(task.taskId, item.id)}
+                    >
+                      删除
+                    </Button>
+                  </Space>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  function renderFactoryTaskArtifacts(
+    task: DesktopTaskDetail,
+    options: { showEmpty?: boolean } = {}
+  ) {
     const artifacts = task.artifacts.filter(isUserDeliverableArtifact);
     if (artifacts.length === 0) {
-      return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无可交付产物" />;
+      return options.showEmpty === false
+        ? null
+        : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无可交付产物" />;
     }
 
     const editedVideoFolder = readCommonArtifactDirectory(
@@ -7781,6 +8080,8 @@ interface FactoryTaskBatchStats {
   qualified?: number;
   rejected?: number;
   review?: number;
+  processingError?: number;
+  excluded?: number;
   edited?: number;
 }
 
@@ -7792,6 +8093,20 @@ interface FactoryBatchStatItem {
 }
 
 function buildFactoryTaskBatchStats(task: DesktopTaskDetail, isVideoFactory: boolean): FactoryTaskBatchStats {
+  if (isVideoFactory && task.factoryOutputs?.length) {
+    const visibleOutputs = task.factoryOutputs.filter((item) => item.status !== 'excluded');
+    return {
+      total: task.factoryOutputs.length,
+      artifacts: countUserDeliverableArtifacts(task),
+      qualified: visibleOutputs.filter((item) => item.status === 'qualified').length,
+      rejected: visibleOutputs.filter((item) => item.status === 'rejected').length,
+      review: visibleOutputs.filter((item) => item.status === 'review_required').length,
+      processingError: visibleOutputs.filter((item) => item.status === 'processing_error').length,
+      excluded: task.factoryOutputs.filter((item) => item.status === 'excluded').length,
+      edited: visibleOutputs.filter((item) => Boolean(item.outputPath)).length
+    };
+  }
+
   const searchableText = [
     readConversationFinalAnswer(task),
     task.input,
@@ -7857,6 +8172,9 @@ function buildFactoryBatchStatItems(
     { key: 'qualified', label: '合格', value: stats.qualified ?? '待统计', tone: 'good' },
     { key: 'rejected', label: '筛掉', value: stats.rejected ?? '待统计', tone: 'danger' },
     { key: 'review', label: '需复核', value: stats.review ?? '待统计', tone: 'warning' },
+    ...(stats.processingError !== undefined
+      ? [{ key: 'processingError', label: '异常', value: stats.processingError, tone: 'danger' as const }]
+      : []),
     { key: 'edited', label: '初剪', value: stats.edited ?? '未开启', tone: 'neutral' },
     { key: 'artifacts', label: '产物', value: stats.artifacts, tone: stats.artifacts > 0 ? 'good' : 'neutral' }
   ];
@@ -7876,6 +8194,55 @@ function readFirstMatchedInteger(text: string, patterns: RegExp[]): number | und
 
 function readFactoryTaskInputFiles(task: DesktopTaskDetail | undefined): string[] {
   return [...new Set(task?.executionContext?.attachmentPaths?.filter(Boolean) ?? [])];
+}
+
+function getFactoryOutputOrder(item: FactoryOutputItem): number {
+  const order = item.metadata?.order;
+  return typeof order === 'number' && Number.isFinite(order) ? order : Number.MAX_SAFE_INTEGER;
+}
+
+function getFactoryOutputLocalPath(item: FactoryOutputItem): string | undefined {
+  return item.outputPath?.trim() || item.sourcePath?.trim() || undefined;
+}
+
+function getFactoryOutputSuggestedFileName(item: FactoryOutputItem, sourcePath: string): string {
+  const sourceFileName = getPathFileName(sourcePath);
+  if (sourceFileName) {
+    return sourceFileName;
+  }
+
+  const extension = item.kind === 'video'
+    ? '.mp4'
+    : item.kind === 'image'
+      ? '.png'
+      : item.kind === 'table'
+        ? '.xlsx'
+        : '';
+  return `${item.title || 'factory-output'}${extension}`;
+}
+
+function factoryOutputStatusLabel(status: FactoryOutputItemStatus): string {
+  if (status === 'qualified') return '合格';
+  if (status === 'rejected') return '不通过';
+  if (status === 'review_required') return '需复核';
+  if (status === 'processing_error') return '处理异常';
+  return '已删除';
+}
+
+function factoryOutputStatusColor(status: FactoryOutputItemStatus): string {
+  if (status === 'qualified') return 'green';
+  if (status === 'rejected') return 'red';
+  if (status === 'review_required') return 'orange';
+  if (status === 'processing_error') return 'volcano';
+  return 'default';
+}
+
+function renderFactoryOutputKindIcon(kind: FactoryOutputItem['kind']): ReactNode {
+  if (kind === 'image') return <FileImageOutlined />;
+  if (kind === 'document') return <FileWordOutlined />;
+  if (kind === 'table') return <FileExcelOutlined />;
+  if (kind === 'folder') return <FolderOpenOutlined />;
+  return <FileTextOutlined />;
 }
 
 function buildFactoryFinalAnswerPreview(answer: string) {

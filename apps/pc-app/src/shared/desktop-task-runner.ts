@@ -2,6 +2,8 @@
   DesktopArtifactSummary,
   DesktopExecutionLogEntry,
   FactoryArtifactPreviewItem,
+  FactoryOutputItem,
+  FactoryOutputItemStatus,
   DesktopKnowledgeSourceSummary,
   DesktopTaskDetail,
   ModelCredential,
@@ -167,7 +169,7 @@ interface FactoryVideoScreeningResult {
   order: number;
   name: string;
   localPath: string;
-  status: 'rejected' | 'scored' | 'edited' | 'review_required';
+  status: 'rejected' | 'scored' | 'edited' | 'review_required' | 'processing_error';
   rejectedGate?: string;
   rejectedReason?: string;
   score?: number;
@@ -195,6 +197,7 @@ interface ModelInvocationSuccess {
   logs: DesktopExecutionLogEntry[];
   usedToolIds: string[];
   generatedArtifacts: DesktopArtifactSummary[];
+  factoryOutputs?: FactoryOutputItem[];
   workflowRuntimeTraces?: WorkflowNodeExecutionTrace[];
   workflowRuntimeVariables?: WorkflowRuntimeVariableSnapshot[];
 }
@@ -585,6 +588,7 @@ function completeTask(
     artifactCount: userArtifactCount,
     costCents: (task.costCents ?? 0) + costCents,
     artifacts,
+    factoryOutputs: invocation.factoryOutputs ?? task.factoryOutputs,
     executionLogs,
     costRecords: [
       ...task.costRecords,
@@ -1005,6 +1009,7 @@ async function runWorkflowRuntime(input: {
   const traces: WorkflowNodeExecutionTrace[] = [];
   const usedToolIds: string[] = [];
   const generatedArtifacts: DesktopArtifactSummary[] = [];
+  const factoryOutputs: FactoryOutputItem[] = [];
   let progressTask = input.task;
   let primaryProfile = input.profiles[0];
   let currentResponse: DesktopModelChatResponse = {
@@ -1115,6 +1120,9 @@ async function runWorkflowRuntime(input: {
       currentResponse = nodeResult.response;
       usedToolIds.push(...nodeResult.usedToolIds);
       generatedArtifacts.push(...nodeResult.generatedArtifacts);
+      if (nodeResult.factoryOutputs?.length) {
+        factoryOutputs.push(...nodeResult.factoryOutputs);
+      }
 
       const trace = createWorkflowNodeTrace({
         node: currentNode,
@@ -1287,6 +1295,7 @@ async function runWorkflowRuntime(input: {
     logs,
     usedToolIds: [...new Set(usedToolIds)],
     generatedArtifacts,
+    factoryOutputs,
     workflowRuntimeTraces: traces,
     workflowRuntimeVariables: pool.snapshot()
   };
@@ -1440,6 +1449,7 @@ async function executeWorkflowRuntimeNode(input: {
   logs: DesktopExecutionLogEntry[];
   usedToolIds: string[];
   generatedArtifacts: DesktopArtifactSummary[];
+  factoryOutputs?: FactoryOutputItem[];
   inputVariables: string[];
   outputVariables: string[];
   message?: string;
@@ -1487,6 +1497,7 @@ function completeWorkflowRuntimeDataNode(input: {
   logs: DesktopExecutionLogEntry[];
   usedToolIds: string[];
   generatedArtifacts: DesktopArtifactSummary[];
+  factoryOutputs?: FactoryOutputItem[];
   inputVariables: string[];
   outputVariables: string[];
   message: string;
@@ -1513,6 +1524,7 @@ function completeWorkflowRuntimeInputNode(input: {
   logs: DesktopExecutionLogEntry[];
   usedToolIds: string[];
   generatedArtifacts: DesktopArtifactSummary[];
+  factoryOutputs?: FactoryOutputItem[];
   inputVariables: string[];
   outputVariables: string[];
   message: string;
@@ -2824,6 +2836,13 @@ async function invokeWorkflowRuntimeModelNode(input: {
   message: string;
 }> {
   const profile = selectWorkflowRuntimeModelProfile(input.node, input.profiles, input.rolePackage);
+  if (input.node.type === 'output') {
+    const factoryOutputResult = completeWorkflowRuntimeFactoryVideoOutputNode(input);
+    if (factoryOutputResult) {
+      return factoryOutputResult;
+    }
+  }
+
   if (readWorkflowRuntimeString(input.node.config?.llmTaskType) === 'video_screening_batch') {
     const videoFactoryResult = await invokeWorkflowRuntimeFactoryVideoScreeningNode({
       ...input,
@@ -2919,6 +2938,7 @@ async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
   logs: DesktopExecutionLogEntry[];
   usedToolIds: string[];
   generatedArtifacts: DesktopArtifactSummary[];
+  factoryOutputs?: FactoryOutputItem[];
   inputVariables: string[];
   outputVariables: string[];
   message: string;
@@ -2976,6 +2996,7 @@ async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
     })
   );
   const rejected = results.filter((item) => item.status === 'rejected').length;
+  const processingError = results.filter((item) => item.status === 'processing_error').length;
   const edited = results.filter((item) => item.status === 'edited').length;
   const scored = results.filter((item) => item.status === 'scored' || item.status === 'edited').length;
   const reviewRequired = results.filter((item) => item.status === 'review_required').length;
@@ -3083,6 +3104,12 @@ async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
       });
     }
   }
+  const factoryOutputs = buildFactoryVideoOutputItems({
+    taskId: input.task.taskId,
+    factoryKind: 'medical_case_video_screening_factory',
+    results,
+    createdAt: input.createdAt
+  });
 
   const summaryContent = [
     `视频筛选完成：共 ${results.length} 个视频`,
@@ -3090,6 +3117,7 @@ async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
     `合格视频：${qualifiedResults.length}`,
     `进入评分：${scored}`,
     `需人工复核：${reviewRequired}`,
+    `处理异常：${processingError}`,
     `已生成初剪：${edited}`,
     editedVideoFolderPath ? `初剪视频文件夹：${editedVideoFolderPath}` : '',
     asrProfile
@@ -3128,14 +3156,15 @@ async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
         input.task.taskId,
         'info',
         'WORKFLOW_RUNTIME_VIDEO_FACTORY_COMPLETED',
-        `Video screening factory completed: rejected=${rejected}, scored=${scored}, edited=${edited}, total=${results.length}.`,
+        `Video screening factory completed: rejected=${rejected}, scored=${scored}, review=${reviewRequired}, error=${processingError}, edited=${edited}, total=${results.length}.`,
         input.createdAt,
         sanitizeLogSuffix(`${input.node.id}-video-factory`),
-        { rejected, scored, edited, reviewRequired, total: results.length }
+        { rejected, scored, edited, reviewRequired, processingError, total: results.length }
       )
     ],
     usedToolIds: [...usedToolIds],
     generatedArtifacts,
+    factoryOutputs,
     inputVariables: ['factory_request', 'start.files'],
     outputVariables: [
       ...new Set([
@@ -3145,7 +3174,69 @@ async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
         editedVideoFolderPath ? 'edited_video_folder' : ''
       ].filter(Boolean))
     ],
-    message: `Video screening finished: rejected=${rejected}, scored=${scored}, edited=${edited}.`
+    message: `Video screening finished: rejected=${rejected}, scored=${scored}, review=${reviewRequired}, error=${processingError}, edited=${edited}.`
+  };
+}
+
+function completeWorkflowRuntimeFactoryVideoOutputNode(input: {
+  task: DesktopTaskDetail;
+  node: WorkflowGraphNode;
+  pool: WorkflowVariablePool;
+  createdAt: string;
+  currentResponse: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+}): {
+  response: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  logs: DesktopExecutionLogEntry[];
+  usedToolIds: string[];
+  generatedArtifacts: DesktopArtifactSummary[];
+  inputVariables: string[];
+  outputVariables: string[];
+  message: string;
+} | undefined {
+  const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
+  if (readWorkflowRuntimeString(factoryRequest?.factoryKind) !== 'medical_case_video_screening_factory') {
+    return undefined;
+  }
+
+  const summary = readWorkflowRuntimeString(input.pool.get('screening_summary'));
+  const results = input.pool.get('video_screening_results');
+  if (!summary || results === undefined) {
+    return undefined;
+  }
+
+  const outputVariables = writeWorkflowNodeOutputs({
+    pool: input.pool,
+    node: input.node,
+    text: summary,
+    result: results,
+    outputValue: summary
+  });
+  input.pool.set('runtime.previous_text', summary);
+
+  return {
+    response: mergeWorkflowRuntimeResponses(input.currentResponse, {
+      provider: input.primaryProfile.providerName,
+      modelName: input.primaryProfile.modelName,
+      content: summary
+    }),
+    primaryProfile: input.primaryProfile,
+    logs: [
+      createLog(
+        input.task.taskId,
+        'info',
+        'WORKFLOW_RUNTIME_FACTORY_OUTPUT_COMPLETED',
+        'Video factory output returned without an extra model call.',
+        input.createdAt,
+        sanitizeLogSuffix(input.node.id)
+      )
+    ],
+    usedToolIds: [],
+    generatedArtifacts: [],
+    inputVariables: input.node.inputVariables ?? ['screening_summary', 'video_screening_results'],
+    outputVariables,
+    message: 'Video factory output returned without an extra model call.'
   };
 }
 
@@ -3654,7 +3745,7 @@ async function runFactoryVideoScreeningItem(input: {
   }
 
   if (!input.asrProfile) {
-    return reviewFactoryVideo(input.video, metrics, asrGate?.name ?? '语音识别', '未配置支持语音转文字的模型，无法自动判断语音质量', undefined, [
+    return errorFactoryVideo(input.video, metrics, asrGate?.name ?? '语音识别', '未配置支持语音转文字的模型，无法自动判断语音质量', undefined, [
       '请先配置并启用语音转文字模型，再重新运行本批次。'
     ]);
   }
@@ -3673,11 +3764,11 @@ async function runFactoryVideoScreeningItem(input: {
   metrics.asrAttempts = asrResult.attempts;
   metrics.asrAudioPath = asrResult.audioPath;
   if (!asrResult.transcript) {
-    return reviewFactoryVideo(
+    return errorFactoryVideo(
       input.video,
       metrics,
       asrGate?.name ?? '语音识别',
-      'ASR 服务调用失败，已转人工复核',
+      'ASR 服务调用失败，已标记为处理异常，建议检查配置后重试',
       undefined,
       [classifyFactoryAsrFailure(asrResult.error)]
     );
@@ -3691,14 +3782,20 @@ async function runFactoryVideoScreeningItem(input: {
     return rejectFactoryVideo(input.video, metrics, asrGate?.name ?? '语音识别', asrFailure, transcript);
   }
 
-  const analysis = await analyzeFactoryVideoTranscript({
-    video: input.video,
-    transcript,
-    metrics,
-    profile: input.scoringProfile,
-    modelInvoker: input.modelInvoker,
-    editTargetSeconds: input.editTargetSeconds
-  });
+  const analysis = shouldUseFactoryVideoLlmScoring(input.factoryRequest)
+    ? await analyzeFactoryVideoTranscript({
+        video: input.video,
+        transcript,
+        metrics,
+        profile: input.scoringProfile,
+        modelInvoker: input.modelInvoker,
+        editTargetSeconds: input.editTargetSeconds
+      })
+    : analyzeFactoryVideoTranscriptByRules({
+        transcript,
+        metrics,
+        editTargetSeconds: input.editTargetSeconds
+      });
   metrics.beforeAfterCompleteness = analysis.beforeAfterCompleteness;
   const contentFailure = contentGate ? evaluateFactoryVideoGate(contentGate, metrics) : undefined;
   if (contentFailure) {
@@ -3735,13 +3832,26 @@ async function runFactoryVideoScreeningItem(input: {
       }
     }
   }
+  const finalStatus = editedVideoPath
+    ? 'edited'
+    : score >= 75
+      ? 'scored'
+      : score >= 60
+        ? 'review_required'
+        : 'rejected';
 
   return {
     id: input.video.id,
     order: input.video.order,
     name: input.video.name,
     localPath: input.video.localPath,
-    status: editedVideoPath ? 'edited' : risks.length > 0 ? 'review_required' : 'scored',
+    status: finalStatus,
+    rejectedGate: finalStatus === 'rejected' ? '表达质量评分' : finalStatus === 'review_required' ? '人工复核边界' : undefined,
+    rejectedReason: finalStatus === 'rejected'
+      ? `规则评分低于 60：${score}`
+      : finalStatus === 'review_required'
+        ? `规则评分处于复核区间：${score}`
+        : undefined,
     score,
     grade,
     shouldEdit,
@@ -3859,6 +3969,29 @@ function reviewFactoryVideo(
     name: video.name,
     localPath: video.localPath,
     status: 'review_required',
+    rejectedGate: gate,
+    rejectedReason: reason,
+    shouldEdit: false,
+    transcript,
+    risks,
+    metrics
+  };
+}
+
+function errorFactoryVideo(
+  video: FactoryVideoRuntimeItem,
+  metrics: Record<string, unknown>,
+  gate: string,
+  reason: string,
+  transcript?: string,
+  risks: string[] = []
+): FactoryVideoScreeningResult {
+  return {
+    id: video.id,
+    order: video.order,
+    name: video.name,
+    localPath: video.localPath,
+    status: 'processing_error',
     rejectedGate: gate,
     rejectedReason: reason,
     shouldEdit: false,
@@ -3994,6 +4127,14 @@ function readFactoryRuntimeAudioFormat(value: unknown): 'm4a' | 'mp3' | 'wav' {
   return normalized === 'mp3' || normalized === 'wav' || normalized === 'm4a' ? normalized : 'm4a';
 }
 
+function shouldUseFactoryVideoLlmScoring(factoryRequest: Record<string, unknown> | undefined): boolean {
+  const scoring = isWorkflowRuntimeRecord(factoryRequest?.scoring)
+    ? factoryRequest.scoring
+    : {};
+  const mode = readWorkflowRuntimeString(scoring.mode ?? factoryRequest?.scoringMode)?.toLowerCase();
+  return mode === 'llm' || mode === 'smart' || mode === 'model';
+}
+
 function isFactoryAsrRetryableFailure(error: unknown): boolean {
   const message = stripDesktopInvocationNoise(readErrorMessage(error));
   const normalized = message.toLowerCase();
@@ -4021,11 +4162,11 @@ function classifyFactoryAsrFailure(error: unknown): string {
   }
 
   if (normalized.includes('timeout') || normalized.includes('timed out') || normalized.includes('等待超时')) {
-    return 'ASR 服务响应超时，已转人工复核；可以稍后重试或换用响应更稳定的语音模型。';
+    return 'ASR 服务响应超时，建议稍后重试或换用响应更稳定的语音模型。';
   }
 
   if (normalized.includes('rate limit') || normalized.includes('too many') || normalized.includes('限流')) {
-    return 'ASR 上游限流，已转人工复核；建议稍后重试或降低批量并发。';
+    return 'ASR 上游限流，建议稍后重试或降低批量并发。';
   }
 
   if (normalized.includes('http/https') || normalized.includes('oss') || normalized.includes('cos') || normalized.includes('可访问 url')) {
@@ -4033,14 +4174,14 @@ function classifyFactoryAsrFailure(error: unknown): string {
   }
 
   if (normalized.includes('10mb') || normalized.includes('5mb') || normalized.includes('直传限制') || normalized.includes('file too large')) {
-    return '音频文件超过当前 ASR 本地直传限制，已转人工复核；建议使用文件转写模型或进一步压缩音频。';
+    return '音频文件超过当前 ASR 本地直传限制，建议使用文件转写模型或进一步压缩音频。';
   }
 
   if (normalized.includes('does not support this input') || normalized.includes('invalidparameter')) {
-    return '当前 ASR 模型不支持这个输入格式，已转人工复核；建议先抽取音频后转写，或换用支持该格式的语音模型。';
+    return '当前 ASR 模型不支持这个输入格式；建议先抽取音频后转写，或换用支持该格式的语音模型。';
   }
 
-  return `ASR 服务调用失败，已转人工复核：${message || '未知错误'}`;
+  return `ASR 服务调用失败，建议检查配置后重试：${message || '未知错误'}`;
 }
 
 function stripDesktopInvocationNoise(message: string): string {
@@ -4100,6 +4241,41 @@ async function analyzeFactoryVideoTranscript(input: {
       editPlan: []
     };
   }
+}
+
+function analyzeFactoryVideoTranscriptByRules(input: {
+  transcript: string;
+  metrics: Record<string, unknown>;
+  editTargetSeconds: number;
+}): {
+  score: number;
+  beforeAfterCompleteness: number;
+  summary: string;
+  risks: string[];
+  editPlan: Array<{ start: number; end: number; label?: string; reason?: string }>;
+} {
+  const beforeAfterCompleteness = estimateBeforeAfterCompleteness(input.transcript);
+  const risks: string[] = [];
+  const transcriptChars = readFactoryRuntimeNumber(input.metrics.transcriptChars) ?? input.transcript.length;
+  const unclearTokenRatio = readFactoryRuntimeNumber(input.metrics.unclearTokenRatio) ?? 0;
+
+  if (beforeAfterCompleteness < 0.6) {
+    risks.push('使用前/使用后改善表述较简略，建议人工确认是否可用');
+  }
+  if (transcriptChars < 160) {
+    risks.push('转写文本较短，表达信息量偏少');
+  }
+  if (unclearTokenRatio > 0.15) {
+    risks.push('转写中存在较多听不清内容');
+  }
+
+  return {
+    score: estimateFactoryVideoScore(input.transcript, input.metrics),
+    beforeAfterCompleteness,
+    summary: buildFactoryVideoTranscriptSummary(input.transcript),
+    risks,
+    editPlan: buildFallbackFactoryVideoEditPlan(input.metrics, input.editTargetSeconds)
+  };
 }
 
 function buildFactoryVideoScoringMessages(
@@ -4206,6 +4382,52 @@ function buildFallbackFactoryVideoEditPlan(
   ];
 }
 
+function buildFactoryVideoOutputItems(input: {
+  taskId: string;
+  factoryKind: string;
+  results: FactoryVideoScreeningResult[];
+  createdAt: string;
+}): FactoryOutputItem[] {
+  return input.results.map((result) => {
+    const status = mapFactoryVideoResultStatusToOutputStatus(result.status);
+    return {
+      id: `${input.taskId}-video-output-${result.order}`,
+      factoryKind: input.factoryKind,
+      kind: 'video',
+      title: result.name,
+      status,
+      originalStatus: status,
+      sourcePath: result.localPath,
+      outputPath: result.editedVideoPath,
+      score: result.score,
+      grade: result.grade,
+      summary: result.summary,
+      reason: result.rejectedReason,
+      risks: result.risks,
+      transcript: result.transcript,
+      metadata: {
+        order: result.order,
+        gate: result.rejectedGate,
+        shouldEdit: result.shouldEdit,
+        editPlan: result.editPlan,
+        metrics: result.metrics
+      },
+      auditTrail: [],
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt
+    };
+  });
+}
+
+function mapFactoryVideoResultStatusToOutputStatus(
+  status: FactoryVideoScreeningResult['status']
+): FactoryOutputItemStatus {
+  if (status === 'scored' || status === 'edited') return 'qualified';
+  if (status === 'review_required') return 'review_required';
+  if (status === 'processing_error') return 'processing_error';
+  return 'rejected';
+}
+
 function buildFactoryVideoScreeningRows(results: FactoryVideoScreeningResult[]): string[][] {
   return [
     ['序号', '文件名', '状态', '关卡/异常类型', '原因/说明', '总分', '等级', '建议剪辑', '摘要', '风险提示', '转写文本', '本地路径', '初剪路径'],
@@ -4241,6 +4463,7 @@ function buildFactoryQualifiedVideoAddressListContent(input: {
 }): string {
   const rejected = input.results.filter((item) => item.status === 'rejected').length;
   const reviewRequired = input.results.filter((item) => item.status === 'review_required').length;
+  const processingError = input.results.filter((item) => item.status === 'processing_error').length;
   const edited = input.qualifiedResults.filter((item) => item.editedVideoPath).length;
   const tableRows = input.qualifiedResults.map((item) =>
     [
@@ -4265,6 +4488,7 @@ function buildFactoryQualifiedVideoAddressListContent(input: {
     `- 合格视频：${input.qualifiedResults.length}`,
     `- 筛掉视频：${rejected}`,
     `- 需人工复核：${reviewRequired}`,
+    `- 处理异常：${processingError}`,
     `- 已生成初剪：${edited}`,
     `- 初剪开关：${input.editEnabled ? '开启' : '关闭'}`,
     input.editedVideoFolderPath ? `- 初剪视频文件夹：${input.editedVideoFolderPath}` : undefined,
@@ -4293,6 +4517,7 @@ function formatFactoryVideoStatus(status: FactoryVideoScreeningResult['status'])
   if (status === 'rejected') return '已筛掉';
   if (status === 'edited') return '已剪辑';
   if (status === 'review_required') return '需人工复核';
+  if (status === 'processing_error') return '处理异常';
   return '已评分';
 }
 

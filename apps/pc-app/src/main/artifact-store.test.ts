@@ -13,6 +13,7 @@ import path from 'node:path';
 
 import {
   cleanupExpiredArtifactCache,
+  exportLocalFilesToDirectory,
   saveArtifactFileAs,
   saveRemoteFileAs,
   writeTaskArtifactFile
@@ -64,6 +65,32 @@ assert.equal(directorySaveResult.canceled, false);
 assert.equal(directorySaveResult.savedPath, directorySavedCopyPath);
 assert.ok(existsSync(directorySavedCopyPath));
 assert.match(readFileSync(directorySavedCopyPath, 'utf8'), /Customer report content/);
+
+const batchExportSourcePath = path.join(tempDir, 'batch-source', 'video.mp4');
+mkdirSync(path.dirname(batchExportSourcePath), { recursive: true });
+writeFileSync(batchExportSourcePath, 'video content');
+const batchExportResult = exportLocalFilesToDirectory(
+  {
+    targetFolderName: 'Factory Result',
+    files: [
+      {
+        sourcePath: batchExportSourcePath,
+        suggestedFileName: 'case-video.mp4'
+      },
+      {
+        sourcePath: batchExportSourcePath,
+        suggestedFileName: 'case-video.mp4'
+      }
+    ]
+  },
+  tempDir
+);
+
+assert.equal(batchExportResult.canceled, false);
+assert.equal(batchExportResult.exportedFiles.length, 2);
+assert.ok(batchExportResult.exportDirectoryPath?.endsWith('Factory_Result'));
+assert.ok(existsSync(path.join(tempDir, 'Factory_Result', 'case-video.mp4')));
+assert.ok(existsSync(path.join(tempDir, 'Factory_Result', 'case-video-2.mp4')));
 
 const remoteFileServer = http.createServer((request, response) => {
   if (request.url !== '/generated/product-main.png') {

@@ -12,6 +12,8 @@ import path from 'node:path';
 import type {
   DesktopArtifactSaveAsRequest,
   DesktopArtifactSaveAsResult,
+  DesktopLocalFileExportRequest,
+  DesktopLocalFileExportResult,
   DesktopRemoteFileSaveAsRequest,
   DesktopRemoteFileSaveAsResult,
   DesktopTaskArtifactWriteRequest,
@@ -68,6 +70,62 @@ export function saveArtifactFileAs(
   return {
     canceled: false,
     savedPath: normalizedDestinationPath
+  };
+}
+
+export function exportLocalFilesToDirectory(
+  request: DesktopLocalFileExportRequest,
+  destinationDirectoryPath: string
+): DesktopLocalFileExportResult {
+  const files = request.files
+    .map((file) => ({
+      sourcePath: normalizeRequiredLocalPath(file.sourcePath, 'Source file path'),
+      suggestedFileName: file.suggestedFileName
+    }))
+    .filter((file) => file.sourcePath);
+
+  if (files.length === 0) {
+    throw new Error('At least one local file is required.');
+  }
+
+  const normalizedDestinationDirectoryPath = normalizeRequiredLocalPath(
+    destinationDirectoryPath,
+    'Destination directory path'
+  );
+  const exportDirectoryPath = request.targetFolderName
+    ? path.join(normalizedDestinationDirectoryPath, normalizePathSegment(request.targetFolderName))
+    : normalizedDestinationDirectoryPath;
+
+  if (existsSync(exportDirectoryPath) && !statSync(exportDirectoryPath).isDirectory()) {
+    throw new Error('Destination path must be a directory.');
+  }
+  if (!existsSync(exportDirectoryPath)) {
+    mkdirSync(exportDirectoryPath, { recursive: true });
+  }
+
+  const usedFileNames = new Set<string>();
+  const exportedFiles: DesktopLocalFileExportResult['exportedFiles'] = [];
+  for (const file of files) {
+    if (!existsSync(file.sourcePath) || !statSync(file.sourcePath).isFile()) {
+      throw new Error(`Local file no longer exists: ${file.sourcePath}`);
+    }
+
+    const fileName = createUniqueExportFileName(
+      normalizeSuggestedFileName(file.suggestedFileName, file.sourcePath),
+      usedFileNames
+    );
+    const savedPath = path.join(exportDirectoryPath, fileName);
+    copyFileSync(file.sourcePath, savedPath);
+    exportedFiles.push({
+      sourcePath: file.sourcePath,
+      savedPath
+    });
+  }
+
+  return {
+    canceled: false,
+    exportDirectoryPath,
+    exportedFiles
   };
 }
 
@@ -253,6 +311,24 @@ function normalizeSuggestedFileName(value: string | undefined, sourcePath: strin
   const fallbackName = path.basename(sourcePath) || 'qiuai-result.md';
   const suggestedName = typeof value === 'string' ? path.basename(value.trim()) : '';
   return suggestedName || fallbackName;
+}
+
+function createUniqueExportFileName(fileName: string, usedFileNames: Set<string>): string {
+  const normalizedFileName = normalizePathSegment(fileName);
+  const extension = path.extname(normalizedFileName);
+  const baseName = extension
+    ? normalizedFileName.slice(0, -extension.length)
+    : normalizedFileName;
+  let candidate = normalizedFileName;
+  let index = 2;
+
+  while (usedFileNames.has(candidate.toLowerCase())) {
+    candidate = `${baseName}-${index}${extension}`;
+    index += 1;
+  }
+
+  usedFileNames.add(candidate.toLowerCase());
+  return candidate;
 }
 
 function normalizeRemoteFileUrl(value: string): string {

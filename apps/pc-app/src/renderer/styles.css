@@ -1664,6 +1664,81 @@ body,
   background: #f6ffed;
 }
 
+.factory-output-item-panel {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #e5edf7;
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.factory-output-item-list {
+  display: grid;
+  gap: 8px;
+}
+
+.factory-output-item-card {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #edf2f7;
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.factory-output-item-card.qualified {
+  border-left-color: #52c41a;
+}
+
+.factory-output-item-card.rejected {
+  border-left-color: #ff4d4f;
+}
+
+.factory-output-item-card.review_required {
+  border-left-color: #faad14;
+}
+
+.factory-output-item-card.processing_error {
+  border-left-color: #fa541c;
+}
+
+.factory-output-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  color: #1677ff;
+  background: #e6f4ff;
+}
+
+.factory-output-item-main {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.factory-output-item-time,
+.factory-output-item-summary,
+.factory-output-item-risk,
+.factory-output-item-path {
+  min-width: 0;
+  font-size: 12px;
+}
+
+.factory-output-item-risk {
+  color: #ad6800;
+}
+
+.factory-output-item-actions {
+  padding-top: 2px;
+}
+
 .factory-task-layout {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);

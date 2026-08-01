@@ -31,6 +31,8 @@ import type {
   DesktopRoleSkillSummary,
   DesktopRoleWorkflowStep,
   FactoryArtifactPreview,
+  FactoryOutputItem,
+  FactoryOutputItemStatus,
   RolePackageManifest,
   ToolManifest
 } from '../shared/desktop-contract.js';
@@ -564,7 +566,8 @@ function validateDesktopTaskDetail(
     currentRun: record.currentRun ? validateDesktopExecutionRunSummary(record.currentRun) : undefined,
     executionContext: record.executionContext
       ? validateDesktopTaskExecutionContext(record.executionContext)
-      : undefined
+      : undefined,
+    factoryOutputs: validateFactoryOutputItems(record.factoryOutputs)
   };
 }
 
@@ -630,6 +633,105 @@ function validateFactoryArtifactPreviewItem(
     error: optionalString(record.error, `${fieldName}.error`),
     createdAt: requireString(record.createdAt, `${fieldName}.createdAt`)
   };
+}
+
+function validateFactoryOutputItems(value: unknown): FactoryOutputItem[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value.map((item, index) => validateFactoryOutputItem(item, `taskDetail.factoryOutputs[${index}]`));
+}
+
+function validateFactoryOutputItem(value: unknown, fieldName: string): FactoryOutputItem {
+  const record = requireRecord(value, fieldName);
+  return {
+    id: requireString(record.id, `${fieldName}.id`),
+    factoryKind: requireString(record.factoryKind, `${fieldName}.factoryKind`),
+    kind: requireEnum(record.kind, `${fieldName}.kind`, [
+      'video',
+      'image',
+      'document',
+      'table',
+      'record',
+      'folder',
+      'artifact'
+    ]),
+    title: requireString(record.title, `${fieldName}.title`),
+    status: requireEnum(record.status, `${fieldName}.status`, [
+      'qualified',
+      'rejected',
+      'review_required',
+      'processing_error',
+      'excluded'
+    ]),
+    originalStatus: requireEnum(record.originalStatus, `${fieldName}.originalStatus`, [
+      'qualified',
+      'rejected',
+      'review_required',
+      'processing_error',
+      'excluded'
+    ]),
+    sourcePath: optionalString(record.sourcePath, `${fieldName}.sourcePath`),
+    sourceUrl: optionalString(record.sourceUrl, `${fieldName}.sourceUrl`),
+    outputPath: optionalString(record.outputPath, `${fieldName}.outputPath`),
+    outputUrl: optionalString(record.outputUrl, `${fieldName}.outputUrl`),
+    thumbnailPath: optionalString(record.thumbnailPath, `${fieldName}.thumbnailPath`),
+    score: optionalNumber(record.score, `${fieldName}.score`),
+    grade: optionalString(record.grade, `${fieldName}.grade`),
+    summary: optionalString(record.summary, `${fieldName}.summary`),
+    reason: optionalString(record.reason, `${fieldName}.reason`),
+    risks: record.risks === undefined ? undefined : requireStringArray(record.risks, `${fieldName}.risks`),
+    transcript: optionalString(record.transcript, `${fieldName}.transcript`),
+    metadata: isPlainRecord(record.metadata) ? record.metadata : undefined,
+    auditTrail: validateFactoryOutputAuditTrail(record.auditTrail, `${fieldName}.auditTrail`),
+    createdAt: requireString(record.createdAt, `${fieldName}.createdAt`),
+    updatedAt: requireString(record.updatedAt, `${fieldName}.updatedAt`)
+  };
+}
+
+function validateFactoryOutputAuditTrail(
+  value: unknown,
+  fieldName: string
+): NonNullable<FactoryOutputItem['auditTrail']> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value.map((item, index) => {
+    const record = requireRecord(item, `${fieldName}[${index}]`);
+    const allowedStatuses: readonly FactoryOutputItemStatus[] = [
+      'qualified',
+      'rejected',
+      'review_required',
+      'processing_error',
+      'excluded'
+    ];
+    return {
+      id: requireString(record.id, `${fieldName}[${index}].id`),
+      action: requireEnum(record.action, `${fieldName}[${index}].action`, [
+        'status_changed',
+        'excluded',
+        'restored'
+      ]),
+      fromStatus: record.fromStatus === undefined
+        ? undefined
+        : requireEnum(record.fromStatus, `${fieldName}[${index}].fromStatus`, allowedStatuses),
+      toStatus: record.toStatus === undefined
+        ? undefined
+        : requireEnum(record.toStatus, `${fieldName}[${index}].toStatus`, allowedStatuses),
+      reason: optionalString(record.reason, `${fieldName}[${index}].reason`),
+      createdAt: requireString(record.createdAt, `${fieldName}[${index}].createdAt`)
+    };
+  });
 }
 
 function validateDesktopExecutionLogEntry(
@@ -979,6 +1081,10 @@ function optionalRecord(value: unknown, label: string): Record<string, unknown> 
   }
 
   return requireRecord(value, label);
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function requireArray(value: unknown, fieldName: string): unknown[] {
