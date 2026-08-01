@@ -113,6 +113,7 @@ test('server role template catalog is focused and production-oriented', () => {
   assert.ok(videoFactoryModelProfiles.has('qiu-general-default'));
   assert.ok(videoFactoryModelProfiles.has('qiu-asr-default'));
   assert.ok(videoFactoryToolActions.has('video-processing/video.probe'));
+  assert.ok(videoFactoryToolActions.has('video-processing/video.extract_audio'));
   assert.ok(videoFactoryToolActions.has('video-processing/video.compose_clips'));
   assert.ok(videoFactoryToolActions.has('local-filesystem/filesystem.write_text_file'));
   assert.ok(videoFactoryToolActions.has('office-document/spreadsheet.write_xlsx'));

@@ -382,6 +382,31 @@ export const serverToolActions: ServerToolActionDefinition[] = [
   },
   {
     packageId: 'video-processing',
+    actionId: 'video.extract_audio',
+    name: '抽取音频',
+    category: 'video',
+    description: '用 FFmpeg 从视频中抽取音轨，生成适合语音转文字的音频文件。',
+    input: [
+      { key: 'videoPath', label: '视频路径', type: 'video', required: true },
+      { key: 'audioFormat', label: '音频格式', type: 'text' }
+    ],
+    output: [
+      { key: 'artifact', label: '音频文件', type: 'artifact' },
+      { key: 'localPath', label: '本地路径', type: 'file' }
+    ],
+    defaultInput: { videoPath: '$runtime.current_item.localPath', audioFormat: 'm4a', folder: 'audios', fileName: '{{task.title}}' },
+    uiFields: [
+      { key: 'videoPath', label: '视频路径', placeholder: '$runtime.current_item.localPath' },
+      { key: 'audioFormat', label: '音频格式', placeholder: 'm4a / mp3 / wav' },
+      { key: 'folder', label: '保存目录' },
+      { key: 'fileName', label: '文件名' }
+    ],
+    requiredConfig: [],
+    requiredDependencies: ['ffmpeg'],
+    maturity: 'stable'
+  },
+  {
+    packageId: 'video-processing',
     actionId: 'video.compose_clips',
     name: '导出剪辑视频',
     category: 'video',

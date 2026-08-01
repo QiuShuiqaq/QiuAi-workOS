@@ -3905,11 +3905,29 @@ export default function App() {
       ? factoryAttachments.filter((attachment) => isFactoryVideoAttachment(attachment))
       : factoryAttachments.filter((attachment) => isFactoryImageInputAttachment(attachment));
     const invalidFactoryAttachmentCount = factoryAttachments.length - validFactoryAttachments.length;
-    const latestFactoryLogs = focusedFactoryTask?.executionLogs.slice(-14) ?? [];
+    const latestFactoryLogs = focusedFactoryTask ? selectFactoryVisibleLogs(focusedFactoryTask) : [];
     const focusedFactoryArtifacts = focusedFactoryTask?.artifacts.filter(isUserDeliverableArtifact) ?? [];
     const focusedFactoryCostCents =
       focusedFactoryTask?.costCents ??
       focusedFactoryTask?.costRecords.reduce((total, record) => total + record.costCents, 0);
+    const focusedFactoryInputFiles = readFactoryTaskInputFiles(focusedFactoryTask);
+    const focusedFactoryStats = focusedFactoryTask
+      ? buildFactoryTaskBatchStats(focusedFactoryTask, isVideoFactory)
+      : undefined;
+    const focusedFactoryFinalAnswer = focusedFactoryTask ? readConversationFinalAnswer(focusedFactoryTask) : '';
+    const missingFactoryModel = selectedFactoryModelReadiness.find((requirement) => !requirement.ready);
+    const missingFactoryToolId = selectedFactoryPackage?.toolIds.find((toolId) => {
+      const known = runtimeState.tools.some((tool) => tool.id === toolId);
+      const enabled = runtimeState.localRuntime.enabledToolIds.includes(toolId);
+      return !known || !enabled;
+    });
+    const factoryRuntimeHint = selectedFactoryReadiness?.ready
+      ? '当前环境可运行'
+      : missingFactoryModel
+        ? `缺少模型配置：${missingFactoryModel.profile.modelName}`
+        : missingFactoryToolId
+          ? `缺少工具配置：${resolveToolLabel(runtimeState.tools, missingFactoryToolId)}`
+          : '请检查模型和工具配置';
 
     return (
       <div className="workbench-page factory-page">
@@ -4110,6 +4128,30 @@ export default function App() {
                       ) : (
                         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={isVideoFactory ? '请添加案例视频' : '请添加商品素材'} />
                       )}
+
+                      {focusedFactoryInputFiles.length > 0 ? (
+                        <div className="factory-input-history">
+                          <Flex align="center" justify="space-between" gap={8}>
+                            <Typography.Text strong>当前批次输入</Typography.Text>
+                            <Tag>{focusedFactoryInputFiles.length} 个文件</Tag>
+                          </Flex>
+                          <div className="factory-input-file-list">
+                            {focusedFactoryInputFiles.slice(0, 6).map((filePath) => (
+                              <div key={filePath} className="factory-input-file-item">
+                                {isVideoFactory ? <VideoCameraOutlined /> : <PaperClipOutlined />}
+                                <Typography.Text ellipsis title={filePath}>
+                                  {getPathFileName(filePath)}
+                                </Typography.Text>
+                              </div>
+                            ))}
+                            {focusedFactoryInputFiles.length > 6 ? (
+                              <Typography.Text type="secondary">
+                                还有 {focusedFactoryInputFiles.length - 6} 个文件未展开显示
+                              </Typography.Text>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : null}
                     </section>
 
                     <Form<FactoryRunFormValues>
@@ -4260,6 +4302,7 @@ export default function App() {
                         <div className="factory-queue-list">
                           {selectedFactoryTasks.slice(0, 30).map((task) => {
                             const progress = factoryTaskProgressPercent(task);
+                            const batchStats = buildFactoryTaskBatchStats(task, isVideoFactory);
                             return (
                               <button
                                 key={task.taskId}
@@ -4276,8 +4319,15 @@ export default function App() {
                                   <span className="factory-task-meta">
                                     <Tag color={taskStateColor(task.state)}>{taskStateLabel(task.state)}</Tag>
                                     <span>{formatShortTime(task.updatedAt)}</span>
-                                    <span>产物 {countUserDeliverableArtifacts(task)}</span>
+                                    <span>输入 {batchStats.total}</span>
+                                    <span>产物 {batchStats.artifacts}</span>
                                   </span>
+                                </span>
+                                <span className="factory-queue-stats">
+                                  {batchStats.qualified !== undefined ? <span>合格 {batchStats.qualified}</span> : null}
+                                  {batchStats.rejected !== undefined ? <span>筛掉 {batchStats.rejected}</span> : null}
+                                  {batchStats.review !== undefined ? <span>复核 {batchStats.review}</span> : null}
+                                  {batchStats.edited !== undefined ? <span>初剪 {batchStats.edited}</span> : null}
                                 </span>
                                 <span className="factory-progress-bar" aria-label={`进度 ${progress}%`}>
                                   <span style={{ width: `${progress}%` }} />
@@ -4322,10 +4372,35 @@ export default function App() {
                               {formatDateTime(focusedFactoryTask.updatedAt)}
                             </Typography.Text>
                           </Flex>
-                          {readConversationFinalAnswer(focusedFactoryTask) ? (
-                            <Typography.Paragraph className="factory-task-summary">
-                              {readConversationFinalAnswer(focusedFactoryTask)}
-                            </Typography.Paragraph>
+                          {focusedFactoryStats ? (
+                            <div className="factory-batch-summary-grid">
+                              {buildFactoryBatchStatItems(focusedFactoryStats, isVideoFactory).map((item) => (
+                                <div key={item.key} className={`factory-batch-summary-card ${item.tone ?? ''}`}>
+                                  <span>{item.label}</span>
+                                  <strong>{item.value}</strong>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                          {focusedFactoryFinalAnswer ? (
+                            <div className="factory-result-preview">
+                              <Flex align="center" justify="space-between" gap={10}>
+                                <Typography.Text strong>结果说明</Typography.Text>
+                                <Button
+                                  size="small"
+                                  type="text"
+                                  onClick={() => {
+                                    setSelectedTaskId(focusedFactoryTask.taskId);
+                                    navigateToSection('logs');
+                                  }}
+                                >
+                                  查看详情
+                                </Button>
+                              </Flex>
+                              <Typography.Paragraph className="factory-task-summary">
+                                {buildFactoryFinalAnswerPreview(focusedFactoryFinalAnswer)}
+                              </Typography.Paragraph>
+                            </div>
                           ) : null}
                           {renderFactoryTaskArtifacts(focusedFactoryTask)}
                         </div>
@@ -4343,6 +4418,11 @@ export default function App() {
                           {selectedFactoryReadiness?.label ?? '待检查'}
                         </Tag>
                       </Flex>
+
+                      <div className={`factory-readiness-hint ${selectedFactoryReadiness?.ready ? 'ready' : 'warning'}`}>
+                        <InfoCircleOutlined />
+                        <Typography.Text>{factoryRuntimeHint}</Typography.Text>
+                      </div>
 
                       <div className="factory-status-list">
                         {selectedFactoryModelReadiness.length > 0 ? (
@@ -4552,7 +4632,12 @@ export default function App() {
             );
           }
 
+          if (editedVideoFolder && (artifact.type === 'video' || getArtifactExtension(artifact) === 'mp4')) {
+            return null;
+          }
+
           const fileName = getArtifactFileName(artifact);
+          const displayTitle = getFactoryArtifactDisplayTitle(artifact);
           return (
             <div key={artifact.id} className="chat-artifact-card factory-file-artifact-card">
               <div className={`artifact-file-icon ${getArtifactToneClass(artifact)}`}>
@@ -4561,14 +4646,14 @@ export default function App() {
               <div className="artifact-file-main">
                 <div className="artifact-file-title-row">
                   <Typography.Text strong ellipsis title={fileName}>
-                    {fileName}
+                    {displayTitle}
                   </Typography.Text>
-                      <Tag className="artifact-file-type">{getArtifactTypeLabel(artifact)}</Tag>
-                    </div>
-                    <Typography.Text type="secondary" className="artifact-file-meta" ellipsis copyable={Boolean(artifact.localPath)}>
-                      {artifact.localPath ?? formatArtifactMeta(artifact)}
-                    </Typography.Text>
-                  </div>
+                  <Tag className="artifact-file-type">{getFactoryArtifactTypeLabel(artifact)}</Tag>
+                </div>
+                <Typography.Text type="secondary" className="artifact-file-meta" ellipsis copyable={Boolean(artifact.localPath)}>
+                  {artifact.localPath ?? formatArtifactMeta(artifact)}
+                </Typography.Text>
+              </div>
               {artifact.localPath ? (
                 <Space size={6}>
                   <Button
@@ -7690,11 +7775,160 @@ function countUserDeliverableArtifacts(task: DesktopTaskDetail) {
   return task.artifacts.filter(isUserDeliverableArtifact).length;
 }
 
+interface FactoryTaskBatchStats {
+  total: number;
+  artifacts: number;
+  qualified?: number;
+  rejected?: number;
+  review?: number;
+  edited?: number;
+}
+
+interface FactoryBatchStatItem {
+  key: string;
+  label: string;
+  value: string | number;
+  tone?: 'good' | 'warning' | 'danger' | 'neutral';
+}
+
+function buildFactoryTaskBatchStats(task: DesktopTaskDetail, isVideoFactory: boolean): FactoryTaskBatchStats {
+  const searchableText = [
+    readConversationFinalAnswer(task),
+    task.input,
+    ...task.executionLogs.map((log) => `${log.eventType}\n${log.message}`)
+  ].join('\n');
+  const inputFiles = readFactoryTaskInputFiles(task);
+  const total =
+    readFirstMatchedInteger(searchableText, [
+      /共\s*(\d+)\s*个视频/,
+      /(\d+)\s*个视频/,
+      /共\s*(\d+)\s*个(?:图片|文件|素材)/,
+      /total\s*[:：]\s*(\d+)/i
+    ]) ?? inputFiles.length;
+
+  if (!isVideoFactory) {
+    return {
+      total,
+      artifacts: countUserDeliverableArtifacts(task)
+    };
+  }
+
+  return {
+    total,
+    artifacts: countUserDeliverableArtifacts(task),
+    qualified: readFirstMatchedInteger(searchableText, [
+      /合格视频\s*[:：]\s*(\d+)/,
+      /合格\s*[:：]\s*(\d+)/,
+      /(\d+)\s*个合格/
+    ]),
+    rejected: readFirstMatchedInteger(searchableText, [
+      /筛掉\s*[:：]?\s*(\d+)/,
+      /(\d+)\s*个被筛掉/,
+      /不合格\s*[:：]\s*(\d+)/
+    ]),
+    review: readFirstMatchedInteger(searchableText, [
+      /需人工复核\s*[:：]?\s*(\d+)/,
+      /人工复核\s*[:：]\s*(\d+)/,
+      /(\d+)\s*个需人工复核/
+    ]),
+    edited: readFirstMatchedInteger(searchableText, [
+      /已生成初剪\s*[:：]?\s*(\d+)/,
+      /初剪\s*[:：]\s*(\d+)/,
+      /(\d+)\s*个初剪/
+    ])
+  };
+}
+
+function buildFactoryBatchStatItems(
+  stats: FactoryTaskBatchStats,
+  isVideoFactory: boolean
+): FactoryBatchStatItem[] {
+  const items: FactoryBatchStatItem[] = [
+    { key: 'total', label: '输入', value: stats.total, tone: 'neutral' },
+    { key: 'artifacts', label: '产物', value: stats.artifacts, tone: stats.artifacts > 0 ? 'good' : 'neutral' }
+  ];
+
+  if (!isVideoFactory) {
+    return items;
+  }
+
+  return [
+    { key: 'total', label: '输入视频', value: stats.total, tone: 'neutral' },
+    { key: 'qualified', label: '合格', value: stats.qualified ?? '待统计', tone: 'good' },
+    { key: 'rejected', label: '筛掉', value: stats.rejected ?? '待统计', tone: 'danger' },
+    { key: 'review', label: '需复核', value: stats.review ?? '待统计', tone: 'warning' },
+    { key: 'edited', label: '初剪', value: stats.edited ?? '未开启', tone: 'neutral' },
+    { key: 'artifacts', label: '产物', value: stats.artifacts, tone: stats.artifacts > 0 ? 'good' : 'neutral' }
+  ];
+}
+
+function readFirstMatchedInteger(text: string, patterns: RegExp[]): number | undefined {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const value = match?.[1] ? Number.parseInt(match[1], 10) : Number.NaN;
+    if (Number.isInteger(value) && value >= 0) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function readFactoryTaskInputFiles(task: DesktopTaskDetail | undefined): string[] {
+  return [...new Set(task?.executionContext?.attachmentPaths?.filter(Boolean) ?? [])];
+}
+
+function buildFactoryFinalAnswerPreview(answer: string) {
+  const normalized = answer
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(' ');
+
+  return normalized.length > 180 ? `${normalized.slice(0, 180)}...` : normalized;
+}
+
+function selectFactoryVisibleLogs(task: DesktopTaskDetail): DesktopTaskDetail['executionLogs'] {
+  const importantEventTypes = new Set([
+    'WORKOS_TASK_RUN_STARTED',
+    'LOCAL_RUN_STARTED',
+    'WORKFLOW_RUNTIME_FACTORY_BATCH_STARTED',
+    'WORKFLOW_RUNTIME_FACTORY_BATCH_COMPLETED',
+    'WORKFLOW_RUNTIME_VIDEO_FACTORY_COMPLETED',
+    'WORKFLOW_RUNTIME_ARTIFACT_WRITTEN',
+    'WORKFLOW_ARTIFACT_FALLBACK_CREATED',
+    'ARTIFACT_CREATED',
+    'ARTIFACT_FILE_WRITTEN',
+    'TASK_COMPLETED'
+  ]);
+  const visibleLogs = task.executionLogs.filter((log) => {
+    if (log.level === 'error' || log.level === 'warning') {
+      return true;
+    }
+    if (importantEventTypes.has(log.eventType)) {
+      return true;
+    }
+    if (/FACTORY|ARTIFACT|TASK_COMPLETED/i.test(log.eventType)) {
+      return true;
+    }
+    if (log.eventType === 'WORKFLOW_RUNTIME_NODE_COMPLETED') {
+      const detail = readWorkflowNodeLogDetail(log);
+      return detail?.type === 'artifact' || detail?.type === 'output';
+    }
+    return false;
+  });
+
+  return visibleLogs.length > 0 ? visibleLogs.slice(-10) : task.executionLogs.slice(-6);
+}
+
 function getArtifactFileName(artifact: DesktopTaskDetail['artifacts'][number]) {
   const source = artifact.localPath?.trim() || artifact.title.trim();
-  const normalizedSource = source.replace(/\\/g, '/');
-  const fileName = normalizedSource.split('/').filter(Boolean).at(-1)?.trim();
-  return fileName || artifact.title || 'result-file';
+  return getPathFileName(source) || artifact.title || 'result-file';
+}
+
+function getPathFileName(path: string) {
+  const normalizedSource = path.replace(/\\/g, '/');
+  return normalizedSource.split('/').filter(Boolean).at(-1)?.trim() ?? '';
 }
 
 function getArtifactExtension(artifact: DesktopTaskDetail['artifacts'][number]) {
@@ -7727,6 +7961,36 @@ function getArtifactTypeLabel(artifact: DesktopTaskDetail['artifacts'][number]) 
   }
 
   return artifact.type.toUpperCase();
+}
+
+function getFactoryArtifactDisplayTitle(artifact: DesktopTaskDetail['artifacts'][number]) {
+  const fileName = getArtifactFileName(artifact);
+  const normalized = fileName.toLowerCase();
+
+  if (/qualified|合格|address|list/.test(normalized)) {
+    return '合格视频地址清单';
+  }
+
+  if (/screening|质检|打分|score/.test(normalized) || getArtifactExtension(artifact) === 'xlsx') {
+    return '筛选打分报告';
+  }
+
+  if (/review|复核/.test(normalized)) {
+    return '人工复核清单';
+  }
+
+  return fileName;
+}
+
+function getFactoryArtifactTypeLabel(artifact: DesktopTaskDetail['artifacts'][number]) {
+  const fileName = getArtifactFileName(artifact).toLowerCase();
+  if (/qualified|合格|address|list/.test(fileName)) {
+    return '清单';
+  }
+  if (/screening|质检|打分|score/.test(fileName)) {
+    return '报告';
+  }
+  return getArtifactTypeLabel(artifact);
 }
 
 function getArtifactToneClass(artifact: DesktopTaskDetail['artifacts'][number]) {

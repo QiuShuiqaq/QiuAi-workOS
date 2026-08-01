@@ -1083,10 +1083,10 @@ const medicalCaseVideoScreeningGates = [
   },
   {
     key: 'content_minimum',
-    label: '内容完整性筛选',
-    description: '只让具备使用前、使用过程、使用后改善表达的视频进入评分。',
+    label: '内容完整性提醒',
+    description: '内容完整性只影响评分和风险提示，不直接筛掉视频。',
     rules: [
-      { metric: 'beforeAfterCompleteness', operator: '>=', value: 0.6, failReason: '缺少清晰的使用前/使用后改善表述' }
+      { metric: 'beforeAfterCompleteness', operator: '>=', value: 0.6, failReason: '使用前/使用后改善表述较简略，建议人工确认是否可用' }
     ]
   }
 ];
@@ -1439,7 +1439,7 @@ function buildMedicalCaseVideoScreeningFactoryWorkflowGraph(): ServerRoleWorkflo
       id: 'screen_score_and_edit',
       type: 'llm',
       name: '批量筛选评分',
-      instruction: '按 factory_request 对每个视频先做硬性筛选：视频比例、时长、音轨、ASR 可识别度、内容完整性；未通过的直接标记并停止后续处理。通过筛选的视频再按表达清晰度、使用前后完整性、改善表述具体度、自然度、剪辑价值评分。只评价素材质量和表达质量，不做医疗诊断，不判断疗效真实性。',
+      instruction: '按 factory_request 对每个视频先做硬性筛选：视频比例、时长、音轨、ASR 可识别度；未通过硬性筛选的直接标记并停止后续处理。通过硬性筛选的视频再按表达清晰度、使用前后完整性、改善表述具体度、自然度、剪辑价值评分；内容完整性不足只作为风险提示和扣分项，不直接筛掉。只评价素材质量和表达质量，不做医疗诊断，不判断疗效真实性。',
       modelProfileId: 'qiu-general-default',
       inputVariables: ['factory_request', 'video_batch', 'screening_gates', 'asr_config', 'edit_config', 'knowledge_context'],
       outputVariables: [
@@ -1456,6 +1456,7 @@ function buildMedicalCaseVideoScreeningFactoryWorkflowGraph(): ServerRoleWorkflo
         requiredModelProfileIds: ['qiu-asr-default'],
         requiredToolActions: [
           { toolId: 'video-processing', action: 'video.probe' },
+          { toolId: 'video-processing', action: 'video.extract_audio', optional: true },
           { toolId: 'local-filesystem', action: 'filesystem.write_text_file' },
           { toolId: 'office-document', action: 'spreadsheet.write_xlsx' },
           { toolId: 'video-processing', action: 'video.compose_clips', optional: true }
@@ -3135,7 +3136,7 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
         order: 4,
         type: 'llm',
         name: '批量筛选评分',
-        instruction: '按视频规格、ASR 质量、内容完整性逐级筛选；通过后再做表达质量评分，并按用户开关决定是否生成初剪。'
+        instruction: '按视频规格和 ASR 质量逐级硬筛；通过后再做表达质量评分，内容完整性不足只提示风险，并按用户开关决定是否生成初剪。'
       },
       {
         id: 'factory_output',

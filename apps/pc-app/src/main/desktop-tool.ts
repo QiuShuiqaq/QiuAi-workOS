@@ -244,6 +244,8 @@ async function invokeVideoProcessingTool(
   switch (request.action) {
     case 'video.probe':
       return await probeVideo(request);
+    case 'video.extract_audio':
+      return await extractVideoAudio(userDataPath, request);
     case 'video.compose_clips':
     case 'video.export_mp4':
       return await composeVideoClips(userDataPath, request);
@@ -251,6 +253,77 @@ async function invokeVideoProcessingTool(
       return await extractVideoFrames(userDataPath, request);
     default:
       return fail(request, `Unsupported video processing action: ${request.action}`);
+  }
+}
+
+async function extractVideoAudio(
+  userDataPath: string,
+  request: DesktopToolInvocationRequest
+): Promise<DesktopToolInvocationResult> {
+  const videoPath = readVideoInputPath(request);
+  assertReadPathAllowed(request, videoPath);
+  if (!existsSync(videoPath) || !statSync(videoPath).isFile()) {
+    return fail(request, `Video file does not exist: ${videoPath}`);
+  }
+
+  const extension = path.extname(videoPath).toLowerCase();
+  if (!isVideoFileExtension(extension)) {
+    return fail(request, `Unsupported video extension: ${extension || 'unknown'}.`);
+  }
+
+  const audioFormat = readAudioOutputFormat(request.input.audioFormat);
+  const ffmpegPath = readString(request.input.ffmpegPath, process.env.QIUAI_FFMPEG_PATH?.trim() || 'ffmpeg');
+  const layout = getDesktopStorageLayout(userDataPath, request.workspaceId);
+  ensureDesktopStorageLayout(layout);
+  const folder = readString(request.input.folder, 'audios');
+  const fileName = normalizePathSegment(
+    readString(request.input.fileName, `${path.basename(videoPath, path.extname(videoPath))}-audio`)
+  );
+  const outputFolderPath = path.join(layout.assetsPath, 'tools', normalizePathSegment(folder));
+  const outputPath = path.join(outputFolderPath, `${fileName}.${audioFormat}`);
+  mkdirSync(outputFolderPath, { recursive: true });
+
+  try {
+    await execFileAsync(
+      ffmpegPath,
+      [
+        '-y',
+        '-i',
+        videoPath,
+        '-vn',
+        '-ac',
+        '1',
+        '-ar',
+        '16000',
+        '-b:a',
+        '64k',
+        outputPath
+      ],
+      { windowsHide: true, timeout: readOptionalPositiveInteger(request.input.timeoutMs, 180_000) }
+    );
+    const outputStats = statSync(outputPath);
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: outputPath,
+        fileName: path.basename(outputPath),
+        sizeBytes: outputStats.size,
+        sourceVideoPath: videoPath,
+        audioFormat
+      }
+    };
+  } catch (error) {
+    return fail(
+      request,
+      [
+        'Video audio extraction failed. Install FFmpeg or set QIUAI_FFMPEG_PATH to ffmpeg.exe, then retry.',
+        error instanceof Error ? error.message : ''
+      ]
+        .filter(Boolean)
+        .join(' ')
+    );
   }
 }
 
@@ -2335,6 +2408,11 @@ function readRequiredString(value: unknown, fieldName: string): string {
 
 function readVideoInputPath(request: DesktopToolInvocationRequest): string {
   return readRequiredString(request.input.videoPath ?? request.input.path ?? request.input.localPath, 'videoPath');
+}
+
+function readAudioOutputFormat(value: unknown): 'm4a' | 'mp3' | 'wav' {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase().replace(/^\./, '') : '';
+  return normalized === 'mp3' || normalized === 'wav' || normalized === 'm4a' ? normalized : 'm4a';
 }
 
 function readVideoCutPlan(value: unknown): Array<{ start: number; end: number }> {

@@ -181,6 +181,13 @@ interface FactoryVideoScreeningResult {
   editedVideoPath?: string;
 }
 
+interface FactoryVideoAsrAttemptResult {
+  transcript: string;
+  audioPath: string;
+  attempts: number;
+  error?: unknown;
+}
+
 interface ModelInvocationSuccess {
   ok: true;
   profile: ModelProfile;
@@ -3572,9 +3579,9 @@ function defaultFactoryVideoScreeningGates(): FactoryVideoScreeningGate[] {
     },
     {
       id: 'content_minimum',
-      name: '内容完整性',
+      name: '内容完整性提醒',
       rules: [
-        { metric: 'beforeAfterCompleteness', operator: '>=', value: 0.6, failReason: '缺少清晰的使用前/使用后改善表述' }
+        { metric: 'beforeAfterCompleteness', operator: '>=', value: 0.6, failReason: '使用前/使用后改善表述较简略，建议人工确认是否可用' }
       ]
     }
   ];
@@ -3647,30 +3654,35 @@ async function runFactoryVideoScreeningItem(input: {
   }
 
   if (!input.asrProfile) {
-    return rejectFactoryVideo(input.video, metrics, asrGate?.name ?? '语音识别', '未配置支持语音转文字的模型');
+    return reviewFactoryVideo(input.video, metrics, asrGate?.name ?? '语音识别', '未配置支持语音转文字的模型，无法自动判断语音质量', undefined, [
+      '请先配置并启用语音转文字模型，再重新运行本批次。'
+    ]);
   }
 
-  let transcript = '';
-  try {
-    const asr: Record<string, unknown> = isWorkflowRuntimeRecord(input.factoryRequest?.asr)
-      ? input.factoryRequest.asr
-      : {};
-    const asrResponse = await input.modelInvoker({
-      profile: input.asrProfile,
-      taskKind: 'audio_transcription',
-      audioTranscription: {
-        audioPath: input.video.localPath,
-        language: readWorkflowRuntimeString(asr.language) ?? 'zh',
-        dialect: readWorkflowRuntimeString(asr.dialect) ?? 'auto',
-        prompt: '请转写医疗案例视频中的人物口述内容，保留使用前、使用后、症状变化等关键信息。'
-      },
-      messages: [{ role: 'user', content: `请转写视频音频：${input.video.name}` }],
-      timeoutMs: 180_000
-    });
-    transcript = asrResponse.content.trim();
-  } catch (error) {
-    return rejectFactoryVideo(input.video, metrics, asrGate?.name ?? '语音识别', `语音转文字失败：${readErrorMessage(error)}`);
+  const preparedAudioPath = await prepareFactoryVideoAudioPath(input, metrics);
+  const asr = isWorkflowRuntimeRecord(input.factoryRequest?.asr)
+    ? input.factoryRequest.asr
+    : {};
+  const asrResult = await transcribeFactoryVideoWithRetry({
+    video: input.video,
+    audioPath: preparedAudioPath,
+    asrProfile: input.asrProfile,
+    asr,
+    modelInvoker: input.modelInvoker
+  });
+  metrics.asrAttempts = asrResult.attempts;
+  metrics.asrAudioPath = asrResult.audioPath;
+  if (!asrResult.transcript) {
+    return reviewFactoryVideo(
+      input.video,
+      metrics,
+      asrGate?.name ?? '语音识别',
+      'ASR 服务调用失败，已转人工复核',
+      undefined,
+      [classifyFactoryAsrFailure(asrResult.error)]
+    );
   }
+  const transcript = asrResult.transcript;
 
   metrics.transcriptChars = transcript.length;
   metrics.unclearTokenRatio = estimateUnclearTokenRatio(transcript);
@@ -3690,7 +3702,7 @@ async function runFactoryVideoScreeningItem(input: {
   metrics.beforeAfterCompleteness = analysis.beforeAfterCompleteness;
   const contentFailure = contentGate ? evaluateFactoryVideoGate(contentGate, metrics) : undefined;
   if (contentFailure) {
-    return rejectFactoryVideo(input.video, metrics, contentGate?.name ?? '内容完整性', contentFailure, transcript);
+    risks.push(contentFailure);
   }
 
   risks.push(...analysis.risks);
@@ -3831,6 +3843,211 @@ function rejectFactoryVideo(
     risks: [],
     metrics
   };
+}
+
+function reviewFactoryVideo(
+  video: FactoryVideoRuntimeItem,
+  metrics: Record<string, unknown>,
+  gate: string,
+  reason: string,
+  transcript?: string,
+  risks: string[] = []
+): FactoryVideoScreeningResult {
+  return {
+    id: video.id,
+    order: video.order,
+    name: video.name,
+    localPath: video.localPath,
+    status: 'review_required',
+    rejectedGate: gate,
+    rejectedReason: reason,
+    shouldEdit: false,
+    transcript,
+    risks,
+    metrics
+  };
+}
+
+async function prepareFactoryVideoAudioPath(
+  input: {
+    task: DesktopTaskDetail;
+    video: FactoryVideoRuntimeItem;
+    desktopToolInvoker?: DesktopToolInvoker;
+    workspaceId?: string;
+    binding: ResolvedRuntimeBinding;
+    factoryRequest?: Record<string, unknown>;
+  },
+  metrics: Record<string, unknown>
+): Promise<string> {
+  if (
+    !input.desktopToolInvoker ||
+    !input.workspaceId ||
+    !hasFactoryToolAction(input.binding, 'video-processing', 'video.extract_audio')
+  ) {
+    return input.video.localPath;
+  }
+
+  let result: DesktopToolInvocationResult;
+  try {
+    result = await input.desktopToolInvoker({
+      workspaceId: input.workspaceId,
+      toolId: 'video-processing',
+      action: 'video.extract_audio',
+      input: {
+        videoPath: input.video.localPath,
+        audioFormat: readFactoryRuntimeAudioFormat(input.factoryRequest?.audioFormat),
+        folder: 'asr-audio',
+        fileName: `${input.video.order}-${sanitizeLogSuffix(input.video.name)}-audio`
+      },
+      allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+    });
+  } catch (error) {
+    metrics.audioExtraction = 'fallback_to_video';
+    metrics.audioExtractionWarning = `音频抽取工具调用失败，已回退到原视频转写：${stripDesktopInvocationNoise(readErrorMessage(error))}`;
+    return input.video.localPath;
+  }
+
+  if (result.ok) {
+    const localPath = readWorkflowRuntimeString(result.output?.localPath);
+    if (localPath) {
+      metrics.audioExtraction = 'ok';
+      return localPath;
+    }
+  }
+
+  metrics.audioExtraction = 'fallback_to_video';
+  metrics.audioExtractionWarning = result.message ?? '音频抽取未返回有效路径，已回退到原视频转写。';
+  return input.video.localPath;
+}
+
+async function transcribeFactoryVideoWithRetry(input: {
+  video: FactoryVideoRuntimeItem;
+  audioPath: string;
+  asrProfile: ModelProfile;
+  asr: Record<string, unknown>;
+  modelInvoker: DesktopModelInvoker;
+}): Promise<FactoryVideoAsrAttemptResult> {
+  const retryDelays = readFactoryAsrRetryDelays(input.asr);
+  let lastError: unknown;
+
+  for (let attemptIndex = 0; attemptIndex <= retryDelays.length; attemptIndex += 1) {
+    try {
+      const asrResponse = await input.modelInvoker({
+        profile: input.asrProfile,
+        taskKind: 'audio_transcription',
+        audioTranscription: {
+          audioPath: input.audioPath,
+          language: readWorkflowRuntimeString(input.asr.language) ?? 'zh',
+          dialect: readWorkflowRuntimeString(input.asr.dialect) ?? 'auto',
+          prompt: '请转写医疗案例视频中的人物口述内容，保留使用前、使用后、症状变化等关键信息。'
+        },
+        messages: [{ role: 'user', content: `请转写视频音频：${input.video.name}` }],
+        timeoutMs: 180_000
+      });
+      return {
+        transcript: asrResponse.content.trim(),
+        audioPath: input.audioPath,
+        attempts: attemptIndex + 1
+      };
+    } catch (error) {
+      lastError = error;
+      if (!isFactoryAsrRetryableFailure(error)) {
+        return {
+          transcript: '',
+          audioPath: input.audioPath,
+          attempts: attemptIndex + 1,
+          error
+        };
+      }
+      const retryDelay = retryDelays[attemptIndex];
+      if (retryDelay !== undefined && retryDelay > 0) {
+        await sleepFactoryRuntime(retryDelay);
+      }
+    }
+  }
+
+  return {
+    transcript: '',
+    audioPath: input.audioPath,
+    attempts: retryDelays.length + 1,
+    error: lastError
+  };
+}
+
+function readFactoryAsrRetryDelays(asr: Record<string, unknown>): number[] {
+  if (Array.isArray(asr.retryDelaysMs)) {
+    return asr.retryDelaysMs
+      .map((item) => readFactoryRuntimeNumber(item))
+      .filter((item): item is number => item !== undefined && item >= 0)
+      .slice(0, 3);
+  }
+
+  return [2000, 5000];
+}
+
+function sleepFactoryRuntime(delayMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+function readFactoryRuntimeAudioFormat(value: unknown): 'm4a' | 'mp3' | 'wav' {
+  const normalized = readWorkflowRuntimeString(value)?.toLowerCase().replace(/^\./, '');
+  return normalized === 'mp3' || normalized === 'wav' || normalized === 'm4a' ? normalized : 'm4a';
+}
+
+function isFactoryAsrRetryableFailure(error: unknown): boolean {
+  const message = stripDesktopInvocationNoise(readErrorMessage(error));
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('timeout') ||
+    normalized.includes('timed out') ||
+    normalized.includes('等待超时') ||
+    normalized.includes('rate limit') ||
+    normalized.includes('too many') ||
+    normalized.includes('限流') ||
+    normalized.includes('econnreset') ||
+    normalized.includes('socket hang up') ||
+    normalized.includes('network') ||
+    normalized.includes('temporarily unavailable') ||
+    normalized.includes('service unavailable')
+  );
+}
+
+function classifyFactoryAsrFailure(error: unknown): string {
+  const message = stripDesktopInvocationNoise(readErrorMessage(error));
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes('api key') || normalized.includes('apikey') || normalized.includes('unauthorized')) {
+    return 'ASR API Key 未配置或鉴权失败，请检查模型配置后重试。';
+  }
+
+  if (normalized.includes('timeout') || normalized.includes('timed out') || normalized.includes('等待超时')) {
+    return 'ASR 服务响应超时，已转人工复核；可以稍后重试或换用响应更稳定的语音模型。';
+  }
+
+  if (normalized.includes('rate limit') || normalized.includes('too many') || normalized.includes('限流')) {
+    return 'ASR 上游限流，已转人工复核；建议稍后重试或降低批量并发。';
+  }
+
+  if (normalized.includes('http/https') || normalized.includes('oss') || normalized.includes('cos') || normalized.includes('可访问 url')) {
+    return '当前 ASR 模型需要公网、OSS 或 COS 文件 URL，PC 本地文件不能直接提交；请换用支持本地音频上传的模型，或先配置文件上传链路。';
+  }
+
+  if (normalized.includes('10mb') || normalized.includes('5mb') || normalized.includes('直传限制') || normalized.includes('file too large')) {
+    return '音频文件超过当前 ASR 本地直传限制，已转人工复核；建议使用文件转写模型或进一步压缩音频。';
+  }
+
+  if (normalized.includes('does not support this input') || normalized.includes('invalidparameter')) {
+    return '当前 ASR 模型不支持这个输入格式，已转人工复核；建议先抽取音频后转写，或换用支持该格式的语音模型。';
+  }
+
+  return `ASR 服务调用失败，已转人工复核：${message || '未知错误'}`;
+}
+
+function stripDesktopInvocationNoise(message: string): string {
+  return message
+    .replace(/^Error invoking remote method 'qiuai:desktop:invoke-model-chat':\s*/i, '')
+    .replace(/^Error:\s*/i, '')
+    .trim();
 }
 
 function estimateUnclearTokenRatio(transcript: string): number {
@@ -3991,7 +4208,7 @@ function buildFallbackFactoryVideoEditPlan(
 
 function buildFactoryVideoScreeningRows(results: FactoryVideoScreeningResult[]): string[][] {
   return [
-    ['序号', '文件名', '状态', '筛掉关卡', '筛掉原因', '总分', '等级', '建议剪辑', '摘要', '风险提示', '转写文本', '本地路径', '初剪路径'],
+    ['序号', '文件名', '状态', '关卡/异常类型', '原因/说明', '总分', '等级', '建议剪辑', '摘要', '风险提示', '转写文本', '本地路径', '初剪路径'],
     ...results.map((item) => [
       String(item.order),
       item.name,

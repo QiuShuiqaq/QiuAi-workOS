@@ -323,6 +323,7 @@ export type DesktopToolInvocationAction =
   | 'presentation.write_pptx'
   | 'presentation.write_outline_markdown'
   | 'video.probe'
+  | 'video.extract_audio'
   | 'video.extract_frames'
   | 'video.compose_clips'
   | 'video.export_mp4';

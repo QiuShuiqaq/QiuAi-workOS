@@ -178,6 +178,12 @@ const tools: ToolManifest[] = [
         outputTypes: ['json']
       },
       {
+        action: 'video.extract_audio',
+        name: 'Extract audio',
+        inputTypes: ['video'],
+        outputTypes: ['artifact']
+      },
+      {
         action: 'video.extract_frames',
         name: 'Extract frames',
         inputTypes: ['video'],
@@ -3174,7 +3180,7 @@ const videoFactoryTask = await runDesktopTask({
     if (request.taskKind === 'audio_transcription') {
       videoFactoryAsrCalls += 1;
       assert.equal(request.profile.id, 'qiu-asr-default');
-      assert.equal(request.audioTranscription?.audioPath, 'C:\\QiuAI\\factory\\case-video-1.mp4');
+      assert.equal(request.audioTranscription?.audioPath, 'C:\\QiuAI\\workspace\\asr-audio\\case-video-1-audio.m4a');
       assert.equal(request.audioTranscription?.dialect, 'sichuan_chongqing');
       return {
         provider: request.profile.providerName,
@@ -3204,8 +3210,8 @@ const videoFactoryTask = await runDesktopTask({
       modelName: request.profile.modelName,
       content: JSON.stringify({
         score: 82,
-        beforeAfterCompleteness: 0.9,
-        summary: '表达清楚，包含使用前、使用过程和使用后变化，适合进入人工复核。',
+        beforeAfterCompleteness: 0.2,
+        summary: '表达整体清楚，但使用前后改善表述偏简略，仍可进入评分和人工确认。',
         risks: [],
         editPlan: [
           { start: 0, end: 8, label: '使用前症状', reason: '开头交代问题' },
@@ -3237,11 +3243,27 @@ const videoFactoryTask = await runDesktopTask({
       };
     }
 
+    if (request.action === 'video.extract_audio') {
+      assert.equal(request.toolId, 'video-processing');
+      assert.equal(request.input.videoPath, 'C:\\QiuAI\\factory\\case-video-1.mp4');
+      assert.equal(request.input.audioFormat, 'm4a');
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          localPath: 'C:\\QiuAI\\workspace\\asr-audio\\case-video-1-audio.m4a'
+        }
+      };
+    }
+
     if (request.action === 'spreadsheet.write_xlsx') {
       assert.equal(request.toolId, 'office-document');
       const sheets = request.input.sheets as Array<{ rows: string[][] }>;
       assert.match(sheets[0]?.rows[1]?.[1] ?? '', /case-video-1/);
+      assert.equal(sheets[0]?.rows[1]?.[2], '已剪辑');
       assert.equal(sheets[0]?.rows[1]?.[5], '82');
+      assert.match(sheets[0]?.rows[1]?.[9] ?? '', /使用前\/使用后改善表述较简略/);
       return {
         toolId: request.toolId,
         action: request.action,
@@ -3292,6 +3314,7 @@ assert.equal(videoFactoryOutputCalls, 1);
 assert.equal(videoFactoryTask.task.artifactCount, 3);
 assert.deepEqual(videoFactoryToolRequests, [
   { toolId: 'video-processing', action: 'video.probe' },
+  { toolId: 'video-processing', action: 'video.extract_audio' },
   { toolId: 'video-processing', action: 'video.compose_clips' },
   { toolId: 'local-filesystem', action: 'filesystem.write_text_file' },
   { toolId: 'office-document', action: 'spreadsheet.write_xlsx' }
@@ -3308,6 +3331,171 @@ assert.ok(
 assert.ok(
   videoFactoryTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_RUNTIME_VIDEO_FACTORY_COMPLETED')
 );
+
+let videoFactoryAsrFailureCalls = 0;
+let videoFactoryFailureOutputCalls = 0;
+const videoFactoryFailureRows: string[][][] = [];
+const videoFactoryFailureTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-factory-video-asr-failure-001',
+    roleCode: 'case-video-factory',
+    roleName: 'Case Video Factory',
+    title: 'Screen videos with ASR failure',
+    input: JSON.stringify({
+      factory_request: {
+        factoryKind: 'medical_case_video_screening_factory',
+        asr: {
+          modelProfileId: 'qiu-asr-default',
+          language: 'zh',
+          dialect: 'auto',
+          retryDelaysMs: [0, 0]
+        },
+        editEnabled: false
+      }
+    }),
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0,
+    executionContext: {
+      modelProfileIds: ['qiu-asr-default', 'qiu-general-default'],
+      toolIds: ['video-processing', 'office-document', 'local-filesystem'],
+      knowledgeBindingIds: [],
+      attachmentPaths: ['C:\\QiuAI\\factory\\asr-failure-video.mp4']
+    }
+  }),
+  rolePackage: {
+    roleCode: 'case-video-factory',
+    applicationType: 'digital_factory',
+    name: 'Case Video Factory',
+    version: '1.0.0',
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      runtimePolicy: {
+        maxNodeExecutions: 6,
+        maxLoopIterations: 2,
+        requireApprovalBeforeTools: false
+      },
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'screen_score_and_edit',
+          type: 'llm',
+          name: 'Screen score and edit',
+          modelProfileId: 'qiu-general-default',
+          inputVariables: ['factory_request', 'start.files'],
+          outputVariables: ['video_screening_results', 'screening_summary'],
+          config: {
+            llmTaskType: 'video_screening_batch',
+            outputMode: 'json',
+            concurrency: 1
+          }
+        },
+        {
+          id: 'factory_output',
+          type: 'output',
+          name: 'Return result',
+          inputVariables: ['video_screening_results', 'screening_summary'],
+          outputVariables: ['final_answer']
+        }
+      ],
+      edges: [
+        { id: 'start-screen', sourceNodeId: 'start', targetNodeId: 'screen_score_and_edit' },
+        { id: 'screen-output', sourceNodeId: 'screen_score_and_edit', targetNodeId: 'factory_output' }
+      ]
+    },
+    modelProfileIds: ['qiu-asr-default', 'qiu-general-default'],
+    toolIds: ['video-processing', 'office-document', 'local-filesystem'],
+    requiredKnowledgeSources: [],
+    defaultTaskTypes: ['factory_video_screening'],
+    syncPolicy: 'summary_only'
+  },
+  modelProfiles: videoFactoryModelProfiles,
+  tools,
+  workspaceId: 'workspace-video-factory',
+  enabledModelProfileIds: ['qiu-general-default', 'qiu-asr-default'],
+  enabledToolIds: ['video-processing', 'office-document', 'local-filesystem'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    if (request.taskKind === 'audio_transcription') {
+      videoFactoryAsrFailureCalls += 1;
+      assert.equal(request.audioTranscription?.audioPath, 'C:\\QiuAI\\workspace\\asr-audio\\asr-failure-audio.m4a');
+      throw new Error(
+        "Error invoking remote method 'qiuai:desktop:invoke-model-chat': Error: Model API returned HTTP 400: <400> InternalError.Algo.InvalidParameter: The dedicated task `asr` corresponding to the current service does not support this input."
+      );
+    }
+
+    videoFactoryFailureOutputCalls += 1;
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: 'ASR failed and the video was routed to manual review.'
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    if (request.action === 'video.probe') {
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          width: 1920,
+          height: 1080,
+          durationSeconds: 45,
+          hasVideo: true,
+          hasAudio: true,
+          audioStreamCount: 1
+        }
+      };
+    }
+
+    if (request.action === 'video.extract_audio') {
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          localPath: 'C:\\QiuAI\\workspace\\asr-audio\\asr-failure-audio.m4a'
+        }
+      };
+    }
+
+    if (request.action === 'filesystem.write_text_file') {
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          localPath: 'C:\\QiuAI\\workspace\\qualified-videos\\asr-failure-qualified-list.md'
+        }
+      };
+    }
+
+    assert.equal(request.action, 'spreadsheet.write_xlsx');
+    const sheets = request.input.sheets as Array<{ rows: string[][] }>;
+    videoFactoryFailureRows.push(sheets[0]?.rows ?? []);
+    assert.equal(sheets[0]?.rows[1]?.[2], '需人工复核');
+    assert.equal(sheets[0]?.rows[1]?.[3], '语音识别');
+    assert.match(sheets[0]?.rows[1]?.[4] ?? '', /ASR 服务调用失败/);
+    assert.doesNotMatch(sheets[0]?.rows[1]?.[4] ?? '', /Error invoking/);
+    assert.match(sheets[0]?.rows[1]?.[9] ?? '', /当前 ASR 模型不支持这个输入格式/);
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\spreadsheets\\asr-failure-video-screening.xlsx'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:14.800Z'
+});
+
+assert.equal(videoFactoryFailureTask.task.state, 'completed');
+assert.equal(videoFactoryAsrFailureCalls, 1);
+assert.equal(videoFactoryFailureOutputCalls, 1);
+assert.equal(videoFactoryFailureTask.task.artifactCount, 2);
+assert.equal(videoFactoryFailureRows.length, 1);
 
 const unconfiguredKnowledge = await runDesktopTask({
   task,
