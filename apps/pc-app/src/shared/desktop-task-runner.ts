@@ -190,6 +190,12 @@ interface FactoryVideoAsrAttemptResult {
   error?: unknown;
 }
 
+interface FactoryVideoPreparedAudioResult {
+  audioPath?: string;
+  error?: string;
+  risks: string[];
+}
+
 interface ModelInvocationSuccess {
   ok: true;
   profile: ModelProfile;
@@ -3058,7 +3064,18 @@ async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
       );
     }
   }
-  if (input.desktopToolInvoker && input.workspaceId && hasFactoryToolAction(input.binding, 'office-document', 'spreadsheet.write_xlsx')) {
+  if (!hasFactoryToolAction(input.binding, 'office-document', 'spreadsheet.write_xlsx')) {
+    extraLogs.push(
+      createLog(
+        input.task.taskId,
+        'warning',
+        'WORKFLOW_RUNTIME_VIDEO_FACTORY_XLSX_UNAVAILABLE',
+        'Screening spreadsheet was not written because office-document/spreadsheet.write_xlsx is not available in the current desktop tool binding.',
+        input.createdAt,
+        sanitizeLogSuffix(`${input.node.id}-xlsx-unavailable`)
+      )
+    );
+  } else if (input.desktopToolInvoker && input.workspaceId) {
     const toolResult = await input.desktopToolInvoker({
       workspaceId: input.workspaceId,
       toolId: 'office-document',
@@ -3088,8 +3105,41 @@ async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
       });
       if (artifact) {
         generatedArtifacts.push(artifact);
+      } else {
+        extraLogs.push(
+          createLog(
+            input.task.taskId,
+            'warning',
+            'WORKFLOW_RUNTIME_VIDEO_FACTORY_XLSX_ARTIFACT_MISSING',
+            'Screening spreadsheet tool completed but did not return a local file path.',
+            input.createdAt,
+            sanitizeLogSuffix(`${input.node.id}-xlsx-artifact-missing`)
+          )
+        );
       }
+    } else {
+      extraLogs.push(
+        createLog(
+          input.task.taskId,
+          'warning',
+          'WORKFLOW_RUNTIME_VIDEO_FACTORY_XLSX_FAILED',
+          `Screening spreadsheet could not be written: ${toolResult.message ?? 'unknown error'}.`,
+          input.createdAt,
+          sanitizeLogSuffix(`${input.node.id}-xlsx-failed`)
+        )
+      );
     }
+  } else {
+    extraLogs.push(
+      createLog(
+        input.task.taskId,
+        'warning',
+        'WORKFLOW_RUNTIME_VIDEO_FACTORY_XLSX_SKIPPED',
+        'Screening spreadsheet was not written because the desktop tool runtime is unavailable.',
+        input.createdAt,
+        sanitizeLogSuffix(`${input.node.id}-xlsx-skipped`)
+      )
+    );
   }
   if (editedResults.length > 0) {
     usedToolIds.add('video-processing');
@@ -3750,13 +3800,23 @@ async function runFactoryVideoScreeningItem(input: {
     ]);
   }
 
-  const preparedAudioPath = await prepareFactoryVideoAudioPath(input, metrics);
+  const preparedAudio = await prepareFactoryVideoAudioPath(input, metrics);
+  if (!preparedAudio.audioPath) {
+    return errorFactoryVideo(
+      input.video,
+      metrics,
+      asrGate?.name ?? '语音识别',
+      preparedAudio.error ?? '音频抽取失败，无法提交语音转文字模型',
+      undefined,
+      preparedAudio.risks.length > 0 ? preparedAudio.risks : ['请检查 FFmpeg 或视频处理工具配置后重试。']
+    );
+  }
   const asr = isWorkflowRuntimeRecord(input.factoryRequest?.asr)
     ? input.factoryRequest.asr
     : {};
   const asrResult = await transcribeFactoryVideoWithRetry({
     video: input.video,
-    audioPath: preparedAudioPath,
+    audioPath: preparedAudio.audioPath,
     asrProfile: input.asrProfile,
     asr,
     modelInvoker: input.modelInvoker
@@ -4011,13 +4071,17 @@ async function prepareFactoryVideoAudioPath(
     factoryRequest?: Record<string, unknown>;
   },
   metrics: Record<string, unknown>
-): Promise<string> {
+): Promise<FactoryVideoPreparedAudioResult> {
   if (
     !input.desktopToolInvoker ||
     !input.workspaceId ||
     !hasFactoryToolAction(input.binding, 'video-processing', 'video.extract_audio')
   ) {
-    return input.video.localPath;
+    metrics.audioExtraction = 'unavailable';
+    return {
+      error: '视频处理工具缺少音频抽取能力，无法把视频提交给语音转文字模型',
+      risks: ['请先启用视频处理工具的音频抽取能力，或安装可用的 FFmpeg 后重试。']
+    };
   }
 
   let result: DesktopToolInvocationResult;
@@ -4035,22 +4099,33 @@ async function prepareFactoryVideoAudioPath(
       allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
     });
   } catch (error) {
-    metrics.audioExtraction = 'fallback_to_video';
-    metrics.audioExtractionWarning = `音频抽取工具调用失败，已回退到原视频转写：${stripDesktopInvocationNoise(readErrorMessage(error))}`;
-    return input.video.localPath;
+    const message = stripDesktopInvocationNoise(readErrorMessage(error));
+    metrics.audioExtraction = 'failed';
+    metrics.audioExtractionWarning = message;
+    return {
+      error: '音频抽取工具调用失败，无法提交语音转文字模型',
+      risks: [`请检查 FFmpeg 或视频处理工具配置后重试：${message}`]
+    };
   }
 
   if (result.ok) {
     const localPath = readWorkflowRuntimeString(result.output?.localPath);
     if (localPath) {
       metrics.audioExtraction = 'ok';
-      return localPath;
+      return {
+        audioPath: localPath,
+        risks: []
+      };
     }
   }
 
-  metrics.audioExtraction = 'fallback_to_video';
-  metrics.audioExtractionWarning = result.message ?? '音频抽取未返回有效路径，已回退到原视频转写。';
-  return input.video.localPath;
+  const message = result.message ?? '音频抽取未返回有效路径。';
+  metrics.audioExtraction = 'failed';
+  metrics.audioExtractionWarning = message;
+  return {
+    error: '音频抽取失败，无法提交语音转文字模型',
+    risks: [`请检查 FFmpeg 或视频处理工具配置后重试：${message}`]
+  };
 }
 
 async function transcribeFactoryVideoWithRetry(input: {
@@ -4124,7 +4199,7 @@ function sleepFactoryRuntime(delayMs: number): Promise<void> {
 
 function readFactoryRuntimeAudioFormat(value: unknown): 'm4a' | 'mp3' | 'wav' {
   const normalized = readWorkflowRuntimeString(value)?.toLowerCase().replace(/^\./, '');
-  return normalized === 'mp3' || normalized === 'wav' || normalized === 'm4a' ? normalized : 'm4a';
+  return normalized === 'mp3' || normalized === 'wav' || normalized === 'm4a' ? normalized : 'mp3';
 }
 
 function shouldUseFactoryVideoLlmScoring(factoryRequest: Record<string, unknown> | undefined): boolean {

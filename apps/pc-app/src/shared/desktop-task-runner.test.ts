@@ -3180,7 +3180,7 @@ const videoFactoryTask = await runDesktopTask({
     if (request.taskKind === 'audio_transcription') {
       videoFactoryAsrCalls += 1;
       assert.equal(request.profile.id, 'qiu-asr-default');
-      assert.equal(request.audioTranscription?.audioPath, 'C:\\QiuAI\\workspace\\asr-audio\\case-video-1-audio.m4a');
+      assert.equal(request.audioTranscription?.audioPath, 'C:\\QiuAI\\workspace\\asr-audio\\case-video-1-audio.mp3');
       assert.equal(request.audioTranscription?.dialect, 'sichuan_chongqing');
       return {
         provider: request.profile.providerName,
@@ -3245,13 +3245,13 @@ const videoFactoryTask = await runDesktopTask({
     if (request.action === 'video.extract_audio') {
       assert.equal(request.toolId, 'video-processing');
       assert.equal(request.input.videoPath, 'C:\\QiuAI\\factory\\case-video-1.mp4');
-      assert.equal(request.input.audioFormat, 'm4a');
+      assert.equal(request.input.audioFormat, 'mp3');
       return {
         toolId: request.toolId,
         action: request.action,
         ok: true,
         output: {
-          localPath: 'C:\\QiuAI\\workspace\\asr-audio\\case-video-1-audio.m4a'
+          localPath: 'C:\\QiuAI\\workspace\\asr-audio\\case-video-1-audio.mp3'
         }
       };
     }
@@ -3426,7 +3426,7 @@ const videoFactoryFailureTask = await runDesktopTask({
   modelInvoker: async (request) => {
     if (request.taskKind === 'audio_transcription') {
       videoFactoryAsrFailureCalls += 1;
-      assert.equal(request.audioTranscription?.audioPath, 'C:\\QiuAI\\workspace\\asr-audio\\asr-failure-audio.m4a');
+      assert.equal(request.audioTranscription?.audioPath, 'C:\\QiuAI\\workspace\\asr-audio\\asr-failure-audio.mp3');
       throw new Error(
         "Error invoking remote method 'qiuai:desktop:invoke-model-chat': Error: Model API returned HTTP 400: <400> InternalError.Algo.InvalidParameter: The dedicated task `asr` corresponding to the current service does not support this input."
       );
@@ -3462,7 +3462,7 @@ const videoFactoryFailureTask = await runDesktopTask({
         action: request.action,
         ok: true,
         output: {
-          localPath: 'C:\\QiuAI\\workspace\\asr-audio\\asr-failure-audio.m4a'
+          localPath: 'C:\\QiuAI\\workspace\\asr-audio\\asr-failure-audio.mp3'
         }
       };
     }
