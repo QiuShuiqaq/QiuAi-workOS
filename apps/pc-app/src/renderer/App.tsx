@@ -1615,6 +1615,10 @@ export default function App() {
   const [modelTestNotice, setModelTestNotice] = useState('');
   const [isTestingModel, setIsTestingModel] = useState(false);
   const [isPullingProviderModels, setIsPullingProviderModels] = useState(false);
+  const [latestPulledModelCatalog, setLatestPulledModelCatalog] = useState<{
+    profileId: string;
+    catalog: ModelProviderCatalog;
+  } | null>(null);
   const [localActionNotice, setLocalActionNotice] = useState('');
   const [savingArtifactId, setSavingArtifactId] = useState('');
   const [savingFactoryImageId, setSavingFactoryImageId] = useState('');
@@ -2399,6 +2403,7 @@ export default function App() {
       fallbackProfileId: selectedModelProfile.fallbackProfileId
     });
     setModelTestNotice('');
+    setLatestPulledModelCatalog(null);
   }, [modelForm, selectedModelDefaultCredential, selectedModelProfile]);
 
   useEffect(() => {
@@ -5204,6 +5209,52 @@ export default function App() {
     );
   }
 
+  function renderProviderModelCatalogPanel(input: {
+    catalog: ModelProviderCatalog;
+    selectedModelName?: string;
+    compact?: boolean;
+    onPick: (model: ModelProviderCatalog['models'][number]) => void;
+  }) {
+    const visibleModels = input.compact ? input.catalog.models.slice(0, 6) : input.catalog.models;
+    const hiddenCount = Math.max(input.catalog.models.length - visibleModels.length, 0);
+
+    return (
+      <div className={input.compact ? 'provider-model-catalog compact' : 'provider-model-catalog'}>
+        <Flex align="center" justify="space-between" gap={12} wrap="wrap">
+          <Space size={8} wrap>
+            <Typography.Text strong>已拉取可用模型</Typography.Text>
+            <Tag color="purple">{input.catalog.models.length} 个</Tag>
+          </Space>
+          <Typography.Text type="secondary">
+            最近拉取：{formatDateTime(input.catalog.fetchedAt)}
+          </Typography.Text>
+        </Flex>
+        <div className={input.compact ? 'provider-model-list compact' : 'provider-model-list'}>
+          {visibleModels.map((model) => (
+            <button
+              key={model.id}
+              type="button"
+              className={
+                input.selectedModelName === model.id
+                  ? 'provider-model-option active'
+                  : 'provider-model-option'
+              }
+              onClick={() => input.onPick(model)}
+              title={model.label ?? model.id}
+            >
+              <span>{model.label ?? model.id}</span>
+              <small>{model.id}</small>
+              <small>{modelCapabilitySummary(model.capabilities, 'general')}</small>
+            </button>
+          ))}
+          {hiddenCount > 0 ? (
+            <span className="provider-model-more">还有 {hiddenCount} 个模型，进入配置后查看全部</span>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
   function renderModels() {
     const configuredModelCount = runtimeState.modelProfiles.filter((profile) =>
       isRuntimeModelProfileConfigured(profile)
@@ -5233,6 +5284,10 @@ export default function App() {
           selectedModelDefaultCredential?.apiBaseUrl ?? selectedModelProfile.apiBaseUrl
         )
       : undefined;
+    const activeSelectedModelCatalog =
+      latestPulledModelCatalog && latestPulledModelCatalog.profileId === selectedModelProfile?.id
+        ? latestPulledModelCatalog.catalog
+        : selectedModelCatalog;
 
     return (
       <>
@@ -5325,6 +5380,21 @@ export default function App() {
                     {preset.models.length > 5 ? <Tag>+{preset.models.length - 5}</Tag> : null}
                   </Space>
 
+                  {modelCatalog
+                    ? renderProviderModelCatalogPanel({
+                        catalog: modelCatalog,
+                        compact: true,
+                        selectedModelName: undefined,
+                        onPick: (model) => {
+                          applyModelProviderPreset(
+                            preset,
+                            createPresetModelFromCatalogEntry(model, preset.models[0]?.purpose ?? 'general')
+                          );
+                          setModelConfigOpen(true);
+                        }
+                      })
+                    : null}
+
                   <div className="catalog-card-action-row">
                     <Button
                       type="primary"
@@ -5382,6 +5452,13 @@ export default function App() {
                   }))}
                 />
               </Form.Item>
+              {activeSelectedModelCatalog
+                ? renderProviderModelCatalogPanel({
+                    catalog: activeSelectedModelCatalog,
+                    selectedModelName: selectedModelProfile.modelName,
+                    onPick: (model) => applyFetchedProviderModel(selectedModelProfile, model)
+                  })
+                : null}
               <Form.Item name="purpose" hidden>
                 <Input />
               </Form.Item>
@@ -5451,33 +5528,6 @@ export default function App() {
                   >
                     {modelTestNotice}
                   </Typography.Text>
-                ) : null}
-                {selectedModelCatalog ? (
-                  <div className="provider-model-catalog">
-                    <Flex align="center" justify="space-between" gap={12} wrap="wrap">
-                      <Typography.Text strong>可调用模型</Typography.Text>
-                      <Typography.Text type="secondary">
-                        最近拉取：{formatDateTime(selectedModelCatalog.fetchedAt)}
-                      </Typography.Text>
-                    </Flex>
-                    <div className="provider-model-list">
-                      {selectedModelCatalog.models.map((model) => (
-                        <button
-                          key={model.id}
-                          type="button"
-                          className={
-                            selectedModelProfile.modelName === model.id
-                              ? 'provider-model-option active'
-                              : 'provider-model-option'
-                          }
-                          onClick={() => applyFetchedProviderModel(selectedModelProfile, model)}
-                        >
-                          <span>{model.label ?? model.id}</span>
-                          <small>{modelCapabilitySummary(model.capabilities, 'general')}</small>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
                 ) : null}
               </Space>
             </Form>
@@ -6609,6 +6659,10 @@ export default function App() {
         timeoutMs: 20_000
       });
 
+      setLatestPulledModelCatalog({
+        profileId: selectedModelProfile.id,
+        catalog
+      });
       setRuntimeState((current) => ({
         ...current,
         modelCatalogs: upsertModelProviderCatalog(current.modelCatalogs, catalog)
@@ -6629,8 +6683,6 @@ export default function App() {
     currentProfile: ModelProfile,
     model: ModelProviderCatalog['models'][number]
   ) {
-    const capabilities = normalizeModelCapabilities(model.capabilities, currentProfile.purpose);
-    const purpose = purposeForModelCapabilities(capabilities, currentProfile.purpose);
     const preset =
       modelProviderPresets.find((item) => item.id === currentProfile.providerId) ?? {
         id: currentProfile.providerId,
@@ -6639,14 +6691,7 @@ export default function App() {
         apiBaseUrl: currentProfile.apiBaseUrl,
         models: []
       };
-    const presetModel: ModelProviderPresetModel = {
-      label: model.label ?? model.id,
-      modelName: model.id,
-      purpose,
-      capabilities,
-      temperature: purpose === 'reasoning' ? 0.2 : 0.4,
-      maxTokens: purpose === 'reasoning' ? 8192 : 4096
-    };
+    const presetModel = createPresetModelFromCatalogEntry(model, currentProfile.purpose);
 
     applyModelProviderPreset(preset, presetModel, {
       apiBaseUrl: modelForm.getFieldValue('apiBaseUrl')?.trim(),
@@ -9188,11 +9233,12 @@ function findModelProviderCatalog(
   providerId: string,
   apiBaseUrl?: string
 ): ModelProviderCatalog | undefined {
-  const normalizedApiBaseUrl = normalizeComparableUrl(apiBaseUrl);
+  const normalizedApiBaseUrl = normalizeComparableModelCatalogUrl(providerId, apiBaseUrl);
   return catalogs.find(
     (catalog) =>
       catalog.providerId === providerId &&
-      (!normalizedApiBaseUrl || normalizeComparableUrl(catalog.apiBaseUrl) === normalizedApiBaseUrl)
+      (!normalizedApiBaseUrl ||
+        normalizeComparableModelCatalogUrl(catalog.providerId, catalog.apiBaseUrl) === normalizedApiBaseUrl)
   );
 }
 
@@ -9200,7 +9246,7 @@ function upsertModelProviderCatalog(
   catalogs: ModelProviderCatalog[],
   catalog: ModelProviderCatalog
 ): ModelProviderCatalog[] {
-  const normalizedApiBaseUrl = normalizeComparableUrl(catalog.apiBaseUrl);
+  const normalizedApiBaseUrl = normalizeComparableModelCatalogUrl(catalog.providerId, catalog.apiBaseUrl);
   const nextCatalog: ModelProviderCatalog = {
     ...catalog,
     models: [...catalog.models].sort((left, right) => left.id.localeCompare(right.id))
@@ -9208,13 +9254,13 @@ function upsertModelProviderCatalog(
   const existing = catalogs.find(
     (item) =>
       item.providerId === catalog.providerId &&
-      normalizeComparableUrl(item.apiBaseUrl) === normalizedApiBaseUrl
+      normalizeComparableModelCatalogUrl(item.providerId, item.apiBaseUrl) === normalizedApiBaseUrl
   );
 
   return existing
     ? catalogs.map((item) =>
         item.providerId === catalog.providerId &&
-        normalizeComparableUrl(item.apiBaseUrl) === normalizedApiBaseUrl
+        normalizeComparableModelCatalogUrl(item.providerId, item.apiBaseUrl) === normalizedApiBaseUrl
           ? nextCatalog
           : item
       )
@@ -9223,6 +9269,46 @@ function upsertModelProviderCatalog(
 
 function normalizeComparableUrl(value?: string) {
   return value?.trim().replace(/\/+$/, '').toLowerCase() ?? '';
+}
+
+function normalizeComparableModelCatalogUrl(providerId: string, value?: string) {
+  const normalized = normalizeComparableUrl(value);
+  if (!normalized || !isAliyunBailianProviderId(providerId)) {
+    return normalized;
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    if (parsed.hostname === 'dashscope.aliyuncs.com') {
+      return parsed.origin;
+    }
+  } catch {
+    return normalized;
+  }
+
+  return normalized;
+}
+
+function isAliyunBailianProviderId(providerId: string) {
+  const normalized = providerId.trim().toLowerCase();
+  return normalized === 'aliyun-bailian' || normalized === 'aliyun-asr-compatible' || normalized.includes('aliyun');
+}
+
+function createPresetModelFromCatalogEntry(
+  model: ModelProviderCatalog['models'][number],
+  fallbackPurpose: ModelProfile['purpose'] = 'general'
+): ModelProviderPresetModel {
+  const capabilities = normalizeModelCapabilities(model.capabilities, fallbackPurpose);
+  const purpose = purposeForModelCapabilities(capabilities, fallbackPurpose);
+
+  return {
+    label: model.label ?? model.id,
+    modelName: model.id,
+    purpose,
+    capabilities,
+    temperature: purpose === 'reasoning' ? 0.2 : 0.4,
+    maxTokens: purpose === 'reasoning' ? 8192 : 4096
+  };
 }
 
 function isPendingModelProviderProfile(profile: ModelProfile): boolean {

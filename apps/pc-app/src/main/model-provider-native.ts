@@ -133,7 +133,7 @@ export async function listNativeProviderModels(
     return {
       providerId: request.providerId.trim(),
       providerName: request.providerName.trim(),
-      apiBaseUrl: normalizeAliyunApiBaseUrl(request.apiBaseUrl),
+      apiBaseUrl: request.apiBaseUrl?.trim() || normalizeAliyunApiBaseUrl(request.apiBaseUrl),
       fetchedAt: new Date().toISOString(),
       models: aliyunNativeAsrModels
     };
