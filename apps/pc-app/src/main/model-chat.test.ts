@@ -209,8 +209,41 @@ try {
 
   assert.equal(capturedAliyunProbeUrl, 'https://dashscope.aliyuncs.com/api/v1/tasks/qiuai-connection-test');
   assert.equal(catalog.providerId, 'aliyun-bailian');
+  assert.ok(catalog.models.some((model) => model.id === 'qwen-plus'));
+  assert.ok(catalog.models.some((model) => model.id === 'qwen-vl-max'));
   assert.ok(catalog.models.some((model) => model.id === 'fun-asr'));
-  assert.ok(catalog.models.every((model) => model.capabilities.includes('audio_to_text')));
+  assert.deepEqual(catalog.models.find((model) => model.id === 'qwen-plus')?.capabilities, ['text']);
+  assert.ok(catalog.models.find((model) => model.id === 'fun-asr')?.capabilities.includes('audio_to_text'));
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+let capturedAliyunTextTestUrl = '';
+globalThis.fetch = (async (input: RequestInfo | URL) => {
+  capturedAliyunTextTestUrl = String(input);
+  return new Response(JSON.stringify({ choices: [{ message: { content: 'pong' } }] }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' }
+  });
+}) as typeof fetch;
+
+try {
+  const response = await testDesktopModelConnection({
+    profile: {
+      id: 'aliyun-qwen-plus',
+      providerId: 'aliyun-bailian',
+      providerName: '阿里云',
+      modelName: 'qwen-plus',
+      purpose: 'general',
+      capabilities: ['text'],
+      apiBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      apiKey: 'aliyun-key'
+    }
+  });
+
+  assert.equal(capturedAliyunTextTestUrl, 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions');
+  assert.equal(response.ok, true);
+  assert.equal(response.mode, 'openai_compatible');
 } finally {
   globalThis.fetch = originalFetch;
 }

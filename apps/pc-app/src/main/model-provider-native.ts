@@ -9,7 +9,7 @@ import type {
   DesktopModelTestRequest,
   DesktopModelTestResponse
 } from '../shared/desktop-api.js';
-import type { ModelCapability } from '../shared/desktop-contract.js';
+import type { ModelCapability, ModelPurpose } from '../shared/desktop-contract.js';
 import { inferModelCapabilitiesFromName } from '../shared/desktop-model-capabilities.js';
 
 export type NativeProviderMode = 'openai_compatible' | 'aliyun_bailian' | 'tencent_cloud';
@@ -32,6 +32,16 @@ const aliyunNativeAsrModels = [
   modelCatalogEntry('fun-asr-flash', 'fun-asr-flash / 快速中文语音识别'),
   modelCatalogEntry('fun-asr-mtl', 'fun-asr-mtl / 多语种语音识别'),
   modelCatalogEntry('paraformer-v2', 'paraformer-v2 / 中文语音识别')
+];
+
+const aliyunPlatformModels = [
+  modelCatalogEntry('qwen-plus', 'Qwen Plus / 通用文本', 'general'),
+  modelCatalogEntry('qwen-max', 'Qwen Max / 高质量推理', 'reasoning'),
+  modelCatalogEntry('qwen-turbo', 'Qwen Turbo / 快速低成本', 'general'),
+  modelCatalogEntry('qwen-long', 'Qwen Long / 长文档', 'document'),
+  modelCatalogEntry('qwen-vl-max', 'Qwen VL Max / 图片理解', 'vision'),
+  modelCatalogEntry('qwen-vl-plus', 'Qwen VL Plus / 图片理解', 'vision'),
+  ...aliyunNativeAsrModels
 ];
 
 const tencentNativeAsrModels = [
@@ -57,27 +67,11 @@ export function detectModelProviderMode(input: {
   const capabilities = input.capabilities ?? [];
   const isAudioTask = input.taskKind === 'audio_transcription' || capabilities.includes('audio_to_text');
 
-  if (
-    providerId === 'tencent-cloud' ||
-    providerId === 'tencent-asr-compatible' ||
-    providerId.includes('tencent') ||
-    providerName.includes('腾讯') ||
-    providerName.includes('tencent')
-  ) {
+  if (isAudioTask && isTencentPlatformProvider(providerId, providerName)) {
     return 'tencent_cloud';
   }
 
-  if (
-    providerId === 'aliyun' ||
-    providerId === 'aliyun-bailian' ||
-    providerId === 'aliyun-asr-compatible' ||
-    (providerId.includes('aliyun') && isAudioTask) ||
-    (providerName.includes('阿里云') && isAudioTask) ||
-    (providerName.includes('百炼') && isAudioTask) ||
-    (providerName.includes('aliyun') && isAudioTask) ||
-    (providerName.includes('dashscope') && isAudioTask) ||
-    isAliyunNativeAsrModel(modelName)
-  ) {
+  if (isAliyunNativeAsrModel(modelName) || (isAudioTask && isAliyunPlatformProvider(providerId, providerName))) {
     return 'aliyun_bailian';
   }
 
@@ -117,6 +111,21 @@ export async function invokeNativeAudioTranscription(
 export async function listNativeProviderModels(
   request: DesktopModelListRequest
 ): Promise<DesktopModelListResponse | undefined> {
+  if (isAliyunPlatformProvider(request.providerId, request.providerName, request.apiBaseUrl)) {
+    await probeAliyunBailianConnection({
+      apiBaseUrl: request.apiBaseUrl,
+      apiKey: request.apiKey,
+      timeoutMs: request.timeoutMs
+    });
+    return {
+      providerId: request.providerId.trim(),
+      providerName: request.providerName.trim(),
+      apiBaseUrl: request.apiBaseUrl?.trim() || aliyunCompatibleDefaultApiBaseUrl,
+      fetchedAt: new Date().toISOString(),
+      models: aliyunPlatformModels
+    };
+  }
+
   const mode = detectModelProviderMode({
     providerId: request.providerId,
     providerName: request.providerName,
@@ -978,12 +987,45 @@ function isRecord(value: unknown): value is JsonRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function modelCatalogEntry(id: string, label: string) {
+function modelCatalogEntry(id: string, label: string, fallbackPurpose: ModelPurpose = 'audio') {
   return {
     id,
     label,
-    capabilities: inferModelCapabilitiesFromName(id, 'audio') as ModelCapability[]
+    capabilities: inferModelCapabilitiesFromName(id, fallbackPurpose) as ModelCapability[]
   };
+}
+
+function isTencentPlatformProvider(providerId?: string, providerName?: string): boolean {
+  const normalizedProviderId = normalizeComparable(providerId);
+  const normalizedProviderName = normalizeComparable(providerName);
+
+  return (
+    normalizedProviderId === 'tencent-cloud' ||
+    normalizedProviderId === 'tencent-asr-compatible' ||
+    normalizedProviderId.includes('tencent') ||
+    normalizedProviderName.includes('腾讯') ||
+    normalizedProviderName.includes('tencent')
+  );
+}
+
+function isAliyunPlatformProvider(providerId?: string, providerName?: string, apiBaseUrl?: string): boolean {
+  const normalizedProviderId = normalizeComparable(providerId);
+  const normalizedProviderName = normalizeComparable(providerName);
+  const normalizedApiBaseUrl = normalizeComparable(apiBaseUrl);
+
+  return (
+    normalizedProviderId === 'aliyun' ||
+    normalizedProviderId === 'aliyun-bailian' ||
+    normalizedProviderId === 'aliyun-asr-compatible' ||
+    normalizedProviderId === 'dashscope' ||
+    normalizedProviderId.includes('aliyun') ||
+    normalizedProviderId.includes('dashscope') ||
+    normalizedProviderName.includes('阿里云') ||
+    normalizedProviderName.includes('百炼') ||
+    normalizedProviderName.includes('aliyun') ||
+    normalizedProviderName.includes('dashscope') ||
+    normalizedApiBaseUrl.includes('dashscope.aliyuncs.com')
+  );
 }
 
 function isAliyunNativeAsrModel(value: string): boolean {

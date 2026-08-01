@@ -2318,23 +2318,12 @@ body,
   background: #fafbfc;
 }
 
-.provider-model-catalog.compact {
-  gap: 8px;
-  padding: 10px;
-  background: #f8fbff;
-}
-
 .provider-model-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   gap: 8px;
   max-height: 220px;
   overflow: auto;
-}
-
-.provider-model-list.compact {
-  grid-template-columns: 1fr;
-  max-height: 168px;
 }
 
 .provider-model-option {
@@ -2349,11 +2338,6 @@ body,
   color: #1f2328;
   text-align: left;
   cursor: pointer;
-}
-
-.provider-model-list.compact .provider-model-option {
-  min-height: 54px;
-  padding: 7px 9px;
 }
 
 .provider-model-option:hover,
@@ -2371,17 +2355,6 @@ body,
 
 .provider-model-option small {
   color: #6b7280;
-}
-
-.provider-model-more {
-  display: flex;
-  align-items: center;
-  min-height: 32px;
-  padding: 0 10px;
-  border: 1px dashed #c9d7e8;
-  border-radius: 8px;
-  color: #57606a;
-  font-size: 12px;
 }
 
 .simple-panel {

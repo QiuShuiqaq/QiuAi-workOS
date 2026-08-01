@@ -1760,19 +1760,49 @@ export default function App() {
     }
   }, [runtimeState.runtimeSnapshot.tasks, selectedTaskId]);
 
+  const desktopRoleTemplates = useMemo(() => {
+    return authorizedRoleTemplateCatalog.templates.map(toDesktopRoleTemplate);
+  }, [authorizedRoleTemplateCatalog.source, authorizedRoleTemplateCatalog.templates]);
+
+  const desktopRoleTemplateByRoleCode = useMemo(() => {
+    const authorizedByRoleCode = new Map(
+      desktopRoleTemplates.map((template) => [template.roleCode, template] as const)
+    );
+
+    return authorizedByRoleCode;
+  }, [desktopRoleTemplates]);
+
+  const refreshedInstalledRolePackages = useMemo(
+    () =>
+      runtimeState.rolePackages.map((rolePackage) =>
+        refreshInstalledRolePackageFromTemplate(
+          rolePackage,
+          desktopRoleTemplateByRoleCode.get(rolePackage.roleCode)
+        )
+      ),
+    [desktopRoleTemplateByRoleCode, runtimeState.rolePackages]
+  );
+  const refreshedInstalledRolePackageByRoleCode = useMemo(
+    () =>
+      new Map(
+        refreshedInstalledRolePackages.map((rolePackage) => [rolePackage.roleCode, rolePackage] as const)
+      ),
+    [refreshedInstalledRolePackages]
+  );
+
   const installedDigitalEmployeePackages = useMemo(
     () =>
-      runtimeState.rolePackages.filter(
+      refreshedInstalledRolePackages.filter(
         (rolePackage) => readRoleApplicationType(rolePackage) === 'digital_employee'
       ),
-    [runtimeState.rolePackages]
+    [refreshedInstalledRolePackages]
   );
   const installedDigitalFactoryPackages = useMemo(
     () =>
-      runtimeState.rolePackages.filter(
+      refreshedInstalledRolePackages.filter(
         (rolePackage) => readRoleApplicationType(rolePackage) === 'digital_factory'
       ),
-    [runtimeState.rolePackages]
+    [refreshedInstalledRolePackages]
   );
 
   useEffect(() => {
@@ -2486,9 +2516,9 @@ export default function App() {
     return orderedTasks.map(
       (task) =>
         detailsById.get(task.taskId) ??
-        createTaskDetailFromSummary(task, resolveRoleName(runtimeState.rolePackages, task.roleCode))
+        createTaskDetailFromSummary(task, resolveRoleName(refreshedInstalledRolePackages, task.roleCode))
     );
-  }, [orderedTasks, runtimeState.rolePackages, runtimeState.taskDetails]);
+  }, [orderedTasks, refreshedInstalledRolePackages, runtimeState.taskDetails]);
 
   const selectedTask = useMemo(() => {
     if (!taskDetails.length) {
@@ -2537,21 +2567,9 @@ export default function App() {
     return runtimeState.runtimeSnapshot.rolePackages;
   }, [runtimeState.runtimeSnapshot.rolePackages]);
 
-  const desktopRoleTemplates = useMemo(() => {
-    return authorizedRoleTemplateCatalog.templates.map(toDesktopRoleTemplate);
-  }, [authorizedRoleTemplateCatalog.source, authorizedRoleTemplateCatalog.templates]);
-
-  const desktopRoleTemplateByRoleCode = useMemo(() => {
-    const authorizedByRoleCode = new Map(
-      desktopRoleTemplates.map((template) => [template.roleCode, template] as const)
-    );
-
-    return authorizedByRoleCode;
-  }, [authorizedRoleTemplateCatalog.source, desktopRoleTemplates]);
-
   const installedRoleApplicationUsage = useMemo(() => {
-    return countInstalledRoleApplications(runtimeState.rolePackages);
-  }, [runtimeState.rolePackages]);
+    return countInstalledRoleApplications(refreshedInstalledRolePackages);
+  }, [refreshedInstalledRolePackages]);
 
   const enabledModelCount = runtimeState.localRuntime.enabledModelProfileIds.length;
   const enabledToolCount = runtimeState.localRuntime.enabledToolIds.length;
@@ -3243,7 +3261,7 @@ export default function App() {
 
       const detail =
         taskDetails.find((item) => item.taskId === task.taskId) ??
-        createTaskDetailFromSummary(task, resolveRoleName(runtimeState.rolePackages, task.roleCode));
+        createTaskDetailFromSummary(task, resolveRoleName(refreshedInstalledRolePackages, task.roleCode));
       latestTaskByRole.set(task.roleCode, detail);
     }
 
@@ -3262,7 +3280,7 @@ export default function App() {
         ? selectedTask
         : activeRoleTasks[0];
     const conversationRole =
-      runtimeState.rolePackages.find((rolePackage) => rolePackage.roleCode === activeRoleCode) ??
+      refreshedInstalledRolePackageByRoleCode.get(activeRoleCode) ??
       activeRolePackage;
     const conversationFinalAnswer = conversationTask ? readConversationFinalAnswer(conversationTask) : '';
     const conversationArtifacts = conversationTask
@@ -3857,31 +3875,29 @@ export default function App() {
           }
         )
       : [];
-    const selectedFactoryAsrRequirement = selectedFactoryModelReadiness.find((requirement) =>
-      readModelProfileCapabilities(requirement.profile).includes('audio_to_text')
-    );
     const dialectOptions = readFactoryAsrDialectOptions(selectedFactoryManifest);
     const targetSecondOptions = selectedFactoryManifest.editing?.targetSecondOptions?.length
       ? selectedFactoryManifest.editing.targetSecondOptions
       : [15, 30, 45];
-    const audioProfiles = runtimeState.modelProfiles.filter((profile) =>
-      readModelProfileCapabilities(profile).includes('audio_to_text')
-    );
-    const audioProfileOptions = audioProfiles.map((profile) => {
-      const enabled = runtimeState.localRuntime.enabledModelProfileIds.includes(profile.id);
-      const configured = isRuntimeModelProfileConfigured(profile, selectedFactoryCode);
-      const suffix = [
-        enabled ? '' : '未启用',
-        configured ? '' : '未配置'
-      ].filter(Boolean).join(' / ');
+    const audioProfileOptions = selectedFactoryModelReadiness
+      .filter((requirement) => readModelProfileCapabilities(requirement.profile).includes('audio_to_text'))
+      .map((requirement) => {
+        const profile = requirement.profile;
+        const suffix = [
+          requirement.enabled ? '' : '未启用',
+          requirement.configured ? '' : '未配置'
+        ].filter(Boolean).join(' / ');
 
-      return {
-        value: profile.id,
-        label: `${profile.providerName} / ${profile.modelName}${suffix ? `（${suffix}）` : ''}`,
-        disabled: !enabled || !configured
-      };
-    });
-    const hasReadyAudioProfile = audioProfileOptions.some((option) => !option.disabled);
+        return {
+          value: profile.id,
+          label: `${profile.providerName} / ${profile.modelName}${suffix ? `（${suffix}）` : ''}`,
+          disabled: !requirement.known
+        };
+      });
+    const hasReadyAudioProfile = selectedFactoryModelReadiness.some(
+      (requirement) =>
+        requirement.ready && readModelProfileCapabilities(requirement.profile).includes('audio_to_text')
+    );
     const acceptedFactoryFileTypes = isVideoFactory
       ? '.mp4,.mov,.mkv,.avi,.webm,.m4v'
       : '.png,.jpg,.jpeg,.webp,.xlsx,.csv';
@@ -4758,9 +4774,12 @@ export default function App() {
     const roleConfigRolePackage = runtimeState.rolePackages.find(
       (rolePackage) => rolePackage.roleCode === roleConfigRoleCode
     );
+    const refreshedRoleConfigRolePackage = roleConfigRoleCode
+      ? refreshedInstalledRolePackageByRoleCode.get(roleConfigRoleCode) ?? roleConfigRolePackage
+      : undefined;
     const roleConfigPreviewPackage = roleConfigTemplate
       ? toConfiguredRolePackagePreview(roleConfigTemplate, roleConfigRolePackage)
-      : undefined;
+      : refreshedRoleConfigRolePackage;
     const roleConfigModelRequirements = roleConfigPreviewPackage
       ? getRoleModelRuntimeRequirementStatuses(
           runtimeState.modelProfiles,
@@ -4877,8 +4896,10 @@ export default function App() {
               const installedRolePackage = runtimeState.rolePackages.find(
                 (rolePackage) => rolePackage.roleCode === template.roleCode
               );
-              const readiness = installedRolePackage
-                ? buildRoleRuntimeReadiness(runtimeState, installedRolePackage)
+              const refreshedInstalledRolePackage =
+                refreshedInstalledRolePackageByRoleCode.get(template.roleCode) ?? installedRolePackage;
+              const readiness = refreshedInstalledRolePackage
+                ? buildRoleRuntimeReadiness(runtimeState, refreshedInstalledRolePackage)
                 : undefined;
               const hasTemplateUpdate = isInstalledRoleTemplateOutdated(template, installedRolePackage);
               const fileContract = buildRoleFileContractSummary(template);
@@ -5212,14 +5233,10 @@ export default function App() {
   function renderProviderModelCatalogPanel(input: {
     catalog: ModelProviderCatalog;
     selectedModelName?: string;
-    compact?: boolean;
     onPick: (model: ModelProviderCatalog['models'][number]) => void;
   }) {
-    const visibleModels = input.compact ? input.catalog.models.slice(0, 6) : input.catalog.models;
-    const hiddenCount = Math.max(input.catalog.models.length - visibleModels.length, 0);
-
     return (
-      <div className={input.compact ? 'provider-model-catalog compact' : 'provider-model-catalog'}>
+      <div className="provider-model-catalog">
         <Flex align="center" justify="space-between" gap={12} wrap="wrap">
           <Space size={8} wrap>
             <Typography.Text strong>已拉取可用模型</Typography.Text>
@@ -5229,8 +5246,8 @@ export default function App() {
             最近拉取：{formatDateTime(input.catalog.fetchedAt)}
           </Typography.Text>
         </Flex>
-        <div className={input.compact ? 'provider-model-list compact' : 'provider-model-list'}>
-          {visibleModels.map((model) => (
+        <div className="provider-model-list">
+          {input.catalog.models.map((model) => (
             <button
               key={model.id}
               type="button"
@@ -5247,9 +5264,6 @@ export default function App() {
               <small>{modelCapabilitySummary(model.capabilities, 'general')}</small>
             </button>
           ))}
-          {hiddenCount > 0 ? (
-            <span className="provider-model-more">还有 {hiddenCount} 个模型，进入配置后查看全部</span>
-          ) : null}
         </div>
       </div>
     );
@@ -5379,21 +5393,6 @@ export default function App() {
                     ))}
                     {preset.models.length > 5 ? <Tag>+{preset.models.length - 5}</Tag> : null}
                   </Space>
-
-                  {modelCatalog
-                    ? renderProviderModelCatalogPanel({
-                        catalog: modelCatalog,
-                        compact: true,
-                        selectedModelName: undefined,
-                        onPick: (model) => {
-                          applyModelProviderPreset(
-                            preset,
-                            createPresetModelFromCatalogEntry(model, preset.models[0]?.purpose ?? 'general')
-                          );
-                          setModelConfigOpen(true);
-                        }
-                      })
-                    : null}
 
                   <div className="catalog-card-action-row">
                     <Button
@@ -6263,18 +6262,28 @@ export default function App() {
     if (isMedicalCaseVideoFactory(factory)) {
       const screeningProfiles = readFactoryScreeningProfiles(factory);
       const defaultProfile = screeningProfiles.find((item) => item.defaultSelected) ?? screeningProfiles[0];
-      const audioProfiles = runtimeState.modelProfiles.filter((profile) =>
-        readModelProfileCapabilities(profile).includes('audio_to_text')
+      const rolePackage =
+        getPreparedInstalledRolePackage(roleCode) ??
+        normalizeRolePackageRequiredModelProfiles(toInstalledRolePackage(template));
+      const modelRequirements = getRoleModelRuntimeRequirementStatuses(
+        ensureModelProfilesForRolePackage(runtimeState.modelProfiles, rolePackage),
+        runtimeState.localRuntime.enabledModelProfileIds,
+        rolePackage,
+        {
+          roleCode,
+          credentials: runtimeState.modelCredentials,
+          roleBindings: runtimeState.roleModelCredentialBindings
+        }
       );
-      const readyAudioProfile = audioProfiles.find(
-        (profile) =>
-          runtimeState.localRuntime.enabledModelProfileIds.includes(profile.id) &&
-          isRuntimeModelProfileConfigured(profile, roleCode)
+      const audioRequirements = modelRequirements.filter((requirement) =>
+        readModelProfileCapabilities(requirement.profile).includes('audio_to_text')
       );
+      const readyAudioProfile = audioRequirements.find((requirement) => requirement.ready)?.profile;
+      const firstAudioProfile = audioRequirements[0]?.profile;
 
       return {
         roleCode,
-        asrModelProfileId: readyAudioProfile?.id ?? audioProfiles[0]?.id,
+        asrModelProfileId: readyAudioProfile?.id ?? firstAudioProfile?.id,
         dialect: factory.asr?.defaultDialect ?? 'auto',
         screeningProfileKey: defaultProfile?.key ?? 'default_medical_case',
         editEnabled: factory.editing?.defaultEnabled ?? false,
@@ -6339,14 +6348,16 @@ export default function App() {
         return;
       }
 
-      const asrProfile = runtimeState.modelProfiles.find((profile) => profile.id === values.asrModelProfileId);
+      const rolePackage =
+        getPreparedInstalledRolePackage(values.roleCode) ??
+        normalizeRolePackageRequiredModelProfiles(toInstalledRolePackage(template));
+      const availableModelProfiles = ensureModelProfilesForRolePackage(runtimeState.modelProfiles, rolePackage);
+      const asrProfile = availableModelProfiles.find((profile) => profile.id === values.asrModelProfileId);
       if (
         !asrProfile ||
-        !readModelProfileCapabilities(asrProfile).includes('audio_to_text') ||
-        !runtimeState.localRuntime.enabledModelProfileIds.includes(asrProfile.id) ||
-        !isRuntimeModelProfileConfigured(asrProfile, values.roleCode)
+        !readModelProfileCapabilities(asrProfile).includes('audio_to_text')
       ) {
-        message.warning('请选择已启用且已配置 API Key 的语音转文字模型。');
+        message.warning('请选择语音转文字能力对应的模型。');
         return;
       }
 
@@ -6966,8 +6977,15 @@ export default function App() {
     }
   }
 
+  function getPreparedInstalledRolePackage(roleCode: string): RolePackageManifest | undefined {
+    const rolePackage =
+      refreshedInstalledRolePackageByRoleCode.get(roleCode) ??
+      runtimeState.rolePackages.find((item) => item.roleCode === roleCode);
+    return rolePackage ? normalizeRolePackageRequiredModelProfiles(rolePackage) : undefined;
+  }
+
   function prepareRoleForTaskRun(roleCode: string): DesktopRuntimeState | undefined {
-    const rolePackage = runtimeState.rolePackages.find((item) => item.roleCode === roleCode);
+    const rolePackage = getPreparedInstalledRolePackage(roleCode);
     if (!rolePackage) {
       message.warning('该应用未安装在当前电脑，请先安装后再执行任务。');
       return undefined;
@@ -6977,17 +6995,7 @@ export default function App() {
       message.warning(`该${roleApplicationLabel}已被服务端删除，不能继续执行。`);
       return undefined;
     }
-    const latestTemplate = desktopRoleTemplates.find((template) => template.roleCode === roleCode);
-    if (latestTemplate && isInstalledRoleTemplateOutdated(latestTemplate, rolePackage)) {
-      message.warning(`该${roleApplicationLabel}有新版可用，请先在“数字市场”页面更新后再运行。`);
-      navigateToSection('roles');
-      return undefined;
-    }
-
-    const preparedRolePackage: RolePackageManifest = {
-      ...rolePackage,
-      modelProfileIds: readRequiredModelProfileIdsForRolePackage(rolePackage)
-    };
+    const preparedRolePackage = rolePackage;
     const preparedModelProfiles = ensureModelProfilesForRolePackage(
       runtimeState.modelProfiles,
       preparedRolePackage
@@ -8339,6 +8347,36 @@ function toConfiguredRolePackagePreview(
     ...templateRolePackage,
     requiredKnowledgeSources:
       installedRolePackage?.requiredKnowledgeSources ?? templateRolePackage.requiredKnowledgeSources
+  };
+}
+
+function refreshInstalledRolePackageFromTemplate(
+  installedRolePackage: RolePackageManifest,
+  template: DesktopRoleTemplate | undefined
+): RolePackageManifest {
+  if (!template) {
+    return normalizeRolePackageRequiredModelProfiles(installedRolePackage);
+  }
+
+  const templateRolePackage = toInstalledRolePackage(template);
+  const refreshedRolePackage: RolePackageManifest = {
+    ...templateRolePackage,
+    requiredKnowledgeSources:
+      installedRolePackage.requiredKnowledgeSources.length > 0
+        ? installedRolePackage.requiredKnowledgeSources
+        : templateRolePackage.requiredKnowledgeSources
+  };
+
+  return {
+    ...refreshedRolePackage,
+    modelProfileIds: readRequiredModelProfileIdsForRolePackage(refreshedRolePackage)
+  };
+}
+
+function normalizeRolePackageRequiredModelProfiles(rolePackage: RolePackageManifest): RolePackageManifest {
+  return {
+    ...rolePackage,
+    modelProfileIds: readRequiredModelProfileIdsForRolePackage(rolePackage)
   };
 }
 
