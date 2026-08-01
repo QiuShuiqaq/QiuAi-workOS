@@ -32,6 +32,7 @@ import { useState } from 'react';
 
 import { createBrowserApiClient } from '../../shared/api/browser-api';
 import { ConsoleShell } from '../../shared/console/ConsoleShell';
+import { withWorkspaceId } from '../common/workspace-href';
 
 export interface SettingsPageClientProps {
   currentAccount: CurrentAccountResponse;
@@ -71,12 +72,6 @@ function formatCurrency(amountCents: number, currency: string) {
   }).format(amountCents / 100);
 }
 
-function planPriceText(plan: PlanDetail) {
-  if (plan.billingCycle === 'FREE') return '免费';
-  if (!plan.priceCents) return '待配置';
-  return formatCurrency(plan.priceCents, plan.currency ?? 'CNY');
-}
-
 function formatDateTime(value?: string) {
   if (!value) return '-';
   return new Intl.DateTimeFormat('zh-CN', {
@@ -109,24 +104,6 @@ function configStatusText(provider?: PaymentProviderConfigStatus) {
   return provider.isConfigured ? '已配置' : '未完成';
 }
 
-function getPlanPaymentDisabledReason(
-  plan: PlanDetail,
-  options: {
-    isApiFallback: boolean;
-    workspaceType: string;
-    isAlipayConfigured: boolean;
-  }
-) {
-  const isPaidPlan = plan.billingCycle === 'MONTHLY' || plan.billingCycle === 'ANNUAL';
-
-  if (options.isApiFallback) return '后端 API 未连接';
-  if (options.workspaceType !== 'enterprise') return '个人空间不能购买企业套餐';
-  if (!isPaidPlan) return '该套餐不支持在线支付';
-  if (!plan.priceCents) return '请先配置正式价格';
-  if (!options.isAlipayConfigured) return '请先完成支付宝配置';
-  return undefined;
-}
-
 export function SettingsPageClient({
   currentAccount,
   plans,
@@ -136,7 +113,6 @@ export function SettingsPageClient({
   isApiFallback
 }: SettingsPageClientProps) {
   const router = useRouter();
-  const [payingPlanCode, setPayingPlanCode] = useState<string | null>(null);
   const [isCreatingBindingCode, setIsCreatingBindingCode] = useState(false);
   const [latestBindingCode, setLatestBindingCode] =
     useState<CreateDesktopBindingCodeResponse['data'] | null>(null);
@@ -146,37 +122,7 @@ export function SettingsPageClient({
   const currentPlan = plans.find((plan) => plan.code === activeWorkspace.planCode) ?? plans[0];
   const alipayStatus = billing.paymentProviders.find((provider) => provider.provider === 'ALIPAY');
   const missingAlipayKeys = alipayStatus?.missingEnvKeys.join(', ') || '-';
-  const purchasablePlans = plans.filter(
-    (plan) => plan.billingCycle === 'MONTHLY' || plan.billingCycle === 'ANNUAL'
-  );
-
-  async function createAlipayOrder(plan: PlanDetail) {
-    if (!plan.priceCents) {
-      message.warning('该套餐还没有配置正式价格');
-      return;
-    }
-
-    setPayingPlanCode(plan.code);
-    try {
-      const response = await createBrowserApiClient().createBillingOrder(activeWorkspace.id, {
-        planCode: plan.code,
-        provider: 'ALIPAY'
-      });
-
-      if (response.data.paymentUrl) {
-        message.success('支付订单已创建');
-        window.location.assign(response.data.paymentUrl);
-        return;
-      }
-
-      message.warning('订单已创建，但支付链接未返回');
-      router.refresh();
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '创建支付订单失败');
-    } finally {
-      setPayingPlanCode(null);
-    }
-  }
+  const purchaseHref = withWorkspaceId('/purchase', activeWorkspace.id);
 
   async function createDesktopBindingCode() {
     if (isApiFallback) {
@@ -262,65 +208,6 @@ export function SettingsPageClient({
       title: '额度',
       key: 'limit',
       render: (_value, entitlement) => entitlementValue(entitlement)
-    }
-  ];
-
-  const planColumns: ColumnsType<PlanDetail> = [
-    {
-      title: '版本',
-      dataIndex: 'name',
-      render: (_value, plan) => (
-        <Space direction="vertical" size={2}>
-          <Typography.Text strong>{plan.name}</Typography.Text>
-          <Typography.Text type="secondary">{plan.code}</Typography.Text>
-        </Space>
-      )
-    },
-    {
-      title: '计费',
-      dataIndex: 'billingCycle',
-      render: (value: string) => billingCycleLabel(value)
-    },
-    {
-      title: '价格',
-      key: 'price',
-      render: (_value, plan) => planPriceText(plan)
-    },
-    {
-      title: '说明',
-      dataIndex: 'description',
-      responsive: ['md']
-    },
-    {
-      title: '当前',
-      key: 'current',
-      render: (_value, plan) =>
-        plan.code === activeWorkspace.planCode ? <QiuStatusTag tone="processing">当前版本</QiuStatusTag> : null
-    },
-    {
-      title: '操作',
-      key: 'action',
-      render: (_value, plan) => {
-        const disabledReason = getPlanPaymentDisabledReason(plan, {
-          isApiFallback,
-          workspaceType: activeWorkspace.workspaceType,
-          isAlipayConfigured: Boolean(alipayStatus?.isConfigured)
-        });
-
-        return (
-          <Button
-            icon={<CreditCardOutlined />}
-            size="small"
-            type={plan.code === activeWorkspace.planCode ? 'default' : 'primary'}
-            disabled={Boolean(disabledReason)}
-            title={disabledReason}
-            loading={payingPlanCode === plan.code}
-            onClick={() => void createAlipayOrder(plan)}
-          >
-            {plan.code === activeWorkspace.planCode ? '续费' : '购买'}
-          </Button>
-        );
-      }
     }
   ];
 
@@ -472,7 +359,7 @@ export function SettingsPageClient({
 
   return (
     <ConsoleShell currentAccount={currentAccount}>
-      <QiuPage title="企业设置" description="管理套餐、支付和桌面端设备授权。">
+      <QiuPage title="企业设置" description="管理工作空间信息和桌面端设备授权。">
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           {isApiFallback ? <Alert showIcon type="warning" message="后端 API 未连接，当前显示 fallback 数据。" /> : null}
 
@@ -573,15 +460,17 @@ export function SettingsPageClient({
             />
           </Card>
 
-          <Card title="购买套餐" bordered={false}>
+          <Card title="购买中心" bordered={false}>
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
               <Alert
                 showIcon
                 type="info"
-                message="企业套餐正式价格"
-                description="企业基础版 588 元/月，企业标准版 1088 元/月，企业专业版 2888 元/月；年付按 10 个月计费。"
+                message="购买和续费已迁移到独立页面。"
+                description="套餐购买、续费、支付订单和支付状态统一在购买中心维护；企业设置只保留设备授权和基础信息。"
               />
-              <Table rowKey="code" columns={planColumns} dataSource={purchasablePlans} pagination={false} />
+              <Button type="primary" icon={<CreditCardOutlined />} href={purchaseHref}>
+                打开购买中心
+              </Button>
             </Space>
           </Card>
 

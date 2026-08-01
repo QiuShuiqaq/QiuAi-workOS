@@ -1,6 +1,6 @@
 'use client';
 
-import { SettingOutlined } from '@ant-design/icons';
+import { CreditCardOutlined, SettingOutlined } from '@ant-design/icons';
 import type {
   CurrentAccountResponse,
   EnterpriseWorkspaceOverview
@@ -69,6 +69,7 @@ export function EnterprisePageClient({
     currentAccount.workspaces.find((workspace) => workspace.id === currentAccount.activeWorkspaceId) ??
     currentAccount.workspaces[0];
   const settingsHref = `/settings?workspaceId=${encodeURIComponent(activeWorkspace.id)}`;
+  const purchaseHref = `/purchase?workspaceId=${encodeURIComponent(activeWorkspace.id)}`;
 
   const entitlementColumns: ColumnsType<EnterpriseWorkspaceOverview['plan']['entitlements'][number]> = [
     {
@@ -96,9 +97,14 @@ export function EnterprisePageClient({
         title="企业控制台"
         description={`单企业账号，管理套餐、设备授权和数字员工使用 · ${activeWorkspace.name}`}
         actions={
-          <Button icon={<SettingOutlined />} href={settingsHref}>
-            设备与套餐设置
-          </Button>
+          <Space>
+            <Button type="primary" icon={<CreditCardOutlined />} href={purchaseHref}>
+              购买中心
+            </Button>
+            <Button icon={<SettingOutlined />} href={settingsHref}>
+              设备设置
+            </Button>
+          </Space>
         }
       >
         <Space direction="vertical" size={16} style={{ width: '100%' }}>

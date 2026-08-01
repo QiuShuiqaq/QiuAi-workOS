@@ -1453,6 +1453,7 @@ function buildMedicalCaseVideoScreeningFactoryWorkflowGraph(): ServerRoleWorkflo
         llmTaskType: 'video_screening_batch',
         outputMode: 'json',
         concurrency: 3,
+        requiredModelProfileIds: ['qiu-asr-default'],
         requiredToolActions: [
           { toolId: 'video-processing', action: 'video.probe' },
           { toolId: 'local-filesystem', action: 'filesystem.write_text_file' },
@@ -1506,14 +1507,14 @@ function buildMedicalCaseVideoScreeningFactoryWorkflowGraph(): ServerRoleWorkflo
       { name: 'factory_request', type: 'json', description: '工厂面板提交的视频批量处理参数。', required: true },
       { name: 'video_batch', type: 'json', description: '待处理视频批次，单批最多 50 个。', required: true },
       { name: 'screening_gates', type: 'json', description: '用户选择的筛选标准和逐级关卡。', required: true },
-      { name: 'asr_config', type: 'json', description: 'ASR 模型、语言和方言配置。', required: true },
+      { name: 'asr_config', type: 'json', description: '语音转文字模型、语言和方言配置。', required: true },
       { name: 'edit_config', type: 'json', description: '是否初剪和目标成片时长。', required: true },
       { name: 'video_screening_results', type: 'json', description: '每个视频的筛选、评分、转写、风险和初剪结果。', required: true },
       { name: 'qualified_video_results', type: 'json', description: '通过筛选并完成评分的视频结果集合。', required: true },
       { name: 'qualified_video_paths', type: 'json', description: '所有合格视频的本地地址清单。', required: true },
       { name: 'edited_video_folder', type: 'text', description: '开启初剪后生成的本地初剪视频合集文件夹。' },
       { name: 'screening_summary', type: 'text', description: '批量处理统计摘要。', required: true },
-      { name: 'transcript', type: 'text', description: 'ASR 转写文本。' }
+      { name: 'transcript', type: 'text', description: '语音转写文本。' }
     ],
     runtimePolicy: {
       maxNodeExecutions: 180,
@@ -3096,14 +3097,14 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     version: DESIGNED_ROLE_TEMPLATE_VERSION,
     name: '视频质检剪辑工厂',
     industry: '医疗健康 / 案例视频运营',
-    scenario: '批量筛选案例视频、ASR 转写、素材评分和可选初剪',
+    scenario: '批量筛选案例视频、语音转写、素材评分和可选初剪',
     description: '面向医疗健康案例视频运营场景，按硬性规则先筛掉不合格视频，再对通过视频做表达质量评分，并可选生成本地初剪视频。',
     recommendedPlanCode: 'ENTERPRISE_PRO_MONTHLY',
     businessGoal: '用稳定的批量筛选和评分流程替代人工初筛，降低案例视频素材审核与粗剪成本。',
     knowledgeSources: ['企业知识库', '案例视频筛选标准', '医疗内容合规边界', '历史高质量案例素材'],
     tools: ['video-processing', 'office-document', 'local-filesystem'],
     skills: [
-      skill('video_gate_screening', '视频硬性筛选', '按比例、时长、音轨、ASR 质量和内容完整性逐级筛掉不合格素材。'),
+      skill('video_gate_screening', '视频硬性筛选', '按比例、时长、音轨、语音转写质量和内容完整性逐级筛掉不合格素材。'),
       skill('case_expression_scoring', '案例表达评分', '按表达清晰度、改善表述完整度、自然度和剪辑价值评分。'),
       skill('rough_cut_planning', '可选初剪规划', '在用户开启初剪时生成剪辑计划并调用本地视频工具导出片段。')
     ],

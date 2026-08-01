@@ -362,7 +362,7 @@ const medicalCaseVideoScreeningGates: Array<{
   {
     key: 'asr_quality',
     label: '语音质量筛选',
-    description: '用 ASR 转写结果判断是否存在说话听不清、识别失败或内容过短。',
+    description: '用语音转写结果判断是否存在说话听不清、识别失败或内容过短。',
     rules: [
       { metric: 'transcriptChars', operator: '>=', value: 80, failReason: '识别文本过短，说话内容不足' },
       { metric: 'unclearTokenRatio', operator: '<=', value: 0.25, failReason: '语音含糊或识别失败比例过高' }
@@ -481,6 +481,11 @@ const modelProfileOptions = [
   { value: 'qiu-general-default', label: '企业默认通用模型（兜底，PC 端配置）' },
   { value: 'qiu-reasoning-default', label: '企业默认推理模型（兜底，PC 端配置）' },
   { value: 'qiu-vision-default', label: '企业默认视觉模型（兜底，PC 端配置）' },
+  { value: 'qiu-asr-default', label: '企业默认语音模型（兜底，PC 端配置）' },
+  { value: 'aliyun-fun-asr', label: '阿里云 / fun-asr（语音转文字）' },
+  { value: 'aliyun-qwen3-asr-flash-filetrans', label: '阿里云 / qwen3-asr-flash-filetrans（文件转写）' },
+  { value: 'tencent-16k-zh-dialect', label: '腾讯云 / 16k_zh_dialect（多方言识别）' },
+  { value: 'tencent-16k-zh-medical', label: '腾讯云 / 16k_zh_medical（中文医疗）' },
   { value: 'custom-model', label: '自定义 OpenAI 兼容模型' }
 ];
 
@@ -561,7 +566,7 @@ const llmTaskTypeOptions: Array<{
   {
     value: 'audio_transcription',
     label: '语音转写',
-    description: '把音频或视频音轨转成文本，适合 ASR 节点和批量视频处理前置转写。',
+    description: '把音频或视频音轨转成文本，适合语音转写节点和批量视频处理前置转写。',
     requiredCapabilities: ['audio_to_text'],
     defaultOutputMode: 'text'
   },
@@ -1196,6 +1201,12 @@ function fallbackModelOptionSupportsLlmTask(option: { value: string }, taskType:
   }
   if (taskType === 'reasoning') return option.value.includes('reasoning') || option.value.includes('deepseek');
   if (taskType === 'vision') return option.value.includes('vision') || option.value.includes('gpt-4o');
+  if (taskType === 'audio_transcription' || taskType === 'video_screening_batch') {
+    return option.value.includes('asr') ||
+      option.value.includes('qiu-asr') ||
+      option.value.includes('tencent-16k') ||
+      option.value.includes('aliyun');
+  }
   return option.value === 'custom-model';
 }
 
@@ -1410,8 +1421,14 @@ function deriveWorkflowKnowledgeSources(graph: RoleWorkflowGraph): string[] {
 function deriveWorkflowModelProfileIds(graph: RoleWorkflowGraph): string[] {
   return uniqueTags(
     getWorkflowExecutableNodes(graph)
-      .filter((node) => isModelNodeType(node.type))
-      .map((node) => node.modelProfileId ?? 'qiu-general-default')
+      .flatMap((node) => {
+        const requiredModelProfileIds = Array.isArray(node.config?.requiredModelProfileIds)
+          ? node.config.requiredModelProfileIds.filter((item): item is string => typeof item === 'string')
+          : [];
+        return isModelNodeType(node.type)
+          ? [node.modelProfileId ?? 'qiu-general-default', ...requiredModelProfileIds]
+          : requiredModelProfileIds;
+      })
   );
 }
 
@@ -1826,6 +1843,7 @@ function createMedicalCaseVideoScreeningFactoryWorkflowGraph(): RoleWorkflowGrap
         llmTaskType: 'video_screening_batch',
         outputMode: 'json',
         concurrency: 3,
+        requiredModelProfileIds: ['qiu-asr-default'],
         requiredToolActions: [
           { toolId: 'video-processing', action: 'video.probe' },
           { toolId: 'local-filesystem', action: 'filesystem.write_text_file' },
@@ -1879,7 +1897,7 @@ function createMedicalCaseVideoScreeningFactoryWorkflowGraph(): RoleWorkflowGrap
       { name: 'factory_request', type: 'json', description: '工厂面板提交的视频批量处理参数。', required: true },
       { name: 'video_batch', type: 'json', description: '待处理视频批次，单批最多 50 个。', required: true },
       { name: 'screening_gates', type: 'json', description: '用户选择的筛选标准和逐级关卡。', required: true },
-      { name: 'asr_config', type: 'json', description: 'ASR 模型、语言和方言配置。', required: true },
+      { name: 'asr_config', type: 'json', description: '语音转文字模型、语言和方言配置。', required: true },
       { name: 'edit_config', type: 'json', description: '是否初剪和目标成片时长。', required: true },
       { name: 'video_screening_results', type: 'json', description: '每个视频的筛选、评分、转写、风险和初剪结果。', required: true },
       { name: 'qualified_video_results', type: 'json', description: '通过筛选并完成评分的视频结果集合。', required: true },
@@ -5390,7 +5408,7 @@ function buildMedicalCaseVideoFactoryManifest() {
       {
         key: 'screening_score',
         label: '筛选评分明细表',
-        description: '辅助输出每个视频的筛选状态、失败原因、评分、等级、ASR 转写和风险提示，方便人工复核。',
+        description: '辅助输出每个视频的筛选状态、失败原因、评分、等级、语音转写和风险提示，方便人工复核。',
         outputType: 'xlsx',
         defaultSelected: true
       },
@@ -5648,7 +5666,7 @@ export function AdminCreateRoleTemplatePageClient({
         scenario: form.getFieldValue('scenario') || '批量筛选视频、评分并可选生成初剪',
         description:
           form.getFieldValue('description') ||
-          '面向企业视频素材团队的批量视频质检工厂，支持规格筛选、ASR 识别、内容质量评分和可选初剪。',
+          '面向企业视频素材团队的批量视频质检工厂，支持规格筛选、语音识别、内容质量评分和可选初剪。',
         businessGoal:
           form.getFieldValue('businessGoal') ||
           '帮助团队快速剔除不合格视频，筛出表达清楚、内容完整、具备剪辑价值的素材，并输出合格视频地址和可复核明细。',

@@ -38,8 +38,16 @@ export function readWorkflowRequiredModelProfileIds(workflowGraph: unknown): str
   return [
     ...new Set(
       graph.nodes
-        .filter((node) => node.type === 'llm')
-        .map((node) => node.modelProfileId?.trim())
+        .flatMap((node) => {
+          const requiredModelProfileIds = Array.isArray(node.config?.requiredModelProfileIds)
+            ? node.config.requiredModelProfileIds
+                .map((profileId) => (typeof profileId === 'string' ? profileId.trim() : ''))
+                .filter(Boolean)
+            : [];
+          return node.type === 'llm'
+            ? [node.modelProfileId?.trim(), ...requiredModelProfileIds]
+            : requiredModelProfileIds;
+        })
         .filter((modelProfileId): modelProfileId is string => Boolean(modelProfileId))
     )
   ];
@@ -179,12 +187,19 @@ function readWorkflowModelNodeIdsByModelProfileId(workflowGraph: unknown): Map<s
   }
 
   for (const node of graph.nodes) {
-    if (node.type !== 'llm' || !node.modelProfileId?.trim()) {
-      continue;
-    }
+    const nodeProfileIds =
+      node.type === 'llm' && node.modelProfileId?.trim()
+        ? [node.modelProfileId.trim()]
+        : [];
+    const requiredModelProfileIds = Array.isArray(node.config?.requiredModelProfileIds)
+      ? node.config.requiredModelProfileIds
+          .map((profileId) => (typeof profileId === 'string' ? profileId.trim() : ''))
+          .filter(Boolean)
+      : [];
 
-    const modelProfileId = node.modelProfileId.trim();
-    result.set(modelProfileId, [...(result.get(modelProfileId) ?? []), node.id]);
+    for (const modelProfileId of [...nodeProfileIds, ...requiredModelProfileIds]) {
+      result.set(modelProfileId, [...(result.get(modelProfileId) ?? []), node.id]);
+    }
   }
 
   return result;
@@ -250,6 +265,16 @@ function inferModelProviderFromProfileId(profileId: string): {
       apiBaseUrl: 'https://api.deepseek.com',
       temperature: normalized.includes('reason') || normalized.includes('pro') ? 0.2 : 0.4,
       maxTokens: normalized.includes('reason') || normalized.includes('pro') ? 8192 : 4096
+    };
+  }
+
+  if (normalized.includes('asr') || normalized.includes('speech') || normalized.includes('audio')) {
+    return {
+      providerId: 'provider-pending',
+      providerName: '待配置语音模型供应商',
+      modelName: 'speech-to-text',
+      temperature: 0.2,
+      maxTokens: 4096
     };
   }
 

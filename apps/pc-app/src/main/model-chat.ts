@@ -2,11 +2,19 @@ import type {
   DesktopModelListRequest,
   DesktopModelListResponse,
   DesktopModelChatRequest,
-  DesktopModelChatResponse
+  DesktopModelChatResponse,
+  DesktopModelTestRequest,
+  DesktopModelTestResponse
 } from '../shared/desktop-api.js';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { inferModelCapabilitiesFromName } from '../shared/desktop-model-capabilities.js';
+import {
+  detectModelProviderMode,
+  invokeNativeAudioTranscription,
+  listNativeProviderModels,
+  testNativeModelConnection
+} from './model-provider-native.js';
 
 interface OpenAiCompatibleChatResponse {
   choices?: Array<{
@@ -58,13 +66,8 @@ const defaultTimeoutMs = 45_000;
 export async function invokeOpenAiCompatibleModelChat(
   request: DesktopModelChatRequest
 ): Promise<DesktopModelChatResponse> {
-  const apiBaseUrl = normalizeApiBaseUrl(request.profile.apiBaseUrl);
   const apiKey = request.profile.apiKey?.trim();
   const modelName = request.profile.modelName.trim();
-
-  if (!apiBaseUrl) {
-    throw new Error('Model API Base URL is missing.');
-  }
 
   if (!apiKey) {
     throw new Error('Model API Key is missing.');
@@ -79,6 +82,7 @@ export async function invokeOpenAiCompatibleModelChat(
   }
 
   if (request.taskKind === 'image_generation' || request.imageGeneration) {
+    const apiBaseUrl = requireOpenAiCompatibleApiBaseUrl(request.profile.apiBaseUrl);
     return invokeOpenAiCompatibleImageGeneration({
       request,
       apiBaseUrl,
@@ -88,6 +92,12 @@ export async function invokeOpenAiCompatibleModelChat(
   }
 
   if (request.taskKind === 'audio_transcription' || request.audioTranscription) {
+    const nativeResponse = await invokeNativeAudioTranscription(request);
+    if (nativeResponse) {
+      return nativeResponse;
+    }
+
+    const apiBaseUrl = requireOpenAiCompatibleApiBaseUrl(request.profile.apiBaseUrl);
     return invokeOpenAiCompatibleAudioTranscription({
       request,
       apiBaseUrl,
@@ -96,6 +106,7 @@ export async function invokeOpenAiCompatibleModelChat(
     });
   }
 
+  const apiBaseUrl = requireOpenAiCompatibleApiBaseUrl(request.profile.apiBaseUrl);
   const response = await fetch(`${apiBaseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -248,6 +259,11 @@ async function invokeOpenAiCompatibleAudioTranscription(input: {
 export async function listOpenAiCompatibleModels(
   request: DesktopModelListRequest
 ): Promise<DesktopModelListResponse> {
+  const nativeCatalog = await listNativeProviderModels(request);
+  if (nativeCatalog) {
+    return nativeCatalog;
+  }
+
   const apiBaseUrl = normalizeApiBaseUrl(request.apiBaseUrl);
   const apiKey = request.apiKey?.trim();
 
@@ -304,6 +320,62 @@ export async function listOpenAiCompatibleModels(
   };
 }
 
+export async function testDesktopModelConnection(
+  request: DesktopModelTestRequest
+): Promise<DesktopModelTestResponse> {
+  const nativeResult = await testNativeModelConnection(request);
+  if (nativeResult) {
+    return nativeResult;
+  }
+
+  if (request.profile.capabilities?.includes('audio_to_text')) {
+    const catalog = await listOpenAiCompatibleModels({
+      providerId: request.profile.providerId,
+      providerName: request.profile.providerName,
+      apiBaseUrl: request.profile.apiBaseUrl,
+      apiKey: request.profile.apiKey ?? '',
+      modelName: request.profile.modelName,
+      capabilities: request.profile.capabilities,
+      timeoutMs: request.timeoutMs ?? 20_000
+    });
+
+    return {
+      providerId: request.profile.providerId,
+      providerName: request.profile.providerName,
+      modelName: request.profile.modelName,
+      ok: true,
+      checkedAt: new Date().toISOString(),
+      mode: 'openai_compatible',
+      message: `Audio transcription endpoint is reachable. Provider returned ${catalog.models.length} model(s).`
+    };
+  }
+
+  const profile = {
+    ...request.profile,
+    maxTokens: Math.min(request.profile.maxTokens ?? 256, 512)
+  };
+  const response = await invokeOpenAiCompatibleModelChat({
+    profile,
+    timeoutMs: request.timeoutMs ?? 20_000,
+    messages: buildOpenAiCompatibleModelTestMessages(profile.capabilities)
+  });
+
+  return {
+    providerId: request.profile.providerId,
+    providerName: response.provider,
+    modelName: response.modelName,
+    ok: true,
+    checkedAt: new Date().toISOString(),
+    mode: detectModelProviderMode({
+      providerId: request.profile.providerId,
+      providerName: request.profile.providerName,
+      modelName: request.profile.modelName,
+      capabilities: request.profile.capabilities
+    }),
+    message: `Model connection is healthy: ${response.provider}/${response.modelName}`
+  };
+}
+
 function buildAudioTranscriptionFormData(
   modelName: string,
   audioPath: string,
@@ -328,6 +400,34 @@ function buildAudioTranscriptionFormData(
   }
 
   return form;
+}
+
+function buildOpenAiCompatibleModelTestMessages(
+  capabilities: DesktopModelChatRequest['profile']['capabilities']
+): DesktopModelChatRequest['messages'] {
+  if (capabilities?.includes('audio_to_text')) {
+    return [
+      {
+        role: 'system',
+        content: 'You are a connection test assistant. Reply briefly in Chinese.'
+      },
+      {
+        role: 'user',
+        content: '请回复“连接正常”，并说明当前语音模型配置已可被 QiuAI WorkOS 识别。'
+      }
+    ];
+  }
+
+  return [
+    {
+      role: 'system',
+      content: 'You are a connection test assistant. Reply briefly in Chinese.'
+    },
+    {
+      role: 'user',
+      content: '请回复“连接正常”，并说明当前模型可用于 QiuAI WorkOS 桌面端。'
+    }
+  ];
 }
 
 function buildImageGenerationPrompt(request: DesktopModelChatRequest): string {
@@ -370,6 +470,15 @@ function buildImageEditFormData(
 function normalizeApiBaseUrl(value: string | undefined): string | undefined {
   const normalized = value?.trim().replace(/\/+$/, '');
   return normalized || undefined;
+}
+
+function requireOpenAiCompatibleApiBaseUrl(value: string | undefined): string {
+  const apiBaseUrl = normalizeApiBaseUrl(value);
+  if (!apiBaseUrl) {
+    throw new Error('Model API Base URL is missing.');
+  }
+
+  return apiBaseUrl;
 }
 
 function parseJsonBody(bodyText: string): OpenAiCompatibleChatResponse | undefined {

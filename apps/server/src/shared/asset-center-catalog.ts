@@ -91,7 +91,13 @@ const modelAssets: ServerAssetDefinitionSeed[] = [
   model(2430, 'luma-ray-2', 'Luma Ray 2', 'luma', 'ray-2', ['text', 'image'], ['video'], ['video_generation', 'text_to_video', 'image_to_video'], ['生成视频'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
   model(2440, 'kling-2-1', '可灵 2.1', 'kling', 'kling-2.1', ['text', 'image'], ['video'], ['video_generation', 'text_to_video', 'image_to_video'], ['生成视频'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
   model(2450, 'pika-2-2', 'Pika 2.2', 'pika', 'pika-2.2', ['text', 'image'], ['video'], ['video_generation', 'text_to_video', 'image_to_video'], ['生成视频'], { availabilityStatus: 'requires_manual_model_id', apiStyle: 'provider_native' }),
-  model(2460, 'custom-openai-compatible', '自定义 OpenAI 兼容模型', 'custom', 'custom-model', ['text'], ['text', 'json'], ['text', 'reasoning', 'long_context'], ['企业私有网关', '中转服务'], { availabilityStatus: 'requires_manual_model_id' })
+  model(2460, 'qiu-asr-default', '默认语音转文字模型', 'aliyun-bailian', 'qwen3-asr-flash-filetrans', ['audio', 'video'], ['text', 'json'], ['audio_to_text'], ['视频转写', '方言识别', '音频质检'], { availabilityStatus: 'provider_documented', apiStyle: 'provider_native', modelProfileId: 'qiu-asr-default' }),
+  model(2470, 'aliyun-qwen3-asr-flash', '阿里云 qwen3-asr-flash', 'aliyun-bailian', 'qwen3-asr-flash', ['audio'], ['text', 'json'], ['audio_to_text'], ['快速语音转文字'], { availabilityStatus: 'provider_documented', apiStyle: 'provider_native' }),
+  model(2480, 'aliyun-qwen3-asr-flash-filetrans', '阿里云 qwen3-asr-flash-filetrans', 'aliyun-bailian', 'qwen3-asr-flash-filetrans', ['audio', 'video'], ['text', 'json'], ['audio_to_text'], ['长文件转写', '时间戳'], { availabilityStatus: 'provider_documented', apiStyle: 'provider_native' }),
+  model(2490, 'aliyun-fun-asr', '阿里云 fun-asr', 'aliyun-bailian', 'fun-asr', ['audio', 'video'], ['text', 'json'], ['audio_to_text'], ['中文方言识别', '噪声场景转写'], { availabilityStatus: 'provider_documented', apiStyle: 'provider_native' }),
+  model(2500, 'tencent-16k-zh-dialect', '腾讯云 16k_zh_dialect', 'tencent-cloud', '16k_zh_dialect', ['audio', 'video'], ['text', 'json'], ['audio_to_text'], ['普通话', '粤语', '上海话', '四川/重庆口音'], { availabilityStatus: 'provider_documented', apiStyle: 'provider_native' }),
+  model(2510, 'tencent-16k-zh-medical', '腾讯云 16k_zh_medical', 'tencent-cloud', '16k_zh_medical', ['audio', 'video'], ['text', 'json'], ['audio_to_text'], ['中文医疗语音识别'], { availabilityStatus: 'provider_documented', apiStyle: 'provider_native' }),
+  model(2520, 'custom-openai-compatible', '自定义 OpenAI 兼容模型', 'custom', 'custom-model', ['text'], ['text', 'json'], ['text', 'reasoning', 'long_context'], ['企业私有网关', '中转服务'], { availabilityStatus: 'requires_manual_model_id' })
 ];
 
 const artifactTemplateAssets: ServerAssetDefinitionSeed[] = [
@@ -194,6 +200,7 @@ function model(
   options?: {
     availabilityStatus?: 'verified' | 'provider_documented' | 'requires_manual_model_id' | 'experimental' | 'deprecated' | 'placeholder';
     apiStyle?: 'openai_compatible' | 'provider_native' | 'azure_openai' | 'custom';
+    modelProfileId?: string;
   }
 ): ServerAssetDefinitionSeed {
   const apiStyle = options?.apiStyle ?? 'openai_compatible';
@@ -211,6 +218,7 @@ function model(
       providerId,
       providerName: providerId,
       modelId,
+      ...(options?.modelProfileId ? { modelProfileId: options.modelProfileId } : {}),
       capabilities,
       inputTypes,
       outputTypes,

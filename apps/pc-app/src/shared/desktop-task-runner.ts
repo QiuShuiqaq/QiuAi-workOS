@@ -3084,7 +3084,9 @@ async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
     `需人工复核：${reviewRequired}`,
     `已生成初剪：${edited}`,
     editedVideoFolderPath ? `初剪视频文件夹：${editedVideoFolderPath}` : '',
-    asrProfile ? `ASR：${asrProfile.providerName}/${asrProfile.modelName}` : 'ASR：未配置，ASR 关卡会拦截视频'
+    asrProfile
+      ? `语音转文字：${asrProfile.providerName}/${asrProfile.modelName}`
+      : '语音转文字：未配置，语音识别关卡会拦截视频'
   ].filter(Boolean).join('\n');
   const outputVariables = writeWorkflowNodeOutputs({
     pool: input.pool,
@@ -3644,7 +3646,7 @@ async function runFactoryVideoScreeningItem(input: {
   }
 
   if (!input.asrProfile) {
-    return rejectFactoryVideo(input.video, metrics, asrGate?.name ?? '语音识别', '未配置支持语音转文字的 ASR 模型');
+    return rejectFactoryVideo(input.video, metrics, asrGate?.name ?? '语音识别', '未配置支持语音转文字的模型');
   }
 
   let transcript = '';
@@ -3666,7 +3668,7 @@ async function runFactoryVideoScreeningItem(input: {
     });
     transcript = asrResponse.content.trim();
   } catch (error) {
-    return rejectFactoryVideo(input.video, metrics, asrGate?.name ?? '语音识别', `ASR 识别失败：${readErrorMessage(error)}`);
+    return rejectFactoryVideo(input.video, metrics, asrGate?.name ?? '语音识别', `语音转文字失败：${readErrorMessage(error)}`);
   }
 
   metrics.transcriptChars = transcript.length;

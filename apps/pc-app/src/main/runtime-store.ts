@@ -647,7 +647,8 @@ function isModelProfile(value: unknown): value is ModelProfile {
       record.purpose === 'reasoning' ||
       record.purpose === 'vision' ||
       record.purpose === 'embeddings' ||
-      record.purpose === 'document') &&
+      record.purpose === 'document' ||
+      record.purpose === 'audio') &&
     (record.capabilities === undefined ||
       (Array.isArray(record.capabilities) && record.capabilities.every(isModelCapability))) &&
     (record.apiBaseUrl === undefined || typeof record.apiBaseUrl === 'string') &&

@@ -138,6 +138,18 @@ export function buildRoleTemplateDependencyManifest(input: {
       upsertModelAsset(modelAssets, node, assetByTypeAndKey, warnings);
     }
 
+    for (const modelProfileId of readConfigStringArray(node.config, 'requiredModelProfileIds')) {
+      upsertModelAsset(
+        modelAssets,
+        {
+          ...node,
+          modelProfileId
+        },
+        assetByTypeAndKey,
+        warnings
+      );
+    }
+
     if (node.type === 'tool' || node.type === 'artifact') {
       upsertToolAction(toolActions, node, assetByTypeAndKey, warnings);
     }

@@ -1,10 +1,11 @@
 import {
   ApiOutlined,
+  AppstoreOutlined,
+  BankOutlined,
   BorderOutlined,
   CloudDownloadOutlined,
   CloudSyncOutlined,
   CloseOutlined,
-  ControlOutlined,
   DatabaseOutlined,
   DeleteOutlined,
   DownOutlined,
@@ -30,6 +31,7 @@ import {
   SettingOutlined,
   RollbackOutlined,
   ReloadOutlined,
+  MessageOutlined,
   ToolOutlined,
   VideoCameraOutlined
 } from '@ant-design/icons';
@@ -135,7 +137,7 @@ import {
   type DesktopLegalDocument
 } from '../shared/desktop-agreements';
 
-type SectionKey = 'workbench' | 'roles' | 'logs' | 'models' | 'tools' | 'knowledge' | 'settings';
+type SectionKey = 'workbench' | 'factories' | 'roles' | 'logs' | 'models' | 'tools' | 'knowledge' | 'settings';
 type AccountModalKey = 'enterprise' | 'help' | 'release' | 'download' | 'logout';
 type DesktopThemePreference = 'light' | 'system';
 type DesktopDensityPreference = 'comfortable' | 'compact';
@@ -255,8 +257,9 @@ interface AccountHelpSection {
 }
 
 const sectionItems: Array<{ key: SectionKey; icon: ReactNode; label: string }> = [
-  { key: 'workbench', icon: <ControlOutlined />, label: '对话' },
-  { key: 'roles', icon: <RobotOutlined />, label: '数字员工' },
+  { key: 'workbench', icon: <MessageOutlined />, label: '数字员工' },
+  { key: 'factories', icon: <BankOutlined />, label: '数字工厂' },
+  { key: 'roles', icon: <AppstoreOutlined />, label: '数字市场' },
   { key: 'logs', icon: <FileTextOutlined />, label: '日志' },
   { key: 'models', icon: <ApiOutlined />, label: '模型' },
   { key: 'tools', icon: <ToolOutlined />, label: '工具' },
@@ -352,7 +355,7 @@ const accountHelpSections: AccountHelpSection[] = [
     items: [
       {
         question: '为什么看不到某个数字员工？',
-        answer: '请先刷新数字员工市场。如果仍看不到，通常是该模板未上架、权限套餐不包含当前账号、企业白名单限制，或服务端已删除该模板。'
+        answer: '请先刷新数字市场。如果仍看不到，通常是该模板未上架、权限套餐不包含当前账号、企业白名单限制，或服务端已删除该模板。'
       },
       {
         question: '数字员工安装后为什么还不能运行？',
@@ -709,12 +712,29 @@ const knowledgeBindingOptions = [
 
 const modelProviderPresets: ModelProviderPreset[] = [
   {
-    id: 'tencent-asr-compatible',
-    name: '腾讯云 ASR 兼容网关',
-    summary: '适合普通话、粤语、上海话、四川/重庆口音等中文语音转文字；API Base URL 按实际兼容网关填写。',
+    id: 'tencent-cloud',
+    name: '腾讯云',
+    summary: '腾讯云平台接口，当前优先接入语音识别，适合普通话、粤语、上海话、四川/重庆口音和中文医疗场景。',
+    apiBaseUrl: 'https://asr.tencentcloudapi.com?region=ap-shanghai',
     models: [
       {
-        label: '多方言识别 / 普通话、粤语、上海话、四川重庆口音',
+        label: '16k_zh / 中文普通话',
+        modelName: '16k_zh',
+        purpose: 'audio',
+        capabilities: ['audio_to_text'],
+        temperature: 0,
+        maxTokens: 0
+      },
+      {
+        label: '16k_zh_en_2.0 / 中英及多方言',
+        modelName: '16k_zh_en_2.0',
+        purpose: 'audio',
+        capabilities: ['audio_to_text'],
+        temperature: 0,
+        maxTokens: 0
+      },
+      {
+        label: '16k_zh_dialect / 多方言',
         modelName: '16k_zh_dialect',
         purpose: 'audio',
         capabilities: ['audio_to_text'],
@@ -722,7 +742,7 @@ const modelProviderPresets: ModelProviderPreset[] = [
         maxTokens: 0
       },
       {
-        label: '中文医疗场景识别',
+        label: '16k_zh_medical / 中文医疗',
         modelName: '16k_zh_medical',
         purpose: 'audio',
         capabilities: ['audio_to_text'],
@@ -732,43 +752,38 @@ const modelProviderPresets: ModelProviderPreset[] = [
     ]
   },
   {
-    id: 'aliyun-asr-compatible',
-    name: '阿里云 ASR 兼容网关',
-    summary: '适合国内企业网络和中文方言转写；API Base URL 按实际兼容网关填写。',
+    id: 'aliyun-bailian',
+    name: '阿里云',
+    summary: '阿里云百炼模型平台，当前优先接入语音模型，支持短音频识别、长文件转写和中文方言场景。',
+    apiBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     models: [
       {
-        label: 'Paraformer 中文多方言',
+        label: 'qwen3-asr-flash / 短音频转写',
+        modelName: 'qwen3-asr-flash',
+        purpose: 'audio',
+        capabilities: ['audio_to_text'],
+        temperature: 0,
+        maxTokens: 0
+      },
+      {
+        label: 'qwen3-asr-flash-filetrans / 文件转写与时间戳',
+        modelName: 'qwen3-asr-flash-filetrans',
+        purpose: 'audio',
+        capabilities: ['audio_to_text'],
+        temperature: 0,
+        maxTokens: 0
+      },
+      {
+        label: 'fun-asr / 中文方言与噪声场景',
+        modelName: 'fun-asr',
+        purpose: 'audio',
+        capabilities: ['audio_to_text'],
+        temperature: 0,
+        maxTokens: 0
+      },
+      {
+        label: 'paraformer-v2 / 中文语音识别',
         modelName: 'paraformer-v2',
-        purpose: 'audio',
-        capabilities: ['audio_to_text'],
-        temperature: 0,
-        maxTokens: 0
-      }
-    ]
-  },
-  {
-    id: 'xfyun-asr-compatible',
-    name: '讯飞 ASR 兼容网关',
-    summary: '适合普通话和常见中文方言语音识别；API Base URL 按实际兼容网关填写。',
-    models: [
-      {
-        label: '中文方言语音听写',
-        modelName: 'iat-dialect',
-        purpose: 'audio',
-        capabilities: ['audio_to_text'],
-        temperature: 0,
-        maxTokens: 0
-      }
-    ]
-  },
-  {
-    id: 'baidu-asr-compatible',
-    name: '百度 ASR 兼容网关',
-    summary: '适合普通话、粤语、四川话等中文转写；API Base URL 按实际兼容网关填写。',
-    models: [
-      {
-        label: '中文多方言识别',
-        modelName: 'zh-dialect-asr',
         purpose: 'audio',
         capabilities: ['audio_to_text'],
         temperature: 0,
@@ -1643,8 +1658,9 @@ export default function App() {
   const [isComposerDragOver, setIsComposerDragOver] = useState(false);
   const [taskHistoryOpen, setTaskHistoryOpen] = useState(false);
   const [pendingUninstallRoleCode, setPendingUninstallRoleCode] = useState('');
-  const [factoryRunRoleCode, setFactoryRunRoleCode] = useState('');
+  const [selectedFactoryRoleCode, setSelectedFactoryRoleCode] = useState('');
   const [factoryAttachments, setFactoryAttachments] = useState<ComposerAttachment[]>([]);
+  const [isFactoryDragOver, setIsFactoryDragOver] = useState(false);
   const [previewFactoryImage, setPreviewFactoryImage] = useState<FactoryArtifactPreviewItem | null>(null);
 
   useEffect(() => {
@@ -1740,10 +1756,63 @@ export default function App() {
     }
   }, [runtimeState.runtimeSnapshot.tasks, selectedTaskId]);
 
+  const installedDigitalEmployeePackages = useMemo(
+    () =>
+      runtimeState.rolePackages.filter(
+        (rolePackage) => readRoleApplicationType(rolePackage) === 'digital_employee'
+      ),
+    [runtimeState.rolePackages]
+  );
+  const installedDigitalFactoryPackages = useMemo(
+    () =>
+      runtimeState.rolePackages.filter(
+        (rolePackage) => readRoleApplicationType(rolePackage) === 'digital_factory'
+      ),
+    [runtimeState.rolePackages]
+  );
+
   useEffect(() => {
-    const activeRoleCode = runtimeState.localRuntime.activeRoleCode ?? runtimeState.rolePackages[0]?.roleCode;
+    const currentActiveEmployee = installedDigitalEmployeePackages.find(
+      (rolePackage) => rolePackage.roleCode === runtimeState.localRuntime.activeRoleCode
+    );
+    const activeRoleCode =
+      currentActiveEmployee?.roleCode ??
+      installedDigitalEmployeePackages.find(
+        (rolePackage) => !isRuntimeRolePackageDeleted(runtimeState, rolePackage.roleCode)
+      )?.roleCode;
     taskForm.setFieldsValue({ roleCode: activeRoleCode ?? '' });
-  }, [runtimeState.localRuntime.activeRoleCode, runtimeState.rolePackages, taskForm]);
+  }, [installedDigitalEmployeePackages, runtimeState, taskForm]);
+
+  useEffect(() => {
+    if (
+      selectedFactoryRoleCode &&
+      installedDigitalFactoryPackages.some((rolePackage) => rolePackage.roleCode === selectedFactoryRoleCode)
+    ) {
+      return;
+    }
+
+    setSelectedFactoryRoleCode(
+      installedDigitalFactoryPackages.find(
+        (rolePackage) => !isRuntimeRolePackageDeleted(runtimeState, rolePackage.roleCode)
+      )?.roleCode ??
+        installedDigitalFactoryPackages[0]?.roleCode ??
+        ''
+    );
+  }, [installedDigitalFactoryPackages, runtimeState, selectedFactoryRoleCode]);
+
+  useEffect(() => {
+    if (!selectedFactoryRoleCode) {
+      factoryRunForm.resetFields();
+      setFactoryAttachments([]);
+      return;
+    }
+
+    const defaultValues = buildFactoryRunDefaultValues(selectedFactoryRoleCode);
+    if (defaultValues) {
+      factoryRunForm.setFieldsValue(defaultValues);
+      setFactoryAttachments([]);
+    }
+  }, [factoryRunForm, selectedFactoryRoleCode]);
 
   async function loadRuntimeState() {
     if (!window.qiuDesktop) {
@@ -1864,13 +1933,13 @@ export default function App() {
       setRoleTemplateNotice(
         catalog.message ??
           (catalog.source === 'server'
-            ? `已同步 ${catalog.templates.length} 个数字员工`
-            : '暂未同步到数字员工，请检查网络或服务端配置。')
+            ? `已同步 ${catalog.templates.length} 个市场应用`
+            : '暂未同步到数字市场，请检查网络或服务端配置。')
       );
     } catch (error) {
       setAuthorizedRoleTemplateCatalog(initialAuthorizedRoleTemplateCatalog);
       setRoleTemplateNotice(
-        `数字员工同步失败：${error instanceof Error ? error.message : 'unknown error'}`
+        `数字市场同步失败：${error instanceof Error ? error.message : 'unknown error'}`
       );
     } finally {
       setIsLoadingRoleTemplates(false);
@@ -2172,6 +2241,35 @@ export default function App() {
     event.target.value = '';
   }
 
+  function handleFactoryDragOver(event: DragEvent<HTMLDivElement>) {
+    if (!hasDraggedFiles(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setIsFactoryDragOver(true);
+  }
+
+  function handleFactoryDragLeave(event: DragEvent<HTMLDivElement>) {
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
+
+    setIsFactoryDragOver(false);
+  }
+
+  function handleFactoryDrop(event: DragEvent<HTMLDivElement>) {
+    if (!hasDraggedFiles(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    setIsFactoryDragOver(false);
+    stageFactoryFiles(event.dataTransfer.files);
+  }
+
   function handleWindowControl(action: DesktopWindowControlAction) {
     void window.qiuDesktop?.controlWindow(action);
   }
@@ -2195,7 +2293,8 @@ export default function App() {
       `控制端：${runtimeState.app.serverBaseUrl}`,
       `连接状态：${connectionLabel(runtimeState.serverConnection.state)}`,
       `最近同步：${formatDate(runtimeState.localRuntime.lastSyncedAt)}`,
-      `数字员工：${runtimeState.rolePackages.length}`,
+      `数字员工：${installedDigitalEmployeePackages.length}`,
+      `数字工厂：${installedDigitalFactoryPackages.length}`,
       `已启用模型：${enabledModelCount}`,
       `已启用工具：${enabledToolCount}`,
       `知识来源：${knowledgeBindingCount}`,
@@ -2259,18 +2358,19 @@ export default function App() {
   }
 
   const activeRolePackage = useMemo(() => {
-    const currentRolePackage = runtimeState.rolePackages.find(
+    const currentRolePackage = installedDigitalEmployeePackages.find(
       (rolePackage) => rolePackage.roleCode === runtimeState.localRuntime.activeRoleCode
     );
     if (currentRolePackage) {
       return currentRolePackage;
     }
 
-    const availableRolePackages = runtimeState.rolePackages.filter(
-      (rolePackage) => !isRuntimeRolePackageDeleted(runtimeState, rolePackage.roleCode)
+    return (
+      installedDigitalEmployeePackages.find(
+        (rolePackage) => !isRuntimeRolePackageDeleted(runtimeState, rolePackage.roleCode)
+      ) ?? installedDigitalEmployeePackages[0]
     );
-    return availableRolePackages[0];
-  }, [runtimeState]);
+  }, [installedDigitalEmployeePackages, runtimeState]);
 
   const selectedModelProfile = useMemo(() => {
     return runtimeState.modelProfiles.find((profile) => profile.id === selectedModelId);
@@ -2340,11 +2440,13 @@ export default function App() {
     }
 
     const capabilities = readModelProfileCapabilities(profile);
-    const preferredModelName = capabilities.includes('reasoning_text')
-      ? 'deepseek-v4-pro'
-      : capabilities.includes('vision_text')
-        ? 'qwen-vl-max'
-        : 'deepseek-v4-flash';
+    const preferredModelName = capabilities.includes('audio_to_text')
+      ? 'qwen3-asr-flash'
+      : capabilities.includes('reasoning_text')
+        ? 'deepseek-v4-pro'
+        : capabilities.includes('vision_text')
+          ? 'qwen-vl-max'
+          : 'deepseek-v4-flash';
     const fallbackPurpose = purposeForModelCapabilities(capabilities, profile.purpose);
     const preferredPreset = modelProviderPresets.find((preset) =>
       preset.models.some((model) => model.modelName === preferredModelName)
@@ -2509,12 +2611,13 @@ export default function App() {
                 {renderProductRail()}
                 <div
                   className={
-                    selectedSection === 'workbench'
+                    selectedSection === 'workbench' || selectedSection === 'factories'
                       ? 'product-surface product-surface-flush'
                       : 'product-surface product-surface-padded'
                   }
                 >
                   {selectedSection === 'workbench' ? renderWorkbench() : null}
+                  {selectedSection === 'factories' ? renderFactories() : null}
                   {selectedSection === 'roles' ? renderRoles() : null}
                   {selectedSection === 'logs' ? renderLogs() : null}
                   {selectedSection === 'models' ? renderModels() : null}
@@ -2832,8 +2935,12 @@ export default function App() {
 
             <div className="account-stat-grid">
               <div>
-                <Typography.Text strong>{runtimeState.rolePackages.length}</Typography.Text>
+                <Typography.Text strong>{installedDigitalEmployeePackages.length}</Typography.Text>
                 <Typography.Text type="secondary">数字员工</Typography.Text>
+              </div>
+              <div>
+                <Typography.Text strong>{installedDigitalFactoryPackages.length}</Typography.Text>
+                <Typography.Text type="secondary">数字工厂</Typography.Text>
               </div>
               <div>
                 <Typography.Text strong>{enabledModelCount}</Typography.Text>
@@ -2842,10 +2949,6 @@ export default function App() {
               <div>
                 <Typography.Text strong>{enabledToolCount}</Typography.Text>
                 <Typography.Text type="secondary">已启用工具</Typography.Text>
-              </div>
-              <div>
-                <Typography.Text strong>{knowledgeBindingCount}</Typography.Text>
-                <Typography.Text type="secondary">知识来源</Typography.Text>
               </div>
             </div>
 
@@ -3040,7 +3143,7 @@ export default function App() {
 
     return (
       <Modal
-        title={rolePackage ? `卸载：${rolePackage.name}` : '卸载数字员工'}
+        title={rolePackage ? `卸载：${rolePackage.name}` : '卸载应用'}
         open={Boolean(pendingUninstallRoleCode)}
         okText={hasBlockingTasks ? '暂不能卸载' : '确认卸载'}
         cancelText="取消"
@@ -3055,11 +3158,11 @@ export default function App() {
       >
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Typography.Paragraph>
-            卸载后，该数字员工将从当前电脑移除。历史任务和已生成产物仍会保留，以后可以在数字员工市场重新安装。
+            卸载后，该应用将从当前电脑移除。历史任务和已生成产物仍会保留，以后可以在数字市场重新安装。
           </Typography.Paragraph>
           {hasBlockingTasks ? (
             <div className="role-uninstall-blocking-note">
-              <Typography.Text strong>该数字员工还有未结束任务，完成或取消后再卸载。</Typography.Text>
+              <Typography.Text strong>该应用还有未结束任务，完成或取消后再卸载。</Typography.Text>
               <Space direction="vertical" size={4} style={{ width: '100%', marginTop: 8 }}>
                 {blockingTasks.slice(0, 3).map((task) => (
                   <Typography.Text key={task.taskId} type="secondary" ellipsis>
@@ -3224,7 +3327,7 @@ export default function App() {
           </Flex>
 
           <div className="agent-session-list">
-            {runtimeState.rolePackages.map((rolePackage) => {
+            {installedDigitalEmployeePackages.map((rolePackage) => {
               const latestTask = latestTaskByRole.get(rolePackage.roleCode);
               const isActive = rolePackage.roleCode === activeRoleCode;
               const summary = installedRoleSummaries.find((item) => item.roleCode === rolePackage.roleCode);
@@ -3274,6 +3377,14 @@ export default function App() {
                 </button>
               );
             })}
+            {installedDigitalEmployeePackages.length === 0 ? (
+              <div className="agent-session-empty">
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无已安装数字员工" />
+                <Button size="small" type="primary" onClick={() => navigateToSection('roles')}>
+                  去数字市场安装
+                </Button>
+              </div>
+            ) : null}
           </div>
         </aside>
 
@@ -3535,10 +3646,10 @@ export default function App() {
               </>
             ) : (
               <div className="chat-empty-state">
-                <RobotOutlined />
+                <MessageOutlined />
                 <Typography.Title level={3}>选择数字员工，直接开始对话</Typography.Title>
                 <Typography.Text type="secondary">
-                  你可以让员工读取本地文件、调用模型、生成报告或整理资料，执行过程会在这里逐步展示。
+                  安装数字员工后，可以在这里下达任务、上传文件并查看交付结果。
                 </Typography.Text>
                 <div className="prompt-chip-row">
                   {[
@@ -3678,6 +3789,794 @@ export default function App() {
     );
   }
 
+  function renderFactories() {
+    const latestTaskByFactory = new Map<string, DesktopTaskDetail>();
+
+    for (const task of taskDetails) {
+      if (latestTaskByFactory.has(task.roleCode)) {
+        continue;
+      }
+      latestTaskByFactory.set(task.roleCode, task);
+    }
+
+    const selectedFactoryPackage =
+      installedDigitalFactoryPackages.find((rolePackage) => rolePackage.roleCode === selectedFactoryRoleCode) ??
+      installedDigitalFactoryPackages[0];
+    const selectedFactoryCode = selectedFactoryPackage?.roleCode ?? '';
+    const selectedFactoryTasks = selectedFactoryCode
+      ? taskDetails
+          .filter((task) => task.roleCode === selectedFactoryCode)
+          .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      : [];
+    const focusedFactoryTask =
+      selectedFactoryTasks.find((task) => task.taskId === selectedTaskId) ?? selectedFactoryTasks[0];
+    const selectedFactoryDeleted = selectedFactoryCode
+      ? isRuntimeRolePackageDeleted(runtimeState, selectedFactoryCode)
+      : false;
+    const selectedFactoryTemplate = selectedFactoryCode
+      ? desktopRoleTemplateByRoleCode.get(selectedFactoryCode)
+      : undefined;
+    const selectedFactoryManifest = readFactoryManifest(
+      selectedFactoryPackage?.dependencyManifest ?? selectedFactoryTemplate?.dependencyManifest
+    );
+    const selectedFactoryFileContract = selectedFactoryPackage
+      ? buildRoleFileContractSummary(selectedFactoryPackage)
+      : undefined;
+    const selectedFactoryReadiness = selectedFactoryPackage
+      ? buildRoleRuntimeReadiness(runtimeState, selectedFactoryPackage)
+      : undefined;
+    const maxItems = readFactoryMaxItems(selectedFactoryManifest);
+    const isVideoFactory = isMedicalCaseVideoFactory(selectedFactoryManifest);
+    const packageOptions = readFactoryPackageOptions(selectedFactoryManifest);
+    const platformOptions = readFactoryPlatformOptions(selectedFactoryManifest);
+    const qualityModes = readFactoryQualityModes(selectedFactoryManifest);
+    const screeningProfiles = readFactoryScreeningProfiles(selectedFactoryManifest);
+    const selectedFactoryPreparedPackage = selectedFactoryPackage
+      ? {
+          ...selectedFactoryPackage,
+          modelProfileIds: readRequiredModelProfileIdsForRolePackage(selectedFactoryPackage)
+        }
+      : undefined;
+    const selectedFactoryPreparedProfiles = selectedFactoryPreparedPackage
+      ? ensureModelProfilesForRolePackage(runtimeState.modelProfiles, selectedFactoryPreparedPackage)
+      : [];
+    const selectedFactoryModelReadiness = selectedFactoryPreparedPackage
+      ? getRoleModelRuntimeRequirementStatuses(
+          selectedFactoryPreparedProfiles,
+          runtimeState.localRuntime.enabledModelProfileIds,
+          selectedFactoryPreparedPackage,
+          {
+            roleCode: selectedFactoryPreparedPackage.roleCode,
+            credentials: runtimeState.modelCredentials,
+            roleBindings: runtimeState.roleModelCredentialBindings
+          }
+        )
+      : [];
+    const selectedFactoryAsrRequirement = selectedFactoryModelReadiness.find((requirement) =>
+      readModelProfileCapabilities(requirement.profile).includes('audio_to_text')
+    );
+    const dialectOptions = readFactoryAsrDialectOptions(selectedFactoryManifest);
+    const targetSecondOptions = selectedFactoryManifest.editing?.targetSecondOptions?.length
+      ? selectedFactoryManifest.editing.targetSecondOptions
+      : [15, 30, 45];
+    const audioProfiles = runtimeState.modelProfiles.filter((profile) =>
+      readModelProfileCapabilities(profile).includes('audio_to_text')
+    );
+    const audioProfileOptions = audioProfiles.map((profile) => {
+      const enabled = runtimeState.localRuntime.enabledModelProfileIds.includes(profile.id);
+      const configured = isRuntimeModelProfileConfigured(profile, selectedFactoryCode);
+      const suffix = [
+        enabled ? '' : '未启用',
+        configured ? '' : '未配置'
+      ].filter(Boolean).join(' / ');
+
+      return {
+        value: profile.id,
+        label: `${profile.providerName} / ${profile.modelName}${suffix ? `（${suffix}）` : ''}`,
+        disabled: !enabled || !configured
+      };
+    });
+    const hasReadyAudioProfile = audioProfileOptions.some((option) => !option.disabled);
+    const acceptedFactoryFileTypes = isVideoFactory
+      ? '.mp4,.mov,.mkv,.avi,.webm,.m4v'
+      : '.png,.jpg,.jpeg,.webp,.xlsx,.csv';
+    const validFactoryAttachments = isVideoFactory
+      ? factoryAttachments.filter((attachment) => isFactoryVideoAttachment(attachment))
+      : factoryAttachments.filter((attachment) => isFactoryImageInputAttachment(attachment));
+    const invalidFactoryAttachmentCount = factoryAttachments.length - validFactoryAttachments.length;
+    const latestFactoryLogs = focusedFactoryTask?.executionLogs.slice(-14) ?? [];
+    const focusedFactoryArtifacts = focusedFactoryTask?.artifacts.filter(isUserDeliverableArtifact) ?? [];
+    const focusedFactoryCostCents =
+      focusedFactoryTask?.costCents ??
+      focusedFactoryTask?.costRecords.reduce((total, record) => total + record.costCents, 0);
+
+    return (
+      <div className="workbench-page factory-page">
+        <aside className="agent-session-panel">
+          <Flex align="center" justify="space-between" className="agent-panel-header">
+            <Space direction="vertical" size={0}>
+              <Typography.Text strong>批量工厂</Typography.Text>
+              <Typography.Text type="secondary">选择数字工厂</Typography.Text>
+            </Space>
+            <Button size="small" shape="circle" icon={<PlusOutlined />} onClick={() => navigateToSection('roles')} />
+          </Flex>
+
+          <div className="agent-session-list">
+            {installedDigitalFactoryPackages.map((rolePackage) => {
+              const latestTask = latestTaskByFactory.get(rolePackage.roleCode);
+              const isActive = rolePackage.roleCode === selectedFactoryCode;
+              const summary = installedRoleSummaries.find((item) => item.roleCode === rolePackage.roleCode);
+              const isDeleted = summary?.state === 'deleted';
+
+              return (
+                <button
+                  key={rolePackage.roleCode}
+                  type="button"
+                  className={['agent-session-item', isActive ? 'selected' : '', isDeleted ? 'deleted' : '']
+                    .filter(Boolean)
+                    .join(' ')}
+                  onClick={() => {
+                    setSelectedFactoryRoleCode(rolePackage.roleCode);
+                    if (latestTask) {
+                      setSelectedTaskId(latestTask.taskId);
+                    }
+                  }}
+                >
+                  <span className="agent-avatar factory-avatar">
+                    <BankOutlined />
+                  </span>
+                  <span className="agent-session-main">
+                    <span className="agent-session-title-row">
+                      <Typography.Text strong ellipsis>
+                        {rolePackage.name}
+                      </Typography.Text>
+                      <Typography.Text type="secondary" className="agent-session-time">
+                        {latestTask ? formatShortTime(latestTask.updatedAt) : '待运行'}
+                      </Typography.Text>
+                    </span>
+                    <Typography.Text type="secondary" ellipsis className="agent-session-preview">
+                      {latestTask
+                        ? `${taskStateLabel(latestTask.state)}：${latestTask.title}`
+                        : isDeleted
+                          ? '该数字工厂已被服务端删除，历史批次仍可查看'
+                          : rolePackage.summary ?? '点击后配置并运行批量任务'}
+                    </Typography.Text>
+                    <span className="agent-session-tags">
+                      <Tag color={isDeleted ? 'red' : isActive ? 'green' : 'default'}>
+                        {isDeleted ? '已删除' : isActive ? '当前' : '可用'}
+                      </Tag>
+                      <Tag>批次 {summary?.taskCount ?? 0}</Tag>
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+            {installedDigitalFactoryPackages.length === 0 ? (
+              <div className="agent-session-empty">
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无已安装数字工厂" />
+                <Button
+                  size="small"
+                  type="primary"
+                  onClick={() => {
+                    setSelectedRoleApplicationType('digital_factory');
+                    navigateToSection('roles');
+                  }}
+                >
+                  去数字市场安装
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        </aside>
+
+        <section className="factory-workspace">
+          {selectedFactoryPackage ? (
+            <>
+              <header className="factory-workspace-header">
+                <Space size={12} align="start">
+                  <span className="chat-agent-avatar factory-avatar">
+                    <BankOutlined />
+                  </span>
+                  <Space direction="vertical" size={4} className="chat-header-main">
+                    <Space size={8} wrap>
+                      <Typography.Text strong>{selectedFactoryPackage.name}</Typography.Text>
+                      <Tag color={selectedFactoryReadiness?.ready ? 'green' : 'orange'}>
+                        {selectedFactoryReadiness?.label ?? '待检查'}
+                      </Tag>
+                      <Tag>{isVideoFactory ? '视频批处理' : '图片批处理'}</Tag>
+                    </Space>
+                    <Typography.Text type="secondary">
+                      {selectedFactoryPackage.summary ?? '批量上传素材，按工作流生成结构化产物。'}
+                    </Typography.Text>
+                  </Space>
+                </Space>
+                <Space wrap>
+                  <Button
+                    disabled={selectedFactoryDeleted || !selectedFactoryTemplate}
+                    onClick={() => {
+                      setSelectedRoleApplicationType('digital_factory');
+                      setSelectedRoleCategory('全部');
+                      openRoleConfig(selectedFactoryCode, 'configure');
+                      navigateToSection('roles');
+                    }}
+                  >
+                    {selectedFactoryReadiness?.ready ? '配置' : '配置模型/工具'}
+                  </Button>
+                  <Button
+                    type="primary"
+                    icon={<PlayCircleOutlined />}
+                    disabled={selectedFactoryDeleted}
+                    onClick={() => {
+                      factoryRunForm.setFieldsValue({ roleCode: selectedFactoryCode });
+                      factoryRunForm.submit();
+                    }}
+                  >
+                    开始任务
+                  </Button>
+                </Space>
+              </header>
+
+              <div className="factory-workspace-body factory-console-body">
+                <div className="factory-console-grid">
+                  <section className="factory-console-column factory-console-left">
+                    <section
+                      className={[
+                        'factory-panel',
+                        'factory-console-upload',
+                        isFactoryDragOver ? 'dragging' : ''
+                      ].filter(Boolean).join(' ')}
+                      onDragOver={handleFactoryDragOver}
+                      onDragLeave={handleFactoryDragLeave}
+                      onDrop={handleFactoryDrop}
+                    >
+                      <Flex align="flex-start" justify="space-between" gap={12}>
+                        <Space direction="vertical" size={2}>
+                          <Typography.Text strong>输入</Typography.Text>
+                          <Typography.Text type="secondary">
+                            {isVideoFactory
+                              ? `上传待质检视频，单批最多 ${maxItems} 个。`
+                              : `上传商品图或表格，单批最多 ${maxItems} 个。`}
+                          </Typography.Text>
+                        </Space>
+                        <Tag color="blue">{validFactoryAttachments.length}/{maxItems}</Tag>
+                      </Flex>
+
+                      <button
+                        type="button"
+                        className="factory-upload-dropzone"
+                        onClick={() => factoryFileInputRef.current?.click()}
+                      >
+                        <FileAddOutlined />
+                        <span>{isVideoFactory ? '添加视频或拖拽到这里' : '添加图片/表格或拖拽到这里'}</span>
+                        <small>{isVideoFactory ? 'mp4、mov、mkv、avi、webm、m4v' : 'png、jpg、webp、xlsx、csv'}</small>
+                      </button>
+                      <input
+                        ref={factoryFileInputRef}
+                        type="file"
+                        multiple
+                        accept={acceptedFactoryFileTypes}
+                        hidden
+                        onChange={handleFactoryFileInputChange}
+                      />
+
+                      {invalidFactoryAttachmentCount > 0 ? (
+                        <Typography.Text type="warning">
+                          已忽略 {invalidFactoryAttachmentCount} 个不符合当前工厂类型的文件。
+                        </Typography.Text>
+                      ) : null}
+
+                      {factoryAttachments.length > 0 ? (
+                        <div className="factory-attachment-list compact">
+                          {factoryAttachments.map((attachment) => {
+                            const valid = isVideoFactory
+                              ? isFactoryVideoAttachment(attachment)
+                              : isFactoryImageInputAttachment(attachment);
+                            return (
+                              <div key={attachment.id} className={valid ? 'factory-attachment-item' : 'factory-attachment-item invalid'}>
+                                <Space size={8}>
+                                  {isVideoFactory ? <VideoCameraOutlined /> : isFactoryImageAttachment(attachment) ? <FileImageOutlined /> : <FileExcelOutlined />}
+                                  <span>{attachment.name}</span>
+                                  <Typography.Text type="secondary">{formatFileSize(attachment.size)}</Typography.Text>
+                                  {!valid ? <Tag color="red">不适用</Tag> : null}
+                                </Space>
+                                <Button size="small" type="text" danger onClick={() => removeFactoryAttachment(attachment.id)}>
+                                  移除
+                                </Button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={isVideoFactory ? '请添加案例视频' : '请添加商品素材'} />
+                      )}
+                    </section>
+
+                    <Form<FactoryRunFormValues>
+                      form={factoryRunForm}
+                      layout="vertical"
+                      className="factory-console-form"
+                      onFinish={submitFactoryRun}
+                    >
+                      <Form.Item name="roleCode" hidden>
+                        <Input />
+                      </Form.Item>
+                      <section className="factory-panel factory-parameter-panel">
+                        <Flex align="center" justify="space-between" gap={12}>
+                          <Space direction="vertical" size={2}>
+                            <Typography.Text strong>参数设置</Typography.Text>
+                            <Typography.Text type="secondary">只保留本次运行需要调整的参数。</Typography.Text>
+                          </Space>
+                          <Button size="small" onClick={() => resetFactoryRunFormForRole(selectedFactoryCode)}>
+                            重置
+                          </Button>
+                        </Flex>
+
+                        {isVideoFactory ? (
+                          <>
+                            <Form.Item
+                              name="asrModelProfileId"
+                              label="语音转文字模型"
+                              rules={[{ required: true, message: '请选择可用的语音转文字模型' }]}
+                            >
+                              <Select
+                                size="large"
+                                placeholder="选择语音转文字模型"
+                                options={audioProfileOptions}
+                                notFoundContent="暂无支持语音转文字的模型"
+                              />
+                            </Form.Item>
+                            {!hasReadyAudioProfile ? (
+                              <Typography.Text type="warning">
+                                语音转文字模型未配置时，任务会停在语音识别前。请先到模型配置填写 API Key。
+                              </Typography.Text>
+                            ) : null}
+                            <div className="factory-inline-form-grid">
+                              <Form.Item name="dialect" label="语言 / 方言" rules={[{ required: true }]}>
+                                <Select
+                                  size="large"
+                                  options={dialectOptions.map((item) => ({
+                                    value: item.key,
+                                    label: item.label
+                                  }))}
+                                />
+                              </Form.Item>
+                              <Form.Item
+                                name="screeningProfileKey"
+                                label="筛选标准"
+                                rules={[{ required: true, message: '请选择筛选标准' }]}
+                              >
+                                <Select
+                                  size="large"
+                                  options={screeningProfiles.map((item) => ({
+                                    value: item.key,
+                                    label: item.label
+                                  }))}
+                                />
+                              </Form.Item>
+                            </div>
+                            <div className="factory-inline-form-grid compact">
+                              <Form.Item name="editEnabled" label="生成初剪" valuePropName="checked">
+                                <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+                              </Form.Item>
+                              <Form.Item shouldUpdate noStyle>
+                                {({ getFieldValue }) => (
+                                  <Form.Item name="editTargetSeconds" label="目标时长">
+                                    <Select
+                                      size="large"
+                                      disabled={!getFieldValue('editEnabled')}
+                                      options={targetSecondOptions.map((seconds) => ({
+                                        value: seconds,
+                                        label: `${seconds} 秒`
+                                      }))}
+                                    />
+                                  </Form.Item>
+                                )}
+                              </Form.Item>
+                            </div>
+                            <Form.Item name="instruction" label="补充要求">
+                              <Input.TextArea
+                                rows={3}
+                                placeholder="例如：优先保留使用前症状和使用后改善的片段；夸张医疗承诺请标记风险。"
+                              />
+                            </Form.Item>
+                          </>
+                        ) : (
+                          <>
+                            <Form.Item name="platform" label="目标平台" rules={[{ required: true, message: '请选择目标平台' }]}>
+                              <Select
+                                size="large"
+                                options={platformOptions.map((item) => ({
+                                  value: item.key,
+                                  label: `${item.label}${item.imageRatio ? ` / ${item.imageRatio}` : ''}`
+                                }))}
+                              />
+                            </Form.Item>
+                            <Form.Item
+                              name="packageKeys"
+                              label="选择产物包"
+                              rules={[{ required: true, message: '请至少选择一个产物包' }]}
+                            >
+                              <Checkbox.Group className="factory-package-checks">
+                                {packageOptions.map((item) => (
+                                  <Tooltip key={item.key} title={item.description}>
+                                    <Checkbox value={item.key}>{item.label}</Checkbox>
+                                  </Tooltip>
+                                ))}
+                              </Checkbox.Group>
+                            </Form.Item>
+                            <Form.Item name="qualityCheckMode" label="质检方式" rules={[{ required: true }]}>
+                              <Select
+                                size="large"
+                                options={qualityModes.map((item) => ({
+                                  value: item.key,
+                                  label: item.label
+                                }))}
+                              />
+                            </Form.Item>
+                            <Form.Item name="instruction" label="补充要求">
+                              <Input.TextArea
+                                rows={3}
+                                placeholder="例如：面向美国站，风格干净高级；白底图不要文字。"
+                              />
+                            </Form.Item>
+                          </>
+                        )}
+                      </section>
+                    </Form>
+                  </section>
+
+                  <section className="factory-console-column factory-console-main">
+                    <section className="factory-panel factory-queue-panel">
+                      <Flex align="center" justify="space-between" gap={12}>
+                        <Space direction="vertical" size={2}>
+                          <Typography.Text strong>任务队列</Typography.Text>
+                          <Typography.Text type="secondary">批量任务的进度和状态。</Typography.Text>
+                        </Space>
+                        <Tag>{selectedFactoryTasks.length} 个批次</Tag>
+                      </Flex>
+
+                      {selectedFactoryTasks.length > 0 ? (
+                        <div className="factory-queue-list">
+                          {selectedFactoryTasks.slice(0, 30).map((task) => {
+                            const progress = factoryTaskProgressPercent(task);
+                            return (
+                              <button
+                                key={task.taskId}
+                                type="button"
+                                className={
+                                  focusedFactoryTask?.taskId === task.taskId
+                                    ? 'factory-queue-item selected'
+                                    : 'factory-queue-item'
+                                }
+                                onClick={() => setSelectedTaskId(task.taskId)}
+                              >
+                                <span className="factory-queue-main">
+                                  <span className="factory-task-title">{task.title}</span>
+                                  <span className="factory-task-meta">
+                                    <Tag color={taskStateColor(task.state)}>{taskStateLabel(task.state)}</Tag>
+                                    <span>{formatShortTime(task.updatedAt)}</span>
+                                    <span>产物 {countUserDeliverableArtifacts(task)}</span>
+                                  </span>
+                                </span>
+                                <span className="factory-progress-bar" aria-label={`进度 ${progress}%`}>
+                                  <span style={{ width: `${progress}%` }} />
+                                </span>
+                                <span className="factory-stage-strip">
+                                  {buildFactoryTaskStages(task, isVideoFactory).map((stage) => (
+                                    <span key={stage.key} className={`factory-stage-pill ${stage.status}`}>
+                                      {stage.label}
+                                    </span>
+                                  ))}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有运行批次" />
+                      )}
+                    </section>
+
+                    <section className="factory-panel factory-output-panel">
+                      <Flex align="center" justify="space-between" gap={12}>
+                        <Space direction="vertical" size={2}>
+                          <Typography.Text strong>输出队列</Typography.Text>
+                          <Typography.Text type="secondary">结果文件和本地位置。</Typography.Text>
+                        </Space>
+                        <Tag color={focusedFactoryArtifacts.length > 0 ? 'green' : 'default'}>
+                          产物 {focusedFactoryArtifacts.length}
+                        </Tag>
+                      </Flex>
+
+                      {focusedFactoryTask ? (
+                        <div className="factory-output-content">
+                          <Flex align="center" justify="space-between" gap={10} wrap="wrap">
+                            <Space size={8} wrap>
+                              <Typography.Text strong>{focusedFactoryTask.title}</Typography.Text>
+                              <Tag color={taskStateColor(focusedFactoryTask.state)}>
+                                {taskStateLabel(focusedFactoryTask.state)}
+                              </Tag>
+                            </Space>
+                            <Typography.Text type="secondary">
+                              {formatDateTime(focusedFactoryTask.updatedAt)}
+                            </Typography.Text>
+                          </Flex>
+                          {readConversationFinalAnswer(focusedFactoryTask) ? (
+                            <Typography.Paragraph className="factory-task-summary">
+                              {readConversationFinalAnswer(focusedFactoryTask)}
+                            </Typography.Paragraph>
+                          ) : null}
+                          {renderFactoryTaskArtifacts(focusedFactoryTask)}
+                        </div>
+                      ) : (
+                        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择一个批次查看产物" />
+                      )}
+                    </section>
+                  </section>
+
+                  <aside className="factory-console-column factory-console-right">
+                    <section className="factory-panel factory-status-panel">
+                      <Flex align="center" justify="space-between" gap={12}>
+                        <Typography.Text strong>模型与工具状态</Typography.Text>
+                        <Tag color={selectedFactoryReadiness?.ready ? 'green' : 'orange'}>
+                          {selectedFactoryReadiness?.label ?? '待检查'}
+                        </Tag>
+                      </Flex>
+
+                      <div className="factory-status-list">
+                        {selectedFactoryModelReadiness.length > 0 ? (
+                          selectedFactoryModelReadiness.map((requirement) => (
+                            <div key={requirement.profile.id} className="factory-status-row">
+                              <span>
+                                <ApiOutlined />
+                                <Typography.Text ellipsis>{requirement.profile.modelName}</Typography.Text>
+                              </span>
+                              <Tag color={requirement.ready ? 'green' : 'orange'}>
+                                {renderModelRequirementStatusLabel(requirement.issue)}
+                              </Tag>
+                            </div>
+                          ))
+                        ) : (
+                          <Typography.Text type="secondary">未声明指定模型。</Typography.Text>
+                        )}
+                        {selectedFactoryPackage.toolIds.map((toolId) => {
+                          const known = runtimeState.tools.some((tool) => tool.id === toolId);
+                          const enabled = runtimeState.localRuntime.enabledToolIds.includes(toolId);
+                          return (
+                            <div key={toolId} className="factory-status-row">
+                              <span>
+                                <ToolOutlined />
+                                <Typography.Text ellipsis>{resolveToolLabel(runtimeState.tools, toolId)}</Typography.Text>
+                              </span>
+                              <Tag color={!known ? 'red' : enabled ? 'green' : 'orange'}>
+                                {!known ? '缺失' : enabled ? '可用' : '未启用'}
+                              </Tag>
+                            </div>
+                          );
+                        })}
+                        {focusedFactoryCostCents && focusedFactoryCostCents > 0 ? (
+                          <div className="factory-status-row">
+                            <span>
+                              <InfoCircleOutlined />
+                              <Typography.Text>本次计费</Typography.Text>
+                            </span>
+                            <Tag color="blue">{formatCents(focusedFactoryCostCents)}</Tag>
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <Button
+                        block
+                        onClick={() => {
+                          setSelectedRoleApplicationType('digital_factory');
+                          setSelectedRoleCategory('全部');
+                          openRoleConfig(selectedFactoryCode, 'configure');
+                          navigateToSection('roles');
+                        }}
+                      >
+                        配置模型/工具
+                      </Button>
+                    </section>
+
+                    <section className="factory-panel factory-log-panel">
+                      <Flex align="center" justify="space-between" gap={12}>
+                        <Typography.Text strong>工作日志</Typography.Text>
+                        <Button
+                          size="small"
+                          disabled={!focusedFactoryTask}
+                          onClick={() => {
+                            if (focusedFactoryTask) {
+                              setSelectedTaskId(focusedFactoryTask.taskId);
+                            }
+                            navigateToSection('logs');
+                          }}
+                        >
+                          详情
+                        </Button>
+                      </Flex>
+                      {latestFactoryLogs.length > 0 ? (
+                        <div className="factory-log-list">
+                          {latestFactoryLogs.map((log) => (
+                            <div key={log.id} className={`factory-log-item ${log.level}`}>
+                              <span className="factory-log-time">{formatShortTime(log.createdAt)}</span>
+                              <span className="factory-log-body">
+                                <Typography.Text strong>{executionEventLabel(log.eventType)}</Typography.Text>
+                                <Typography.Text type="secondary">
+                                  {userFriendlyExecutionMessage(log)}
+                                </Typography.Text>
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无日志" />
+                      )}
+                    </section>
+                  </aside>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="factory-empty-state">
+              <BankOutlined />
+              <Typography.Title level={3}>先安装一个数字工厂</Typography.Title>
+              <Typography.Text type="secondary">
+                数字工厂适合批量处理图片、视频和表格类任务，安装后会在这里运行。
+              </Typography.Text>
+              <Button
+                type="primary"
+                onClick={() => {
+                  setSelectedRoleApplicationType('digital_factory');
+                  navigateToSection('roles');
+                }}
+              >
+                打开数字市场
+              </Button>
+            </div>
+          )}
+        </section>
+      </div>
+    );
+  }
+
+  function renderFactoryTaskArtifacts(task: DesktopTaskDetail) {
+    const artifacts = task.artifacts.filter(isUserDeliverableArtifact);
+    if (artifacts.length === 0) {
+      return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无可交付产物" />;
+    }
+
+    const editedVideoFolder = readCommonArtifactDirectory(
+      artifacts
+        .filter((artifact) => artifact.type === 'video' || getArtifactExtension(artifact) === 'mp4')
+        .flatMap((artifact) => (artifact.localPath ? [artifact.localPath] : []))
+    );
+
+    return (
+      <div className="factory-task-artifacts">
+        {editedVideoFolder ? (
+          <div className="factory-folder-artifact-card">
+            <div className="artifact-file-icon video">
+              <VideoCameraOutlined />
+            </div>
+            <div className="artifact-file-main">
+              <div className="artifact-file-title-row">
+                <Typography.Text strong ellipsis title={editedVideoFolder}>
+                  初剪视频文件夹
+                </Typography.Text>
+                <Tag className="artifact-file-type">文件夹</Tag>
+              </div>
+              <Typography.Text type="secondary" className="artifact-file-meta" ellipsis copyable>
+                {editedVideoFolder}
+              </Typography.Text>
+            </div>
+            <Button
+              size="small"
+              icon={<FolderOpenOutlined />}
+              title="打开位置"
+              aria-label="打开位置"
+              onClick={() => void openLocalPath(editedVideoFolder)}
+            />
+          </div>
+        ) : null}
+        {artifacts.map((artifact) => {
+          const factoryPreview = artifact.factoryPreview;
+          if (factoryPreview?.kind === 'digital_factory_image_batch') {
+            const previewItems = [...factoryPreview.items].sort((left, right) => left.order - right.order);
+            return (
+              <div key={artifact.id} className="factory-artifact-card">
+                <div className="factory-artifact-header">
+                  <div className="artifact-file-icon image">
+                    <FileImageOutlined />
+                  </div>
+                  <div className="artifact-file-main">
+                    <div className="artifact-file-title-row">
+                      <Typography.Text strong ellipsis title={artifact.title}>
+                        {artifact.title}
+                      </Typography.Text>
+                      <Tag className="artifact-file-type">图片批次</Tag>
+                    </div>
+                    <Typography.Text type="secondary" className="artifact-file-meta">
+                      {formatFactoryPreviewMeta(factoryPreview)}
+                    </Typography.Text>
+                  </div>
+                </div>
+                <div className="factory-preview-grid">
+                  {previewItems.map((item) => {
+                    const imageSrc = getFactoryPreviewImageSrc(item);
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={`factory-preview-tile ${item.status}`}
+                        disabled={!imageSrc}
+                        title={item.error ?? `${item.sku} / ${item.packageLabel}`}
+                        onClick={() => setPreviewFactoryImage(item)}
+                      >
+                        <span className="factory-preview-thumb">
+                          {imageSrc ? (
+                            <img src={imageSrc} alt={`${item.sku} ${item.packageLabel}`} loading="lazy" />
+                          ) : (
+                            <FileImageOutlined />
+                          )}
+                        </span>
+                        <span className="factory-preview-caption">
+                          <span>{item.sku}</span>
+                          <span>{item.packageLabel}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          }
+
+          const fileName = getArtifactFileName(artifact);
+          return (
+            <div key={artifact.id} className="chat-artifact-card factory-file-artifact-card">
+              <div className={`artifact-file-icon ${getArtifactToneClass(artifact)}`}>
+                {renderArtifactFileIcon(artifact)}
+              </div>
+              <div className="artifact-file-main">
+                <div className="artifact-file-title-row">
+                  <Typography.Text strong ellipsis title={fileName}>
+                    {fileName}
+                  </Typography.Text>
+                      <Tag className="artifact-file-type">{getArtifactTypeLabel(artifact)}</Tag>
+                    </div>
+                    <Typography.Text type="secondary" className="artifact-file-meta" ellipsis copyable={Boolean(artifact.localPath)}>
+                      {artifact.localPath ?? formatArtifactMeta(artifact)}
+                    </Typography.Text>
+                  </div>
+              {artifact.localPath ? (
+                <Space size={6}>
+                  <Button
+                    size="small"
+                    icon={<FolderOpenOutlined />}
+                    title="打开位置"
+                    aria-label="打开位置"
+                    onClick={() => void openLocalPath(artifact.localPath)}
+                  />
+                  <Button
+                    size="small"
+                    className="artifact-download-button"
+                    icon={<DownloadOutlined />}
+                    loading={savingArtifactId === artifact.id}
+                    title="另存为"
+                    aria-label="另存为"
+                    onClick={() => void saveArtifactAs(artifact)}
+                  />
+                </Space>
+              ) : (
+                <Tag color="warning">缓存已过期</Tag>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
   function renderTaskInputMessage(input: string) {
     const attachmentMarker = '\n附件：\n';
     if (!input.includes(attachmentMarker)) {
@@ -3780,12 +4679,22 @@ export default function App() {
                   <Button
                     size="small"
                     onClick={() => {
-                      activateRole(selectedLogTask.roleCode);
+                      const rolePackage = runtimeState.rolePackages.find(
+                        (item) => item.roleCode === selectedLogTask.roleCode
+                      );
+                      const roleTemplate = desktopRoleTemplateByRoleCode.get(selectedLogTask.roleCode);
                       setSelectedTaskId(selectedLogTask.taskId);
+                      if (readRoleApplicationType(rolePackage ?? roleTemplate) === 'digital_factory') {
+                        setSelectedFactoryRoleCode(selectedLogTask.roleCode);
+                        navigateToSection('factories');
+                        return;
+                      }
+
+                      activateRole(selectedLogTask.roleCode);
                       navigateToSection('workbench');
                     }}
                   >
-                    回到对话
+                    回到任务
                   </Button>
                 </Flex>
 
@@ -3881,7 +4790,6 @@ export default function App() {
     const filteredRoleTemplates = selectedApplicationTemplates.filter(
       (template) => selectedRoleCategory === '全部' || roleTemplateCategory(template) === selectedRoleCategory
     );
-    const selectedApplicationLabel = roleApplicationTypeLabel(selectedRoleApplicationType);
     const selectedApplicationCapacityText = formatRoleApplicationCapacityUsage(
       selectedRoleApplicationType,
       installedRoleApplicationUsage,
@@ -3894,12 +4802,10 @@ export default function App() {
           <Flex align="center" justify="space-between" gap={16} wrap="wrap" className="catalog-page-header">
             <div>
               <Typography.Title level={2} className="page-title">
-                {selectedApplicationLabel}
+                数字市场
               </Typography.Title>
               <Typography.Text type="secondary">
-                {selectedRoleApplicationType === 'digital_factory'
-                  ? '选择、安装和运行批量化数字工厂。'
-                  : '选择、安装和配置企业可用的数字员工。'}
+                选择、安装和配置数字员工与数字工厂；安装后到对应侧边栏开始使用。
               </Typography.Text>
             </div>
             <Button icon={<ReloadOutlined />} loading={isLoadingRoleTemplates} onClick={loadAuthorizedRoleTemplates}>
@@ -3961,7 +4867,7 @@ export default function App() {
             {filteredRoleTemplates.map((template) => {
               const installed = installedRoleCodes.has(template.roleCode);
               const isFactory = readRoleApplicationType(template) === 'digital_factory';
-              const active = runtimeState.localRuntime.activeRoleCode === template.roleCode;
+              const active = !isFactory && runtimeState.localRuntime.activeRoleCode === template.roleCode;
               const summary = installedRoleSummaries.find((item) => item.roleCode === template.roleCode);
               const installedRolePackage = runtimeState.rolePackages.find(
                 (rolePackage) => rolePackage.roleCode === template.roleCode
@@ -3984,7 +4890,7 @@ export default function App() {
                     <Flex align="flex-start" justify="space-between" gap={12}>
                       <Flex align="center" gap={8}>
                         <span className="catalog-card-icon">
-                          {isFactory ? <ControlOutlined /> : <RobotOutlined />}
+                          {isFactory ? <BankOutlined /> : <RobotOutlined />}
                         </span>
                         {freeTemplate ? <Tag color="green">免费</Tag> : null}
                       </Flex>
@@ -4042,14 +4948,15 @@ export default function App() {
                           type={active ? 'default' : 'primary'}
                           onClick={() => {
                             if (isFactory) {
-                              openFactoryRunModal(template.roleCode);
+                              setSelectedFactoryRoleCode(template.roleCode);
+                              navigateToSection('factories');
                             } else {
                               activateRole(template.roleCode);
                               navigateToSection('workbench');
                             }
                           }}
                         >
-                          {isFactory ? '运行工厂' : active ? '进入对话' : '开始使用'}
+                          {isFactory ? '进入工厂' : active ? '进入对话' : '开始使用'}
                         </Button>
                       ) : !installAvailability.canInstall ? (
                         <Tooltip title={installAvailability.reason}>
@@ -4060,7 +4967,7 @@ export default function App() {
                           </span>
                         </Tooltip>
                       ) : (
-                        <Button size="small" type="primary" onClick={() => openRoleConfig(template.roleCode, 'install')}>
+                        <Button size="small" type="primary" onClick={() => installRoleFromMarket(template)}>
                           安装
                         </Button>
                       )}
@@ -4270,311 +5177,7 @@ export default function App() {
             <Empty description={`未找到${roleConfigApplicationLabel}`} />
           )}
         </Modal>
-        {renderFactoryRunModal()}
       </>
-    );
-  }
-
-  function renderFactoryRunModal() {
-    const template = factoryRunRoleCode
-      ? desktopRoleTemplateByRoleCode.get(factoryRunRoleCode)
-      : undefined;
-    const factory = readFactoryManifest(template?.dependencyManifest);
-    if (isMedicalCaseVideoFactory(factory)) {
-      return renderMedicalCaseVideoFactoryRunModal(template, factory);
-    }
-
-    const platformOptions = readFactoryPlatformOptions(factory);
-    const packageOptions = readFactoryPackageOptions(factory);
-    const qualityModes = readFactoryQualityModes(factory);
-    const maxItems = readFactoryMaxItems(factory);
-
-    return (
-      <Modal
-        open={Boolean(factoryRunRoleCode)}
-        title={template ? `运行工厂：${template.name}` : '运行数字工厂'}
-        okText="开始生成"
-        onCancel={closeFactoryRunModal}
-        onOk={() => factoryRunForm.submit()}
-        width={780}
-        destroyOnHidden
-      >
-        {template ? (
-          <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <Descriptions column={1} size="small" bordered>
-              <Descriptions.Item label="工厂">{template.name}</Descriptions.Item>
-              <Descriptions.Item label="单批上限">{maxItems} 个商品</Descriptions.Item>
-              <Descriptions.Item label="输出">{template.outputFormat || '图片 URL 预览结果 + 任务摘要'}</Descriptions.Item>
-            </Descriptions>
-
-            <Form<FactoryRunFormValues>
-              form={factoryRunForm}
-              layout="vertical"
-              initialValues={{
-                roleCode: template.roleCode,
-                platform: platformOptions[0]?.key ?? 'amazon',
-                packageKeys: packageOptions.map((item) => item.key),
-                qualityCheckMode: 'basic'
-              }}
-              onFinish={submitFactoryRun}
-            >
-              <Form.Item name="roleCode" hidden>
-                <Input />
-              </Form.Item>
-              <Form.Item name="platform" label="目标平台" rules={[{ required: true, message: '请选择目标平台' }]}>
-                <Select
-                  options={platformOptions.map((item) => ({
-                    value: item.key,
-                    label: `${item.label}${item.imageRatio ? ` / ${item.imageRatio}` : ''}`
-                  }))}
-                />
-              </Form.Item>
-              <Form.Item
-                name="packageKeys"
-                label="选择产物包"
-                rules={[{ required: true, message: '请至少选择一个产物包' }]}
-              >
-                <Checkbox.Group className="factory-package-checks">
-                  {packageOptions.map((item) => (
-                    <Tooltip key={item.key} title={item.description}>
-                      <Checkbox value={item.key}>{item.label}</Checkbox>
-                    </Tooltip>
-                  ))}
-                </Checkbox.Group>
-              </Form.Item>
-              <Form.Item name="qualityCheckMode" label="质检方式" rules={[{ required: true }]}>
-                <Select
-                  options={qualityModes.map((item) => ({
-                    value: item.key,
-                    label: item.label
-                  }))}
-                />
-              </Form.Item>
-              <Form.Item name="instruction" label="补充要求">
-                <Input.TextArea
-                  rows={3}
-                  placeholder="例如：面向美国站，风格干净高级；白底图不要文字；卖点图突出防水和安装便捷。"
-                />
-              </Form.Item>
-            </Form>
-
-            <div className="factory-upload-panel">
-              <Flex align="center" justify="space-between" gap={12} wrap="wrap">
-                <Space direction="vertical" size={2}>
-                  <Typography.Text strong>商品图片 / SKU 表格</Typography.Text>
-                  <Typography.Text type="secondary">
-                    支持 png、jpg、webp、xlsx、csv；图片按商品计数，单批最多 {maxItems} 张。
-                  </Typography.Text>
-                </Space>
-                <Button icon={<FileAddOutlined />} onClick={() => factoryFileInputRef.current?.click()}>
-                  添加文件
-                </Button>
-                <input
-                  ref={factoryFileInputRef}
-                  type="file"
-                  multiple
-                  accept=".png,.jpg,.jpeg,.webp,.xlsx,.csv"
-                  hidden
-                  onChange={handleFactoryFileInputChange}
-                />
-              </Flex>
-              {factoryAttachments.length > 0 ? (
-                <div className="factory-attachment-list">
-                  {factoryAttachments.map((attachment) => (
-                    <div key={attachment.id} className="factory-attachment-item">
-                      <Space size={8}>
-                        {isFactoryImageAttachment(attachment) ? <FileImageOutlined /> : <FileExcelOutlined />}
-                        <span>{attachment.name}</span>
-                        <Typography.Text type="secondary">{formatFileSize(attachment.size)}</Typography.Text>
-                      </Space>
-                      <Button size="small" type="text" danger onClick={() => removeFactoryAttachment(attachment.id)}>
-                        移除
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请添加商品参考图" />
-              )}
-            </div>
-          </Space>
-        ) : (
-          <Empty description="未找到数字工厂" />
-        )}
-      </Modal>
-    );
-  }
-
-  function renderMedicalCaseVideoFactoryRunModal(
-    template: DesktopRoleTemplate | undefined,
-    factory: DigitalFactoryManifest
-  ) {
-    const maxItems = readFactoryMaxItems(factory);
-    const dialectOptions = readFactoryAsrDialectOptions(factory);
-    const screeningProfiles = readFactoryScreeningProfiles(factory);
-    const targetSecondOptions = factory.editing?.targetSecondOptions?.length
-      ? factory.editing.targetSecondOptions
-      : [15, 30, 45];
-    const audioProfiles = runtimeState.modelProfiles.filter((profile) =>
-      readModelProfileCapabilities(profile).includes('audio_to_text')
-    );
-    const audioProfileOptions = audioProfiles.map((profile) => {
-      const enabled = runtimeState.localRuntime.enabledModelProfileIds.includes(profile.id);
-      const configured = isRuntimeModelProfileConfigured(profile, template?.roleCode);
-      const suffix = [
-        enabled ? '' : '未启用',
-        configured ? '' : '未配置'
-      ].filter(Boolean).join(' / ');
-
-      return {
-        value: profile.id,
-        label: `${profile.providerName} / ${profile.modelName}${suffix ? `（${suffix}）` : ''}`,
-        disabled: !enabled || !configured
-      };
-    });
-    const hasReadyAudioProfile = audioProfileOptions.some((option) => !option.disabled);
-
-    return (
-      <Modal
-        open={Boolean(factoryRunRoleCode)}
-        title={template ? `运行工厂：${template.name}` : '运行数字工厂'}
-        okText="开始筛选"
-        onCancel={closeFactoryRunModal}
-        onOk={() => factoryRunForm.submit()}
-        width={820}
-        destroyOnHidden
-      >
-        {template ? (
-          <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <Descriptions column={1} size="small" bordered>
-              <Descriptions.Item label="工厂">{template.name}</Descriptions.Item>
-              <Descriptions.Item label="单批上限">{maxItems} 个视频</Descriptions.Item>
-              <Descriptions.Item label="输出">{template.outputFormat || 'Excel 筛选评分表 + 可选本地初剪视频'}</Descriptions.Item>
-            </Descriptions>
-
-            {!hasReadyAudioProfile ? (
-              <Typography.Text type="warning">
-                请先在模型配置中启用并配置一个支持“语音转文字”的 ASR 模型，否则只能筛掉到 ASR 关卡，无法进入评分。
-              </Typography.Text>
-            ) : null}
-
-            <Form<FactoryRunFormValues>
-              form={factoryRunForm}
-              layout="vertical"
-              initialValues={{
-                roleCode: template.roleCode,
-                dialect: factory.asr?.defaultDialect ?? 'auto',
-                screeningProfileKey: screeningProfiles[0]?.key ?? 'default_medical_case',
-                editEnabled: factory.editing?.defaultEnabled ?? false,
-                editTargetSeconds: factory.editing?.targetSeconds ?? 30
-              }}
-              onFinish={submitFactoryRun}
-            >
-              <Form.Item name="roleCode" hidden>
-                <Input />
-              </Form.Item>
-              <div className="inline-form-grid">
-                <Form.Item
-                  name="asrModelProfileId"
-                  label="ASR 模型"
-                  rules={[{ required: true, message: '请选择可用的 ASR 模型' }]}
-                >
-                  <Select
-                    placeholder="选择语音转文字模型"
-                    options={audioProfileOptions}
-                    notFoundContent="暂无支持语音转文字的模型"
-                  />
-                </Form.Item>
-                <Form.Item name="dialect" label="语言 / 方言" rules={[{ required: true }]}>
-                  <Select
-                    options={dialectOptions.map((item) => ({
-                      value: item.key,
-                      label: item.label
-                    }))}
-                  />
-                </Form.Item>
-              </div>
-              <Form.Item
-                name="screeningProfileKey"
-                label="筛选标准"
-                rules={[{ required: true, message: '请选择筛选标准' }]}
-              >
-                <Select
-                  options={screeningProfiles.map((item) => ({
-                    value: item.key,
-                    label: item.label
-                  }))}
-                />
-              </Form.Item>
-              <Typography.Text type="secondary">
-                当前标准会依次检查 9:16 竖屏、20 秒以上、音轨可识别、转写文本长度和使用前后改善表达完整度。
-              </Typography.Text>
-
-              <div className="inline-form-grid">
-                <Form.Item name="editEnabled" label="生成初剪" valuePropName="checked">
-                  <Switch checkedChildren="开启" unCheckedChildren="关闭" />
-                </Form.Item>
-                <Form.Item name="editTargetSeconds" label="目标时长">
-                  <Select
-                    options={targetSecondOptions.map((seconds) => ({
-                      value: seconds,
-                      label: `${seconds} 秒`
-                    }))}
-                  />
-                </Form.Item>
-              </div>
-              <Form.Item name="instruction" label="补充要求">
-                <Input.TextArea
-                  rows={3}
-                  placeholder="例如：优先保留用户说使用前症状和使用后改善的片段；夸张医疗承诺请标记风险。"
-                />
-              </Form.Item>
-            </Form>
-
-            <div className="factory-upload-panel">
-              <Flex align="center" justify="space-between" gap={12} wrap="wrap">
-                <Space direction="vertical" size={2}>
-                  <Typography.Text strong>案例视频</Typography.Text>
-                  <Typography.Text type="secondary">
-                    支持 mp4、mov、mkv、avi、webm、m4v；单批最多 {maxItems} 个视频，视频只在本机处理。
-                  </Typography.Text>
-                </Space>
-                <Button icon={<FileAddOutlined />} onClick={() => factoryFileInputRef.current?.click()}>
-                  添加视频
-                </Button>
-                <input
-                  ref={factoryFileInputRef}
-                  type="file"
-                  multiple
-                  accept=".mp4,.mov,.mkv,.avi,.webm,.m4v"
-                  hidden
-                  onChange={handleFactoryFileInputChange}
-                />
-              </Flex>
-              {factoryAttachments.length > 0 ? (
-                <div className="factory-attachment-list">
-                  {factoryAttachments.map((attachment) => (
-                    <div key={attachment.id} className="factory-attachment-item">
-                      <Space size={8}>
-                        <VideoCameraOutlined />
-                        <span>{attachment.name}</span>
-                        <Typography.Text type="secondary">{formatFileSize(attachment.size)}</Typography.Text>
-                      </Space>
-                      <Button size="small" type="text" danger onClick={() => removeFactoryAttachment(attachment.id)}>
-                        移除
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请添加案例视频" />
-              )}
-            </div>
-          </Space>
-        ) : (
-          <Empty description="未找到数字工厂" />
-        )}
-      </Modal>
     );
   }
 
@@ -5500,10 +6103,15 @@ export default function App() {
             )
           ]
         : current.roleModelCredentialBindings;
+      const currentActiveRolePackage = current.localRuntime.activeRoleCode
+        ? rolePackages.find((rolePackage) => rolePackage.roleCode === current.localRuntime.activeRoleCode)
+        : undefined;
       const activeRoleCode =
-        current.localRuntime.activeRoleCode && rolePackages.some((rolePackage) => rolePackage.roleCode === current.localRuntime.activeRoleCode)
-          ? current.localRuntime.activeRoleCode
-          : template.roleCode;
+        currentActiveRolePackage && readRoleApplicationType(currentActiveRolePackage) === 'digital_employee'
+          ? currentActiveRolePackage.roleCode
+          : readRoleApplicationType(installedRolePackage) === 'digital_employee'
+            ? template.roleCode
+            : rolePackages.find((rolePackage) => readRoleApplicationType(rolePackage) === 'digital_employee')?.roleCode;
       const tasks = current.runtimeSnapshot.tasks;
 
       return {
@@ -5549,10 +6157,25 @@ export default function App() {
     message.success(`${template.name} 已更新到 ${template.version}。`);
   }
 
+  function installRoleFromMarket(template: DesktopRoleTemplate) {
+    const installAvailability = resolveRoleInstallAvailability(
+      template,
+      installedRoleApplicationUsage,
+      authorizedRoleTemplateCatalog.deviceCapacity
+    );
+    if (!installAvailability.canInstall) {
+      message.warning(installAvailability.reason);
+      return;
+    }
+
+    installRole(template);
+    message.success(`${template.name} 已安装，缺少配置时会在运行前提示你补充。`);
+  }
+
   function confirmUninstallRole(roleCode: string) {
     const rolePackage = runtimeState.rolePackages.find((item) => item.roleCode === roleCode);
     if (!rolePackage) {
-      message.warning('该数字员工未安装在当前电脑。');
+      message.warning('该应用未安装在当前电脑。');
       return;
     }
 
@@ -5562,12 +6185,12 @@ export default function App() {
   function uninstallRole(roleCode: string) {
     const rolePackage = runtimeState.rolePackages.find((item) => item.roleCode === roleCode);
     if (!rolePackage) {
-      message.warning('该数字员工未安装在当前电脑。');
+      message.warning('该应用未安装在当前电脑。');
       return;
     }
 
     if (hasBlockingTaskForRole(runtimeState, roleCode)) {
-      message.warning('该数字员工正在执行任务，请等待任务完成或取消后再卸载。');
+      message.warning('该应用正在执行任务，请等待任务完成或取消后再卸载。');
       return;
     }
 
@@ -5580,11 +6203,10 @@ export default function App() {
     message.success(`${rolePackage.name} 已从当前电脑卸载，历史任务和产物已保留。`);
   }
 
-  function openFactoryRunModal(roleCode: string) {
+  function buildFactoryRunDefaultValues(roleCode: string): FactoryRunFormValues | undefined {
     const template = desktopRoleTemplateByRoleCode.get(roleCode);
     if (!template) {
-      message.warning('未找到这个数字工厂。');
-      return;
+      return undefined;
     }
 
     const factory = readFactoryManifest(template.dependencyManifest);
@@ -5600,9 +6222,7 @@ export default function App() {
           isRuntimeModelProfileConfigured(profile, roleCode)
       );
 
-      setFactoryRunRoleCode(roleCode);
-      setFactoryAttachments([]);
-      factoryRunForm.setFieldsValue({
+      return {
         roleCode,
         asrModelProfileId: readyAudioProfile?.id ?? audioProfiles[0]?.id,
         dialect: factory.asr?.defaultDialect ?? 'auto',
@@ -5610,8 +6230,7 @@ export default function App() {
         editEnabled: factory.editing?.defaultEnabled ?? false,
         editTargetSeconds: factory.editing?.targetSeconds ?? 30,
         instruction: ''
-      });
-      return;
+      };
     }
 
     const packageOptions = readFactoryPackageOptions(factory);
@@ -5621,21 +6240,25 @@ export default function App() {
       .filter((item) => item.defaultSelected !== false)
       .map((item) => item.key);
 
-    setFactoryRunRoleCode(roleCode);
-    setFactoryAttachments([]);
-    factoryRunForm.setFieldsValue({
+    return {
       roleCode,
       platform: platformOptions[0]?.key ?? 'amazon',
       packageKeys: defaultPackages.length ? defaultPackages : packageOptions.map((item) => item.key),
       qualityCheckMode: qualityModes[0]?.key ?? 'basic',
       instruction: ''
-    });
+    };
   }
 
-  function closeFactoryRunModal() {
-    setFactoryRunRoleCode('');
+  function resetFactoryRunFormForRole(roleCode: string) {
+    const defaultValues = buildFactoryRunDefaultValues(roleCode);
+    if (!defaultValues) {
+      message.warning('未找到这个数字工厂。');
+      return false;
+    }
+
+    factoryRunForm.setFieldsValue(defaultValues);
     setFactoryAttachments([]);
-    factoryRunForm.resetFields();
+    return true;
   }
 
   function submitFactoryRun(values: FactoryRunFormValues) {
@@ -5662,7 +6285,7 @@ export default function App() {
         return;
       }
       if (!values.asrModelProfileId) {
-        message.warning('请选择一个可用的 ASR 模型。');
+        message.warning('请选择一个可用的语音转文字模型。');
         return;
       }
 
@@ -5673,7 +6296,7 @@ export default function App() {
         !runtimeState.localRuntime.enabledModelProfileIds.includes(asrProfile.id) ||
         !isRuntimeModelProfileConfigured(asrProfile, values.roleCode)
       ) {
-        message.warning('请选择已启用且已配置 API Key 的 ASR 模型。');
+        message.warning('请选择已启用且已配置 API Key 的语音转文字模型。');
         return;
       }
 
@@ -5692,15 +6315,23 @@ export default function App() {
         extraModelProfileIds: [values.asrModelProfileId]
       });
       if (created) {
-        closeFactoryRunModal();
-        navigateToSection('workbench');
+        resetFactoryRunFormForRole(values.roleCode);
+        setSelectedFactoryRoleCode(values.roleCode);
+        navigateToSection('factories');
       }
       return;
     }
 
     const imageAttachments = factoryAttachments.filter((attachment) => isFactoryImageAttachment(attachment));
+    const invalidImageFactoryAttachments = factoryAttachments.filter(
+      (attachment) => !isFactoryImageInputAttachment(attachment)
+    );
     if (imageAttachments.length === 0) {
       message.warning('请至少上传一张商品参考图。');
+      return;
+    }
+    if (invalidImageFactoryAttachments.length > 0) {
+      message.warning('当前工厂只支持图片、Excel 或 CSV，请移除不适用文件后再运行。');
       return;
     }
     if (imageAttachments.length > maxItems) {
@@ -5728,8 +6359,9 @@ export default function App() {
       attachments: factoryAttachments
     });
     if (created) {
-      closeFactoryRunModal();
-      navigateToSection('workbench');
+      resetFactoryRunFormForRole(values.roleCode);
+      setSelectedFactoryRoleCode(values.roleCode);
+      navigateToSection('factories');
     }
   }
 
@@ -5905,9 +6537,13 @@ export default function App() {
       const values = await modelForm.validateFields();
       const apiBaseUrl = values.apiBaseUrl?.trim();
       const apiKey = values.apiKey?.trim();
+      const capabilities = normalizeModelCapabilities(
+        values.capabilities,
+        values.purpose ?? selectedModelProfile.purpose
+      );
 
-      if (!apiBaseUrl || !apiKey) {
-        setModelTestNotice('请先填写 API Base URL 和 API Key。');
+      if ((!apiBaseUrl && !isNativeProviderModelProfile(selectedModelProfile, capabilities)) || !apiKey) {
+        setModelTestNotice('请先填写 API Key；OpenAI 兼容接口还需要填写 API Base URL。');
         return;
       }
 
@@ -5916,13 +6552,10 @@ export default function App() {
         providerName: values.providerName.trim(),
         modelName: values.modelName.trim(),
         purpose: purposeForModelCapabilities(
-          values.capabilities,
+          capabilities,
           values.purpose ?? selectedModelProfile.purpose
         ),
-        capabilities: normalizeModelCapabilities(
-          values.capabilities,
-          values.purpose ?? selectedModelProfile.purpose
-        ),
+        capabilities,
         apiBaseUrl,
         apiKey,
         temperature: values.temperature,
@@ -5931,22 +6564,12 @@ export default function App() {
         fallbackProfileId: values.fallbackProfileId || undefined
       };
 
-      const response = await window.qiuDesktop.invokeModelChat({
+      const response = await window.qiuDesktop.testModelConnection({
         profile,
-        timeoutMs: 20_000,
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a connection test assistant. Reply briefly in Chinese.'
-          },
-          {
-            role: 'user',
-            content: '请回复“连接正常”，并说明当前模型可用于 QiuAI WorkOS 桌面端。'
-          }
-        ]
+        timeoutMs: 20_000
       });
 
-      setModelTestNotice(`模型连接正常：${response.provider}/${response.modelName}`);
+      setModelTestNotice(`模型连接正常：${response.providerName}/${response.modelName}。${response.message}`);
     } catch (error) {
       setModelTestNotice(`模型连接失败：${error instanceof Error ? error.message : 'unknown error'}`);
     } finally {
@@ -5966,9 +6589,13 @@ export default function App() {
       const values = await modelForm.validateFields();
       const apiBaseUrl = values.apiBaseUrl?.trim();
       const apiKey = values.apiKey?.trim();
+      const capabilities = normalizeModelCapabilities(
+        values.capabilities,
+        values.purpose ?? selectedModelProfile.purpose
+      );
 
-      if (!apiBaseUrl || !apiKey) {
-        setModelTestNotice('请先填写 API Base URL 和 API Key。');
+      if ((!apiBaseUrl && !isNativeProviderModelProfile(selectedModelProfile, capabilities)) || !apiKey) {
+        setModelTestNotice('请先填写 API Key；OpenAI 兼容接口还需要填写 API Base URL。');
         return;
       }
 
@@ -5977,6 +6604,8 @@ export default function App() {
         providerName: values.providerName.trim(),
         apiBaseUrl,
         apiKey,
+        modelName: values.modelName.trim(),
+        capabilities,
         timeoutMs: 20_000
       });
 
@@ -6295,16 +6924,17 @@ export default function App() {
   function prepareRoleForTaskRun(roleCode: string): DesktopRuntimeState | undefined {
     const rolePackage = runtimeState.rolePackages.find((item) => item.roleCode === roleCode);
     if (!rolePackage) {
-      message.warning('该数字员工未安装在当前电脑，请先安装后再执行任务。');
+      message.warning('该应用未安装在当前电脑，请先安装后再执行任务。');
       return undefined;
     }
+    const roleApplicationLabel = roleApplicationTypeLabel(readRoleApplicationType(rolePackage));
     if (isRuntimeRolePackageDeleted(runtimeState, roleCode)) {
-      message.warning('该数字员工已被服务端删除，不能继续执行。');
+      message.warning(`该${roleApplicationLabel}已被服务端删除，不能继续执行。`);
       return undefined;
     }
     const latestTemplate = desktopRoleTemplates.find((template) => template.roleCode === roleCode);
     if (latestTemplate && isInstalledRoleTemplateOutdated(latestTemplate, rolePackage)) {
-      message.warning('该数字员工有新版可用，请先在“数字员工”页面更新后再运行。');
+      message.warning(`该${roleApplicationLabel}有新版可用，请先在“数字市场”页面更新后再运行。`);
       navigateToSection('roles');
       return undefined;
     }
@@ -6340,8 +6970,8 @@ export default function App() {
       setModelConfigOpen(true);
       setModelTestNotice(
         firstUnreadyModel.issue === 'disabled'
-          ? '这个数字员工需要先启用指定模型，并确认 API Key 已填写。'
-          : '这个数字员工需要先填写指定模型的 API Key，并测试连接。'
+          ? `这个${roleApplicationLabel}需要先启用指定模型，并确认 API Key 已填写。`
+          : `这个${roleApplicationLabel}需要先填写指定模型的 API Key，并测试连接。`
       );
       navigateToSection('models');
       return undefined;
@@ -6350,7 +6980,7 @@ export default function App() {
     const runtimeReadiness = buildRoleRuntimeReadiness(preparedState, preparedRolePackage);
     if (!runtimeReadiness.ready) {
       setRuntimeState(preparedState);
-      message.warning(runtimeReadiness.issueText || '该数字员工运行所需配置不完整。');
+      message.warning(runtimeReadiness.issueText || `该${roleApplicationLabel}运行所需配置不完整。`);
       navigateToSection(
         runtimeReadiness.missingToolIds.length > 0 || runtimeReadiness.disabledToolIds.length > 0
           ? 'tools'
@@ -6784,12 +7414,16 @@ function modelProviderLogoText(providerName: string): string {
 function sectionMeta(section: SectionKey) {
   const meta: Record<SectionKey, { title: string; description: string }> = {
     workbench: {
-      title: '对话',
-      description: '选员工，发任务，拿结果。'
+      title: '数字员工',
+      description: '和已安装的数字员工对话，上传文件并交付结果。'
+    },
+    factories: {
+      title: '数字工厂',
+      description: '运行批量化任务，查看批次进度和工厂产物。'
     },
     roles: {
-      title: '数字员工',
-      description: '安装和配置可用员工。'
+      title: '数字市场',
+      description: '发现、安装和配置数字员工与数字工厂。'
     },
     logs: {
       title: '日志',
@@ -6860,6 +7494,102 @@ function taskStateColor(state: DesktopTaskState) {
   return colors[state];
 }
 
+type FactoryTaskStageStatus = 'waiting' | 'running' | 'completed' | 'failed' | 'optional';
+
+interface FactoryTaskStageView {
+  key: string;
+  label: string;
+  status: FactoryTaskStageStatus;
+}
+
+function factoryTaskProgressPercent(task: DesktopTaskDetail): number {
+  if (task.state === 'completed') {
+    return 100;
+  }
+
+  if (task.state === 'failed' || task.state === 'cancelled') {
+    return 100;
+  }
+
+  if (task.state === 'queued') {
+    return 8;
+  }
+
+  const progressFromLogs = Math.min(88, 18 + task.executionLogs.length * 3);
+  return Math.max(24, progressFromLogs);
+}
+
+function buildFactoryTaskStages(task: DesktopTaskDetail, isVideoFactory: boolean): FactoryTaskStageView[] {
+  const stages = isVideoFactory
+    ? [
+        { key: 'probe', label: '规格' },
+        { key: 'asr', label: '语音转文字' },
+        { key: 'score', label: '评分' },
+        { key: 'edit', label: '初剪', optional: true },
+        { key: 'artifact', label: '产物' }
+      ]
+    : [
+        { key: 'prompt', label: '提示词' },
+        { key: 'generate', label: '生图' },
+        { key: 'quality', label: '质检', optional: true },
+        { key: 'artifact', label: '产物' }
+      ];
+  const text = task.executionLogs.map((log) => `${log.eventType} ${log.message}`).join('\n').toLowerCase();
+  const completed = task.state === 'completed';
+  const failed = task.state === 'failed' || task.state === 'cancelled';
+
+  return stages.map((stage, index): FactoryTaskStageView => {
+    if (completed) {
+      if (stage.optional && !stageWasObserved(stage.key, text) && !hasFactoryArtifactForStage(task, stage.key)) {
+        return { key: stage.key, label: stage.label, status: 'optional' };
+      }
+      return { key: stage.key, label: stage.label, status: 'completed' };
+    }
+
+    if (failed && (stageWasObserved(stage.key, text) || index === 0)) {
+      return { key: stage.key, label: stage.label, status: 'failed' };
+    }
+
+    if (stageWasObserved(stage.key, text) || hasFactoryArtifactForStage(task, stage.key)) {
+      return { key: stage.key, label: stage.label, status: task.state === 'running' ? 'running' : 'completed' };
+    }
+
+    if (stage.optional) {
+      return { key: stage.key, label: stage.label, status: 'optional' };
+    }
+
+    return { key: stage.key, label: stage.label, status: task.state === 'running' && index === 0 ? 'running' : 'waiting' };
+  });
+}
+
+function stageWasObserved(stageKey: string, text: string): boolean {
+  if (stageKey === 'probe') return text.includes('video.probe') || text.includes('视频规格');
+  if (stageKey === 'asr') return text.includes('asr') || text.includes('audio_transcription') || text.includes('语音识别');
+  if (stageKey === 'score') return text.includes('score') || text.includes('评分') || text.includes('video screening');
+  if (stageKey === 'edit') return text.includes('compose_clips') || text.includes('初剪') || text.includes('剪辑');
+  if (stageKey === 'artifact') return text.includes('artifact') || text.includes('产物') || text.includes('写入');
+  if (stageKey === 'prompt') return text.includes('prompt') || text.includes('提示词');
+  if (stageKey === 'generate') return text.includes('image_generation') || text.includes('生图') || text.includes('图片');
+  if (stageKey === 'quality') return text.includes('quality') || text.includes('质检');
+  return false;
+}
+
+function hasFactoryArtifactForStage(task: DesktopTaskDetail, stageKey: string): boolean {
+  if (stageKey === 'artifact') {
+    return task.artifacts.some(isUserDeliverableArtifact);
+  }
+
+  if (stageKey === 'edit') {
+    return task.artifacts.some((artifact) => artifact.type === 'video' || getArtifactExtension(artifact) === 'mp4');
+  }
+
+  if (stageKey === 'generate') {
+    return task.artifacts.some((artifact) => artifact.factoryPreview?.kind === 'digital_factory_image_batch');
+  }
+
+  return false;
+}
+
 function formatDate(value?: string) {
   return value ? new Date(value).toLocaleString('zh-CN') : '—';
 }
@@ -6917,6 +7647,24 @@ function getArtifactFileName(artifact: DesktopTaskDetail['artifacts'][number]) {
 function getArtifactExtension(artifact: DesktopTaskDetail['artifacts'][number]) {
   const fileName = getArtifactFileName(artifact);
   return fileName.match(/\.([a-zA-Z0-9]+)$/)?.[1]?.toLowerCase() ?? '';
+}
+
+function readCommonArtifactDirectory(paths: string[]): string | undefined {
+  const directories = paths
+    .map((path) => path.trim())
+    .filter(Boolean)
+    .map((path) => {
+      const normalized = path.replace(/\\/g, '/');
+      const index = normalized.lastIndexOf('/');
+      return index > 0 ? path.slice(0, index) : '';
+    })
+    .filter(Boolean);
+
+  if (directories.length === 0) {
+    return undefined;
+  }
+
+  return directories.every((directory) => directory === directories[0]) ? directories[0] : undefined;
 }
 
 function getArtifactTypeLabel(artifact: DesktopTaskDetail['artifacts'][number]) {
@@ -7711,6 +8459,7 @@ const defaultFactoryQualityModes: DigitalFactoryQualityModeOption[] = [
 ];
 
 const factoryImageExtensions = new Set(['png', 'jpg', 'jpeg', 'webp']);
+const factoryTableExtensions = new Set(['xlsx', 'csv']);
 const factoryVideoExtensions = new Set(['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v']);
 
 const defaultFactoryAsrDialects: DigitalFactoryAsrDialectOption[] = [
@@ -7857,6 +8606,15 @@ function isFactoryVideoAttachment(attachment: ComposerAttachment) {
 
   const extension = attachment.name.split('.').pop()?.trim().toLowerCase() ?? '';
   return factoryVideoExtensions.has(extension);
+}
+
+function isFactoryTableAttachment(attachment: ComposerAttachment) {
+  const extension = attachment.name.split('.').pop()?.trim().toLowerCase() ?? '';
+  return factoryTableExtensions.has(extension);
+}
+
+function isFactoryImageInputAttachment(attachment: ComposerAttachment) {
+  return isFactoryImageAttachment(attachment) || isFactoryTableAttachment(attachment);
 }
 
 function readFactoryKind(factory: DigitalFactoryManifest) {
@@ -8011,7 +8769,7 @@ function buildMedicalCaseVideoFactoryTaskInput({
       instructions: [
         '只评价视频素材质量、表达清晰度、剪辑价值和合规风险，不做医疗诊断，不判断药物疗效真实性。',
         '先做筛选，未通过视频直接标记失败原因，不进入评分和初剪。',
-        '通过筛选后再根据 ASR 转写内容评分，重点看使用前、使用过程、使用后改善表达是否完整具体。',
+        '通过筛选后再根据语音转写内容评分，重点看使用前、使用过程、使用后改善表达是否完整具体。',
         '只有用户开启初剪时才生成视频片段；大视频和生成视频都只保存在本机。'
       ]
     },
@@ -8469,6 +9227,32 @@ function normalizeComparableUrl(value?: string) {
 
 function isPendingModelProviderProfile(profile: ModelProfile): boolean {
   return profile.providerId === 'provider-pending' || profile.providerId === 'provider-local';
+}
+
+function isNativeProviderModelProfile(profile: ModelProfile, capabilities: string[] = []): boolean {
+  const providerId = profile.providerId.trim().toLowerCase();
+  const providerName = profile.providerName.trim().toLowerCase();
+  const modelName = profile.modelName.trim().toLowerCase();
+  const isAudioProfile = capabilities.includes('audio_to_text') || Boolean(profile.capabilities?.includes('audio_to_text'));
+
+  return (
+    providerId === 'aliyun-bailian' ||
+    providerId === 'aliyun-asr-compatible' ||
+    providerId === 'tencent-cloud' ||
+    providerId === 'tencent-asr-compatible' ||
+    (isAudioProfile && (
+      providerId.includes('aliyun') ||
+      providerId.includes('tencent') ||
+      providerName.includes('阿里云') ||
+      providerName.includes('百炼') ||
+      providerName.includes('腾讯') ||
+      providerName.includes('aliyun') ||
+      providerName.includes('tencent') ||
+      modelName.includes('fun-asr') ||
+      modelName.includes('qwen3-asr') ||
+      modelName.includes('paraformer')
+    ))
+  );
 }
 
 function mergeModelProfileOptions(

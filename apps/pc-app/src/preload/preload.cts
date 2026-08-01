@@ -9,6 +9,8 @@ import type {
   DesktopModelChatResponse,
   DesktopModelListRequest,
   DesktopModelListResponse,
+  DesktopModelTestRequest,
+  DesktopModelTestResponse,
   DesktopRuntimeState,
   DesktopRuntimeSyncResponse,
   DesktopServerConnectionStatus,
@@ -44,6 +46,7 @@ const channels = {
   createWorkspaceBackup: 'qiuai:desktop:create-workspace-backup',
   restoreWorkspaceBackup: 'qiuai:desktop:restore-workspace-backup',
   invokeModelChat: 'qiuai:desktop:invoke-model-chat',
+  testModelConnection: 'qiuai:desktop:test-model-connection',
   listProviderModels: 'qiuai:desktop:list-provider-models',
   selectKnowledgeSourcePath: 'qiuai:desktop:select-knowledge-source-path',
   writeTaskArtifact: 'qiuai:desktop:write-task-artifact',
@@ -84,6 +87,8 @@ const bridge: QiuDesktopBridge = {
     ipcRenderer.invoke(channels.restoreWorkspaceBackup, bundlePath) as Promise<DesktopBackupSummary>,
   invokeModelChat: (request: DesktopModelChatRequest) =>
     ipcRenderer.invoke(channels.invokeModelChat, request) as Promise<DesktopModelChatResponse>,
+  testModelConnection: (request: DesktopModelTestRequest) =>
+    ipcRenderer.invoke(channels.testModelConnection, request) as Promise<DesktopModelTestResponse>,
   listProviderModels: (request: DesktopModelListRequest) =>
     ipcRenderer.invoke(channels.listProviderModels, request) as Promise<DesktopModelListResponse>,
   selectKnowledgeSourcePath: (source: KnowledgeBindingSource) =>

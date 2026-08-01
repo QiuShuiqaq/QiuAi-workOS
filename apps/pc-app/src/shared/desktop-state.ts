@@ -57,6 +57,17 @@ const initialModelProfiles: ModelProfile[] = [
     maxTokens: 4096,
     fallbackProfileId: 'qiu-general-default',
     monthlyBudgetCents: 0
+  },
+  {
+    id: 'qiu-asr-default',
+    providerId: 'provider-pending',
+    providerName: '待配置语音模型供应商',
+    modelName: 'speech-to-text',
+    purpose: 'audio',
+    capabilities: ['audio_to_text'],
+    temperature: 0.2,
+    maxTokens: 4096,
+    monthlyBudgetCents: 0
   }
 ];
 

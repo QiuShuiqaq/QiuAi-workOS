@@ -3072,7 +3072,7 @@ const videoFactoryModelProfiles: ModelProfile[] = [
   {
     id: 'qiu-asr-default',
     providerId: 'tencent-asr-compatible',
-    providerName: 'Tencent ASR Compatible',
+    providerName: 'Tencent Cloud',
     modelName: '16k_zh_dialect',
     purpose: 'audio',
     capabilities: ['audio_to_text'],

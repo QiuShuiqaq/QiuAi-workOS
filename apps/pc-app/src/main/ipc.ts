@@ -15,7 +15,11 @@ import {
   getUserAgreementStatus
 } from './agreement-state.js';
 import { saveDesktopRuntimeState } from './runtime-store.js';
-import { invokeOpenAiCompatibleModelChat, listOpenAiCompatibleModels } from './model-chat.js';
+import {
+  invokeOpenAiCompatibleModelChat,
+  listOpenAiCompatibleModels,
+  testDesktopModelConnection
+} from './model-chat.js';
 import { selectKnowledgeSourcePath } from './knowledge-source.js';
 import {
   cleanupExpiredArtifactCache,
@@ -49,6 +53,7 @@ const channels = {
   createWorkspaceBackup: 'qiuai:desktop:create-workspace-backup',
   restoreWorkspaceBackup: 'qiuai:desktop:restore-workspace-backup',
   invokeModelChat: 'qiuai:desktop:invoke-model-chat',
+  testModelConnection: 'qiuai:desktop:test-model-connection',
   listProviderModels: 'qiuai:desktop:list-provider-models',
   selectKnowledgeSourcePath: 'qiuai:desktop:select-knowledge-source-path',
   writeTaskArtifact: 'qiuai:desktop:write-task-artifact',
@@ -96,6 +101,9 @@ export function registerDesktopIpc() {
   });
   ipcMain.handle(channels.invokeModelChat, async (_, request) => {
     return invokeOpenAiCompatibleModelChat(request);
+  });
+  ipcMain.handle(channels.testModelConnection, async (_, request) => {
+    return testDesktopModelConnection(request);
   });
   ipcMain.handle(channels.listProviderModels, async (_, request) => {
     return listOpenAiCompatibleModels(request);

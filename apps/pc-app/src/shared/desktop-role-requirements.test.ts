@@ -72,6 +72,40 @@ assert.deepEqual(readWorkflowRequiredModelProfileIds(rolePackage.workflowGraph),
   'deepseek-v4-flash',
   'openai-gpt-5.6-terra'
 ]);
+
+const videoFactoryWorkflowGraph = {
+  version: '1.0.0',
+  entryNodeId: 'start',
+  nodes: [
+    { id: 'start', type: 'start', name: 'Start' },
+    {
+      id: 'screen_score_and_edit',
+      type: 'llm',
+      name: 'Screen videos',
+      modelProfileId: 'qiu-general-default',
+      config: {
+        requiredModelProfileIds: ['qiu-asr-default']
+      }
+    }
+  ],
+  edges: [
+    {
+      id: 'start-screen',
+      sourceNodeId: 'start',
+      targetNodeId: 'screen_score_and_edit',
+      condition: { type: 'always' }
+    }
+  ]
+} satisfies RolePackageManifest['workflowGraph'];
+assert.deepEqual(readWorkflowRequiredModelProfileIds(videoFactoryWorkflowGraph), [
+  'qiu-general-default',
+  'qiu-asr-default'
+]);
+
+const asrProfile = createPlaceholderModelProfile('qiu-asr-default');
+assert.equal(asrProfile.purpose, 'audio');
+assert.ok(asrProfile.capabilities?.includes('audio_to_text'));
+
 assert.deepEqual(readRequiredModelProfileIdsForRolePackage(rolePackage), [
   'qiu-general-default',
   'deepseek-v4-flash',

@@ -3,7 +3,11 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { invokeOpenAiCompatibleModelChat, listOpenAiCompatibleModels } from './model-chat.js';
+import {
+  invokeOpenAiCompatibleModelChat,
+  listOpenAiCompatibleModels,
+  testDesktopModelConnection
+} from './model-chat.js';
 
 const originalFetch = globalThis.fetch;
 let capturedUrl = '';
@@ -120,8 +124,8 @@ try {
   const response = await invokeOpenAiCompatibleModelChat({
     profile: {
       id: 'asr-profile',
-      providerId: 'tencent-asr-compatible',
-      providerName: '腾讯云 ASR 兼容网关',
+      providerId: 'openai-compatible-asr',
+      providerName: 'OpenAI Compatible ASR',
       modelName: '16k_zh_dialect',
       purpose: 'general',
       capabilities: ['audio_to_text'],
@@ -140,6 +144,246 @@ try {
   assert.equal(capturedTranscriptionUrl, 'https://asr.example.test/v1/audio/transcriptions');
   assert.equal(capturedTranscriptionAuthorization, 'Bearer asr-key');
   assert.match(response.content, /使用前疼痛明显/);
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+let capturedAliyunCompatibleAudioUrl = '';
+let capturedAliyunCompatibleAudioBody: Record<string, unknown> | undefined;
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  capturedAliyunCompatibleAudioUrl = String(input);
+  capturedAliyunCompatibleAudioBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+
+  return new Response(JSON.stringify({ choices: [{ message: { content: '阿里云短音频转写成功。' } }] }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' }
+  });
+}) as typeof fetch;
+
+try {
+  const response = await invokeOpenAiCompatibleModelChat({
+    profile: {
+      id: 'aliyun-qwen3-asr-flash',
+      providerId: 'aliyun-bailian',
+      providerName: '阿里云',
+      modelName: 'qwen3-asr-flash',
+      purpose: 'audio',
+      capabilities: ['audio_to_text'],
+      apiKey: 'aliyun-key'
+    },
+    taskKind: 'audio_transcription',
+    audioTranscription: {
+      audioPath: sampleAudioPath
+    },
+    messages: [{ role: 'user', content: '请转写。' }]
+  });
+
+  assert.equal(
+    capturedAliyunCompatibleAudioUrl,
+    'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
+  );
+  assert.equal(capturedAliyunCompatibleAudioBody?.model, 'qwen3-asr-flash');
+  assert.equal(capturedAliyunCompatibleAudioBody?.stream, false);
+  assert.match(response.content, /短音频转写成功/);
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+let capturedAliyunProbeUrl = '';
+globalThis.fetch = (async (input: RequestInfo | URL) => {
+  capturedAliyunProbeUrl = String(input);
+  return new Response(JSON.stringify({ code: 'TaskNotFound', message: 'task not found' }), {
+    status: 404,
+    headers: { 'content-type': 'application/json' }
+  });
+}) as typeof fetch;
+
+try {
+  const catalog = await listOpenAiCompatibleModels({
+    providerId: 'aliyun-bailian',
+    providerName: '阿里云',
+    apiKey: 'aliyun-key',
+    modelName: 'fun-asr',
+    capabilities: ['audio_to_text']
+  });
+
+  assert.equal(capturedAliyunProbeUrl, 'https://dashscope.aliyuncs.com/api/v1/tasks/qiuai-connection-test');
+  assert.equal(catalog.providerId, 'aliyun-bailian');
+  assert.ok(catalog.models.some((model) => model.id === 'fun-asr'));
+  assert.ok(catalog.models.every((model) => model.capabilities.includes('audio_to_text')));
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+let capturedTencentAction = '';
+let capturedTencentAuthorization = '';
+globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+  const headers = new Headers(init?.headers);
+  capturedTencentAction = headers.get('x-tc-action') ?? '';
+  capturedTencentAuthorization = headers.get('authorization') ?? '';
+  return new Response(
+    JSON.stringify({
+      Response: {
+        Error: {
+          Code: 'ResourceNotFound.Task',
+          Message: 'task not found'
+        },
+        RequestId: 'req-test'
+      }
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+}) as typeof fetch;
+
+try {
+  const response = await testDesktopModelConnection({
+    profile: {
+      id: 'qiu-asr-default',
+      providerId: 'tencent-cloud',
+      providerName: '腾讯云',
+      modelName: '16k_zh_dialect',
+      purpose: 'audio',
+      capabilities: ['audio_to_text'],
+      apiBaseUrl: 'https://asr.tencentcloudapi.com?region=ap-shanghai',
+      apiKey: 'secret-id:secret-key'
+    }
+  });
+
+  assert.equal(capturedTencentAction, 'DescribeTaskStatus');
+  assert.match(capturedTencentAuthorization, /^TC3-HMAC-SHA256 Credential=secret-id/);
+  assert.equal(response.ok, true);
+  assert.equal(response.mode, 'tencent_cloud');
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+const aliyunCalls: string[] = [];
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = String(input);
+  aliyunCalls.push(url);
+  const headers = new Headers(init?.headers);
+  if (url.endsWith('/services/audio/asr/transcription')) {
+    assert.equal(headers.get('authorization'), 'Bearer aliyun-key');
+    assert.equal(headers.get('x-dashscope-async'), 'enable');
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    assert.equal(body.model, 'fun-asr');
+    return new Response(JSON.stringify({ output: { task_id: 'task-aliyun-001' } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+  if (url.endsWith('/tasks/task-aliyun-001')) {
+    return new Response(
+      JSON.stringify({
+        output: {
+          task_status: 'SUCCEEDED',
+          results: [{ transcription_url: 'https://cdn.example.test/asr-result.json' }]
+        }
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    );
+  }
+
+  assert.equal(url, 'https://cdn.example.test/asr-result.json');
+  return new Response(JSON.stringify({ transcripts: [{ text: '使用前疼痛明显，使用后改善清楚。' }] }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' }
+  });
+}) as typeof fetch;
+
+try {
+  const response = await invokeOpenAiCompatibleModelChat({
+    profile: {
+      id: 'aliyun-fun-asr',
+      providerId: 'aliyun-bailian',
+      providerName: '阿里云',
+      modelName: 'fun-asr',
+      purpose: 'audio',
+      capabilities: ['audio_to_text'],
+      apiKey: 'aliyun-key'
+    },
+    taskKind: 'audio_transcription',
+    audioTranscription: {
+      audioPath: 'https://oss.example.test/case-video.mp4',
+      language: 'zh',
+      dialect: 'shanghai'
+    },
+    messages: [{ role: 'user', content: '请转写。' }]
+  });
+
+  assert.deepEqual(aliyunCalls, [
+    'https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription',
+    'https://dashscope.aliyuncs.com/api/v1/tasks/task-aliyun-001',
+    'https://cdn.example.test/asr-result.json'
+  ]);
+  assert.match(response.content, /使用前疼痛明显/);
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+let tencentCreatePayload: Record<string, unknown> | undefined;
+let tencentCallCount = 0;
+globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+  tencentCallCount += 1;
+  const headers = new Headers(init?.headers);
+  assert.match(headers.get('authorization') ?? '', /^TC3-HMAC-SHA256 Credential=secret-id/);
+  const action = headers.get('x-tc-action');
+  const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+
+  if (action === 'CreateRecTask') {
+    tencentCreatePayload = body;
+    return new Response(JSON.stringify({ Response: { Data: { TaskId: 12345 }, RequestId: 'req-create' } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+
+  assert.equal(action, 'DescribeTaskStatus');
+  return new Response(
+    JSON.stringify({
+      Response: {
+        Data: {
+          Status: 2,
+          Result: '[0.00, 2.40] 使用前咳嗽不舒服，[2.40, 5.60] 使用后缓解明显。',
+          ResultDetail: [
+            { FinalSentence: '使用前咳嗽不舒服。' },
+            { FinalSentence: '使用后缓解明显。' }
+          ]
+        },
+        RequestId: 'req-describe'
+      }
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+}) as typeof fetch;
+
+try {
+  const response = await invokeOpenAiCompatibleModelChat({
+    profile: {
+      id: 'tencent-asr',
+      providerId: 'tencent-cloud',
+      providerName: '腾讯云',
+      modelName: '16k_zh_dialect',
+      purpose: 'audio',
+      capabilities: ['audio_to_text'],
+      apiBaseUrl: 'https://asr.tencentcloudapi.com?region=ap-shanghai',
+      apiKey: 'secret-id:secret-key'
+    },
+    taskKind: 'audio_transcription',
+    audioTranscription: {
+      audioPath: sampleAudioPath,
+      language: 'zh',
+      dialect: 'auto'
+    },
+    messages: [{ role: 'user', content: '请转写。' }]
+  });
+
+  assert.equal(tencentCallCount, 2);
+  assert.equal(tencentCreatePayload?.EngineModelType, '16k_zh_dialect');
+  assert.equal(tencentCreatePayload?.SourceType, 1);
+  assert.equal(typeof tencentCreatePayload?.Data, 'string');
+  assert.match(response.content, /使用前咳嗽/);
+  assert.doesNotMatch(response.content, /\[0\.00, 2\.40\]/);
 } finally {
   globalThis.fetch = originalFetch;
 }

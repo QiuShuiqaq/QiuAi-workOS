@@ -212,11 +212,27 @@ export interface DesktopModelChatRequest {
   };
   audioTranscription?: {
     audioPath: string;
+    audioUrl?: string;
     language?: string;
     dialect?: string;
     prompt?: string;
     responseFormat?: 'json' | 'text';
   };
+}
+
+export interface DesktopModelTestRequest {
+  profile: ModelProfile;
+  timeoutMs?: number;
+}
+
+export interface DesktopModelTestResponse {
+  providerId: string;
+  providerName: string;
+  modelName: string;
+  ok: boolean;
+  message: string;
+  checkedAt: string;
+  mode: 'openai_compatible' | 'aliyun_bailian' | 'tencent_cloud';
 }
 
 export interface DesktopModelChatResponse {
@@ -240,6 +256,8 @@ export interface DesktopModelListRequest {
   providerName: string;
   apiBaseUrl?: string;
   apiKey: string;
+  modelName?: string;
+  capabilities?: string[];
   timeoutMs?: number;
 }
 
@@ -343,6 +361,7 @@ export interface QiuDesktopBridge {
   createWorkspaceBackup(state: DesktopRuntimeState): Promise<DesktopBackupSummary>;
   restoreWorkspaceBackup(bundlePath: string): Promise<DesktopBackupSummary>;
   invokeModelChat(request: DesktopModelChatRequest): Promise<DesktopModelChatResponse>;
+  testModelConnection(request: DesktopModelTestRequest): Promise<DesktopModelTestResponse>;
   listProviderModels(request: DesktopModelListRequest): Promise<DesktopModelListResponse>;
   selectKnowledgeSourcePath(source: KnowledgeBindingSource): Promise<DesktopKnowledgeSourcePathResult>;
   writeTaskArtifact(request: DesktopTaskArtifactWriteRequest): Promise<DesktopTaskArtifactWriteResult>;
