@@ -7,6 +7,8 @@ import type {
   LoginRequest,
   LoginResponse,
   LogoutResponse,
+  RegisterRequest,
+  RegisterResponse,
   SyncAlipayOrderResponse,
   ApiErrorResponse,
   CreateTaskRequest,
@@ -146,6 +148,10 @@ export class QiuApiClient {
 
   login(input: LoginRequest): Promise<LoginResponse> {
     return this.post('/api/v1/auth/login', input);
+  }
+
+  register(input: RegisterRequest): Promise<RegisterResponse> {
+    return this.post('/api/v1/auth/register', input);
   }
 
   logout(): Promise<LogoutResponse> {

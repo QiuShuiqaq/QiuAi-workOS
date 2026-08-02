@@ -10,7 +10,6 @@ import {
   RobotOutlined,
   SettingOutlined,
   TeamOutlined,
-  UnorderedListOutlined,
   UserOutlined
 } from '@ant-design/icons';
 import type { CurrentAccountResponse } from '@qiuai/api-contract';
@@ -33,7 +32,6 @@ export interface ConsoleShellProps {
 
 function selectedKey(pathname: string) {
   if (pathname.startsWith('/roles')) return 'roles';
-  if (pathname.startsWith('/tasks')) return 'tasks';
   if (pathname.startsWith('/approvals')) return 'approvals';
   if (pathname.startsWith('/costs')) return 'costs';
   if (pathname.startsWith('/purchase')) return 'purchase';
@@ -124,11 +122,6 @@ export function ConsoleShell({ currentAccount, children }: ConsoleShellProps) {
               key: 'roles',
               icon: <RobotOutlined />,
               label: <Link href={withWorkspaceId('/roles')}>数字员工</Link>
-            },
-            {
-              key: 'tasks',
-              icon: <UnorderedListOutlined />,
-              label: <Link href={withWorkspaceId('/tasks')}>任务中心</Link>
             },
             {
               key: 'approvals',

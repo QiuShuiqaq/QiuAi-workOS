@@ -35,6 +35,17 @@ export interface LoginResponse extends AuthSessionResponse {
   authenticated: true;
 }
 
+export interface RegisterRequest {
+  email: string;
+  password: string;
+  workspaceName: string;
+  acceptedTerms: boolean;
+}
+
+export interface RegisterResponse extends AuthSessionResponse {
+  authenticated: true;
+}
+
 export interface LogoutResponse {
   ok: true;
 }

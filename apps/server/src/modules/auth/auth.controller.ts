@@ -1,9 +1,10 @@
 import { Body, Controller, Get, Inject, Post, Req, Res } from '@nestjs/common';
-import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import { ApiCreatedResponse, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import { serializeExpiredSessionCookie, serializeSessionCookie } from '../../shared/auth/session-cookie';
 import { LoginRequestDto } from './dto/login-request.dto';
+import { RegisterRequestDto } from './dto/register-request.dto';
 import { AuthSessionResponseDto, LogoutResponseDto } from './dto/auth-session-response.dto';
 import { AuthService } from './auth.service';
 
@@ -23,6 +24,22 @@ export class AuthController {
     @Req() request: FastifyRequest
   ): Promise<AuthSessionResponseDto> {
     const result = await this.authService.login(body, {
+      userAgent: request.headers['user-agent'],
+      ipAddress: request.ip
+    });
+
+    reply.header('set-cookie', serializeSessionCookie(result.sessionToken, result.maxAgeSeconds));
+    return result.response;
+  }
+
+  @Post('register')
+  @ApiCreatedResponse({ type: AuthSessionResponseDto })
+  async register(
+    @Body() body: RegisterRequestDto,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Req() request: FastifyRequest
+  ): Promise<AuthSessionResponseDto> {
+    const result = await this.authService.register(body, {
       userAgent: request.headers['user-agent'],
       ipAddress: request.ip
     });

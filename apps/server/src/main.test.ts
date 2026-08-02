@@ -120,6 +120,55 @@ test('workspace APIs require an authenticated workspace session', async () => {
   }
 });
 
+test('auth register creates an authenticated free enterprise workspace session', async () => {
+  const app = await createApplication();
+  app.useLogger(false);
+
+  await app.init();
+  try {
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      headers: {
+        'content-type': 'application/json'
+      },
+      payload: {
+        email: `founder-${Date.now()}@example.com`,
+        password: 'password-123',
+        workspaceName: '秋 AI 科技',
+        acceptedTerms: true
+      }
+    });
+
+    assert.equal(registerResponse.statusCode, 201);
+    const body = JSON.parse(registerResponse.body);
+    assert.equal(body.authenticated, true);
+    assert.equal(body.account.status, 'active');
+    assert.equal(body.workspaces.length, 1);
+    assert.equal(body.workspaces[0].workspaceType, 'enterprise');
+    assert.equal(body.workspaces[0].planCode, 'PERSONAL_FREE');
+
+    const setCookie = registerResponse.headers['set-cookie'];
+    const sessionCookie: string | undefined = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+    assert.ok(sessionCookie);
+
+    const sessionResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/session',
+      headers: {
+        cookie: sessionCookie.split(';')[0]
+      }
+    });
+
+    assert.equal(sessionResponse.statusCode, 200);
+    const sessionBody = JSON.parse(sessionResponse.body);
+    assert.equal(sessionBody.authenticated, true);
+    assert.equal(sessionBody.activeWorkspaceId, body.activeWorkspaceId);
+  } finally {
+    await app.close();
+  }
+});
+
 test('desktop agreement acceptance records device consent', async () => {
   const app = await createApplication();
   app.useLogger(false);

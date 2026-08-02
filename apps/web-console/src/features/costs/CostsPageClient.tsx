@@ -9,11 +9,9 @@ import Row from 'antd/es/row';
 import Table from 'antd/es/table';
 import type { ColumnsType } from 'antd/es/table';
 import Typography from 'antd/es/typography';
-import Link from 'next/link';
 import { useMemo } from 'react';
 
 import { ConsoleShell } from '../../shared/console/ConsoleShell';
-import { withWorkspaceId } from '../common/workspace-href';
 import { formatCurrency } from '../tasks/task-format';
 
 export interface CostsPageClientProps {
@@ -29,7 +27,6 @@ interface CostRow extends CostRecordSummary {
 }
 
 export function CostsPageClient({ currentAccount, taskDetails, isApiFallback }: CostsPageClientProps) {
-  const workspaceId = currentAccount.activeWorkspaceId;
   const rows = useMemo(
     () =>
       taskDetails.flatMap((task) =>
@@ -52,11 +49,7 @@ export function CostsPageClient({ currentAccount, taskDetails, isApiFallback }: 
     {
       title: '任务',
       dataIndex: 'taskTitle',
-      render: (_value, row) => (
-        <Link href={withWorkspaceId(`/tasks/${row.taskId}`, workspaceId)}>
-          <Typography.Text strong>{row.taskTitle}</Typography.Text>
-        </Link>
-      )
+      render: (_value, row) => <Typography.Text strong>{row.taskTitle}</Typography.Text>
     },
     { title: '数字员工', dataIndex: 'roleName', responsive: ['md'] },
     { title: '模型', dataIndex: 'modelName' },

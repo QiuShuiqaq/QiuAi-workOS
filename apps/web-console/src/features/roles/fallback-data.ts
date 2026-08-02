@@ -42,7 +42,7 @@ export function fallbackRoleDetail(roleId: string): RoleInstanceDetail {
     businessGoal:
       template?.businessGoal ?? '稳定完成重复性业务工作，并输出可验收结果。',
     knowledgeSources: template?.knowledgeSources ?? ['企业知识库', '历史业务案例'],
-    tools: template?.tools ?? ['业务系统连接器', '任务中心'],
+    tools: template?.tools ?? ['业务系统连接器', '执行记录'],
     approvalPolicy: template?.approvalPolicy ?? '高风险结果需要人工确认。',
     recentTaskIds: ['task_case_screening']
   };

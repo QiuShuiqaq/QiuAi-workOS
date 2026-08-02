@@ -108,9 +108,7 @@ export function DashboardShell({ currentAccount, overview, isApiFallback }: Dash
                   <List.Item>
                     <Flex justify="space-between" align="center" style={{ width: '100%' }}>
                       <Space direction="vertical" size={2}>
-                        <Link href={withWorkspaceId(`/tasks/${task.id}`, currentAccount.activeWorkspaceId)}>
-                          <Typography.Text strong>{task.title}</Typography.Text>
-                        </Link>
+                        <Typography.Text strong>{task.title}</Typography.Text>
                         <Typography.Text type="secondary">{task.roleName}</Typography.Text>
                       </Space>
                       <Badge status={taskBadgeStatus(task.state)} text={taskStateLabel(task.state)} />

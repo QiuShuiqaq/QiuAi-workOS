@@ -4,6 +4,7 @@ import type { LoginRequest } from '@qiuai/api-contract';
 import { createBrowserApiClient } from '../../shared/api/browser-api';
 import { Alert, Button, Card, Checkbox, Flex, Form, Input, message, Space, Typography } from 'antd';
 import { LockOutlined, LoginOutlined, MailOutlined } from '@ant-design/icons';
+import Link from 'next/link';
 import { useState } from 'react';
 
 export interface LoginPageClientProps {
@@ -81,6 +82,10 @@ export function LoginPageClient({ nextPath }: LoginPageClientProps) {
               登录
             </Button>
           </Form>
+          <Flex justify="center" gap={8}>
+            <Typography.Text type="secondary">还没有账号？</Typography.Text>
+            <Link href={`/register?next=${encodeURIComponent(nextPath)}`}>注册账号</Link>
+          </Flex>
         </Space>
       </Card>
     </Flex>

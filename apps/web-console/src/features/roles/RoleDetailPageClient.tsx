@@ -10,10 +10,8 @@ import List from 'antd/es/list';
 import Row from 'antd/es/row';
 import Space from 'antd/es/space';
 import Tag from 'antd/es/tag';
-import Link from 'next/link';
 
 import { ConsoleShell } from '../../shared/console/ConsoleShell';
-import { withWorkspaceId } from '../common/workspace-href';
 
 export function RoleDetailPageClient({
   currentAccount,
@@ -29,7 +27,6 @@ export function RoleDetailPageClient({
       <QiuPage
         title={role.name}
         description={role.businessGoal}
-        actions={<Link href={withWorkspaceId('/tasks', currentAccount.activeWorkspaceId)}>查看任务</Link>}
       >
         {isApiFallback ? <Alert showIcon type="warning" message="后端 API 未连接，当前显示 fallback 数据。" /> : null}
         <Row gutter={[16, 16]}>
