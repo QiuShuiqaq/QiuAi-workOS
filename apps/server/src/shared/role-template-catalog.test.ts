@@ -164,6 +164,35 @@ test('server role template catalog is focused and production-oriented', () => {
       template.workflowGraph.nodes.some((node) => node.type === 'llm'),
       `${template.templateId} must define an LLM workflow node`
     );
+    for (const node of template.workflowGraph.nodes) {
+      if (node.type !== 'llm') {
+        continue;
+      }
+      assert.ok(
+        node.modelProfileId && isSemanticModelProfileId(node.modelProfileId),
+        `${template.templateId}/${node.id} must use a qiu semantic model slot`
+      );
+      const requiredModelProfileIds = Array.isArray(node.config?.requiredModelProfileIds)
+        ? node.config.requiredModelProfileIds
+        : [];
+      for (const profileId of requiredModelProfileIds) {
+        assert.equal(
+          typeof profileId === 'string' && isSemanticModelProfileId(profileId),
+          true,
+          `${template.templateId}/${node.id} required model profile must use a qiu semantic model slot`
+        );
+      }
+    }
+    const dependencyManifest = buildRoleTemplateDependencyManifest({
+      workflowGraph: template.workflowGraph,
+      generatedAt: '2026-07-30T00:00:00.000Z'
+    });
+    for (const modelAsset of dependencyManifest.modelAssets) {
+      assert.ok(
+        isSemanticModelProfileId(modelAsset.modelProfileId),
+        `${template.templateId}/${modelAsset.key} dependency model asset must use a qiu semantic model slot`
+      );
+    }
     const artifactNode = template.workflowGraph.nodes.find((node) => node.type === 'artifact');
     if (isDigitalFactory) {
       const factoryManifest = readRecord(template.dependencyManifestFactory);
@@ -330,6 +359,10 @@ function readRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+function isSemanticModelProfileId(profileId: string): boolean {
+  return profileId.trim().startsWith('qiu-');
 }
 
 function findUnreachableNodeIds(graph: {

@@ -1186,6 +1186,31 @@ function readWorkflowLlmTaskType(node: RoleWorkflowGraphNode): WorkflowLlmTaskTy
   return 'text';
 }
 
+function readEffectiveWorkflowLlmTaskType(node: RoleWorkflowGraphNode): WorkflowLlmTaskType {
+  const taskType = readWorkflowLlmTaskType(node);
+  if (taskType === 'image_generation' && workflowNodeUsesReferenceImage(node)) {
+    return 'image_editing';
+  }
+
+  return taskType;
+}
+
+function workflowNodeUsesReferenceImage(node: RoleWorkflowGraphNode): boolean {
+  return [
+    ...(node.inputVariables ?? []),
+    readWorkflowConfigString(node.config, 'sourceImageVariable') ?? '',
+    readWorkflowConfigString(node.config, 'referenceImageVariable') ?? ''
+  ].some((value) => {
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'start.images' ||
+      normalized === 'start.files' ||
+      normalized === 'factory_items' ||
+      normalized.includes('referenceimage') ||
+      normalized.includes('sourceimage') ||
+      normalized.includes('source_image');
+  });
+}
+
 function readWorkflowLlmTaskOption(taskType: WorkflowLlmTaskType) {
   return llmTaskTypeOptions.find((option) => option.value === taskType) ?? llmTaskTypeOptions[0];
 }
@@ -1466,7 +1491,7 @@ function deriveWorkflowModelProfileIds(graph: RoleWorkflowGraph): string[] {
           ? node.config.requiredModelProfileIds.filter((item): item is string => typeof item === 'string')
           : [];
         return isModelNodeType(node.type)
-          ? [getDefaultModelProfileIdForLlmTask(readWorkflowLlmTaskType(node)), ...requiredModelProfileIds.map(mapModelProfileIdToSemanticDefault)]
+          ? [getDefaultModelProfileIdForLlmTask(readEffectiveWorkflowLlmTaskType(node)), ...requiredModelProfileIds.map(mapModelProfileIdToSemanticDefault)]
           : requiredModelProfileIds;
       })
   );
@@ -1477,12 +1502,24 @@ function mapModelProfileIdToSemanticDefault(profileId: string): string {
   if (!normalized) return '';
   if (normalized.startsWith('qiu-')) return profileId.trim();
   if (normalized.includes('asr') || normalized.includes('speech') || normalized.includes('audio')) return 'qiu-asr-default';
+  if (
+    normalized.includes('reason') ||
+    normalized.includes('reasoner') ||
+    normalized.includes('thinking') ||
+    normalized.includes('deepseek-r1') ||
+    normalized.includes('deepseek-v4-pro') ||
+    normalized.includes('r1')
+  ) {
+    return 'qiu-reasoning-default';
+  }
   if (normalized.includes('gpt-image') || normalized.includes('img2img') || normalized.includes('image-edit')) {
     return 'qiu-image-editing-default';
   }
   if (normalized.includes('image') || normalized.includes('vision') || normalized.includes('vl') || normalized.includes('gpt-4o')) {
     return 'qiu-vision-default';
   }
+  if (normalized.includes('embedding') || normalized.includes('embed')) return 'qiu-embedding-default';
+  if (normalized.includes('rerank')) return 'qiu-rerank-default';
   return 'qiu-general-default';
 }
 

@@ -13,7 +13,10 @@
   ToolManifest
 } from './desktop-contract.js';
 import { resolveModelProfileCredential } from './desktop-model-credentials.js';
-import { readModelProfileCapabilities } from './desktop-model-capabilities.js';
+import {
+  modelProfileSupportsRequiredCapabilities,
+  readModelProfileCapabilities
+} from './desktop-model-capabilities.js';
 import { readRequiredModelProfileIdsForRolePackage } from './desktop-role-requirements.js';
 import type {
   DesktopModelChatMessage,
@@ -6087,7 +6090,7 @@ function isWorkflowTextModelProfile(profile: ModelProfile): boolean {
 }
 
 function getWorkflowModelRequiredCapabilities(node: WorkflowGraphNode): string[] {
-  const taskType = readWorkflowRuntimeString(node.config?.llmTaskType) ?? 'text';
+  const taskType = getWorkflowEffectiveModelTaskType(node);
 
   if (taskType === 'reasoning') {
     return ['reasoning_text', 'text'];
@@ -6141,9 +6144,10 @@ function getWorkflowModelRequiredCapabilities(node: WorkflowGraphNode): string[]
 }
 
 function getWorkflowSemanticDefaultProfileId(node: WorkflowGraphNode): string | undefined {
-  const taskType = readWorkflowRuntimeString(node.config?.llmTaskType) ?? 'text';
+  const taskType = getWorkflowEffectiveModelTaskType(node);
 
   if (taskType === 'vision') return 'qiu-vision-default';
+  if (taskType === 'reasoning') return 'qiu-reasoning-default';
   if (taskType === 'audio_transcription') return 'qiu-asr-default';
   if (taskType === 'image_generation') return 'qiu-image-generation-default';
   if (taskType === 'image_editing') return 'qiu-image-editing-default';
@@ -6152,16 +6156,7 @@ function getWorkflowSemanticDefaultProfileId(node: WorkflowGraphNode): string | 
 }
 
 function modelProfileSupportsAnyCapability(profile: ModelProfile, capabilities: string[]): boolean {
-  const normalizedProfileCapabilities = new Set(
-    readModelProfileCapabilities(profile).map(normalizeWorkflowModelCapability)
-  );
-  return capabilities.map(normalizeWorkflowModelCapability).some((capability) =>
-    normalizedProfileCapabilities.has(capability)
-  );
-}
-
-function normalizeWorkflowModelCapability(value: string): string {
-  return value.trim().toLowerCase().replace(/[-\s]+/g, '_');
+  return modelProfileSupportsRequiredCapabilities(profile, capabilities);
 }
 
 function readDependencyManifestModelProfileIdForNode(
@@ -6180,9 +6175,92 @@ function readDependencyManifestModelProfileIdForNode(
   const asset = modelAssetKey
     ? modelAssets.find((item) => item.key === modelAssetKey)
     : modelAssets.find((item) => item.nodeIds.includes(node.id));
-  const profileId = asset?.modelProfileId || asset?.modelId || asset?.key;
+  const profileId = asset
+    ? readDependencyManifestSemanticModelProfileId(asset)
+    : undefined;
 
   return profileId?.trim() || undefined;
+}
+
+function getWorkflowEffectiveModelTaskType(node: WorkflowGraphNode): string {
+  const taskType = readWorkflowRuntimeString(node.config?.llmTaskType) ?? 'text';
+  if (taskType === 'image_generation' && workflowNodeUsesReferenceImage(node)) {
+    return 'image_editing';
+  }
+
+  return taskType;
+}
+
+function workflowNodeUsesReferenceImage(node: WorkflowGraphNode): boolean {
+  return [
+    ...(node.inputVariables ?? []),
+    readWorkflowRuntimeString(node.config?.sourceImageVariable) ?? '',
+    readWorkflowRuntimeString(node.config?.referenceImageVariable) ?? ''
+  ].some((value) => {
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'start.images' ||
+      normalized === 'start.files' ||
+      normalized === 'factory_items' ||
+      normalized.includes('referenceimage') ||
+      normalized.includes('sourceimage') ||
+      normalized.includes('source_image');
+  });
+}
+
+function readDependencyManifestSemanticModelProfileId(
+  asset: NonNullable<RolePackageManifest['dependencyManifest']>['modelAssets'][number]
+): string {
+  return getSemanticModelProfileIdForAssetCapabilities({
+    capabilities: asset.capabilities,
+    inputTypes: asset.inputTypes,
+    outputTypes: asset.outputTypes
+  }) ?? normalizeRuntimeRequirementModelProfileId(asset.modelProfileId || asset.modelId || asset.key);
+}
+
+function getSemanticModelProfileIdForAssetCapabilities(input: {
+  capabilities?: string[];
+  inputTypes?: string[];
+  outputTypes?: string[];
+}): string | undefined {
+  const capabilities = new Set((input.capabilities ?? []).map(normalizeWorkflowModelToken));
+  const inputTypes = new Set((input.inputTypes ?? []).map(normalizeWorkflowModelToken));
+  const outputTypes = new Set((input.outputTypes ?? []).map(normalizeWorkflowModelToken));
+
+  if (capabilities.has('audio_to_text')) return 'qiu-asr-default';
+  if (capabilities.has('embedding') || outputTypes.has('embedding')) return 'qiu-embedding-default';
+  if (capabilities.has('rerank') || outputTypes.has('scores')) return 'qiu-rerank-default';
+  if (
+    capabilities.has('image_editing') ||
+    capabilities.has('image_to_image') ||
+    (inputTypes.has('image') && outputTypes.has('image'))
+  ) {
+    return 'qiu-image-editing-default';
+  }
+  if (capabilities.has('text_to_image') || (outputTypes.has('image') && !inputTypes.has('image'))) {
+    return 'qiu-image-generation-default';
+  }
+  if (
+    capabilities.has('image_understanding') ||
+    capabilities.has('vision_understanding') ||
+    capabilities.has('vision_text') ||
+    (inputTypes.has('image') && (outputTypes.has('text') || outputTypes.has('json')))
+  ) {
+    return 'qiu-vision-default';
+  }
+  if (capabilities.has('video_generation') || outputTypes.has('video')) return 'qiu-vision-default';
+  if (capabilities.has('video_understanding') || inputTypes.has('video')) return 'qiu-vision-default';
+  if (capabilities.has('reasoning') || capabilities.has('reasoning_text')) {
+    return 'qiu-reasoning-default';
+  }
+  if (capabilities.has('text')) {
+    return 'qiu-general-default';
+  }
+
+  return undefined;
+}
+
+function normalizeWorkflowModelToken(value: string): string {
+  return value.trim().toLowerCase().replace(/[-\s]+/g, '_');
 }
 
 function mergeWorkflowRuntimeResponses(
@@ -8153,6 +8231,16 @@ function normalizeRuntimeRequirementModelProfileId(profileId: string): string {
   if (!normalized) return '';
   if (normalized.startsWith('qiu-')) return profileId.trim();
   if (normalized.includes('asr') || normalized.includes('speech') || normalized.includes('audio')) return 'qiu-asr-default';
+  if (
+    normalized.includes('reason') ||
+    normalized.includes('reasoner') ||
+    normalized.includes('thinking') ||
+    normalized.includes('deepseek-r1') ||
+    normalized.includes('deepseek-v4-pro') ||
+    normalized.includes('r1')
+  ) {
+    return 'qiu-reasoning-default';
+  }
   if (normalized.includes('gpt-image') || normalized.includes('img2img') || normalized.includes('image-edit')) {
     return 'qiu-image-editing-default';
   }

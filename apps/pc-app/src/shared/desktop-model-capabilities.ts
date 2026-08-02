@@ -65,6 +65,49 @@ export function readModelProfileCapabilities(profile: ModelProfile): ModelCapabi
   return normalizeModelCapabilities(profile.capabilities, profile.purpose);
 }
 
+export function readEffectiveModelProfileCapabilities(profile: ModelProfile): string[] {
+  return [
+    ...new Set([
+      ...inferModelCapabilitiesFromName(profile.modelName, profile.purpose),
+      ...readModelProfileCapabilities(profile)
+    ].map(normalizeCapabilityToken))
+  ];
+}
+
+export function modelProfileSupportsRequiredCapabilities(
+  profile: ModelProfile,
+  requiredCapabilities: string[]
+): boolean {
+  const capabilities = new Set(readEffectiveModelProfileCapabilities(profile));
+  const required = [
+    ...new Set(requiredCapabilities.map(normalizeCapabilityToken).filter(Boolean))
+  ];
+  if (required.length === 0) {
+    return true;
+  }
+
+  const strictGroups = [
+    ['image_editing', 'image_to_image'],
+    ['text_to_image', 'image_generation'],
+    ['image_understanding', 'vision_understanding', 'vision_text'],
+    ['video_generation', 'text_to_video', 'image_to_video'],
+    ['video_understanding', 'video_text'],
+    ['audio_to_text'],
+    ['embedding'],
+    ['rerank']
+  ];
+  const matchedStrictGroups = strictGroups.filter((group) =>
+    group.some((capability) => required.includes(capability))
+  );
+  if (matchedStrictGroups.length > 0) {
+    return matchedStrictGroups.some((group) =>
+      group.some((capability) => capabilities.has(capability))
+    );
+  }
+
+  return required.some((capability) => capabilities.has(capability));
+}
+
 export function primaryCapabilityForPurpose(purpose: ModelPurpose): ModelCapability {
   return defaultCapabilitiesForPurpose(purpose)[0] ?? 'text';
 }
@@ -191,4 +234,8 @@ export function inferModelCapabilitiesFromName(
 
 function matchesAny(value: string, tokens: string[]): boolean {
   return tokens.some((token) => value.includes(token));
+}
+
+function normalizeCapabilityToken(value: string): string {
+  return value.trim().toLowerCase().replace(/[-\s]+/g, '_');
 }

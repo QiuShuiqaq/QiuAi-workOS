@@ -119,7 +119,8 @@ export async function invokeOpenAiCompatibleModelChat(
   }
 
   const apiBaseUrl = requireOpenAiCompatibleApiBaseUrl(request.profile.apiBaseUrl);
-  const response = await fetch(`${apiBaseUrl}/chat/completions`, {
+  const chatEndpoint = `${apiBaseUrl}/chat/completions`;
+  const response = await fetchModelApi(chatEndpoint, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${apiKey}`,
@@ -132,7 +133,7 @@ export async function invokeOpenAiCompatibleModelChat(
       max_tokens: request.profile.maxTokens
     }),
     signal: AbortSignal.timeout(request.timeoutMs ?? defaultTimeoutMs)
-  });
+  }, 'Model chat');
 
   const bodyText = await response.text();
   const body = parseJsonBody(bodyText);
@@ -169,16 +170,19 @@ async function invokeOpenAiCompatibleImageGeneration(input: {
     throw new Error(`Source image file does not exist: ${sourceImagePath}`);
   }
 
+  const imageEndpoint = sourceImagePath
+    ? `${input.apiBaseUrl}/images/edits`
+    : `${input.apiBaseUrl}/images/generations`;
   const response = sourceImagePath
-    ? await fetch(`${input.apiBaseUrl}/images/edits`, {
+    ? await fetchModelApi(imageEndpoint, {
         method: 'POST',
         headers: {
           authorization: `Bearer ${input.apiKey}`
         },
         body: buildImageEditFormData(input.modelName, prompt, sourceImagePath, input.request.imageGeneration?.size),
         signal: AbortSignal.timeout(timeoutMs)
-      })
-    : await fetch(`${input.apiBaseUrl}/images/generations`, {
+      }, 'Image edit')
+    : await fetchModelApi(imageEndpoint, {
         method: 'POST',
         headers: {
           authorization: `Bearer ${input.apiKey}`,
@@ -192,7 +196,7 @@ async function invokeOpenAiCompatibleImageGeneration(input: {
           response_format: input.request.imageGeneration?.responseFormat ?? 'url'
         }),
         signal: AbortSignal.timeout(timeoutMs)
-      });
+      }, 'Image generation');
   const bodyText = await response.text();
   const body = parseImageGenerationJsonBody(bodyText);
 
@@ -240,14 +244,15 @@ async function invokeOpenAiCompatibleAudioTranscription(input: {
     throw new Error(`Audio file does not exist: ${audioPath}`);
   }
 
-  const response = await fetch(`${input.apiBaseUrl}/audio/transcriptions`, {
+  const transcriptionEndpoint = `${input.apiBaseUrl}/audio/transcriptions`;
+  const response = await fetchModelApi(transcriptionEndpoint, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${input.apiKey}`
     },
     body: buildAudioTranscriptionFormData(input.modelName, audioPath, input.request.audioTranscription),
     signal: AbortSignal.timeout(input.request.timeoutMs ?? 180_000)
-  });
+  }, 'Audio transcription');
   const bodyText = await response.text();
   const body = parseTranscriptionJsonBody(bodyText);
 
@@ -346,13 +351,14 @@ async function fetchOpenAiCompatibleProviderModels(input: {
   apiKey: string;
   timeoutMs?: number;
 }): Promise<ModelCatalogEntry[]> {
-  const response = await fetch(`${input.apiBaseUrl}/models`, {
+  const modelsEndpoint = `${input.apiBaseUrl}/models`;
+  const response = await fetchModelApi(modelsEndpoint, {
     method: 'GET',
     headers: {
       authorization: `Bearer ${input.apiKey}`
     },
     signal: AbortSignal.timeout(input.timeoutMs ?? 20_000)
-  });
+  }, 'Model list');
 
   const bodyText = await response.text();
   const body = parseModelListJsonBody(bodyText);
@@ -382,6 +388,31 @@ async function fetchOpenAiCompatibleProviderModels(input: {
       }
     ];
   });
+}
+
+async function fetchModelApi(endpoint: string, init: RequestInit, label: string): Promise<Response> {
+  try {
+    return await fetch(endpoint, init);
+  } catch (error) {
+    throw new Error(`${label} request failed: ${readFetchFailureMessage(error)}. Endpoint: ${endpoint}`);
+  }
+}
+
+function readFetchFailureMessage(error: unknown): string {
+  if (error instanceof Error) {
+    const cause = (error as Error & { cause?: unknown }).cause;
+    const causeMessage =
+      cause instanceof Error
+        ? `${cause.name}: ${cause.message}`
+        : typeof cause === 'string'
+          ? cause
+          : '';
+    return causeMessage
+      ? `${error.name}: ${error.message}; cause: ${causeMessage}`
+      : `${error.name}: ${error.message}`;
+  }
+
+  return String(error);
 }
 
 async function runOpenAiCompatibleModelTestChecks(
@@ -549,7 +580,8 @@ async function runVisionUnderstandingTestCheck(request: DesktopModelTestRequest)
     label: '图片理解',
     endpoint: `${apiBaseUrl}/chat/completions`,
     action: async () => {
-      const response = await fetch(`${apiBaseUrl}/chat/completions`, {
+      const endpoint = `${apiBaseUrl}/chat/completions`;
+      const response = await fetchModelApi(endpoint, {
         method: 'POST',
         headers: {
           authorization: `Bearer ${requireModelApiKey(request.profile.apiKey)}`,
@@ -574,7 +606,7 @@ async function runVisionUnderstandingTestCheck(request: DesktopModelTestRequest)
           max_tokens: 128
         }),
         signal: AbortSignal.timeout(request.timeoutMs ?? 30_000)
-      });
+      }, 'Vision understanding');
       const bodyText = await response.text();
       const body = parseJsonBody(bodyText);
       if (!response.ok) {
@@ -596,7 +628,8 @@ async function runEmbeddingTestCheck(request: DesktopModelTestRequest): Promise<
     label: '文本向量',
     endpoint: `${apiBaseUrl}/embeddings`,
     action: async () => {
-      const response = await fetch(`${apiBaseUrl}/embeddings`, {
+      const endpoint = `${apiBaseUrl}/embeddings`;
+      const response = await fetchModelApi(endpoint, {
         method: 'POST',
         headers: {
           authorization: `Bearer ${requireModelApiKey(request.profile.apiKey)}`,
@@ -607,7 +640,7 @@ async function runEmbeddingTestCheck(request: DesktopModelTestRequest): Promise<
           input: 'QiuAI WorkOS model test'
         }),
         signal: AbortSignal.timeout(request.timeoutMs ?? 20_000)
-      });
+      }, 'Embedding');
       const bodyText = await response.text();
       const body = parseJsonObject(bodyText);
       if (!response.ok) {

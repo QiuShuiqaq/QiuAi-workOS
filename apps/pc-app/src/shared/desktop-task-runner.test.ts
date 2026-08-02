@@ -3165,6 +3165,177 @@ assert.ok(
   factoryTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_RUNTIME_FACTORY_BATCH_COMPLETED')
 );
 
+let legacyImageFactoryModelUsed = false;
+const legacyImageFactoryTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-legacy-image-factory-model-slot-001',
+    roleCode: 'legacy-cross-border-image-factory',
+    roleName: 'Legacy Cross Border Image Factory',
+    title: 'Generate product image with legacy package',
+    input: JSON.stringify({
+      factory_request: {
+        platform: { key: 'amazon', label: 'Amazon', imageRatio: '1:1' },
+        packages: [
+          { key: 'main_image', label: 'Main image', description: 'Marketplace main product image.' }
+        ]
+      }
+    }),
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0,
+    executionContext: {
+      modelProfileIds: ['openai-gpt-image-2'],
+      toolIds: [],
+      knowledgeBindingIds: [],
+      attachmentPaths: ['C:\\QiuAI\\factory\\legacy-sku.png']
+    }
+  }),
+  rolePackage: {
+    roleCode: 'legacy-cross-border-image-factory',
+    applicationType: 'digital_factory',
+    name: 'Legacy Cross Border Image Factory',
+    version: '1.0.0',
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'prepare_batch',
+          type: 'data',
+          name: 'Prepare batch',
+          inputVariables: ['start.files', 'factory_request'],
+          outputVariables: ['factory_items', 'selected_packages', 'target_platform', 'package_instructions'],
+          config: {
+            dataMode: 'code',
+            outputVariable: 'factory_items',
+            code:
+              'const files = Array.isArray(input["start.files"]) ? input["start.files"] : [];\n' +
+              'const request = input.factory_request && typeof input.factory_request === "object" ? input.factory_request : {};\n' +
+              'const packages = Array.isArray(request.packages) ? request.packages : [];\n' +
+              'return {\n' +
+              '  factory_items: files.map((file, index) => ({ sku: `SKU-${index + 1}`, image: file, sourceName: file.name })),\n' +
+              '  selected_packages: packages,\n' +
+              '  target_platform: request.platform,\n' +
+              '  package_instructions: { items: files.map((file, index) => ({ sku: `SKU-${index + 1}`, packages: packages.map((item) => ({ key: item.key, prompt: `Generate ${item.label} for SKU-${index + 1}` })) })) }\n' +
+              '};'
+          }
+        },
+        {
+          id: 'generate_images',
+          type: 'llm',
+          name: 'Generate images',
+          modelProfileId: 'openai-gpt-image-2',
+          inputVariables: ['factory_items', 'package_instructions'],
+          outputVariables: ['factory_generated_images'],
+          config: {
+            llmTaskType: 'image_generation',
+            concurrency: 1,
+            maxRetries: 0,
+            timeoutMs: 20_000
+          }
+        }
+      ],
+      edges: [
+        { id: 'start-prepare', sourceNodeId: 'start', targetNodeId: 'prepare_batch' },
+        { id: 'prepare-generate', sourceNodeId: 'prepare_batch', targetNodeId: 'generate_images' }
+      ]
+    },
+    dependencyManifest: {
+      version: '1.0.0',
+      generatedAt: '2026-07-29T00:00:00.000Z',
+      variables: [],
+      modelAssets: [
+        {
+          key: 'openai-gpt-image-2',
+          name: 'OpenAI GPT Image 2',
+          providerId: 'openai',
+          providerName: 'OpenAI',
+          modelId: 'gpt-image-2',
+          modelProfileId: 'openai-gpt-image-2',
+          capabilities: ['image_generation', 'image_editing'],
+          inputTypes: ['text', 'image'],
+          outputTypes: ['image'],
+          credentialFields: ['apiKey', 'apiBaseUrl'],
+          required: true,
+          nodeIds: ['generate_images']
+        }
+      ],
+      toolActions: [],
+      artifactTemplates: [],
+      nodeTemplates: [],
+      warnings: []
+    },
+    modelProfileIds: ['openai-gpt-image-2'],
+    toolIds: [],
+    requiredKnowledgeSources: [],
+    defaultTaskTypes: ['factory_image_batch'],
+    syncPolicy: 'summary_only'
+  },
+  modelProfiles: modelProfiles.concat([
+    {
+      id: 'qiu-image-editing-default',
+      providerId: 'provider-pending',
+      providerName: 'Pending Model Provider',
+      modelName: 'image-editing-default',
+      purpose: 'vision',
+      capabilities: ['image_editing', 'image_to_image']
+    },
+    {
+      id: 'grsai-gpt-image-2',
+      providerId: 'custom-grsai',
+      providerName: 'GrsAI',
+      modelName: 'gpt-image-2',
+      purpose: 'vision',
+      capabilities: ['image_generation', 'image_to_image', 'image_editing'],
+      apiBaseUrl: 'https://grsai.example/v1',
+      apiKey: 'grsai-key'
+    }
+  ]),
+  tools,
+  enabledModelProfileIds: ['qiu-image-editing-default', 'grsai-gpt-image-2'],
+  enabledToolIds: [],
+  enabledKnowledgeBindingIds: [],
+  roleModelCredentialBindings: [
+    {
+      roleCode: 'legacy-cross-border-image-factory',
+      modelProfileId: 'qiu-image-editing-default',
+      runtimeModelProfileId: 'grsai-gpt-image-2',
+      mode: 'provider_default',
+      updatedAt: '2026-07-27T00:00:00.000Z'
+    }
+  ],
+  modelInvoker: async (request) => {
+    legacyImageFactoryModelUsed = true;
+    assert.equal(request.profile.id, 'grsai-gpt-image-2');
+    assert.equal(request.profile.apiBaseUrl, 'https://grsai.example/v1');
+    assert.equal(request.taskKind, 'image_generation');
+    assert.match(request.imageGeneration?.sourceImagePath ?? '', /legacy-sku\.png/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: JSON.stringify({
+        remoteUrl: 'https://cdn.example.test/factory/legacy-image.png',
+        thumbnailPath: 'https://cdn.example.test/factory/legacy-thumb.png'
+      }),
+      artifacts: [
+        {
+          type: 'image',
+          remoteUrl: 'https://cdn.example.test/factory/legacy-image.png',
+          thumbnailPath: 'https://cdn.example.test/factory/legacy-thumb.png'
+        }
+      ]
+    };
+  },
+  completedAt: '2026-07-20T10:00:14.500Z'
+});
+const legacyImageFactoryPreviewArtifact = legacyImageFactoryTask.task.artifacts.find(
+  (artifact) => artifact.factoryPreview
+);
+assert.equal(legacyImageFactoryTask.task.state, 'completed');
+assert.equal(legacyImageFactoryModelUsed, true);
+assert.equal(legacyImageFactoryPreviewArtifact?.factoryPreview?.completed, 1);
+
 const videoFactoryModelProfiles: ModelProfile[] = [
   {
     id: 'qiu-asr-default',

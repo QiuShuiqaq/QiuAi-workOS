@@ -13,11 +13,16 @@ export interface ModelCredentialResolutionInput {
 
 export interface ModelCredentialResolution {
   profile: ModelProfile;
-  source: 'role_inline' | 'credential_ref' | 'provider_default' | 'legacy_profile' | 'missing';
+  source: 'role_inline' | 'credential_ref' | 'provider_default' | 'missing';
   credential?: ModelCredential;
   binding?: RoleModelCredentialBinding;
   configured: boolean;
 }
+
+const providerCredentialAliasGroups = [
+  ['aliyun-bailian', 'aliyun-asr-compatible', 'dashscope'],
+  ['tencent-cloud', 'tencent-asr-compatible']
+];
 
 export function resolveModelProfileCredential(
   input: ModelCredentialResolutionInput
@@ -25,11 +30,7 @@ export function resolveModelProfileCredential(
   const credentials = input.credentials ?? [];
   const roleBindings = input.roleBindings ?? [];
   const roleBinding = input.roleCode
-    ? roleBindings.find(
-        (binding) =>
-          binding.roleCode === input.roleCode &&
-          binding.modelProfileId === input.profile.id
-      )
+    ? findRoleBindingForModelProfile(roleBindings, input.roleCode, input.profile.id)
     : undefined;
 
   if (roleBinding?.mode === 'inline' && roleBinding.apiKey?.trim()) {
@@ -48,7 +49,7 @@ export function resolveModelProfileCredential(
     const credential = credentials.find(
       (item) =>
         item.id === roleBinding.credentialId &&
-        item.providerId === input.profile.providerId &&
+        providerIdsShareCredentialScope(item.providerId, input.profile.providerId) &&
         item.apiKey.trim()
     );
 
@@ -78,21 +79,33 @@ export function resolveModelProfileCredential(
     };
   }
 
-  if (input.profile.apiBaseUrl?.trim() && input.profile.apiKey?.trim()) {
-    return {
-      profile: input.profile,
-      source: 'legacy_profile',
-      binding: roleBinding,
-      configured: true
-    };
-  }
-
   return {
     profile: input.profile,
     source: 'missing',
     binding: roleBinding,
     configured: false
   };
+}
+
+function findRoleBindingForModelProfile(
+  roleBindings: RoleModelCredentialBinding[],
+  roleCode: string,
+  profileId: string
+): RoleModelCredentialBinding | undefined {
+  const directBinding = roleBindings.find(
+    (binding) =>
+      binding.roleCode === roleCode &&
+      binding.modelProfileId === profileId
+  );
+  if (directBinding) {
+    return directBinding;
+  }
+
+  return roleBindings.find(
+    (binding) =>
+      binding.roleCode === roleCode &&
+      binding.runtimeModelProfileId === profileId
+  );
 }
 
 export function isModelProfileConfiguredByCredentials(
@@ -105,9 +118,19 @@ export function findDefaultModelCredential(
   credentials: ModelCredential[],
   providerId: string
 ): ModelCredential | undefined {
-  return credentials.find(
+  const exactCredential = credentials.find(
     (credential) =>
       credential.providerId === providerId &&
+      credential.isDefault &&
+      credential.apiKey.trim()
+  );
+  if (exactCredential) {
+    return exactCredential;
+  }
+
+  return credentials.find(
+    (credential) =>
+      providerIdsShareCredentialScope(credential.providerId, providerId) &&
       credential.isDefault &&
       credential.apiKey.trim()
   );
@@ -118,7 +141,7 @@ export function listProviderModelCredentials(
   providerId: string
 ): ModelCredential[] {
   return credentials.filter(
-    (credential) => credential.providerId === providerId && credential.apiKey.trim()
+    (credential) => providerIdsShareCredentialScope(credential.providerId, providerId) && credential.apiKey.trim()
   );
 }
 
@@ -143,7 +166,12 @@ export function migrateLegacyModelProfileCredentials(input: {
 
   for (const profile of input.modelProfiles) {
     const apiKey = profile.apiKey?.trim();
-    if (!apiKey || defaultProviderIds.has(profile.providerId)) {
+    if (
+      !apiKey ||
+      [...defaultProviderIds].some((providerId) =>
+        providerIdsShareCredentialScope(providerId, profile.providerId)
+      )
+    ) {
       continue;
     }
 
@@ -175,9 +203,15 @@ export function upsertDefaultModelCredential(input: {
   const apiKey = input.apiKey?.trim();
   const apiBaseUrl = input.apiBaseUrl?.trim() || input.profile.apiBaseUrl;
   const now = input.now ?? new Date().toISOString();
-  const existing = input.credentials.find(
-    (credential) => credential.providerId === input.profile.providerId && credential.isDefault
-  );
+  const existing =
+    input.credentials.find(
+      (credential) => credential.providerId === input.profile.providerId && credential.isDefault
+    ) ??
+    input.credentials.find(
+      (credential) =>
+        providerIdsShareCredentialScope(credential.providerId, input.profile.providerId) &&
+        credential.isDefault
+    );
 
   if (!apiKey) {
     return input.credentials;
@@ -185,8 +219,8 @@ export function upsertDefaultModelCredential(input: {
 
   const nextCredential: ModelCredential = {
     id: existing?.id ?? createDefaultCredentialId(input.profile.providerId),
-    providerId: input.profile.providerId,
-    providerName: input.profile.providerName,
+    providerId: existing?.providerId ?? input.profile.providerId,
+    providerName: existing?.providerName ?? input.profile.providerName,
     label: existing?.label ?? `${input.profile.providerName} 默认 Key`,
     apiBaseUrl,
     apiKey,
@@ -216,6 +250,22 @@ export function normalizeRoleModelCredentialBindings(
         binding.mode === 'credential_ref' ||
         binding.mode === 'inline')
   );
+}
+
+function providerIdsShareCredentialScope(left: string, right: string): boolean {
+  const normalizedLeft = normalizeProviderCredentialId(left);
+  const normalizedRight = normalizeProviderCredentialId(right);
+  if (normalizedLeft === normalizedRight) {
+    return true;
+  }
+
+  return providerCredentialAliasGroups.some(
+    (group) => group.includes(normalizedLeft) && group.includes(normalizedRight)
+  );
+}
+
+function normalizeProviderCredentialId(providerId: string): string {
+  return providerId.trim().toLowerCase();
 }
 
 function applyCredentialFields(

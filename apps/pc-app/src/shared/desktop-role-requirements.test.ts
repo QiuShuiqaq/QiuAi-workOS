@@ -10,7 +10,7 @@ import {
   readRequiredModelProfileIdsForRolePackage,
   readWorkflowRequiredModelProfileIds
 } from './desktop-role-requirements.js';
-import type { ModelProfile, RolePackageManifest } from './desktop-contract.js';
+import type { ModelCredential, ModelProfile, RoleModelCredentialBinding, RolePackageManifest } from './desktop-contract.js';
 
 const rolePackage: RolePackageManifest = {
   roleCode: 'ai-test-role',
@@ -138,15 +138,52 @@ const manifestDrivenRolePackage: RolePackageManifest = {
   }
 };
 assert.deepEqual(readRequiredModelProfileIdsForRolePackage(manifestDrivenRolePackage), [
-  'qiu-general-default'
+  'qiu-reasoning-default'
 ]);
+const manifestDrivenRequirementStatus = getRoleModelRequirementStatuses(
+  [createPlaceholderModelProfile('qiu-reasoning-default')],
+  manifestDrivenRolePackage
+)[0];
+assert.equal(
+  manifestDrivenRequirementStatus?.profile.id,
+  'qiu-reasoning-default'
+);
 assert.deepEqual(
-  getRoleModelRequirementStatuses(
-    [createPlaceholderModelProfile('qiu-general-default')],
-    manifestDrivenRolePackage
-  )[0]?.requiredByNodeIds,
+  manifestDrivenRequirementStatus?.requiredByNodeIds,
   ['classify']
 );
+
+const visionManifestDrivenRolePackage: RolePackageManifest = {
+  ...rolePackage,
+  dependencyManifest: {
+    version: '1.0.0',
+    generatedAt: '2026-07-29T00:00:00.000Z',
+    variables: [],
+    modelAssets: [
+      {
+        key: 'openai-gpt-4o',
+        name: 'OpenAI GPT-4o',
+        providerId: 'openai',
+        providerName: 'OpenAI',
+        modelId: 'gpt-4o',
+        modelProfileId: 'openai-gpt-4o',
+        capabilities: ['vision_text', 'image_understanding', 'text'],
+        inputTypes: ['text', 'image'],
+        outputTypes: ['text', 'json'],
+        credentialFields: ['apiKey', 'apiBaseUrl'],
+        required: true,
+        nodeIds: ['describe_image']
+      }
+    ],
+    toolActions: [],
+    artifactTemplates: [],
+    nodeTemplates: [],
+    warnings: []
+  }
+};
+assert.deepEqual(readRequiredModelProfileIdsForRolePackage(visionManifestDrivenRolePackage), [
+  'qiu-vision-default'
+]);
 
 const imageManifestDrivenRolePackage: RolePackageManifest = {
   ...rolePackage,
@@ -187,12 +224,30 @@ assert.equal(moonshotProfile.purpose, 'document');
 
 const ensuredProfiles = ensureModelProfilesForRolePackage(existingProfiles, rolePackage);
 assert.ok(ensuredProfiles.some((profile) => profile.id === 'qiu-general-default'));
-assert.equal(findFirstUnconfiguredRequiredModelProfileId(ensuredProfiles, rolePackage), undefined);
+assert.equal(findFirstUnconfiguredRequiredModelProfileId(ensuredProfiles, rolePackage), 'qiu-general-default');
 
 const configuredProfiles = ensuredProfiles;
-const statuses = getRoleModelRequirementStatuses(configuredProfiles, rolePackage);
+const localProviderCredential: ModelCredential = {
+  id: 'credential-default-provider-local',
+  providerId: 'provider-local',
+  providerName: 'Local Provider',
+  label: 'Local Provider default',
+  apiBaseUrl: 'https://model.example/v1',
+  apiKey: 'test-key',
+  isDefault: true,
+  createdAt: '2026-07-27T00:00:00.000Z',
+  updatedAt: '2026-07-27T00:00:00.000Z'
+};
+const statuses = getRoleModelRequirementStatuses(configuredProfiles, rolePackage, {
+  credentials: [localProviderCredential]
+});
 assert.equal(statuses.every((status) => status.configured), true);
-assert.equal(findFirstUnconfiguredRequiredModelProfileId(configuredProfiles, rolePackage), undefined);
+assert.equal(
+  findFirstUnconfiguredRequiredModelProfileId(configuredProfiles, rolePackage, {
+    credentials: [localProviderCredential]
+  }),
+  undefined
+);
 
 const credentialManagedProfiles = configuredProfiles.map((profile) => ({
   ...profile,
@@ -246,7 +301,9 @@ assert.equal(
 
 const runtimeStatuses = getRoleModelRuntimeRequirementStatuses(configuredProfiles, [
   'qiu-general-default'
-], rolePackage);
+], rolePackage, {
+  credentials: [localProviderCredential]
+});
 assert.equal(
   runtimeStatuses.find((status) => status.profile.id === 'qiu-general-default')?.ready,
   true
@@ -254,14 +311,112 @@ assert.equal(
 assert.equal(
   findFirstUnreadyRequiredModelProfileId(configuredProfiles, [
     'qiu-general-default'
-  ], rolePackage),
+  ], rolePackage, {
+    credentials: [localProviderCredential]
+  }),
   undefined
 );
 assert.equal(
   findFirstUnreadyRequiredModelProfileId(configuredProfiles, [
     'qiu-general-default'
-  ], rolePackage),
+  ], rolePackage, {
+    credentials: [localProviderCredential]
+  }),
   undefined
 );
+
+const imageFactoryRolePackage: RolePackageManifest = {
+  ...imageManifestDrivenRolePackage,
+  roleCode: 'cross-border-image-factory',
+  modelProfileIds: readRequiredModelProfileIdsForRolePackage(imageManifestDrivenRolePackage)
+};
+const imageEditingSlotProfile = createPlaceholderModelProfile('qiu-image-editing-default');
+const grsaiImageProfile: ModelProfile = {
+  id: 'custom-grsai-gpt-image-2-vision',
+  providerId: 'custom-grsai',
+  providerName: 'GrsAI',
+  modelName: 'gpt-image-2',
+  purpose: 'vision',
+  capabilities: ['image_generation', 'image_to_image', 'image_editing'],
+  apiBaseUrl: 'https://grsai.example/v1'
+};
+const grsaiDefaultCredential: ModelCredential = {
+  id: 'credential-default-custom-grsai',
+  providerId: 'custom-grsai',
+  providerName: 'GrsAI',
+  label: 'GrsAI default',
+  apiBaseUrl: 'https://grsai.example/v1',
+  apiKey: 'grsai-key',
+  isDefault: true,
+  createdAt: '2026-07-27T00:00:00.000Z',
+  updatedAt: '2026-07-27T00:00:00.000Z'
+};
+const grsaiRuntimeBinding: RoleModelCredentialBinding = {
+  roleCode: imageFactoryRolePackage.roleCode,
+  modelProfileId: 'qiu-image-editing-default',
+  runtimeModelProfileId: grsaiImageProfile.id,
+  mode: 'provider_default',
+  updatedAt: '2026-07-27T00:00:00.000Z'
+};
+const imageFactoryRuntimeStatuses = getRoleModelRuntimeRequirementStatuses(
+  [imageEditingSlotProfile, grsaiImageProfile],
+  ['qiu-image-editing-default', grsaiImageProfile.id],
+  imageFactoryRolePackage,
+  {
+    roleCode: imageFactoryRolePackage.roleCode,
+    credentials: [grsaiDefaultCredential],
+    roleBindings: [grsaiRuntimeBinding]
+  }
+);
+const imageEditingStatus = imageFactoryRuntimeStatuses.find(
+  (status) => status.profile.id === 'qiu-image-editing-default'
+);
+assert.equal(imageEditingStatus?.runtimeProfile?.id, grsaiImageProfile.id);
+assert.equal(imageEditingStatus?.configured, true);
+assert.equal(imageEditingStatus?.enabled, true);
+assert.equal(imageEditingStatus?.ready, true);
+
+const disabledRuntimeImageModel = findFirstUnreadyRequiredModelProfileId(
+  [imageEditingSlotProfile, grsaiImageProfile],
+  ['qiu-image-editing-default'],
+  imageFactoryRolePackage,
+  {
+    roleCode: imageFactoryRolePackage.roleCode,
+    credentials: [grsaiDefaultCredential],
+    roleBindings: [grsaiRuntimeBinding]
+  }
+);
+assert.equal(disabledRuntimeImageModel, grsaiImageProfile.id);
+
+const incompatibleRuntimeBinding: RoleModelCredentialBinding = {
+  ...grsaiRuntimeBinding,
+  runtimeModelProfileId: 'deepseek-v4-flash'
+};
+const incompatibleRuntimeStatuses = getRoleModelRuntimeRequirementStatuses(
+  [
+    imageEditingSlotProfile,
+    {
+      id: 'deepseek-v4-flash',
+      providerId: 'deepseek',
+      providerName: 'DeepSeek',
+      modelName: 'deepseek-v4-flash',
+      purpose: 'general',
+      capabilities: ['text'],
+      apiBaseUrl: 'https://api.deepseek.com',
+      apiKey: 'deepseek-key'
+    }
+  ],
+  ['qiu-image-editing-default', 'deepseek-v4-flash'],
+  imageFactoryRolePackage,
+  {
+    roleCode: imageFactoryRolePackage.roleCode,
+    roleBindings: [incompatibleRuntimeBinding]
+  }
+);
+const incompatibleImageEditingStatus = incompatibleRuntimeStatuses.find(
+  (status) => status.profile.id === 'qiu-image-editing-default'
+);
+assert.equal(incompatibleImageEditingStatus?.ready, false);
+assert.equal(incompatibleImageEditingStatus?.issue, 'incompatible');
 
 console.log('Desktop role requirements passed.');

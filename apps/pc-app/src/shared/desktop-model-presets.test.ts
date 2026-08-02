@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 
-import { selectModelProfileForPreset } from './desktop-model-presets.js';
+import {
+  createCustomCompatibleModelProfile,
+  selectModelProfileForPreset
+} from './desktop-model-presets.js';
+import { modelProfileSupportsRequiredCapabilities } from './desktop-model-capabilities.js';
 import type { ModelProfile } from './desktop-contract.js';
 import type { ModelProviderPreset } from './desktop-model-presets.js';
 
@@ -196,6 +200,79 @@ assert.equal(
     (profile) => profile.id === 'qiu-general-default'
   )?.providerId,
   'deepseek'
+);
+
+const firstCustomProfile = createCustomCompatibleModelProfile([], {
+  providerName: 'GrsAI',
+  modelName: 'gpt-image-2',
+  purpose: 'vision',
+  capabilities: ['text_to_image']
+});
+const secondCustomProfile = createCustomCompatibleModelProfile([firstCustomProfile], {
+  providerName: 'GrsAI',
+  modelName: 'nano-banana-2',
+  purpose: 'vision',
+  capabilities: ['image_to_image']
+});
+
+assert.equal(firstCustomProfile.providerName, 'GrsAI');
+assert.equal(firstCustomProfile.modelName, 'gpt-image-2');
+assert.equal(firstCustomProfile.providerId, 'custom-grsai');
+assert.equal(secondCustomProfile.providerId, 'custom-grsai-2');
+assert.notEqual(firstCustomProfile.id, secondCustomProfile.id);
+
+const customReplacementSelection = selectModelProfileForPreset(
+  [
+    {
+      ...firstCustomProfile,
+      apiBaseUrl: 'https://grsai.example/v1'
+    }
+  ],
+  {
+    id: firstCustomProfile.providerId,
+    name: 'GrsAI',
+    summary: 'Custom compatible endpoint.',
+    apiBaseUrl: 'https://grsai.example/v1',
+    models: []
+  },
+  {
+    label: 'nano-banana-2',
+    modelName: 'nano-banana-2',
+    purpose: 'vision',
+    capabilities: ['image_to_image'],
+    temperature: 0.4,
+    maxTokens: 4096
+  },
+  { replaceProfileId: firstCustomProfile.id }
+);
+
+assert.ok(customReplacementSelection);
+assert.equal(customReplacementSelection.modelProfiles.length, 1);
+assert.equal(customReplacementSelection.profile.id, firstCustomProfile.id);
+assert.equal(customReplacementSelection.profile.providerId, firstCustomProfile.providerId);
+assert.equal(customReplacementSelection.profile.providerName, 'GrsAI');
+assert.equal(customReplacementSelection.profile.modelName, 'nano-banana-2');
+assert.deepEqual(customReplacementSelection.profile.capabilities, ['image_to_image']);
+
+assert.equal(
+  modelProfileSupportsRequiredCapabilities(
+    {
+      id: 'deepseek-v4-flash',
+      providerId: 'deepseek',
+      providerName: 'DeepSeek',
+      modelName: 'deepseek-v4-flash',
+      purpose: 'general',
+      capabilities: ['text'],
+      apiBaseUrl: 'https://api.deepseek.com',
+      apiKey: 'deepseek-key'
+    },
+    ['image_understanding', 'vision_text', 'text']
+  ),
+  false
+);
+assert.equal(
+  modelProfileSupportsRequiredCapabilities(firstCustomProfile, ['image_editing', 'image_to_image']),
+  true
 );
 
 console.log('Desktop model preset selection passed.');

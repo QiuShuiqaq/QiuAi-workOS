@@ -627,7 +627,7 @@ function readWorkflowNodeSemanticModelProfileIds(node: WorkflowGraphNode): strin
     return [];
   }
 
-  return [getSemanticModelProfileIdForTaskType(readTrimmedString(node.config?.llmTaskType))];
+  return [getSemanticModelProfileIdForTaskType(getWorkflowEffectiveModelTaskType(node))];
 }
 
 function readDependencyManifestSemanticModelProfileId(
@@ -642,6 +642,7 @@ function readDependencyManifestSemanticModelProfileId(
 
 function getSemanticModelProfileIdForTaskType(taskType: string | undefined): string {
   if (taskType === 'vision') return 'qiu-vision-default';
+  if (taskType === 'reasoning') return 'qiu-reasoning-default';
   if (taskType === 'audio_transcription') return 'qiu-asr-default';
   if (taskType === 'image_generation') return 'qiu-image-generation-default';
   if (taskType === 'image_editing') return 'qiu-image-editing-default';
@@ -663,7 +664,13 @@ function getSemanticModelProfileIdForCapabilities(input: {
   if (capabilities.has('audio_to_text')) return 'qiu-asr-default';
   if (capabilities.has('embedding') || outputTypes.has('embedding')) return 'qiu-embedding-default';
   if (capabilities.has('rerank') || outputTypes.has('scores')) return 'qiu-rerank-default';
-  if (capabilities.has('image_editing') || capabilities.has('image_to_image')) return 'qiu-image-editing-default';
+  if (
+    capabilities.has('image_editing') ||
+    capabilities.has('image_to_image') ||
+    (inputTypes.has('image') && outputTypes.has('image'))
+  ) {
+    return 'qiu-image-editing-default';
+  }
   if (capabilities.has('text_to_image') || (outputTypes.has('image') && !inputTypes.has('image'))) {
     return 'qiu-image-generation-default';
   }
@@ -677,11 +684,39 @@ function getSemanticModelProfileIdForCapabilities(input: {
   }
   if (capabilities.has('video_generation') || outputTypes.has('video')) return 'qiu-vision-default';
   if (capabilities.has('video_understanding') || inputTypes.has('video')) return 'qiu-vision-default';
-  if (capabilities.has('text') || capabilities.has('reasoning') || capabilities.has('reasoning_text')) {
+  if (capabilities.has('reasoning') || capabilities.has('reasoning_text')) {
+    return 'qiu-reasoning-default';
+  }
+  if (capabilities.has('text')) {
     return 'qiu-general-default';
   }
 
   return undefined;
+}
+
+function getWorkflowEffectiveModelTaskType(node: WorkflowGraphNode): string | undefined {
+  const taskType = readTrimmedString(node.config?.llmTaskType) ?? 'text';
+  if (taskType === 'image_generation' && workflowNodeUsesReferenceImage(node)) {
+    return 'image_editing';
+  }
+
+  return taskType;
+}
+
+function workflowNodeUsesReferenceImage(node: WorkflowGraphNode): boolean {
+  return [
+    ...(node.inputVariables ?? []),
+    readTrimmedString(node.config?.sourceImageVariable) ?? '',
+    readTrimmedString(node.config?.referenceImageVariable) ?? ''
+  ].some((value) => {
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'start.images' ||
+      normalized === 'start.files' ||
+      normalized === 'factory_items' ||
+      normalized.includes('referenceimage') ||
+      normalized.includes('sourceimage') ||
+      normalized.includes('source_image');
+  });
 }
 
 function mapModelProfileIdToSemanticDefault(profileId: string): string {
@@ -689,6 +724,16 @@ function mapModelProfileIdToSemanticDefault(profileId: string): string {
   if (!normalized) return '';
   if (normalized.startsWith('qiu-')) return profileId.trim();
   if (normalized.includes('asr') || normalized.includes('speech') || normalized.includes('audio')) return 'qiu-asr-default';
+  if (
+    normalized.includes('reason') ||
+    normalized.includes('reasoner') ||
+    normalized.includes('thinking') ||
+    normalized.includes('deepseek-r1') ||
+    normalized.includes('deepseek-v4-pro') ||
+    normalized.includes('r1')
+  ) {
+    return 'qiu-reasoning-default';
+  }
   if (normalized.includes('gpt-image') || normalized.includes('img2img') || normalized.includes('image-edit')) {
     return 'qiu-image-editing-default';
   }

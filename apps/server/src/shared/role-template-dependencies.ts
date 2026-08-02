@@ -274,7 +274,7 @@ function inferModelRequirementFromNode(node: ServerRoleWorkflowGraphNode): {
   inputTypes: string[];
   outputTypes: string[];
 } {
-  const taskType = readConfigString(node.config, 'llmTaskType') ?? 'text';
+  const taskType = getEffectiveModelTaskTypeForNode(node);
 
   if (taskType === 'vision') {
     return {
@@ -357,8 +357,9 @@ function inferModelRequirementFromNode(node: ServerRoleWorkflowGraphNode): {
 }
 
 function getSemanticModelProfileIdForNode(node: ServerRoleWorkflowGraphNode): string | undefined {
-  const taskType = readConfigString(node.config, 'llmTaskType') ?? 'text';
+  const taskType = getEffectiveModelTaskTypeForNode(node);
   if (taskType === 'vision') return 'qiu-vision-default';
+  if (taskType === 'reasoning') return 'qiu-reasoning-default';
   if (taskType === 'audio_transcription') return 'qiu-asr-default';
   if (taskType === 'image_generation') return 'qiu-image-generation-default';
   if (taskType === 'image_editing') return 'qiu-image-editing-default';
@@ -368,11 +369,46 @@ function getSemanticModelProfileIdForNode(node: ServerRoleWorkflowGraphNode): st
   return 'qiu-general-default';
 }
 
+function getEffectiveModelTaskTypeForNode(node: ServerRoleWorkflowGraphNode): string {
+  const taskType = readConfigString(node.config, 'llmTaskType') ?? 'text';
+  if (taskType === 'image_generation' && workflowNodeUsesReferenceImage(node)) {
+    return 'image_editing';
+  }
+
+  return taskType;
+}
+
+function workflowNodeUsesReferenceImage(node: ServerRoleWorkflowGraphNode): boolean {
+  return [
+    ...(node.inputVariables ?? []),
+    readConfigString(node.config, 'sourceImageVariable') ?? '',
+    readConfigString(node.config, 'referenceImageVariable') ?? ''
+  ].some((value) => {
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'start.images' ||
+      normalized === 'start.files' ||
+      normalized === 'factory_items' ||
+      normalized.includes('referenceimage') ||
+      normalized.includes('sourceimage') ||
+      normalized.includes('source_image');
+  });
+}
+
 function mapModelProfileIdToSemanticDefault(profileId: string): string | undefined {
   const normalized = profileId.trim().toLowerCase();
   if (!normalized) return undefined;
   if (normalized.startsWith('qiu-')) return profileId.trim();
   if (normalized.includes('asr') || normalized.includes('speech') || normalized.includes('audio')) return 'qiu-asr-default';
+  if (
+    normalized.includes('reason') ||
+    normalized.includes('reasoner') ||
+    normalized.includes('thinking') ||
+    normalized.includes('deepseek-r1') ||
+    normalized.includes('deepseek-v4-pro') ||
+    normalized.includes('r1')
+  ) {
+    return 'qiu-reasoning-default';
+  }
   if (normalized.includes('gpt-image') || normalized.includes('img2img') || normalized.includes('image-edit')) {
     return 'qiu-image-editing-default';
   }

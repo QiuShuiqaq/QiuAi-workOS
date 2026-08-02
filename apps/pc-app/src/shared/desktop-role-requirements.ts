@@ -5,7 +5,10 @@ import type {
   RolePackageManifest
 } from './desktop-contract.js';
 import { isModelProfileConfiguredByCredentials } from './desktop-model-credentials.js';
-import { inferModelCapabilitiesFromName } from './desktop-model-capabilities.js';
+import {
+  inferModelCapabilitiesFromName,
+  modelProfileSupportsRequiredCapabilities
+} from './desktop-model-capabilities.js';
 import { parseWorkflowGraph, type WorkflowGraphNode } from './desktop-workflow-graph.js';
 
 export interface RoleModelRequirementStatus {
@@ -15,12 +18,14 @@ export interface RoleModelRequirementStatus {
   known: boolean;
 }
 
-export type RoleModelRuntimeIssue = 'missing' | 'disabled' | 'unconfigured';
+export type RoleModelRuntimeIssue = 'missing' | 'disabled' | 'unconfigured' | 'incompatible';
 
 export interface RoleModelRuntimeRequirementStatus extends RoleModelRequirementStatus {
   enabled: boolean;
   ready: boolean;
   issue?: RoleModelRuntimeIssue;
+  runtimeProfileId?: string;
+  runtimeProfile?: ModelProfile;
 }
 
 export interface RoleModelCredentialContext {
@@ -127,17 +132,48 @@ export function getRoleModelRuntimeRequirementStatuses(
   const enabledIds = new Set(enabledModelProfileIds);
 
   return getRoleModelRequirementStatuses(modelProfiles, rolePackage, credentialContext).map((requirement) => {
-    const enabled = requirement.known && enabledIds.has(requirement.profile.id);
-    const ready = requirement.known && enabled && requirement.configured;
+    const runtimeProfileId = findRuntimeModelProfileIdForRequirement(
+      credentialContext.roleBindings ?? [],
+      credentialContext.roleCode ?? rolePackage.roleCode,
+      requirement.profile.id
+    );
+    const runtimeProfile = runtimeProfileId
+      ? modelProfiles.find((profile) => profile.id === runtimeProfileId)
+      : undefined;
+    const runtimeOverrideSelected = Boolean(
+      runtimeProfileId &&
+      runtimeProfileId !== requirement.profile.id
+    );
+    const requiredCapabilities = getRequiredCapabilitiesForSemanticProfileId(requirement.profile.id);
+    const runtimeCompatible =
+      !runtimeOverrideSelected ||
+      !runtimeProfile ||
+      requiredCapabilities.length === 0 ||
+      modelProfileSupportsAnyCapability(runtimeProfile, requiredCapabilities);
+    const known = runtimeOverrideSelected ? Boolean(runtimeProfile) : requirement.known;
+    const configured = runtimeOverrideSelected && runtimeProfile
+      ? hasConfiguredModelApi(runtimeProfile, credentialContext)
+      : requirement.configured;
+    const enabledProfileId = runtimeOverrideSelected
+      ? runtimeProfile?.id
+      : requirement.profile.id;
+    const enabled = known && Boolean(enabledProfileId && enabledIds.has(enabledProfileId));
+    const ready = known && runtimeCompatible && enabled && configured;
 
     return {
       ...requirement,
+      known,
+      configured,
       enabled,
       ready,
+      runtimeProfileId,
+      runtimeProfile,
       issue: ready
         ? undefined
-        : !requirement.known
+        : !known
           ? 'missing'
+          : !runtimeCompatible
+            ? 'incompatible'
           : !enabled
             ? 'disabled'
             : 'unconfigured'
@@ -161,12 +197,27 @@ export function findFirstUnreadyRequiredModelProfileId(
   rolePackage: Pick<RolePackageManifest, 'roleCode' | 'modelProfileIds' | 'workflowGraph' | 'dependencyManifest'>,
   credentialContext: RoleModelCredentialContext = {}
 ): string | undefined {
-  return getRoleModelRuntimeRequirementStatuses(
+  const firstUnreadyRequirement = getRoleModelRuntimeRequirementStatuses(
     modelProfiles,
     enabledModelProfileIds,
     rolePackage,
     credentialContext
-  ).find((requirement) => !requirement.ready)?.profile.id;
+  ).find((requirement) => !requirement.ready);
+
+  return firstUnreadyRequirement?.runtimeProfileId ?? firstUnreadyRequirement?.profile.id;
+}
+
+function findRuntimeModelProfileIdForRequirement(
+  roleBindings: RoleModelCredentialBinding[],
+  roleCode: string,
+  modelProfileId: string
+): string | undefined {
+  return roleBindings.find(
+    (binding) =>
+      binding.roleCode === roleCode &&
+      binding.modelProfileId === modelProfileId &&
+      binding.runtimeModelProfileId?.trim()
+  )?.runtimeModelProfileId?.trim();
 }
 
 function findConfiguredCompatibleModelProfile(
@@ -200,13 +251,7 @@ function getRequiredCapabilitiesForSemanticProfileId(profileId: string): string[
 }
 
 function modelProfileSupportsAnyCapability(profile: ModelProfile, capabilities: string[]): boolean {
-  const normalizedProfileCapabilities = new Set(
-    inferModelCapabilitiesFromName(profile.modelName, profile.purpose).concat(profile.capabilities ?? [])
-      .map(normalizeModelRequirementToken)
-  );
-  return capabilities.map(normalizeModelRequirementToken).some((capability) =>
-    normalizedProfileCapabilities.has(capability)
-  );
+  return modelProfileSupportsRequiredCapabilities(profile, capabilities);
 }
 
 export function createPlaceholderModelProfile(profileId: string): ModelProfile {
@@ -320,11 +365,12 @@ function readConfigString(config: Record<string, unknown> | undefined, key: stri
 }
 
 function getSemanticModelProfileIdForWorkflowNode(node: WorkflowGraphNode): string {
-  return getSemanticModelProfileIdForTaskType(readConfigString(node.config, 'llmTaskType')) ?? 'qiu-general-default';
+  return getSemanticModelProfileIdForTaskType(getWorkflowEffectiveModelTaskType(node)) ?? 'qiu-general-default';
 }
 
 function getSemanticModelProfileIdForTaskType(taskType: string | undefined): string | undefined {
   if (taskType === 'vision') return 'qiu-vision-default';
+  if (taskType === 'reasoning') return 'qiu-reasoning-default';
   if (taskType === 'audio_transcription') return 'qiu-asr-default';
   if (taskType === 'image_generation') return 'qiu-image-generation-default';
   if (taskType === 'image_editing') return 'qiu-image-editing-default';
@@ -332,6 +378,31 @@ function getSemanticModelProfileIdForTaskType(taskType: string | undefined): str
   if (taskType === 'embedding') return 'qiu-embedding-default';
   if (taskType === 'rerank') return 'qiu-rerank-default';
   return 'qiu-general-default';
+}
+
+function getWorkflowEffectiveModelTaskType(node: WorkflowGraphNode): string | undefined {
+  const taskType = readConfigString(node.config, 'llmTaskType') ?? 'text';
+  if (taskType === 'image_generation' && workflowNodeUsesReferenceImage(node)) {
+    return 'image_editing';
+  }
+
+  return taskType;
+}
+
+function workflowNodeUsesReferenceImage(node: WorkflowGraphNode): boolean {
+  return [
+    ...(node.inputVariables ?? []),
+    readConfigString(node.config, 'sourceImageVariable') ?? '',
+    readConfigString(node.config, 'referenceImageVariable') ?? ''
+  ].some((value) => {
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'start.images' ||
+      normalized === 'start.files' ||
+      normalized === 'factory_items' ||
+      normalized.includes('referenceimage') ||
+      normalized.includes('sourceimage') ||
+      normalized.includes('source_image');
+  });
 }
 
 function getSemanticModelProfileIdForCapabilities(input: {
@@ -346,7 +417,13 @@ function getSemanticModelProfileIdForCapabilities(input: {
   if (capabilities.has('audio_to_text')) return 'qiu-asr-default';
   if (capabilities.has('embedding') || outputTypes.has('embedding')) return 'qiu-embedding-default';
   if (capabilities.has('rerank') || outputTypes.has('scores')) return 'qiu-rerank-default';
-  if (capabilities.has('image_editing') || capabilities.has('image_to_image')) return 'qiu-image-editing-default';
+  if (
+    capabilities.has('image_editing') ||
+    capabilities.has('image_to_image') ||
+    (inputTypes.has('image') && outputTypes.has('image'))
+  ) {
+    return 'qiu-image-editing-default';
+  }
   if (capabilities.has('text_to_image') || (outputTypes.has('image') && !inputTypes.has('image'))) {
     return 'qiu-image-generation-default';
   }
@@ -360,7 +437,10 @@ function getSemanticModelProfileIdForCapabilities(input: {
   }
   if (capabilities.has('video_generation') || outputTypes.has('video')) return 'qiu-vision-default';
   if (capabilities.has('video_understanding') || inputTypes.has('video')) return 'qiu-vision-default';
-  if (capabilities.has('text') || capabilities.has('reasoning') || capabilities.has('reasoning_text')) {
+  if (capabilities.has('reasoning') || capabilities.has('reasoning_text')) {
+    return 'qiu-reasoning-default';
+  }
+  if (capabilities.has('text')) {
     return 'qiu-general-default';
   }
 
@@ -372,6 +452,16 @@ function mapModelProfileIdToSemanticDefault(profileId: string): string {
   if (!normalized) return '';
   if (normalized.startsWith('qiu-')) return profileId.trim();
   if (normalized.includes('asr') || normalized.includes('speech') || normalized.includes('audio')) return 'qiu-asr-default';
+  if (
+    normalized.includes('reason') ||
+    normalized.includes('reasoner') ||
+    normalized.includes('thinking') ||
+    normalized.includes('deepseek-r1') ||
+    normalized.includes('deepseek-v4-pro') ||
+    normalized.includes('r1')
+  ) {
+    return 'qiu-reasoning-default';
+  }
   if (normalized.includes('gpt-image') || normalized.includes('img2img') || normalized.includes('image-edit')) {
     return 'qiu-image-editing-default';
   }

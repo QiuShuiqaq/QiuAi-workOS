@@ -2436,6 +2436,21 @@ body,
   min-width: 88px;
 }
 
+.custom-model-profile-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.custom-model-profile-header .ant-typography {
+  margin: 0;
+}
+
+.custom-model-profile-grid {
+  margin-top: 0;
+}
+
 .catalog-card-icon,
 .model-provider-logo {
   display: inline-flex;
