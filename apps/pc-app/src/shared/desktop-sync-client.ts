@@ -69,6 +69,19 @@ interface CheckDesktopUpdateResponse {
   data: DesktopUpdateCheckResult;
 }
 
+interface EnterpriseKnowledgeRuntimeContextResponse {
+  data: {
+    workspaceId: string;
+    enabled: boolean;
+    versionId?: string;
+    versionNumber?: number;
+    title?: string;
+    fileName?: string;
+    contextText: string;
+    updatedAt: string;
+  };
+}
+
 export interface DesktopAgreementAcceptanceStatusInput {
   agreementKey: string;
   agreementVersion: string;
@@ -255,6 +268,31 @@ export async function fetchWorkspaceDesktopToolActionCatalog(
   }
 
   return body as ListDesktopServerToolActionCatalogResponse;
+}
+
+export async function fetchEnterpriseKnowledgeRuntimeContext(
+  baseUrl: string,
+  workspaceId: string,
+  deviceToken: string
+): Promise<EnterpriseKnowledgeRuntimeContextResponse> {
+  const response = await fetch(
+    `${normalizeBaseUrl(baseUrl)}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/desktop/knowledge-base/runtime-context`,
+    {
+      headers: {
+        accept: 'application/json',
+        'x-qiuai-device-token': deviceToken
+      }
+    }
+  );
+
+  const body = (await response.json()) as EnterpriseKnowledgeRuntimeContextResponse | { error?: { message?: string } };
+  if (!response.ok) {
+    const errorBody = body as { error?: { message?: string } };
+    const message = errorBody.error?.message ?? `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return body as EnterpriseKnowledgeRuntimeContextResponse;
 }
 
 export async function checkDesktopUpdate(

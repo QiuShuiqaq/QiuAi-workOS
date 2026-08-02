@@ -224,6 +224,23 @@ enum DesktopIssueStatus {
   CLOSED
 }
 
+enum KnowledgeBaseScope {
+  ENTERPRISE
+  LOCAL
+}
+
+enum KnowledgeBaseStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum KnowledgeBaseVersionStatus {
+  PROCESSING
+  READY
+  FAILED
+  ARCHIVED
+}
+
 model Account {
   id           String        @id @default(uuid()) @db.Uuid
   primaryEmail String        @unique @map("primary_email")
@@ -302,6 +319,7 @@ model Workspace {
   desktopBindingCodes DesktopBindingCode[]
   desktopDevices DesktopDevice[]
   desktopIssueReports DesktopIssueReport[]
+  knowledgeBases KnowledgeBase[]
   invitations    Invitation[]
 
   @@index([tenantId])
@@ -701,6 +719,59 @@ model AssetDefinition {
   @@index([category])
   @@index([sortOrder])
   @@map("asset_definitions")
+}
+
+model KnowledgeBase {
+  id               String              @id @default(uuid()) @db.Uuid
+  workspaceId      String              @map("workspace_id") @db.Uuid
+  scope            KnowledgeBaseScope
+  name             String
+  status           KnowledgeBaseStatus @default(ACTIVE)
+  currentVersionId String?             @map("current_version_id") @db.Uuid
+  profile          Json                @default("{}")
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+
+  workspace      Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  currentVersion KnowledgeBaseVersion?   @relation("CurrentKnowledgeBaseVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  versions       KnowledgeBaseVersion[]  @relation("KnowledgeBaseVersions")
+
+  @@unique([workspaceId, scope])
+  @@index([workspaceId])
+  @@index([scope])
+  @@index([status])
+  @@index([currentVersionId])
+  @@map("knowledge_bases")
+}
+
+model KnowledgeBaseVersion {
+  id              String                     @id @default(uuid()) @db.Uuid
+  knowledgeBaseId String                     @map("knowledge_base_id") @db.Uuid
+  versionNumber   Int                        @map("version_number")
+  title           String
+  fileName        String                     @map("file_name")
+  mimeType        String                     @map("mime_type")
+  fileSizeBytes   Int                        @map("file_size_bytes")
+  sourceSha256    String                     @map("source_sha256")
+  fileDataBase64  String                     @map("file_data_base64")
+  textContent     String                     @map("text_content")
+  summary         String
+  status          KnowledgeBaseVersionStatus @default(READY)
+  isEnabled       Boolean                    @default(false) @map("is_enabled")
+  activatedAt     DateTime?                  @map("activated_at")
+  failureMessage  String?                    @map("failure_message")
+  createdAt       DateTime                   @default(now()) @map("created_at")
+  updatedAt       DateTime                   @updatedAt @map("updated_at")
+
+  knowledgeBase KnowledgeBase  @relation("KnowledgeBaseVersions", fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  currentFor    KnowledgeBase[] @relation("CurrentKnowledgeBaseVersion")
+
+  @@unique([knowledgeBaseId, versionNumber])
+  @@index([knowledgeBaseId])
+  @@index([status])
+  @@index([isEnabled])
+  @@index([createdAt])
+  @@map("knowledge_base_versions")
 }
 
 model RoleInstance {

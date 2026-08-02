@@ -12,6 +12,7 @@
   RolePackageManifest,
   ToolManifest
 } from './desktop-contract.js';
+import { normalizeKnowledgeBindingId } from './knowledge-bindings.js';
 import { resolveModelProfileCredential } from './desktop-model-credentials.js';
 import {
   modelProfileSupportsRequiredCapabilities,
@@ -239,6 +240,7 @@ const maxAttachmentContextChars = 40_000;
 const maxKnowledgeRetrievalSources = 4;
 const maxKnowledgeRetrievalFiles = 4;
 const maxKnowledgeRetrievalChars = 30_000;
+const maxKnowledgeSourceSummaryChars = 20_000;
 type WorkflowRuntimeModelOutputMode = 'text' | 'json';
 const supportedToolActions: DesktopToolInvocationAction[] = [
   'filesystem.write_text_file',
@@ -470,7 +472,7 @@ function buildContextFromRolePackage(rolePackage?: RolePackageManifest) {
   return {
     modelProfileIds: readRequiredModelProfileIdsForRolePackage(rolePackage),
     toolIds: [...rolePackage.toolIds],
-    knowledgeBindingIds: rolePackage.requiredKnowledgeSources.map((source) => source)
+    knowledgeBindingIds: rolePackage.requiredKnowledgeSources.map((source) => normalizeKnowledgeBindingId(source))
   };
 }
 
@@ -485,10 +487,15 @@ function resolveRuntimeBinding(input: {
 }): ResolvedRuntimeBinding {
   const enabledModelIds = new Set(input.enabledModelProfileIds);
   const enabledToolIds = new Set(input.enabledToolIds);
-  const enabledKnowledgeIds = new Set(input.enabledKnowledgeBindingIds);
+  const enabledKnowledgeIds = new Set(input.enabledKnowledgeBindingIds.map(normalizeKnowledgeBindingId));
   const modelProfilesById = new Map(input.modelProfiles.map((profile) => [profile.id, profile]));
   const toolsById = new Map(input.tools.map((tool) => [tool.id, tool]));
-  const knowledgeSourcesById = new Map(input.knowledgeSources.map((source) => [source.id, source]));
+  const knowledgeSourcesById = new Map(
+    input.knowledgeSources.map((source) => [normalizeKnowledgeBindingId(source.id), source])
+  );
+  const requiredKnowledgeBindingIds = mergeUniqueStrings(
+    input.context.knowledgeBindingIds.map(normalizeKnowledgeBindingId)
+  );
 
   const requiredModelProfileIds = mergeUniqueStrings(
     input.context.modelProfileIds.map(normalizeRuntimeRequirementModelProfileId)
@@ -509,14 +516,14 @@ function resolveRuntimeBinding(input: {
     return tool && enabledToolIds.has(toolId) ? [tool] : [];
   });
   const missingToolIds = input.context.toolIds.filter((toolId) => !enabledToolIds.has(toolId));
-  const missingKnowledgeBindingIds = input.context.knowledgeBindingIds.filter(
+  const missingKnowledgeBindingIds = requiredKnowledgeBindingIds.filter(
     (bindingId) => !enabledKnowledgeIds.has(bindingId)
   );
-  const availableKnowledgeSources = input.context.knowledgeBindingIds.flatMap((bindingId) => {
+  const availableKnowledgeSources = requiredKnowledgeBindingIds.flatMap((bindingId) => {
     const source = knowledgeSourcesById.get(bindingId);
     return source && source.enabled && enabledKnowledgeIds.has(bindingId) ? [source] : [];
   });
-  const unconfiguredKnowledgeBindingIds = input.context.knowledgeBindingIds.filter(
+  const unconfiguredKnowledgeBindingIds = requiredKnowledgeBindingIds.filter(
     (bindingId) => enabledKnowledgeIds.has(bindingId) && !knowledgeSourcesById.has(bindingId)
   );
 
@@ -1909,7 +1916,7 @@ function selectKnowledgeReaderTool(
 ): { toolId: string; action: DesktopToolInvocationAction } | undefined {
   const toolIds = new Set(tools.map((tool) => tool.id));
   const extension = filePath.split('.').at(-1)?.trim().toLowerCase() ?? '';
-  const officeExtensions = new Set(['txt', 'md', 'markdown', 'csv', 'json', 'docx', 'pptx', 'xlsx']);
+  const officeExtensions = new Set(['txt', 'md', 'markdown', 'csv', 'json', 'docx', 'pptx', 'xlsx', 'pdf']);
 
   if (toolIds.has('office-document') && officeExtensions.has(extension)) {
     return {
@@ -8125,7 +8132,7 @@ function formatKnowledgeSourceForPrompt(source: DesktopKnowledgeSourceSummary): 
     `Type: ${source.source}`,
     `Path: ${source.localPath ?? 'none'}`,
     `Indexed at: ${source.lastIndexedAt ?? 'not indexed'}`,
-    `Summary: ${truncateForPrompt(source.summary ?? 'No summary available.', 2_000)}`
+    `Summary: ${truncateForPrompt(source.summary ?? 'No summary available.', maxKnowledgeSourceSummaryChars)}`
   ].join('\n');
 }
 

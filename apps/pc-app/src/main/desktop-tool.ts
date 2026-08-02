@@ -21,6 +21,7 @@ import {
   normalizePathSegment
 } from './storage-layout.js';
 import { loadDesktopRuntimeState } from './runtime-store.js';
+import { loadPdfParse } from './pdf-parse-loader.js';
 
 const localFilesystemToolId = 'local-filesystem';
 const webSearchToolId = 'web-search';
@@ -643,7 +644,7 @@ async function extractDocumentText(request: DesktopToolInvocationRequest): Promi
   } else if (extension === '.xlsx') {
     text = await extractXlsxText(filePath);
   } else if (extension === '.pdf') {
-    return fail(request, 'PDF text extraction is not supported yet. Convert the PDF to text or Word for this version.');
+    text = await extractPdfText(filePath);
   } else {
     return fail(request, `Unsupported document extension for text extraction: ${extension || 'unknown'}.`);
   }
@@ -2362,6 +2363,12 @@ async function extractXlsxText(filePath: string): Promise<string> {
     .join('\n\n');
 
   return [sharedText, worksheetText].filter(Boolean).join('\n\n');
+}
+
+async function extractPdfText(filePath: string): Promise<string> {
+  const pdfParse = loadPdfParse();
+  const parsed = await pdfParse(readFileSync(filePath));
+  return parsed.text;
 }
 
 async function readZipXmlFiles(zip: JSZip, pattern: RegExp): Promise<string[]> {

@@ -4,6 +4,7 @@ import {
   ApartmentOutlined,
   AuditOutlined,
   CreditCardOutlined,
+  DatabaseOutlined,
   DollarOutlined,
   LogoutOutlined,
   RobotOutlined,
@@ -36,6 +37,7 @@ function selectedKey(pathname: string) {
   if (pathname.startsWith('/approvals')) return 'approvals';
   if (pathname.startsWith('/costs')) return 'costs';
   if (pathname.startsWith('/purchase')) return 'purchase';
+  if (pathname.startsWith('/knowledge')) return 'knowledge';
   if (pathname.startsWith('/enterprise')) return 'enterprise';
   if (pathname.startsWith('/settings')) return 'settings';
   return 'dashboard';
@@ -142,6 +144,11 @@ export function ConsoleShell({ currentAccount, children }: ConsoleShellProps) {
               key: 'purchase',
               icon: <CreditCardOutlined />,
               label: <Link href={withWorkspaceId('/purchase')}>购买中心</Link>
+            },
+            {
+              key: 'knowledge',
+              icon: <DatabaseOutlined />,
+              label: <Link href={withWorkspaceId('/knowledge')}>企业知识库</Link>
             },
             {
               key: 'enterprise',

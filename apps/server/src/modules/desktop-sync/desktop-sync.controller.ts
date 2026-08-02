@@ -4,6 +4,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import { DesktopSyncService } from './desktop-sync.service';
 import { openDesktopReleaseAsset } from '../../shared/desktop-release-assets';
+import { KnowledgeService } from '../knowledge/knowledge.service';
 import {
   CheckDesktopUpdateQueryDto,
   CheckDesktopUpdateResponseDto
@@ -67,11 +68,23 @@ export class DesktopSyncController {
   version: '1'
 })
 export class WorkspaceDesktopController {
-  constructor(@Inject(DesktopSyncService) private readonly desktopSyncService: DesktopSyncService) {}
+  constructor(
+    @Inject(DesktopSyncService) private readonly desktopSyncService: DesktopSyncService,
+    @Inject(KnowledgeService) private readonly knowledgeService: KnowledgeService
+  ) {}
 
   @Get('tools')
   listTools(@Param('workspaceId') workspaceId: string, @Req() request: FastifyRequest) {
     return this.desktopSyncService.listDesktopToolActionCatalog(workspaceId, readDesktopDeviceToken(request));
+  }
+
+  @Get('knowledge-base/runtime-context')
+  async getEnterpriseKnowledgeRuntimeContext(
+    @Param('workspaceId') workspaceId: string,
+    @Req() request: FastifyRequest
+  ) {
+    await this.desktopSyncService.requireDesktopDeviceWorkspaceAccess(workspaceId, readDesktopDeviceToken(request));
+    return this.knowledgeService.getEnterpriseKnowledgeRuntimeContext(workspaceId);
   }
 
   @Get('role-templates')

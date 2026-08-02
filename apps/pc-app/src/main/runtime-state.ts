@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createInitialDesktopRuntimeState } from '../shared/desktop-state.js';
 import {
   checkDesktopUpdate as fetchDesktopUpdate,
+  fetchEnterpriseKnowledgeRuntimeContext,
   fetchPublicDesktopToolActionCatalog,
   fetchWorkspaceDesktopToolActionCatalog,
   listAuthorizedRoleTemplates as fetchAuthorizedRoleTemplates,
@@ -33,6 +34,12 @@ import {
   updateRuntimeIdentity
 } from './runtime-store.js';
 import { buildDesktopToolStateFromServerCatalog } from './desktop-tool-catalog.js';
+import type { DesktopKnowledgeSourceSummary } from '../shared/desktop-contract.js';
+import {
+  enterpriseKnowledgeBindingId,
+  knowledgeBindingSourceFromId,
+  normalizeKnowledgeBindingId
+} from '../shared/knowledge-bindings.js';
 
 const electronApi = (electron as typeof electron & { default?: typeof electron }).default ?? electron;
 const { app } = electronApi;
@@ -85,7 +92,10 @@ export async function getDesktopRuntimeState(): Promise<DesktopRuntimeState> {
   });
 
   if (!persistedState) {
-    const serverDefinedState = await applyServerDefinedToolCatalog(initialState, identity.deviceToken);
+    const serverDefinedState = await applyServerDefinedKnowledgeSources(
+      await applyServerDefinedToolCatalog(initialState, identity.deviceToken),
+      identity.deviceToken
+    );
     await saveDesktopRuntimeState(appInfo.userDataPath, serverDefinedState);
     return serverDefinedState;
   }
@@ -120,7 +130,10 @@ export async function getDesktopRuntimeState(): Promise<DesktopRuntimeState> {
     serverConnection
   };
 
-  const serverDefinedState = await applyServerDefinedToolCatalog(mergedState, identity.deviceToken);
+  const serverDefinedState = await applyServerDefinedKnowledgeSources(
+    await applyServerDefinedToolCatalog(mergedState, identity.deviceToken),
+    identity.deviceToken
+  );
   if (serverDefinedState !== mergedState) {
     await saveDesktopRuntimeState(appInfo.userDataPath, serverDefinedState);
   }
@@ -190,7 +203,10 @@ export async function syncDesktopRuntimeState(state: DesktopRuntimeState) {
     throw new Error('Desktop device token is missing. Bind the device first.');
   }
 
-  const serverDefinedState = await applyServerDefinedToolCatalog(state, identity.deviceToken);
+  const serverDefinedState = await applyServerDefinedKnowledgeSources(
+    await applyServerDefinedToolCatalog(state, identity.deviceToken),
+    identity.deviceToken
+  );
   const result = await syncDesktopRuntimeSnapshot(
     appInfo.serverBaseUrl,
     serverDefinedState.localRuntime.workspaceId,
@@ -282,6 +298,78 @@ async function applyServerDefinedToolCatalog(
       }
     };
   }
+}
+
+async function applyServerDefinedKnowledgeSources(
+  state: DesktopRuntimeState,
+  deviceToken?: string
+): Promise<DesktopRuntimeState> {
+  if (!deviceToken || state.localRuntime.workspaceId === 'workspace_pending_login') {
+    return state;
+  }
+
+  try {
+    const response = await fetchEnterpriseKnowledgeRuntimeContext(
+      state.app.serverBaseUrl,
+      state.localRuntime.workspaceId,
+      deviceToken
+    );
+    const context = response.data;
+    const existingSource = state.knowledgeSources.find(
+      (source) => normalizeKnowledgeBindingId(source.id) === enterpriseKnowledgeBindingId
+    );
+    const enabled = context.enabled && context.contextText.trim().length > 0;
+    const source: DesktopKnowledgeSourceSummary = {
+      id: enterpriseKnowledgeBindingId,
+      source: 'workspace_library',
+      label: '企业知识库',
+      enabled,
+      createdAt: existingSource?.createdAt ?? context.updatedAt,
+      lastIndexedAt: context.updatedAt,
+      summary: buildEnterpriseKnowledgeRuntimeSummary(context)
+    };
+    const knowledgeSources = [
+      ...state.knowledgeSources.filter(
+        (item) => normalizeKnowledgeBindingId(item.id) !== enterpriseKnowledgeBindingId
+      ),
+      source
+    ];
+    const knowledgeBindingIds = [
+      ...new Set([
+        ...state.localRuntime.knowledgeBindingIds.map(normalizeKnowledgeBindingId),
+        ...(enabled ? [enterpriseKnowledgeBindingId] : [])
+      ])
+    ];
+
+    return {
+      ...state,
+      knowledgeSources,
+      localRuntime: {
+        ...state.localRuntime,
+        knowledgeBindingIds
+      }
+    };
+  } catch {
+    return state;
+  }
+}
+
+function buildEnterpriseKnowledgeRuntimeSummary(input: {
+  enabled: boolean;
+  versionNumber?: number;
+  title?: string;
+  fileName?: string;
+  contextText: string;
+}): string {
+  const header = [
+    '企业知识库同步内容',
+    input.enabled ? '状态：已启用' : '状态：未启用',
+    input.versionNumber ? `版本：V${input.versionNumber}` : undefined,
+    input.title ? `标题：${input.title}` : undefined,
+    input.fileName ? `文件：${input.fileName}` : undefined
+  ].filter(Boolean);
+
+  return [header.join('\n'), input.contextText].filter(Boolean).join('\n\n');
 }
 
 export async function listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRoleTemplateCatalog> {
@@ -416,7 +504,13 @@ function hydratePersistedRuntimeState(state: DesktopRuntimeState): DesktopRuntim
   const validModelProfileIds = new Set(state.modelProfiles.map((profile) => profile.id));
   const normalizedState = {
     ...state,
-    knowledgeSources: state.knowledgeSources ?? [],
+    localRuntime: {
+      ...state.localRuntime,
+      knowledgeBindingIds: [
+        ...new Set((state.localRuntime.knowledgeBindingIds ?? []).map(normalizeKnowledgeBindingId))
+      ]
+    },
+    knowledgeSources: normalizePersistedKnowledgeSources(state.knowledgeSources ?? []),
     modelCredentials,
     modelCatalogs: state.modelCatalogs ?? [],
     roleModelCredentialBindings: normalizeRoleModelCredentialBindings(
@@ -438,6 +532,22 @@ function hydratePersistedRuntimeState(state: DesktopRuntimeState): DesktopRuntim
     ...normalizedState,
     taskDetails
   };
+}
+
+function normalizePersistedKnowledgeSources(
+  sources: DesktopKnowledgeSourceSummary[]
+): DesktopKnowledgeSourceSummary[] {
+  const deduped = new Map<string, DesktopKnowledgeSourceSummary>();
+  for (const source of sources) {
+    const id = normalizeKnowledgeBindingId(source.id);
+    deduped.set(id, {
+      ...source,
+      id,
+      source: knowledgeBindingSourceFromId(id)
+    });
+  }
+
+  return [...deduped.values()];
 }
 
 function resolveRoleName(rolePackages: DesktopRuntimeState['rolePackages'], roleCode: string): string {

@@ -12,6 +12,7 @@ export * from './errors';
 export * from './execution';
 export * from './invitation';
 export * from './issue-message';
+export * from './knowledge';
 export * from './kernel';
 export * from './pagination';
 export * from './platform-overview';

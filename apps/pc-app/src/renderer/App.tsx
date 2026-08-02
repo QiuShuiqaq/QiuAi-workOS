@@ -111,6 +111,13 @@ import {
 import type { RoleTemplateCatalogEntry } from '@qiuai/domain';
 import { createDesktopRuntimePreviewState } from '../shared/desktop-state';
 import {
+  enterpriseKnowledgeBindingId,
+  knowledgeBindingIdFromSource,
+  knowledgeBindingSourceFromId,
+  localPdfKnowledgeBindingId,
+  normalizeKnowledgeBindingId
+} from '../shared/knowledge-bindings';
+import {
   createMockTaskDetail,
   createTaskDetailFromSummary,
   toDesktopTaskSummary
@@ -336,28 +343,16 @@ const issueFeedbackSeverityOptions: Array<{ value: DesktopIssueSeverity; label: 
 
 const knowledgeBindingCatalog: KnowledgeBindingCatalogEntry[] = [
   {
-    source: 'local_folder',
-    bindingId: 'kb-local-folder',
-    label: '本地文件夹',
-    description: '同步指定目录下的资料与文档摘要'
-  },
-  {
     source: 'local_file',
-    bindingId: 'kb-local-file',
-    label: '本地文件',
-    description: '同步单个文件或附件摘要'
+    bindingId: localPdfKnowledgeBindingId,
+    label: '本地 PDF 知识库',
+    description: '只保留一份启用中的本地完整 PDF，作为本机知识库资产。'
   },
   {
     source: 'workspace_library',
-    bindingId: 'kb-workspace-library',
-    label: '工作区知识库',
-    description: '同步当前工作区内的沉淀知识'
-  },
-  {
-    source: 'server_summary',
-    bindingId: 'kb-server-summary',
-    label: '服务端摘要',
-    description: '同步服务端返回的精简摘要'
+    bindingId: enterpriseKnowledgeBindingId,
+    label: '企业知识库',
+    description: '同步 web-console 中启用的企业基础信息和企业知识 PDF。'
   }
 ];
 
@@ -1708,9 +1703,6 @@ export default function App() {
   const [selectedRoleApplicationType, setSelectedRoleApplicationType] =
     useState<RoleApplicationType>('digital_employee');
   const [selectedToolCategory, setSelectedToolCategory] = useState('全部');
-  const [selectedKnowledgeScope, setSelectedKnowledgeScope] = useState<'enterprise' | 'local'>(
-    'enterprise'
-  );
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [accountModal, setAccountModal] = useState<AccountModalKey | null>(null);
   const [issueFeedbackOpen, setIssueFeedbackOpen] = useState(false);
@@ -2069,17 +2061,18 @@ export default function App() {
     try {
       const result = await window.qiuDesktop.syncRuntimeState(runtimeState);
       const syncedAt = result.data.syncedAt;
-      setRuntimeState((current) => ({
-        ...current,
+      const refreshedState = await window.qiuDesktop.getRuntimeState();
+      setRuntimeState({
+        ...refreshedState,
         localRuntime: {
-          ...current.localRuntime,
+          ...refreshedState.localRuntime,
           lastSyncedAt: syncedAt
         },
         runtimeSnapshot: {
-          ...current.runtimeSnapshot,
+          ...refreshedState.runtimeSnapshot,
           lastSyncedAt: syncedAt
         }
-      }));
+      });
       setSyncNotice(`已同步到服务端：${formatDate(syncedAt)}`);
     } catch (error) {
       setSyncNotice(`同步失败：${error instanceof Error ? error.message : 'unknown error'}`);
@@ -7250,115 +7243,151 @@ export default function App() {
         : runtimeState.localRuntime.knowledgeBindingIds.map((bindingId) =>
             createKnowledgeSourceFromBindingId(bindingId)
           );
-    const enterpriseOptions = knowledgeBindingCatalog.filter(
-      (entry) => entry.source === 'workspace_library' || entry.source === 'server_summary'
+    const normalizedBindingIds = new Set(
+      runtimeState.localRuntime.knowledgeBindingIds.map(normalizeKnowledgeBindingId)
     );
-    const localOptions = knowledgeBindingCatalog.filter(
-      (entry) => entry.source === 'local_file' || entry.source === 'local_folder'
+    const enterpriseOption =
+      knowledgeBindingCatalogByBindingId.get(enterpriseKnowledgeBindingId) ?? knowledgeBindingCatalog[1];
+    const localPdfOption =
+      knowledgeBindingCatalogByBindingId.get(localPdfKnowledgeBindingId) ?? knowledgeBindingCatalog[0];
+    const enterpriseSource = knowledgeSources.find(
+      (source) => normalizeKnowledgeBindingId(source.id) === enterpriseKnowledgeBindingId
     );
-    const visibleOptions = selectedKnowledgeScope === 'enterprise' ? enterpriseOptions : localOptions;
-    const visibleSources = knowledgeSources.filter((source) =>
-      selectedKnowledgeScope === 'enterprise'
-        ? source.source === 'workspace_library' || source.source === 'server_summary'
-        : source.source === 'local_file' || source.source === 'local_folder'
+    const localPdfSource = knowledgeSources.find(
+      (source) => normalizeKnowledgeBindingId(source.id) === localPdfKnowledgeBindingId
     );
+    const enterpriseEnabled =
+      Boolean(enterpriseSource?.enabled) && normalizedBindingIds.has(enterpriseKnowledgeBindingId);
+    const localPdfEnabled = Boolean(localPdfSource?.enabled) && normalizedBindingIds.has(localPdfKnowledgeBindingId);
 
     return (
-      <div className="catalog-page">
+      <div className="catalog-page knowledge-page">
         <Flex align="center" justify="space-between" gap={16} wrap="wrap" className="catalog-page-header">
           <div>
             <Typography.Title level={2} className="page-title">
               知识库
             </Typography.Title>
             <Typography.Text type="secondary">
-              同步企业知识库，或导入本地资料给数字员工使用。
+              企业知识库和本地 PDF 会在任务运行时自动合并，数字员工和数字工厂只需要调用“知识库”。
             </Typography.Text>
           </div>
 
-          {selectedKnowledgeScope === 'enterprise' ? (
-            <Button type="primary" icon={<CloudSyncOutlined />} loading={isSyncing} onClick={syncRuntimeState}>
-              同步
+          <Space wrap>
+            <Button icon={<CloudSyncOutlined />} loading={isSyncing} onClick={syncRuntimeState}>
+              同步企业知识库
             </Button>
-          ) : (
-            <Button
-              type="primary"
-              icon={<FileAddOutlined />}
-              onClick={() => {
-                const localFileOption = localOptions.find((option) => option.source === 'local_file') ?? localOptions[0];
-                if (localFileOption) {
-                  void addKnowledgeBinding(localFileOption);
-                }
-              }}
-            >
-              导入
+            <Button type="primary" icon={<FileAddOutlined />} onClick={() => void addKnowledgeBinding(localPdfOption)}>
+              选择本地 PDF
             </Button>
-          )}
+          </Space>
         </Flex>
 
-        <div className="category-tabs">
-          <button
-            type="button"
-            className={selectedKnowledgeScope === 'enterprise' ? 'category-tab active' : 'category-tab'}
-            onClick={() => setSelectedKnowledgeScope('enterprise')}
-          >
-            企业知识库
-          </button>
-          <button
-            type="button"
-            className={selectedKnowledgeScope === 'local' ? 'category-tab active' : 'category-tab'}
-            onClick={() => setSelectedKnowledgeScope('local')}
-          >
-            本地知识库
-          </button>
-        </div>
-
-        <div className="catalog-grid knowledge-source-grid">
-          {visibleOptions.map((option) => {
-            const isBound = runtimeState.localRuntime.knowledgeBindingIds.includes(option.bindingId);
-
-            return (
-              <Card key={option.bindingId} bordered={false} className="catalog-card knowledge-source-card">
-                <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                  <Flex align="flex-start" justify="space-between" gap={12}>
-                    <span className="catalog-card-icon">
-                      {selectedKnowledgeScope === 'enterprise' ? <CloudSyncOutlined /> : <DatabaseOutlined />}
-                    </span>
-                    <Tag color={isBound ? 'green' : 'default'}>{isBound ? '已绑定' : '可绑定'}</Tag>
-                  </Flex>
-                  <Typography.Title level={5}>{option.label}</Typography.Title>
-                  <Typography.Paragraph type="secondary" ellipsis={{ rows: 2 }}>
-                    {option.description}
-                  </Typography.Paragraph>
-                  <Button
-                    type={isBound ? 'default' : 'primary'}
-                    disabled={isBound}
-                    onClick={() => void addKnowledgeBinding(option)}
-                  >
-                    {isBound ? '已绑定' : selectedKnowledgeScope === 'enterprise' ? '添加' : '导入'}
-                  </Button>
+        <div className="knowledge-source-summary-grid">
+          <Card bordered={false} className="knowledge-status-card">
+            <Space direction="vertical" size={14} style={{ width: '100%' }}>
+              <Flex align="flex-start" justify="space-between" gap={12}>
+                <Space align="start">
+                  <span className="catalog-card-icon">
+                    <CloudSyncOutlined />
+                  </span>
+                  <div>
+                    <Typography.Title level={5}>企业知识库</Typography.Title>
+                    <Typography.Text type="secondary">
+                      {enterpriseOption?.description ?? '同步 web-console 中启用的企业知识。'}
+                    </Typography.Text>
+                  </div>
                 </Space>
-              </Card>
-            );
-          })}
+                <Tag color={enterpriseEnabled ? 'green' : 'default'}>
+                  {enterpriseEnabled ? '已启用' : enterpriseSource ? '未启用' : '未同步'}
+                </Tag>
+              </Flex>
+
+              <Descriptions column={1} size="small" className="knowledge-descriptions">
+                <Descriptions.Item label="来源">web-console 企业知识库</Descriptions.Item>
+                <Descriptions.Item label="最近同步">
+                  {enterpriseSource?.lastIndexedAt
+                    ? formatDate(enterpriseSource.lastIndexedAt)
+                    : runtimeState.localRuntime.lastSyncedAt
+                      ? formatDate(runtimeState.localRuntime.lastSyncedAt)
+                      : '尚未同步'}
+                </Descriptions.Item>
+                <Descriptions.Item label="当前内容">
+                  {enterpriseSource?.summary ? (
+                    <Typography.Paragraph ellipsis={{ rows: 4 }} className="knowledge-source-description">
+                      {enterpriseSource.summary}
+                    </Typography.Paragraph>
+                  ) : (
+                    <Typography.Text type="secondary">企业知识库为空，或当前设备尚未绑定企业。</Typography.Text>
+                  )}
+                </Descriptions.Item>
+              </Descriptions>
+
+              <Button icon={<CloudSyncOutlined />} loading={isSyncing} onClick={syncRuntimeState}>
+                立即同步
+              </Button>
+            </Space>
+          </Card>
+
+          <Card bordered={false} className="knowledge-status-card">
+            <Space direction="vertical" size={14} style={{ width: '100%' }}>
+              <Flex align="flex-start" justify="space-between" gap={12}>
+                <Space align="start">
+                  <span className="catalog-card-icon">
+                    <FilePdfOutlined />
+                  </span>
+                  <div>
+                    <Typography.Title level={5}>本地 PDF 知识库</Typography.Title>
+                    <Typography.Text type="secondary">
+                      {localPdfOption?.description ?? '选择一份本机 PDF 作为本地知识库。'}
+                    </Typography.Text>
+                  </div>
+                </Space>
+                <Tag color={localPdfEnabled ? 'green' : 'default'}>{localPdfEnabled ? '已启用' : '未配置'}</Tag>
+              </Flex>
+
+              {localPdfSource ? (
+                <Descriptions column={1} size="small" className="knowledge-descriptions">
+                  <Descriptions.Item label="文件">{localPdfSource.label}</Descriptions.Item>
+                  <Descriptions.Item label="路径">
+                    <Typography.Text ellipsis title={localPdfSource.localPath}>
+                      {localPdfSource.localPath ?? '未记录本地路径'}
+                    </Typography.Text>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="最近索引">
+                    {localPdfSource.lastIndexedAt ? formatDate(localPdfSource.lastIndexedAt) : '尚未索引'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="内容预览">
+                    <Typography.Paragraph ellipsis={{ rows: 4 }} className="knowledge-source-description">
+                      {localPdfSource.summary ?? '已选择本地 PDF。'}
+                    </Typography.Paragraph>
+                  </Descriptions.Item>
+                </Descriptions>
+              ) : (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description="尚未选择本地 PDF"
+                  className="knowledge-empty-state"
+                />
+              )}
+
+              <Button type="primary" icon={<FileAddOutlined />} onClick={() => void addKnowledgeBinding(localPdfOption)}>
+                {localPdfSource ? '替换 PDF' : '选择 PDF'}
+              </Button>
+            </Space>
+          </Card>
         </div>
 
         <section className="simple-panel">
-          <Typography.Title level={5}>已绑定</Typography.Title>
+          <Typography.Title level={5}>运行规则</Typography.Title>
           <List
-            dataSource={visibleSources}
-            locale={{ emptyText: selectedKnowledgeScope === 'enterprise' ? '尚未同步企业知识库' : '尚未导入本地知识库' }}
-            renderItem={(source) => (
+            dataSource={[
+              '企业知识库由 web-console 维护，PC 端只负责同步当前启用版本。',
+              '本地知识库只选择一份完整 PDF，替换 PDF 后会覆盖旧的本地知识来源。',
+              '任务运行时会合并企业知识库和本地 PDF；本地 PDF 可以为空，企业知识库建议保持启用。'
+            ]}
+            renderItem={(item) => (
               <List.Item>
-                <List.Item.Meta
-                  avatar={<DatabaseOutlined className="list-icon" />}
-                  title={
-                    <Space size={8} wrap>
-                      <Typography.Text strong>{source.label}</Typography.Text>
-                      {source.enabled ? <Tag color="green">已启用</Tag> : <Tag>已停用</Tag>}
-                    </Space>
-                  }
-                  description={source.localPath ?? source.summary ?? source.id}
-                />
+                <List.Item.Meta avatar={<DatabaseOutlined className="list-icon" />} description={item} />
               </List.Item>
             )}
           />
@@ -8306,47 +8335,51 @@ export default function App() {
   }
 
   async function addKnowledgeBinding(option: KnowledgeBindingCatalogEntry) {
-    const now = new Date().toISOString();
-    const pathResult =
-      option.source === 'local_folder' || option.source === 'local_file'
-        ? await window.qiuDesktop?.selectKnowledgeSourcePath(option.source)
-        : undefined;
+    try {
+      const now = new Date().toISOString();
+      const bindingId = normalizeKnowledgeBindingId(option.bindingId);
+      const pathResult =
+        option.source === 'local_folder' || option.source === 'local_file'
+          ? await window.qiuDesktop?.selectKnowledgeSourcePath(option.source)
+          : undefined;
 
-    if (pathResult?.canceled) {
-      return;
-    }
-
-    const knowledgeSource: DesktopKnowledgeSourceSummary = {
-      id: option.bindingId,
-      source: option.source,
-      label: pathResult?.label ?? option.label,
-      enabled: true,
-      createdAt: now,
-      localPath: pathResult?.path,
-      lastIndexedAt: pathResult?.lastIndexedAt,
-      summary:
-        pathResult?.summary
-          ? pathResult.summary
-          : option.description
-    };
-
-    setRuntimeState((current) => {
-      if (current.localRuntime.knowledgeBindingIds.includes(option.bindingId)) {
-        return current;
+      if (pathResult?.canceled) {
+        return;
       }
 
-      return {
-        ...current,
-        knowledgeSources: [
-          ...current.knowledgeSources.filter((source) => source.id !== knowledgeSource.id),
-          knowledgeSource
-        ],
-        localRuntime: {
-          ...current.localRuntime,
-          knowledgeBindingIds: [...current.localRuntime.knowledgeBindingIds, option.bindingId]
-        }
+      const knowledgeSource: DesktopKnowledgeSourceSummary = {
+        id: bindingId,
+        source: option.source,
+        label: pathResult?.label ?? option.label,
+        enabled: true,
+        createdAt: now,
+        localPath: pathResult?.path,
+        lastIndexedAt: pathResult?.lastIndexedAt,
+        summary:
+          pathResult?.summary
+            ? pathResult.summary
+            : option.description
       };
-    });
+
+      setRuntimeState((current) => {
+        return {
+          ...current,
+          knowledgeSources: [
+            ...current.knowledgeSources.filter((source) => normalizeKnowledgeBindingId(source.id) !== bindingId),
+            knowledgeSource
+          ],
+          localRuntime: {
+            ...current.localRuntime,
+            knowledgeBindingIds: mergeUniqueStrings(
+              current.localRuntime.knowledgeBindingIds.map(normalizeKnowledgeBindingId),
+              [bindingId]
+            )
+          }
+        };
+      });
+    } catch (error) {
+      message.error(`导入知识库失败：${error instanceof Error ? error.message : 'unknown error'}`);
+    }
   }
 
   async function persistTaskArtifacts(
@@ -11316,17 +11349,18 @@ function mergeModelProfileOptions(
 }
 
 function getKnowledgeBindingId(source: KnowledgeBindingSource) {
-  return knowledgeBindingCatalog.find((entry) => entry.source === source)?.bindingId ?? source;
+  return knowledgeBindingIdFromSource(source);
 }
 
 function createKnowledgeSourceFromBindingId(bindingId: string): DesktopKnowledgeSourceSummary {
-  const catalogEntry = knowledgeBindingCatalogByBindingId.get(bindingId);
+  const normalizedBindingId = normalizeKnowledgeBindingId(bindingId);
+  const catalogEntry = knowledgeBindingCatalogByBindingId.get(normalizedBindingId);
 
   return {
-    id: bindingId,
-    source: catalogEntry?.source ?? 'server_summary',
-    label: catalogEntry?.label ?? bindingId,
-    enabled: true,
+    id: normalizedBindingId,
+    source: catalogEntry?.source ?? knowledgeBindingSourceFromId(normalizedBindingId),
+    label: catalogEntry?.label ?? normalizedBindingId,
+    enabled: false,
     createdAt: new Date(0).toISOString(),
     summary: catalogEntry?.description
   };

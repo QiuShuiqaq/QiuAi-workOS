@@ -10,6 +10,7 @@ import type {
   DesktopKnowledgeSourcePathResult
 } from '../shared/desktop-api.js';
 import type { KnowledgeBindingSource } from '../shared/desktop-contract.js';
+import { loadPdfParse } from './pdf-parse-loader.js';
 
 const electronApi = (electron as typeof electron & { default?: typeof electron }).default ?? electron;
 const { dialog } = electronApi;
@@ -18,6 +19,7 @@ const maxFolderEntries = 200;
 const maxFolderDepth = 2;
 const maxTextPreviewBytes = 64 * 1024;
 const maxTextPreviewChars = 1_200;
+const maxPdfKnowledgeChars = 30_000;
 const ignoredFolderNames = new Set(['.git', '.next', 'dist', 'node_modules']);
 const textPreviewExtensions = new Set([
   '.csv',
@@ -58,8 +60,9 @@ export async function selectKnowledgeSourcePath(
   }
 
   const result = await dialog.showOpenDialog({
-    title: source === 'local_folder' ? 'Select local knowledge folder' : 'Select local knowledge file',
-    properties: [source === 'local_folder' ? 'openDirectory' : 'openFile']
+    title: source === 'local_folder' ? 'Select local knowledge folder' : 'Select local knowledge PDF',
+    properties: [source === 'local_folder' ? 'openDirectory' : 'openFile'],
+    filters: source === 'local_file' ? [{ name: 'PDF', extensions: ['pdf'] }] : undefined
   });
 
   if (result.canceled || result.filePaths.length === 0) {
@@ -70,7 +73,9 @@ export async function selectKnowledgeSourcePath(
   }
 
   const selectedPath = result.filePaths[0];
-  const localSummary = summarizeLocalKnowledgeSource(source, selectedPath);
+  const localSummary = source === 'local_file'
+    ? await summarizeLocalPdfFile(selectedPath)
+    : summarizeLocalKnowledgeSource(source, selectedPath);
 
   return {
     canceled: false,
@@ -127,6 +132,41 @@ function summarizeLocalFile(filePath: string, indexedAt: string): LocalKnowledge
   return {
     label: path.basename(filePath),
     summary: lines.join('\n'),
+    lastIndexedAt: indexedAt
+  };
+}
+
+async function summarizeLocalPdfFile(filePath: string, indexedAt = new Date().toISOString()): Promise<LocalKnowledgeSummary> {
+  const stats = statSync(filePath);
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension !== '.pdf') {
+    throw new Error('本地知识库只支持上传一份完整 PDF。');
+  }
+
+  let text = '';
+  try {
+    const pdfParse = loadPdfParse();
+    const parsed = await pdfParse(readFileSync(filePath));
+    text = normalizeKnowledgeText(parsed.text);
+  } catch (error) {
+    throw new Error(
+      `PDF 文本提取失败，请使用可复制文字的 PDF：${error instanceof Error ? error.message : 'unknown error'}`
+    );
+  }
+
+  if (!text) {
+    throw new Error('PDF 文本为空，请使用可复制文字的 PDF。');
+  }
+
+  return {
+    label: path.basename(filePath),
+    summary: [
+      `Local PDF knowledge base: ${path.basename(filePath)}`,
+      `Path: ${filePath}`,
+      `Size: ${formatBytes(stats.size)}`,
+      `Modified: ${stats.mtime.toISOString()}`,
+      `Extracted text: ${text.slice(0, maxPdfKnowledgeChars)}`
+    ].join('\n'),
     lastIndexedAt: indexedAt
   };
 }
@@ -261,4 +301,12 @@ function formatBytes(value: number): string {
   }
 
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function normalizeKnowledgeText(value: string): string {
+  return value
+    .replace(/\r/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }

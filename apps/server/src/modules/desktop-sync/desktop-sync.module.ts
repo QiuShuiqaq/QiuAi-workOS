@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { AuthModule } from '../auth/auth.module';
 import { EntitlementModule } from '../entitlement/entitlement.module';
+import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { RoleModule } from '../role/role.module';
 import {
   DesktopAgreementAcceptanceController,
@@ -16,7 +17,7 @@ import {
 import { DesktopSyncService } from './desktop-sync.service';
 
 @Module({
-  imports: [AuthModule, EntitlementModule, RoleModule],
+  imports: [AuthModule, EntitlementModule, KnowledgeModule, RoleModule],
   controllers: [
     DesktopAgreementAcceptanceController,
     DesktopBindingController,

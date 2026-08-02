@@ -238,6 +238,16 @@ export class DesktopSyncService {
     };
   }
 
+  async requireDesktopDeviceWorkspaceAccess(workspaceId: string, deviceToken?: string) {
+    if (isDatabasePersistenceEnabled()) {
+      return this.requireDatabaseDeviceTokenForWorkspace(workspaceId, deviceToken);
+    }
+
+    this.assertMockWorkspace(workspaceId);
+    this.requireMockDeviceTokenForWorkspace(workspaceId, deviceToken, new Date());
+    return undefined;
+  }
+
   async getDesktopAgreementAcceptanceStatus(
     query: Record<string, unknown>
   ): Promise<DesktopAgreementAcceptanceStatusResponse> {

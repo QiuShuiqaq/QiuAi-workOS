@@ -9,9 +9,13 @@ import { getDesktopReleaseUploadMaxBytes } from './shared/desktop-release-assets
 import { AllExceptionsFilter } from './shared/filters/all-exceptions.filter';
 
 export async function createApplication(): Promise<NestFastifyApplication> {
-  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter(), {
-    bufferLogs: true
-  });
+  const app = await NestFactory.create<NestFastifyApplication>(
+    AppModule,
+    new FastifyAdapter({ bodyLimit: 24 * 1024 * 1024 }),
+    {
+      bufferLogs: true
+    }
+  );
 
   configureApplication(app);
 

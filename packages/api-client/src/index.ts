@@ -27,6 +27,9 @@ import type {
   GetTaskResponse,
   GetBillingOverviewResponse,
   GetEnterpriseWorkspaceOverviewResponse,
+  GetEnterpriseKnowledgeBaseResponse,
+  GetEnterpriseKnowledgeDocumentResponse,
+  GetEnterpriseKnowledgeRuntimeContextResponse,
   AcceptWorkspaceInvitationRequest,
   AcceptWorkspaceInvitationResponse,
   CreateAdminWorkspaceRequest,
@@ -92,12 +95,19 @@ import type {
   UploadAdminDesktopReleaseAssetResponse,
   UpdateAdminDesktopReleaseRequest,
   UpdateAdminDesktopReleaseResponse,
+  UpdateEnterpriseKnowledgeProfileRequest,
+  UpdateEnterpriseKnowledgeProfileResponse,
+  UpdateEnterpriseKnowledgeStatusRequest,
+  UpdateEnterpriseKnowledgeStatusResponse,
   UpdateAdminRoleTemplateRequest,
   UpdateAdminRoleTemplateResponse,
   UpdateDesktopBindingCodeRequest,
   UpdateDesktopBindingCodeResponse,
   UpdateAdminPlanRequest,
-  UpdateAdminPlanResponse
+  UpdateAdminPlanResponse,
+  UploadEnterpriseKnowledgePdfRequest,
+  UploadEnterpriseKnowledgePdfResponse,
+  ActivateEnterpriseKnowledgeVersionResponse
 } from '@qiuai/api-contract';
 
 export interface QiuApiClientOptions {
@@ -485,6 +495,54 @@ export class QiuApiClient {
 
   getEnterpriseWorkspaceOverview(workspaceId: string): Promise<GetEnterpriseWorkspaceOverviewResponse> {
     return this.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/organization/overview`);
+  }
+
+  getEnterpriseKnowledgeBase(workspaceId: string): Promise<GetEnterpriseKnowledgeBaseResponse> {
+    return this.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/knowledge-base`);
+  }
+
+  updateEnterpriseKnowledgeProfile(
+    workspaceId: string,
+    input: UpdateEnterpriseKnowledgeProfileRequest
+  ): Promise<UpdateEnterpriseKnowledgeProfileResponse> {
+    return this.patch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/knowledge-base/profile`, input);
+  }
+
+  uploadEnterpriseKnowledgePdf(
+    workspaceId: string,
+    input: UploadEnterpriseKnowledgePdfRequest
+  ): Promise<UploadEnterpriseKnowledgePdfResponse> {
+    return this.post(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/knowledge-base/versions`, input);
+  }
+
+  activateEnterpriseKnowledgeVersion(
+    workspaceId: string,
+    versionId: string
+  ): Promise<ActivateEnterpriseKnowledgeVersionResponse> {
+    return this.post(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/knowledge-base/versions/${encodeURIComponent(versionId)}/activate`,
+      {}
+    );
+  }
+
+  updateEnterpriseKnowledgeStatus(
+    workspaceId: string,
+    input: UpdateEnterpriseKnowledgeStatusRequest
+  ): Promise<UpdateEnterpriseKnowledgeStatusResponse> {
+    return this.patch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/knowledge-base/status`, input);
+  }
+
+  getEnterpriseKnowledgeDocument(
+    workspaceId: string,
+    versionId: string
+  ): Promise<GetEnterpriseKnowledgeDocumentResponse> {
+    return this.get(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/knowledge-base/versions/${encodeURIComponent(versionId)}/document`
+    );
+  }
+
+  getEnterpriseKnowledgeRuntimeContext(workspaceId: string): Promise<GetEnterpriseKnowledgeRuntimeContextResponse> {
+    return this.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/knowledge-base/runtime-context`);
   }
 
   listRoleTemplates(workspaceId: string): Promise<ListRoleTemplatesResponse> {

@@ -11,6 +11,7 @@ import { EntitlementModule } from './entitlement/entitlement.module';
 import { InvitationModule } from './invitation/invitation.module';
 import { HealthModule } from './health/health.module';
 import { KernelModule } from './kernel/kernel.module';
+import { KnowledgeModule } from './knowledge/knowledge.module';
 import { OrganizationModule } from './organization/organization.module';
 import { RoleModule } from './role/role.module';
 import { RoleTemplateFactoryModule } from './role-template-factory/role-template-factory.module';
@@ -34,6 +35,7 @@ import { MockPlatformStoreModule } from '../shared/mock/mock-platform-store.modu
     InvitationModule,
     HealthModule,
     KernelModule,
+    KnowledgeModule,
     OrganizationModule,
     RoleModule,
     RoleTemplateFactoryModule,
