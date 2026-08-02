@@ -69,8 +69,7 @@ const existingProfiles: ModelProfile[] = [
 ];
 
 assert.deepEqual(readWorkflowRequiredModelProfileIds(rolePackage.workflowGraph), [
-  'deepseek-v4-flash',
-  'openai-gpt-5.6-terra'
+  'qiu-general-default'
 ]);
 
 const videoFactoryWorkflowGraph = {
@@ -107,9 +106,7 @@ assert.equal(asrProfile.purpose, 'audio');
 assert.ok(asrProfile.capabilities?.includes('audio_to_text'));
 
 assert.deepEqual(readRequiredModelProfileIdsForRolePackage(rolePackage), [
-  'qiu-general-default',
-  'deepseek-v4-flash',
-  'openai-gpt-5.6-terra'
+  'qiu-general-default'
 ]);
 
 const manifestDrivenRolePackage: RolePackageManifest = {
@@ -141,15 +138,47 @@ const manifestDrivenRolePackage: RolePackageManifest = {
   }
 };
 assert.deepEqual(readRequiredModelProfileIdsForRolePackage(manifestDrivenRolePackage), [
-  'deepseek-v4-pro'
+  'qiu-general-default'
 ]);
 assert.deepEqual(
   getRoleModelRequirementStatuses(
-    [createPlaceholderModelProfile('deepseek-v4-pro')],
+    [createPlaceholderModelProfile('qiu-general-default')],
     manifestDrivenRolePackage
   )[0]?.requiredByNodeIds,
   ['classify']
 );
+
+const imageManifestDrivenRolePackage: RolePackageManifest = {
+  ...rolePackage,
+  dependencyManifest: {
+    version: '1.0.0',
+    generatedAt: '2026-07-29T00:00:00.000Z',
+    variables: [],
+    modelAssets: [
+      {
+        key: 'openai-gpt-image-2',
+        name: 'OpenAI GPT Image 2',
+        providerId: 'openai',
+        providerName: 'OpenAI',
+        modelId: 'gpt-image-2',
+        modelProfileId: 'openai-gpt-image-2',
+        capabilities: ['image_generation', 'image_editing'],
+        inputTypes: ['text', 'image'],
+        outputTypes: ['image'],
+        credentialFields: ['apiKey', 'apiBaseUrl'],
+        required: true,
+        nodeIds: ['generate_images']
+      }
+    ],
+    toolActions: [],
+    artifactTemplates: [],
+    nodeTemplates: [],
+    warnings: []
+  }
+};
+assert.deepEqual(readRequiredModelProfileIdsForRolePackage(imageManifestDrivenRolePackage), [
+  'qiu-image-editing-default'
+]);
 
 const moonshotProfile = createPlaceholderModelProfile('moonshot-v1-32k');
 assert.equal(moonshotProfile.providerId, 'moonshot');
@@ -157,26 +186,10 @@ assert.equal(moonshotProfile.modelName, 'moonshot-v1-32k');
 assert.equal(moonshotProfile.purpose, 'document');
 
 const ensuredProfiles = ensureModelProfilesForRolePackage(existingProfiles, rolePackage);
-assert.ok(ensuredProfiles.some((profile) => profile.id === 'deepseek-v4-flash'));
-assert.ok(ensuredProfiles.some((profile) => profile.id === 'openai-gpt-5.6-terra'));
-assert.equal(
-  ensuredProfiles.find((profile) => profile.id === 'deepseek-v4-flash')?.providerName,
-  'DeepSeek'
-);
-assert.equal(
-  ensuredProfiles.find((profile) => profile.id === 'openai-gpt-5.6-terra')?.providerName,
-  'OpenAI'
-);
-assert.equal(
-  findFirstUnconfiguredRequiredModelProfileId(ensuredProfiles, rolePackage),
-  'deepseek-v4-flash'
-);
+assert.ok(ensuredProfiles.some((profile) => profile.id === 'qiu-general-default'));
+assert.equal(findFirstUnconfiguredRequiredModelProfileId(ensuredProfiles, rolePackage), undefined);
 
-const configuredProfiles = ensuredProfiles.map((profile) =>
-  profile.id === 'deepseek-v4-flash' || profile.id === 'openai-gpt-5.6-terra'
-    ? { ...profile, apiKey: 'configured-key' }
-    : profile
-);
+const configuredProfiles = ensuredProfiles;
 const statuses = getRoleModelRequirementStatuses(configuredProfiles, rolePackage);
 assert.equal(statuses.every((status) => status.configured), true);
 assert.equal(findFirstUnconfiguredRequiredModelProfileId(configuredProfiles, rolePackage), undefined);
@@ -184,7 +197,18 @@ assert.equal(findFirstUnconfiguredRequiredModelProfileId(configuredProfiles, rol
 const credentialManagedProfiles = configuredProfiles.map((profile) => ({
   ...profile,
   apiKey: undefined
-}));
+})).concat([
+  {
+    id: 'deepseek-v4-flash',
+    providerId: 'deepseek',
+    providerName: 'DeepSeek',
+    modelName: 'deepseek-v4-flash',
+    purpose: 'general',
+    capabilities: ['text'],
+    apiBaseUrl: 'https://api.deepseek.com',
+    apiKey: undefined
+  }
+]);
 const credentialManagedStatuses = getRoleModelRequirementStatuses(
   credentialManagedProfiles,
   rolePackage,
@@ -216,38 +240,26 @@ const credentialManagedStatuses = getRoleModelRequirementStatuses(
   }
 );
 assert.equal(
-  credentialManagedStatuses.find((status) => status.profile.id === 'deepseek-v4-flash')?.configured,
-  true
-);
-assert.equal(
-  credentialManagedStatuses.find((status) => status.profile.id === 'openai-gpt-5.6-terra')?.configured,
+  credentialManagedStatuses.find((status) => status.profile.id === 'qiu-general-default')?.configured,
   true
 );
 
 const runtimeStatuses = getRoleModelRuntimeRequirementStatuses(configuredProfiles, [
-  'qiu-general-default',
-  'deepseek-v4-flash'
+  'qiu-general-default'
 ], rolePackage);
 assert.equal(
-  runtimeStatuses.find((status) => status.profile.id === 'deepseek-v4-flash')?.ready,
+  runtimeStatuses.find((status) => status.profile.id === 'qiu-general-default')?.ready,
   true
 );
 assert.equal(
-  runtimeStatuses.find((status) => status.profile.id === 'openai-gpt-5.6-terra')?.issue,
-  'disabled'
-);
-assert.equal(
   findFirstUnreadyRequiredModelProfileId(configuredProfiles, [
-    'qiu-general-default',
-    'deepseek-v4-flash'
+    'qiu-general-default'
   ], rolePackage),
-  'openai-gpt-5.6-terra'
+  undefined
 );
 assert.equal(
   findFirstUnreadyRequiredModelProfileId(configuredProfiles, [
-    'qiu-general-default',
-    'deepseek-v4-flash',
-    'openai-gpt-5.6-terra'
+    'qiu-general-default'
   ], rolePackage),
   undefined
 );

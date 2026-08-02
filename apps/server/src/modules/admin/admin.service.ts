@@ -44,15 +44,21 @@ import {
   GetAdminWorkspaceResponseDto,
   GrantAdminWorkspaceAuthorizationRequestDto,
   GrantAdminWorkspaceAuthorizationResponseDto,
+  DeleteAdminIssueMessageResponseDto,
+  GetAdminIssueMessageResponseDto,
   ListAdminActionLogsQueryDto,
   ListAdminActionLogsResponseDto,
   ListAdminDesktopReleasesQueryDto,
   ListAdminDesktopReleasesResponseDto,
+  ListAdminIssueMessagesQueryDto,
+  ListAdminIssueMessagesResponseDto,
   ListAdminPlansResponseDto,
   ListAdminWorkspacesQueryDto,
   ListAdminWorkspacesResponseDto,
   PublishAdminDesktopReleaseResponseDto,
   RevokeAdminDesktopDeviceResponseDto,
+  UpdateAdminIssueMessageRequestDto,
+  UpdateAdminIssueMessageResponseDto,
   UpdateAdminDesktopReleaseRequestDto,
   UpdateAdminDesktopReleaseResponseDto,
   UpdateAdminWorkspaceStatusRequestDto,
@@ -226,6 +232,30 @@ type DesktopReleaseRecord = {
   publishedAt?: DesktopReleaseDate | null;
   createdAt: DesktopReleaseDate;
   updatedAt: DesktopReleaseDate;
+};
+
+type DesktopIssueMessageRecord = {
+  id: string;
+  issueNo: string;
+  category: string;
+  severity: string;
+  status: string;
+  title: string;
+  description: string;
+  contact?: string | null;
+  workspaceId?: string | null;
+  runtimeId?: string | null;
+  deviceId?: string | null;
+  deviceName?: string | null;
+  appVersion?: string | null;
+  platform?: string | null;
+  diagnostics?: unknown;
+  adminNote?: string | null;
+  createdAt: DesktopReleaseDate;
+  updatedAt: DesktopReleaseDate;
+  workspace?: {
+    name: string;
+  } | null;
 };
 
 @Injectable()
@@ -689,6 +719,225 @@ export class AdminService {
         contentType: input.contentType,
         body: input.body
       })
+    };
+  }
+
+  async listIssueMessages(
+    query: ListAdminIssueMessagesQueryDto,
+    cookieHeader?: string
+  ): Promise<ListAdminIssueMessagesResponseDto> {
+    await this.requireAdminOperator(cookieHeader);
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+
+    if (!isDatabasePersistenceEnabled()) {
+      const filtered = this.store
+        .listDesktopIssueReports()
+        .filter((report) => this.matchesIssueMessageQuery(report, query))
+        .sort((left, right) => this.toDateTimeMs(right.createdAt) - this.toDateTimeMs(left.createdAt));
+      const totalItems = filtered.length;
+
+      return {
+        data: filtered
+          .slice((page - 1) * pageSize, page * pageSize)
+          .map((report) => this.toIssueMessageSummary(report)),
+        pagination: {
+          page,
+          pageSize,
+          totalItems,
+          totalPages: Math.max(1, Math.ceil(totalItems / pageSize))
+        }
+      };
+    }
+
+    const where = this.buildIssueMessageWhere(query);
+    const [totalItems, reports] = await this.prismaService.$transaction([
+      this.prismaService.desktopIssueReport.count({ where }),
+      this.prismaService.desktopIssueReport.findMany({
+        where,
+        include: {
+          workspace: {
+            select: {
+              name: true
+            }
+          }
+        },
+        orderBy: {
+          createdAt: 'desc'
+        },
+        skip: (page - 1) * pageSize,
+        take: pageSize
+      })
+    ]);
+
+    return {
+      data: reports.map((report) => this.toIssueMessageSummary(report)),
+      pagination: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages: Math.max(1, Math.ceil(totalItems / pageSize))
+      }
+    };
+  }
+
+  async getIssueMessage(
+    issueId: string,
+    cookieHeader?: string
+  ): Promise<GetAdminIssueMessageResponseDto> {
+    await this.requireAdminOperator(cookieHeader);
+    const id = issueId.trim();
+
+    if (!isDatabasePersistenceEnabled()) {
+      const report = this.store.getDesktopIssueReport(id);
+      if (!report) {
+        throw this.issueMessageNotFound(id);
+      }
+
+      return {
+        data: this.toIssueMessageSummary(report)
+      };
+    }
+
+    const report = await this.prismaService.desktopIssueReport.findUnique({
+      where: {
+        id
+      },
+      include: {
+        workspace: {
+          select: {
+            name: true
+          }
+        }
+      }
+    });
+
+    if (!report) {
+      throw this.issueMessageNotFound(id);
+    }
+
+    return {
+      data: this.toIssueMessageSummary(report)
+    };
+  }
+
+  async updateIssueMessage(
+    issueId: string,
+    input: UpdateAdminIssueMessageRequestDto,
+    cookieHeader?: string
+  ): Promise<UpdateAdminIssueMessageResponseDto> {
+    const operator = await this.requireAdminOperator(cookieHeader);
+    const id = issueId.trim();
+    const updateData = this.normalizeIssueMessageUpdate(input);
+
+    if (!isDatabasePersistenceEnabled()) {
+      const updated = this.store.updateDesktopIssueReport(id, updateData);
+      if (!updated) {
+        throw this.issueMessageNotFound(id);
+      }
+
+      return {
+        data: this.toIssueMessageSummary(updated)
+      };
+    }
+
+    const current = await this.prismaService.desktopIssueReport.findUnique({
+      where: {
+        id
+      }
+    });
+    if (!current) {
+      throw this.issueMessageNotFound(id);
+    }
+
+    const updated = await this.prismaService.$transaction(async (tx) => {
+      const report = await tx.desktopIssueReport.update({
+        where: {
+          id
+        },
+        data: updateData as Prisma.DesktopIssueReportUpdateInput,
+        include: {
+          workspace: {
+            select: {
+              name: true
+            }
+          }
+        }
+      });
+
+      await this.recordAdminAction(tx, {
+        operatorAccountId: operator.account.id,
+        action: 'UPDATE_DESKTOP_ISSUE_MESSAGE',
+        targetType: 'desktop_issue_report',
+        targetId: report.id,
+        summary: `Updated issue message ${report.issueNo}`,
+        metadata: input
+      });
+
+      return report;
+    });
+
+    return {
+      data: this.toIssueMessageSummary(updated)
+    };
+  }
+
+  async deleteIssueMessage(
+    issueId: string,
+    cookieHeader?: string
+  ): Promise<DeleteAdminIssueMessageResponseDto> {
+    const operator = await this.requireAdminOperator(cookieHeader);
+    const id = issueId.trim();
+
+    if (!isDatabasePersistenceEnabled()) {
+      const deleted = this.store.deleteDesktopIssueReport(id);
+      if (!deleted) {
+        throw this.issueMessageNotFound(id);
+      }
+
+      return {
+        data: {
+          id,
+          deleted: true
+        }
+      };
+    }
+
+    const current = await this.prismaService.desktopIssueReport.findUnique({
+      where: {
+        id
+      }
+    });
+    if (!current) {
+      throw this.issueMessageNotFound(id);
+    }
+
+    await this.prismaService.$transaction(async (tx) => {
+      await tx.desktopIssueReport.delete({
+        where: {
+          id
+        }
+      });
+
+      await this.recordAdminAction(tx, {
+        operatorAccountId: operator.account.id,
+        action: 'DELETE_DESKTOP_ISSUE_MESSAGE',
+        targetType: 'desktop_issue_report',
+        targetId: id,
+        summary: `Deleted issue message ${current.issueNo}`,
+        metadata: {
+          issueNo: current.issueNo,
+          title: current.title,
+          status: current.status
+        }
+      });
+    });
+
+    return {
+      data: {
+        id,
+        deleted: true
+      }
     };
   }
 
@@ -1639,6 +1888,139 @@ export class AdminService {
     );
   }
 
+  private buildIssueMessageWhere(
+    query: ListAdminIssueMessagesQueryDto
+  ): Prisma.DesktopIssueReportWhereInput {
+    const filters: Prisma.DesktopIssueReportWhereInput[] = [];
+    const search = query.query?.trim();
+
+    if (query.status) {
+      filters.push({ status: query.status as never });
+    }
+    if (query.category) {
+      filters.push({ category: query.category as never });
+    }
+    if (query.severity) {
+      filters.push({ severity: query.severity as never });
+    }
+    if (query.workspaceId) {
+      filters.push({ workspaceId: query.workspaceId });
+    }
+    if (search) {
+      filters.push({
+        OR: [
+          {
+            issueNo: {
+              contains: search,
+              mode: 'insensitive'
+            }
+          },
+          {
+            title: {
+              contains: search,
+              mode: 'insensitive'
+            }
+          },
+          {
+            description: {
+              contains: search,
+              mode: 'insensitive'
+            }
+          },
+          {
+            deviceName: {
+              contains: search,
+              mode: 'insensitive'
+            }
+          },
+          {
+            appVersion: {
+              contains: search,
+              mode: 'insensitive'
+            }
+          },
+          {
+            workspace: {
+              name: {
+                contains: search,
+                mode: 'insensitive'
+              }
+            }
+          }
+        ]
+      });
+    }
+
+    return filters.length > 0 ? { AND: filters } : {};
+  }
+
+  private matchesIssueMessageQuery(
+    report: {
+      issueNo: string;
+      category: string;
+      severity: string;
+      status: string;
+      title: string;
+      description: string;
+      deviceName?: string | null;
+      appVersion?: string | null;
+      workspaceId?: string | null;
+    },
+    query: ListAdminIssueMessagesQueryDto
+  ): boolean {
+    const search = query.query?.trim().toLowerCase();
+    return (
+      (!query.status || report.status === query.status) &&
+      (!query.category || report.category === query.category) &&
+      (!query.severity || report.severity === query.severity) &&
+      (!query.workspaceId || report.workspaceId === query.workspaceId) &&
+      (!search ||
+        [
+          report.issueNo,
+          report.title,
+          report.description,
+          report.deviceName,
+          report.appVersion
+        ]
+          .filter(Boolean)
+          .some((value) => value!.toLowerCase().includes(search)))
+    );
+  }
+
+  private normalizeIssueMessageUpdate(input: UpdateAdminIssueMessageRequestDto) {
+    const update: {
+      status?: string;
+      adminNote?: string | null;
+    } = {};
+
+    if (input.status !== undefined) {
+      update.status = input.status;
+    }
+    if (input.adminNote !== undefined) {
+      const note = input.adminNote?.trim() ?? '';
+      if (note.length > 2000) {
+        throw new BadRequestException({
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Admin note must be at most 2000 characters.'
+          }
+        });
+      }
+      update.adminNote = note || null;
+    }
+
+    if (Object.keys(update).length === 0) {
+      throw new BadRequestException({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'At least one issue message field must be provided.'
+        }
+      });
+    }
+
+    return update;
+  }
+
   private normalizeCreateDesktopReleaseInput(input: CreateAdminDesktopReleaseRequestDto) {
     const version = this.requireNonEmptyText(input.version, 'Desktop release version is required.');
     const downloadUrl = this.requireNonEmptyText(
@@ -2063,6 +2445,30 @@ export class AdminService {
     };
   }
 
+  private toIssueMessageSummary(report: DesktopIssueMessageRecord) {
+    return {
+      id: report.id,
+      issueNo: report.issueNo,
+      category: this.toIssueCategory(report.category),
+      severity: this.toIssueSeverity(report.severity),
+      status: this.toIssueStatus(report.status),
+      title: report.title,
+      description: report.description,
+      contact: report.contact ?? undefined,
+      workspaceId: report.workspaceId ?? undefined,
+      workspaceName: report.workspace?.name,
+      runtimeId: report.runtimeId ?? undefined,
+      deviceId: report.deviceId ?? undefined,
+      deviceName: report.deviceName ?? undefined,
+      appVersion: report.appVersion ?? undefined,
+      platform: report.platform ?? undefined,
+      diagnostics: this.toMetadataRecord(report.diagnostics as Prisma.JsonValue | null),
+      adminNote: report.adminNote ?? undefined,
+      createdAt: this.toRequiredIsoDateString(report.createdAt),
+      updatedAt: this.toRequiredIsoDateString(report.updatedAt)
+    };
+  }
+
   private toAdminWorkspaceSummary(workspace: WorkspaceSummaryRecord): AdminWorkspaceSummaryDto {
     const subscription = workspace.subscriptions[0];
 
@@ -2311,6 +2717,16 @@ export class AdminService {
     });
   }
 
+  private issueMessageNotFound(issueId: string) {
+    return new NotFoundException({
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Issue message was not found.',
+        details: { issueId }
+      }
+    });
+  }
+
   private desktopReleaseConflict(version: string) {
     return new ConflictException({
       error: {
@@ -2408,6 +2824,42 @@ export class AdminService {
     }
 
     return 'DRAFT';
+  }
+
+  private toIssueCategory(value: string): 'BUG' | 'USAGE' | 'FEATURE_REQUEST' | 'BAD_OUTPUT' | 'OTHER' {
+    if (
+      value === 'BUG' ||
+      value === 'USAGE' ||
+      value === 'FEATURE_REQUEST' ||
+      value === 'BAD_OUTPUT' ||
+      value === 'OTHER'
+    ) {
+      return value;
+    }
+
+    return 'OTHER';
+  }
+
+  private toIssueSeverity(value: string): 'NORMAL' | 'IMPACTING' | 'BLOCKING' {
+    if (value === 'IMPACTING' || value === 'BLOCKING') {
+      return value;
+    }
+
+    return 'NORMAL';
+  }
+
+  private toIssueStatus(value: string): 'NEW' | 'VIEWED' | 'IN_PROGRESS' | 'FIXED' | 'WONT_FIX' | 'CLOSED' {
+    if (
+      value === 'VIEWED' ||
+      value === 'IN_PROGRESS' ||
+      value === 'FIXED' ||
+      value === 'WONT_FIX' ||
+      value === 'CLOSED'
+    ) {
+      return value;
+    }
+
+    return 'NEW';
   }
 
   private compareDesktopVersions(left: string, right: string): number {

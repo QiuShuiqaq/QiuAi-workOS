@@ -702,6 +702,10 @@ function isModelCatalogEntry(value: unknown): boolean {
     typeof record.id === 'string' &&
     (record.label === undefined || typeof record.label === 'string') &&
     (record.ownedBy === undefined || typeof record.ownedBy === 'string') &&
+    (record.source === undefined ||
+      record.source === 'provider' ||
+      record.source === 'built_in' ||
+      record.source === 'manual') &&
     Array.isArray(record.capabilities) &&
     record.capabilities.every(isModelCapability)
   );
@@ -716,10 +720,12 @@ function isModelCapability(value: unknown): value is ModelCapability {
     value === 'embedding' ||
     value === 'rerank' ||
     value === 'long_context' ||
+    value === 'image_understanding' ||
     value === 'vision_understanding' ||
     value === 'video_understanding' ||
     value === 'text_to_image' ||
     value === 'image_to_image' ||
+    value === 'image_editing' ||
     value === 'image_generation' ||
     value === 'video_generation' ||
     value === 'text_to_video' ||
@@ -765,6 +771,7 @@ function isRoleModelCredentialBinding(value: unknown): value is RoleModelCredent
   return (
     typeof record.roleCode === 'string' &&
     typeof record.modelProfileId === 'string' &&
+    (record.runtimeModelProfileId === undefined || typeof record.runtimeModelProfileId === 'string') &&
     (record.mode === 'provider_default' ||
       record.mode === 'credential_ref' ||
       record.mode === 'inline') &&

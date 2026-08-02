@@ -42,6 +42,7 @@ import Card from 'antd/es/card';
 import Checkbox from 'antd/es/checkbox';
 import ConfigProvider from 'antd/es/config-provider';
 import Descriptions from 'antd/es/descriptions';
+import Drawer from 'antd/es/drawer';
 import Empty from 'antd/es/empty';
 import Divider from 'antd/es/divider';
 import Flex from 'antd/es/flex';
@@ -69,6 +70,10 @@ import type {
   DesktopAuthorizedRoleTemplateSummary,
   DesktopBackupSummary,
   DesktopDeviceCapacitySummary,
+  DesktopIssueCategory,
+  DesktopIssueReportSubmitRequest,
+  DesktopIssueSeverity,
+  DesktopModelTestResponse,
   DesktopRuntimeState,
   DesktopUpdateCheckResult,
   DesktopWindowControlAction
@@ -138,6 +143,19 @@ import {
   qiuaiUserAgreementRequiredReadSeconds,
   type DesktopLegalDocument
 } from '../shared/desktop-agreements';
+import aliyunBailianLogoUrl from './assets/model-providers/bailian-color.svg';
+import deepseekLogoUrl from './assets/model-providers/deepseek-color.svg';
+import geminiLogoUrl from './assets/model-providers/gemini-color.svg';
+import kimiLogoUrl from './assets/model-providers/kimi-color.svg';
+import minimaxLogoUrl from './assets/model-providers/minimax-color.svg';
+import ollamaLogoUrl from './assets/model-providers/ollama.svg';
+import openaiLogoUrl from './assets/model-providers/openai.svg';
+import openrouterLogoUrl from './assets/model-providers/openrouter-color.svg';
+import qwenLogoUrl from './assets/model-providers/qwen-color.svg';
+import siliconcloudLogoUrl from './assets/model-providers/siliconcloud-color.svg';
+import tencentcloudLogoUrl from './assets/model-providers/tencentcloud-color.svg';
+import volcengineLogoUrl from './assets/model-providers/volcengine-color.svg';
+import zhipuLogoUrl from './assets/model-providers/zhipu-color.svg';
 
 type SectionKey = 'workbench' | 'factories' | 'roles' | 'logs' | 'models' | 'tools' | 'knowledge' | 'settings';
 type AccountModalKey = 'enterprise' | 'help' | 'release' | 'download' | 'logout';
@@ -231,16 +249,29 @@ interface RoleConfigFormValues {
 }
 
 interface RoleModelCredentialFormValue {
+  runtimeModelProfileId?: string;
   mode?: ModelCredentialBindingMode;
   credentialId?: string;
   apiBaseUrl?: string;
   apiKey?: string;
 }
 
+interface RuntimeModelQuickSwitchFormValues {
+  runtimeModels?: Record<string, string | undefined>;
+}
+
 interface ToolSettingsFormValues {
   webSearchEndpoint?: string;
   webSearchApiKey?: string;
   allowPrivateNetwork?: boolean;
+}
+
+interface IssueFeedbackFormValues {
+  category: DesktopIssueCategory;
+  severity: DesktopIssueSeverity;
+  title: string;
+  description: string;
+  contact?: string;
 }
 
 interface KnowledgeBindingCatalogEntry {
@@ -284,6 +315,20 @@ const desktopThemeOptions: Array<{ value: DesktopThemePreference; label: string 
 const desktopDensityOptions: Array<{ value: DesktopDensityPreference; label: string }> = [
   { value: 'comfortable', label: '标准' },
   { value: 'compact', label: '紧凑' }
+];
+
+const issueFeedbackCategoryOptions: Array<{ value: DesktopIssueCategory; label: string }> = [
+  { value: 'BUG', label: 'Bug/报错' },
+  { value: 'USAGE', label: '使用问题' },
+  { value: 'FEATURE_REQUEST', label: '功能建议' },
+  { value: 'BAD_OUTPUT', label: '结果不好' },
+  { value: 'OTHER', label: '其他' }
+];
+
+const issueFeedbackSeverityOptions: Array<{ value: DesktopIssueSeverity; label: string }> = [
+  { value: 'NORMAL', label: '普通' },
+  { value: 'IMPACTING', label: '影响工作' },
+  { value: 'BLOCKING', label: '阻塞使用' }
 ];
 
 const knowledgeBindingCatalog: KnowledgeBindingCatalogEntry[] = [
@@ -1615,6 +1660,7 @@ export default function App() {
     qiuaiUserAgreementRequiredReadSeconds
   );
   const [modelTestNotice, setModelTestNotice] = useState('');
+  const [modelTestResult, setModelTestResult] = useState<DesktopModelTestResponse | null>(null);
   const [isTestingModel, setIsTestingModel] = useState(false);
   const [isPullingProviderModels, setIsPullingProviderModels] = useState(false);
   const [latestPulledModelCatalog, setLatestPulledModelCatalog] = useState<{
@@ -1641,10 +1687,14 @@ export default function App() {
   const [toolSettingsForm] = Form.useForm<ToolSettingsFormValues>();
   const [onboardingForm] = Form.useForm<OnboardingFormValues>();
   const [roleConfigForm] = Form.useForm<RoleConfigFormValues>();
+  const [runtimeModelQuickSwitchForm] = Form.useForm<RuntimeModelQuickSwitchFormValues>();
+  const [issueFeedbackForm] = Form.useForm<IssueFeedbackFormValues>();
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [roleConfigModalOpen, setRoleConfigModalOpen] = useState(false);
   const [roleConfigMode, setRoleConfigMode] = useState<'install' | 'configure'>('install');
   const [roleConfigRoleCode, setRoleConfigRoleCode] = useState('');
+  const [runtimeModelQuickSwitchOpen, setRuntimeModelQuickSwitchOpen] = useState(false);
+  const [runtimeModelQuickSwitchRoleCode, setRuntimeModelQuickSwitchRoleCode] = useState('');
   const [toolSettingsNotice, setToolSettingsNotice] = useState('');
   const [isSavingToolSettings, setIsSavingToolSettings] = useState(false);
   const [modelSearchQuery, setModelSearchQuery] = useState('');
@@ -1660,6 +1710,10 @@ export default function App() {
   );
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [accountModal, setAccountModal] = useState<AccountModalKey | null>(null);
+  const [issueFeedbackOpen, setIssueFeedbackOpen] = useState(false);
+  const [issueFeedbackTaskId, setIssueFeedbackTaskId] = useState('');
+  const [isSubmittingIssueFeedback, setIsSubmittingIssueFeedback] = useState(false);
+  const [issueFeedbackNotice, setIssueFeedbackNotice] = useState('');
   const [selectedLegalDocumentId, setSelectedLegalDocumentId] = useState('');
   const [isUnbindingDevice, setIsUnbindingDevice] = useState(false);
   const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
@@ -1670,6 +1724,7 @@ export default function App() {
   const [factoryAttachments, setFactoryAttachments] = useState<ComposerAttachment[]>([]);
   const [isFactoryDragOver, setIsFactoryDragOver] = useState(false);
   const [previewFactoryImage, setPreviewFactoryImage] = useState<FactoryArtifactPreviewItem | null>(null);
+  const [factorySidePanelOpen, setFactorySidePanelOpen] = useState<'status' | 'logs' | null>(null);
 
   useEffect(() => {
     void loadRuntimeState();
@@ -2575,6 +2630,7 @@ export default function App() {
       fallbackProfileId: selectedModelProfile.fallbackProfileId
     });
     setModelTestNotice('');
+    setModelTestResult(null);
     setLatestPulledModelCatalog(null);
   }, [modelForm, selectedModelDefaultCredential, selectedModelProfile]);
 
@@ -2677,6 +2733,126 @@ export default function App() {
 
     return taskDetails.find((task) => task.taskId === selectedTaskId) ?? taskDetails[0];
   }, [selectedTaskId, taskDetails]);
+
+  const issueFeedbackTask = useMemo(
+    () => taskDetails.find((task) => task.taskId === issueFeedbackTaskId),
+    [issueFeedbackTaskId, taskDetails]
+  );
+
+  function openIssueFeedbackModal(task?: DesktopTaskDetail) {
+    const defaultCategory: DesktopIssueCategory = task
+      ? task.state === 'failed'
+        ? 'BUG'
+        : 'BAD_OUTPUT'
+      : 'BUG';
+    setIssueFeedbackTaskId(task?.taskId ?? '');
+    setIssueFeedbackNotice('');
+    issueFeedbackForm.setFieldsValue({
+      category: defaultCategory,
+      severity: task?.state === 'failed' ? 'IMPACTING' : 'NORMAL',
+      title: task ? `任务问题：${task.title}` : '',
+      description: '',
+      contact: ''
+    });
+    setIssueFeedbackOpen(true);
+    setAccountMenuOpen(false);
+  }
+
+  async function submitIssueFeedback(values: IssueFeedbackFormValues) {
+    if (!window.qiuDesktop) {
+      setIssueFeedbackNotice('当前运行环境不支持提交问题反馈。');
+      return;
+    }
+
+    const payload: DesktopIssueReportSubmitRequest = {
+      category: values.category,
+      severity: values.severity,
+      title: values.title.trim(),
+      description: values.description.trim(),
+      contact: values.contact?.trim() || undefined,
+      workspaceId: isEnterpriseUnbound ? undefined : runtimeState.localRuntime.workspaceId,
+      runtimeId: runtimeState.localRuntime.runtimeId,
+      deviceId: runtimeState.localRuntime.deviceId,
+      deviceName: runtimeState.app.deviceName,
+      appVersion: runtimeState.app.appVersion,
+      platform: runtimeState.app.platform,
+      diagnostics: buildIssueFeedbackDiagnostics(issueFeedbackTask)
+    };
+
+    setIsSubmittingIssueFeedback(true);
+    setIssueFeedbackNotice('');
+    try {
+      const response = await window.qiuDesktop.submitIssueReport(payload);
+      message.success(`问题反馈已提交：${response.data.issueNo}`);
+      setIssueFeedbackOpen(false);
+      setIssueFeedbackTaskId('');
+      issueFeedbackForm.resetFields();
+    } catch (error) {
+      setIssueFeedbackNotice(
+        `提交失败：${error instanceof Error ? error.message : 'unknown error'}`
+      );
+    } finally {
+      setIsSubmittingIssueFeedback(false);
+    }
+  }
+
+  function buildIssueFeedbackDiagnostics(task?: DesktopTaskDetail) {
+    const taskLogs = task?.executionLogs ?? [];
+    const attachmentPaths = task?.executionContext?.attachmentPaths ?? [];
+    return {
+      appVersion: runtimeState.app.appVersion,
+      platform: runtimeState.app.platform,
+      arch: runtimeState.app.arch,
+      deviceName: runtimeState.app.deviceName,
+      runtimeId: runtimeState.localRuntime.runtimeId,
+      deviceId: runtimeState.localRuntime.deviceId,
+      workspaceId: isEnterpriseUnbound ? undefined : runtimeState.localRuntime.workspaceId,
+      serverBaseUrl: runtimeState.app.serverBaseUrl,
+      connectionState: runtimeState.serverConnection.state,
+      task: task
+        ? {
+            taskId: task.taskId,
+            taskTitle: task.title,
+            taskState: task.state,
+            roleCode: task.roleCode,
+            roleName: task.roleName,
+            updatedAt: task.updatedAt
+          }
+        : undefined,
+      logs: taskLogs.slice(-24).map((log) => ({
+        level: log.level,
+        eventType: log.eventType,
+        message: redactDiagnosticText(log.message).slice(0, 900),
+        createdAt: log.createdAt
+      })),
+      models: runtimeState.modelProfiles.map((profile) => ({
+        providerId: profile.providerId,
+        providerName: profile.providerName,
+        modelName: profile.modelName,
+        purpose: profile.purpose,
+        enabled: runtimeState.localRuntime.enabledModelProfileIds.includes(profile.id)
+      })),
+      tools: [
+        ...runtimeState.tools.map((tool) => ({
+          toolId: tool.id,
+          enabled: runtimeState.localRuntime.enabledToolIds.includes(tool.id)
+        })),
+        ...((runtimeState.runtimeSnapshot.toolActions ?? []).map((action) => ({
+          toolId: action.toolId,
+          actionId: action.actionId,
+          status: action.status,
+          message: action.message ? redactDiagnosticText(action.message).slice(0, 300) : undefined
+        })))
+      ].slice(0, 80),
+      files: attachmentPaths.slice(0, 20).map((filePath) => ({
+        name: fileNameFromPath(filePath)
+      })),
+      notes: [
+        'Diagnostics are sanitized on the desktop client before upload.',
+        'API keys, local file contents, artifacts and full local paths are not included.'
+      ]
+    };
+  }
 
   useEffect(() => {
     if (selectedSection !== 'workbench') {
@@ -2796,7 +2972,10 @@ export default function App() {
         </Layout>
         {renderOnboardingModal()}
         {renderAccountModal()}
+        {renderIssueFeedbackModal()}
         {renderRoleUninstallModal()}
+        {renderRuntimeModelQuickSwitchModal()}
+        {renderRoleConfigModal()}
         {renderFactoryImagePreviewModal()}
         {renderUserAgreementModal()}
       </AppProvider>
@@ -2905,6 +3084,10 @@ export default function App() {
                 <button type="button" onClick={() => openAccountModal('download')}>
                   <CloudDownloadOutlined />
                   <span>版本与更新</span>
+                </button>
+                <button type="button" onClick={() => openIssueFeedbackModal()}>
+                  <MessageOutlined />
+                  <span>问题反馈</span>
                 </button>
                 <button type="button" onClick={() => openAccountModal('logout')}>
                   <LogoutOutlined />
@@ -3040,6 +3223,104 @@ export default function App() {
             未绑定时可直接使用免费版；绑定企业后，桌面端会自动接入对应企业工作区。
           </Typography.Text>
           {onboardingNotice ? <Typography.Text type="danger">{onboardingNotice}</Typography.Text> : null}
+        </Form>
+      </Modal>
+    );
+  }
+
+  function renderIssueFeedbackModal() {
+    return (
+      <Modal
+        title="问题反馈"
+        open={issueFeedbackOpen}
+        width={680}
+        destroyOnHidden
+        okText="提交反馈"
+        cancelText="取消"
+        confirmLoading={isSubmittingIssueFeedback}
+        onCancel={() => {
+          setIssueFeedbackOpen(false);
+          setIssueFeedbackTaskId('');
+          setIssueFeedbackNotice('');
+        }}
+        onOk={() => issueFeedbackForm.submit()}
+      >
+        <Form<IssueFeedbackFormValues>
+          form={issueFeedbackForm}
+          layout="vertical"
+          onFinish={(values) => void submitIssueFeedback(values)}
+        >
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            {issueFeedbackTask ? (
+              <div className="issue-feedback-context">
+                <Typography.Text strong>关联任务</Typography.Text>
+                <Typography.Text type="secondary" ellipsis>
+                  {issueFeedbackTask.title} · {taskStateLabel(issueFeedbackTask.state)}
+                </Typography.Text>
+              </div>
+            ) : null}
+
+            <Space size={12} style={{ width: '100%' }} align="start">
+              <Form.Item
+                name="category"
+                label="问题类型"
+                rules={[{ required: true, message: '请选择问题类型' }]}
+                style={{ flex: 1 }}
+              >
+                <Select options={issueFeedbackCategoryOptions} />
+              </Form.Item>
+              <Form.Item
+                name="severity"
+                label="影响程度"
+                rules={[{ required: true, message: '请选择影响程度' }]}
+                style={{ width: 180 }}
+              >
+                <Select options={issueFeedbackSeverityOptions} />
+              </Form.Item>
+            </Space>
+
+            <Form.Item
+              name="title"
+              label="标题"
+              rules={[
+                { required: true, message: '请填写标题' },
+                { max: 120, message: '标题最多 120 字' }
+              ]}
+            >
+              <Input placeholder="例如：视频质检任务运行失败" />
+            </Form.Item>
+
+            <Form.Item
+              name="description"
+              label="问题描述"
+              rules={[
+                { required: true, message: '请描述你遇到的问题' },
+                { max: 4000, message: '问题描述最多 4000 字' }
+              ]}
+            >
+              <Input.TextArea
+                rows={6}
+                showCount
+                maxLength={4000}
+                placeholder="请说明你做了什么、期望结果是什么、实际发生了什么。"
+              />
+            </Form.Item>
+
+            <Form.Item name="contact" label="联系方式（选填）" rules={[{ max: 120, message: '联系方式最多 120 字' }]}>
+              <Input placeholder="手机号、微信或邮箱，方便后续联系" />
+            </Form.Item>
+
+            <div className="issue-feedback-privacy-note">
+              <InfoCircleOutlined />
+              <Typography.Text type="secondary">
+                提交时会自动附带客户端版本、设备状态、模型/工具状态和最近任务日志。不会上传 API Key、原始文件、产物内容或完整本地路径。
+              </Typography.Text>
+            </div>
+
+            {issueFeedbackNotice ? (
+              <Typography.Text type="danger">{issueFeedbackNotice}</Typography.Text>
+            ) : null}
+          </Space>
         </Form>
       </Modal>
     );
@@ -3388,6 +3669,240 @@ export default function App() {
     );
   }
 
+  function openRuntimeModelQuickSwitch(roleCode: string) {
+    const rolePackage = getPreparedInstalledRolePackage(roleCode);
+    if (!rolePackage) {
+      message.warning('该应用未安装在当前电脑，请先安装后再切换模型。');
+      return;
+    }
+
+    const normalizedModelProfileIds = readRequiredModelProfileIdsForRolePackage(rolePackage);
+    const credentialValues = buildRoleModelCredentialFormValues(
+      rolePackage.roleCode,
+      normalizedModelProfileIds,
+      runtimeState.roleModelCredentialBindings
+    );
+
+    runtimeModelQuickSwitchForm.setFieldsValue({
+      runtimeModels: Object.fromEntries(
+        normalizedModelProfileIds.map((modelProfileId) => [
+          modelProfileId,
+          credentialValues[modelProfileId]?.runtimeModelProfileId ?? modelProfileId
+        ])
+      )
+    });
+    setRuntimeModelQuickSwitchRoleCode(rolePackage.roleCode);
+    setRuntimeModelQuickSwitchOpen(true);
+  }
+
+  function closeRuntimeModelQuickSwitch() {
+    setRuntimeModelQuickSwitchOpen(false);
+    setRuntimeModelQuickSwitchRoleCode('');
+    runtimeModelQuickSwitchForm.resetFields();
+  }
+
+  function submitRuntimeModelQuickSwitch(values: RuntimeModelQuickSwitchFormValues) {
+    const rolePackage = getPreparedInstalledRolePackage(runtimeModelQuickSwitchRoleCode);
+    if (!rolePackage) {
+      closeRuntimeModelQuickSwitch();
+      return;
+    }
+
+    const normalizedModelProfileIds = readRequiredModelProfileIdsForRolePackage(rolePackage);
+    setRuntimeState((current) => ({
+      ...current,
+      roleModelCredentialBindings: buildRoleModelCredentialBindingsWithRuntimeModelSelections(
+        rolePackage.roleCode,
+        normalizedModelProfileIds,
+        current.roleModelCredentialBindings,
+        values.runtimeModels
+      )
+    }));
+    message.success('当前调用模型已保存。');
+    closeRuntimeModelQuickSwitch();
+  }
+
+  function renderRuntimeModelQuickSwitchModal() {
+    const rolePackage = runtimeModelQuickSwitchRoleCode
+      ? getPreparedInstalledRolePackage(runtimeModelQuickSwitchRoleCode)
+      : undefined;
+    const requirements = rolePackage
+      ? getRoleModelRuntimeRequirementStatuses(
+          runtimeState.modelProfiles,
+          runtimeState.localRuntime.enabledModelProfileIds,
+          rolePackage,
+          {
+            roleCode: rolePackage.roleCode,
+            credentials: runtimeState.modelCredentials,
+            roleBindings: runtimeState.roleModelCredentialBindings
+          }
+        )
+      : [];
+
+    return (
+      <Modal
+        open={runtimeModelQuickSwitchOpen}
+        title={rolePackage ? `当前调用模型：${rolePackage.name}` : '当前调用模型'}
+        okText="保存"
+        cancelText="取消"
+        width={720}
+        destroyOnHidden
+        onCancel={closeRuntimeModelQuickSwitch}
+        onOk={() => runtimeModelQuickSwitchForm.submit()}
+      >
+        {rolePackage ? (
+          <Form<RuntimeModelQuickSwitchFormValues>
+            form={runtimeModelQuickSwitchForm}
+            layout="vertical"
+            onFinish={submitRuntimeModelQuickSwitch}
+          >
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <div className="runtime-model-quick-note">
+                <InfoCircleOutlined />
+                <Typography.Text type="secondary">
+                  这里只切换当前应用各模型槽位实际调用的模型。API Key、工具、知识库请在“模型与工具”里配置。
+                </Typography.Text>
+              </div>
+
+              {requirements.length > 0 ? (
+                requirements.map((requirement) => {
+                  const binding = runtimeState.roleModelCredentialBindings.find(
+                    (item) =>
+                      item.roleCode === rolePackage.roleCode &&
+                      item.modelProfileId === requirement.profile.id
+                  );
+                  const runtimeModelProfileId =
+                    binding?.runtimeModelProfileId ?? requirement.profile.id;
+                  const runtimeProfile =
+                    runtimeState.modelProfiles.find((profile) => profile.id === runtimeModelProfileId) ??
+                    requirement.profile;
+                  const runtimeReady = isRuntimeModelProfileConfigured(runtimeProfile, rolePackage.roleCode);
+
+                  return (
+                    <div key={requirement.profile.id} className="runtime-model-switch-item">
+                      <Flex align="flex-start" justify="space-between" gap={12} wrap="wrap">
+                        <Space direction="vertical" size={2}>
+                          <Typography.Text strong>
+                            {modelCapabilitySummary(requirement.profile.capabilities, requirement.profile.purpose)}
+                          </Typography.Text>
+                          <Typography.Text type="secondary">
+                            槽位：{requirement.profile.providerName} / {requirement.profile.modelName}
+                          </Typography.Text>
+                        </Space>
+                        <Tag color={runtimeReady ? 'green' : 'orange'}>
+                          {runtimeReady ? '当前可用' : '待配置'}
+                        </Tag>
+                      </Flex>
+                      <Form.Item
+                        name={['runtimeModels', requirement.profile.id]}
+                        label="实际调用模型"
+                        tooltip="只显示输入输出能力兼容、且已启用的本机模型。"
+                      >
+                        <Select
+                          showSearch
+                          optionFilterProp="label"
+                          placeholder="选择实际调用模型"
+                          options={buildCompatibleRuntimeModelOptions(
+                            runtimeState,
+                            requirement.profile,
+                            rolePackage.roleCode
+                          )}
+                        />
+                      </Form.Item>
+                    </div>
+                  );
+                })
+              ) : (
+                <Empty description="当前应用没有声明模型槽位" />
+              )}
+            </Space>
+          </Form>
+        ) : (
+          <Empty description="未找到已安装应用" />
+        )}
+      </Modal>
+    );
+  }
+
+  function buildRuntimeModelSummaryItems(rolePackage: RolePackageManifest | undefined) {
+    if (!rolePackage) {
+      return [];
+    }
+
+    return getRoleModelRuntimeRequirementStatuses(
+      runtimeState.modelProfiles,
+      runtimeState.localRuntime.enabledModelProfileIds,
+      rolePackage,
+      {
+        roleCode: rolePackage.roleCode,
+        credentials: runtimeState.modelCredentials,
+        roleBindings: runtimeState.roleModelCredentialBindings
+      }
+    ).map((requirement) => {
+      const runtimeModelProfileId = runtimeState.roleModelCredentialBindings.find(
+        (binding) =>
+          binding.roleCode === rolePackage.roleCode &&
+          binding.modelProfileId === requirement.profile.id &&
+          binding.runtimeModelProfileId
+      )?.runtimeModelProfileId;
+      const runtimeProfile = runtimeModelProfileId
+        ? runtimeState.modelProfiles.find((profile) => profile.id === runtimeModelProfileId)
+        : undefined;
+      const displayProfile = runtimeProfile ?? requirement.profile;
+
+      return {
+        key: requirement.profile.id,
+        capability: modelCapabilitySummary(requirement.profile.capabilities, requirement.profile.purpose),
+        model: `${displayProfile.providerName} / ${displayProfile.modelName}`,
+        ready: runtimeProfile
+          ? isRuntimeModelProfileConfigured(runtimeProfile, rolePackage.roleCode)
+          : requirement.ready
+      };
+    });
+  }
+
+  function renderRuntimeModelSummaryStrip(input: {
+    rolePackage?: RolePackageManifest;
+    compact?: boolean;
+    onQuickSwitch: () => void;
+  }) {
+    const items = buildRuntimeModelSummaryItems(input.rolePackage);
+
+    if (!input.rolePackage) {
+      return null;
+    }
+
+    return (
+      <button
+        type="button"
+        className={input.compact ? 'runtime-model-strip compact' : 'runtime-model-strip'}
+        onClick={input.onQuickSwitch}
+        title="点击快速切换当前调用模型"
+        aria-label="点击快速切换当前调用模型"
+      >
+        <ApiOutlined />
+        <span className="runtime-model-strip-label">当前调用模型</span>
+        <span className="runtime-model-strip-items">
+          {items.length > 0 ? (
+            items.slice(0, 3).map((item) => (
+              <span key={item.key} className={item.ready ? 'runtime-model-chip ready' : 'runtime-model-chip warning'}>
+                <span>{item.capability}</span>
+                <strong>{item.model}</strong>
+              </span>
+            ))
+          ) : (
+            <span className="runtime-model-chip warning">
+              <span>模型</span>
+              <strong>未声明</strong>
+            </span>
+          )}
+          {items.length > 3 ? <span className="runtime-model-more">+{items.length - 3}</span> : null}
+        </span>
+        <SettingOutlined />
+      </button>
+    );
+  }
+
   function renderWorkbench() {
     const runningTaskCount = orderedTasks.filter((task) => task.state === 'running').length;
     const waitingTaskCount = orderedTasks.filter(
@@ -3424,6 +3939,20 @@ export default function App() {
     const conversationRole =
       refreshedInstalledRolePackageByRoleCode.get(activeRoleCode) ??
       activeRolePackage;
+    const openConversationConfig = () => {
+      if (!conversationRole) {
+        return;
+      }
+      setSelectedRoleApplicationType('digital_employee');
+      setSelectedRoleCategory('全部');
+      openRoleConfig(conversationRole.roleCode, 'configure');
+    };
+    const openConversationRuntimeModelQuickSwitch = () => {
+      if (!conversationRole) {
+        return;
+      }
+      openRuntimeModelQuickSwitch(conversationRole.roleCode);
+    };
     const conversationFinalAnswer = conversationTask ? readConversationFinalAnswer(conversationTask) : '';
     const conversationArtifacts = conversationTask
       ? conversationTask.artifacts.filter(isUserDeliverableArtifact)
@@ -3582,6 +4111,11 @@ export default function App() {
                 <Typography.Text type="secondary">
                   {conversationRole?.summary ?? '选择左侧员工后，直接用自然语言下达任务。'}
                 </Typography.Text>
+                {renderRuntimeModelSummaryStrip({
+                  rolePackage: conversationRole,
+                  compact: true,
+                  onQuickSwitch: openConversationRuntimeModelQuickSwitch
+                })}
               </Space>
             </Space>
 
@@ -3592,8 +4126,13 @@ export default function App() {
               <Button size="small" disabled={activeRoleDeleted} onClick={startNewConversationTask}>
                 新任务
               </Button>
-              <Button size="small" onClick={() => navigateToSection('models')}>
-                模型
+              <Button
+                size="small"
+                icon={<SettingOutlined />}
+                disabled={!conversationRole}
+                onClick={openConversationConfig}
+              >
+                模型与工具
               </Button>
             </Space>
           </header>
@@ -3672,6 +4211,16 @@ export default function App() {
                         >
                           查看详细日志
                         </Button>
+                        {conversationTask.state === 'failed' ? (
+                          <Button
+                            size="small"
+                            icon={<MessageOutlined />}
+                            className="process-log-link"
+                            onClick={() => openIssueFeedbackModal(conversationTask)}
+                          >
+                            提交问题反馈
+                          </Button>
+                        ) : null}
                       </div>
                     ) : (
                       <Typography.Text type="secondary">
@@ -4072,6 +4621,110 @@ export default function App() {
         : missingFactoryToolId
           ? `缺少工具配置：${resolveToolLabel(runtimeState.tools, missingFactoryToolId)}`
           : '请检查模型和工具配置';
+    const renderFactoryStatusPanel = (variant: 'default' | 'drawer' = 'default') => (
+      <section className={`factory-panel factory-status-panel ${variant === 'drawer' ? 'factory-drawer-panel' : ''}`}>
+        <Flex align="center" justify="space-between" gap={12}>
+          <Typography.Text strong>模型与工具状态</Typography.Text>
+          <Tag color={selectedFactoryReadiness?.ready ? 'green' : 'orange'}>
+            {selectedFactoryReadiness?.label ?? '待检查'}
+          </Tag>
+        </Flex>
+
+        <div className={`factory-readiness-hint ${selectedFactoryReadiness?.ready ? 'ready' : 'warning'}`}>
+          <InfoCircleOutlined />
+          <Typography.Text>{factoryRuntimeHint}</Typography.Text>
+        </div>
+
+        <div className="factory-status-list">
+          {selectedFactoryModelReadiness.length > 0 ? (
+            selectedFactoryModelReadiness.map((requirement) => (
+              <div key={requirement.profile.id} className="factory-status-row">
+                <span>
+                  <ApiOutlined />
+                  <Typography.Text ellipsis>{requirement.profile.modelName}</Typography.Text>
+                </span>
+                <Tag color={requirement.ready ? 'green' : 'orange'}>
+                  {renderModelRequirementStatusLabel(requirement.issue)}
+                </Tag>
+              </div>
+            ))
+          ) : (
+            <Typography.Text type="secondary">未声明指定模型。</Typography.Text>
+          )}
+          {selectedFactoryPackage.toolIds.map((toolId) => {
+            const known = runtimeState.tools.some((tool) => tool.id === toolId);
+            const enabled = runtimeState.localRuntime.enabledToolIds.includes(toolId);
+            return (
+              <div key={toolId} className="factory-status-row">
+                <span>
+                  <ToolOutlined />
+                  <Typography.Text ellipsis>{resolveToolLabel(runtimeState.tools, toolId)}</Typography.Text>
+                </span>
+                <Tag color={!known ? 'red' : enabled ? 'green' : 'orange'}>
+                  {!known ? '缺失' : enabled ? '可用' : '未启用'}
+                </Tag>
+              </div>
+            );
+          })}
+          {focusedFactoryCostCents && focusedFactoryCostCents > 0 ? (
+            <div className="factory-status-row">
+              <span>
+                <InfoCircleOutlined />
+                <Typography.Text>本次计费</Typography.Text>
+              </span>
+              <Tag color="blue">{formatCents(focusedFactoryCostCents)}</Tag>
+            </div>
+          ) : null}
+        </div>
+
+        <Button
+          block
+          onClick={() => {
+            setSelectedRoleApplicationType('digital_factory');
+            setSelectedRoleCategory('全部');
+            openRoleConfig(selectedFactoryCode, 'configure');
+          }}
+        >
+          模型与工具
+        </Button>
+      </section>
+    );
+    const renderFactoryLogPanel = (variant: 'default' | 'drawer' = 'default') => (
+      <section className={`factory-panel factory-log-panel ${variant === 'drawer' ? 'factory-drawer-panel' : ''}`}>
+        <Flex align="center" justify="space-between" gap={12}>
+          <Typography.Text strong>工作日志</Typography.Text>
+          <Button
+            size="small"
+            disabled={!focusedFactoryTask}
+            onClick={() => {
+              if (focusedFactoryTask) {
+                setSelectedTaskId(focusedFactoryTask.taskId);
+              }
+              navigateToSection('logs');
+            }}
+          >
+            详情
+          </Button>
+        </Flex>
+        {latestFactoryLogs.length > 0 ? (
+          <div className="factory-log-list">
+            {latestFactoryLogs.map((log) => (
+              <div key={log.id} className={`factory-log-item ${log.level}`}>
+                <span className="factory-log-time">{formatShortTime(log.createdAt)}</span>
+                <span className="factory-log-body">
+                  <Typography.Text strong>{executionEventLabel(log.eventType)}</Typography.Text>
+                  <Typography.Text type="secondary">
+                    {userFriendlyExecutionMessage(log)}
+                  </Typography.Text>
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无日志" />
+        )}
+      </section>
+    );
 
     return (
       <div className="workbench-page factory-page">
@@ -4171,6 +4824,11 @@ export default function App() {
                     <Typography.Text type="secondary">
                       {selectedFactoryPackage.summary ?? '批量上传素材，按工作流生成结构化产物。'}
                     </Typography.Text>
+                    {renderRuntimeModelSummaryStrip({
+                      rolePackage: selectedFactoryPackage,
+                      compact: true,
+                      onQuickSwitch: () => openRuntimeModelQuickSwitch(selectedFactoryCode)
+                    })}
                   </Space>
                 </Space>
                 <Space wrap>
@@ -4180,10 +4838,9 @@ export default function App() {
                       setSelectedRoleApplicationType('digital_factory');
                       setSelectedRoleCategory('全部');
                       openRoleConfig(selectedFactoryCode, 'configure');
-                      navigateToSection('roles');
                     }}
                   >
-                    {selectedFactoryReadiness?.ready ? '配置' : '配置模型/工具'}
+                    模型与工具
                   </Button>
                   <Button
                     type="primary"
@@ -4200,6 +4857,20 @@ export default function App() {
               </header>
 
               <div className="factory-workspace-body factory-console-body">
+                <div className="factory-console-compact-bar">
+                  <div className={`factory-readiness-hint ${selectedFactoryReadiness?.ready ? 'ready' : 'warning'}`}>
+                    <InfoCircleOutlined />
+                    <Typography.Text>{factoryRuntimeHint}</Typography.Text>
+                  </div>
+                  <Space size={8} wrap>
+                    <Button icon={<InfoCircleOutlined />} onClick={() => setFactorySidePanelOpen('status')}>
+                      状态
+                    </Button>
+                    <Button icon={<MessageOutlined />} onClick={() => setFactorySidePanelOpen('logs')}>
+                      日志
+                    </Button>
+                  </Space>
+                </div>
                 <div className="factory-console-grid">
                   <section className="factory-console-column factory-console-left">
                     <section
@@ -4559,111 +5230,24 @@ export default function App() {
                   </section>
 
                   <aside className="factory-console-column factory-console-right">
-                    <section className="factory-panel factory-status-panel">
-                      <Flex align="center" justify="space-between" gap={12}>
-                        <Typography.Text strong>模型与工具状态</Typography.Text>
-                        <Tag color={selectedFactoryReadiness?.ready ? 'green' : 'orange'}>
-                          {selectedFactoryReadiness?.label ?? '待检查'}
-                        </Tag>
-                      </Flex>
-
-                      <div className={`factory-readiness-hint ${selectedFactoryReadiness?.ready ? 'ready' : 'warning'}`}>
-                        <InfoCircleOutlined />
-                        <Typography.Text>{factoryRuntimeHint}</Typography.Text>
-                      </div>
-
-                      <div className="factory-status-list">
-                        {selectedFactoryModelReadiness.length > 0 ? (
-                          selectedFactoryModelReadiness.map((requirement) => (
-                            <div key={requirement.profile.id} className="factory-status-row">
-                              <span>
-                                <ApiOutlined />
-                                <Typography.Text ellipsis>{requirement.profile.modelName}</Typography.Text>
-                              </span>
-                              <Tag color={requirement.ready ? 'green' : 'orange'}>
-                                {renderModelRequirementStatusLabel(requirement.issue)}
-                              </Tag>
-                            </div>
-                          ))
-                        ) : (
-                          <Typography.Text type="secondary">未声明指定模型。</Typography.Text>
-                        )}
-                        {selectedFactoryPackage.toolIds.map((toolId) => {
-                          const known = runtimeState.tools.some((tool) => tool.id === toolId);
-                          const enabled = runtimeState.localRuntime.enabledToolIds.includes(toolId);
-                          return (
-                            <div key={toolId} className="factory-status-row">
-                              <span>
-                                <ToolOutlined />
-                                <Typography.Text ellipsis>{resolveToolLabel(runtimeState.tools, toolId)}</Typography.Text>
-                              </span>
-                              <Tag color={!known ? 'red' : enabled ? 'green' : 'orange'}>
-                                {!known ? '缺失' : enabled ? '可用' : '未启用'}
-                              </Tag>
-                            </div>
-                          );
-                        })}
-                        {focusedFactoryCostCents && focusedFactoryCostCents > 0 ? (
-                          <div className="factory-status-row">
-                            <span>
-                              <InfoCircleOutlined />
-                              <Typography.Text>本次计费</Typography.Text>
-                            </span>
-                            <Tag color="blue">{formatCents(focusedFactoryCostCents)}</Tag>
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <Button
-                        block
-                        onClick={() => {
-                          setSelectedRoleApplicationType('digital_factory');
-                          setSelectedRoleCategory('全部');
-                          openRoleConfig(selectedFactoryCode, 'configure');
-                          navigateToSection('roles');
-                        }}
-                      >
-                        配置模型/工具
-                      </Button>
-                    </section>
-
-                    <section className="factory-panel factory-log-panel">
-                      <Flex align="center" justify="space-between" gap={12}>
-                        <Typography.Text strong>工作日志</Typography.Text>
-                        <Button
-                          size="small"
-                          disabled={!focusedFactoryTask}
-                          onClick={() => {
-                            if (focusedFactoryTask) {
-                              setSelectedTaskId(focusedFactoryTask.taskId);
-                            }
-                            navigateToSection('logs');
-                          }}
-                        >
-                          详情
-                        </Button>
-                      </Flex>
-                      {latestFactoryLogs.length > 0 ? (
-                        <div className="factory-log-list">
-                          {latestFactoryLogs.map((log) => (
-                            <div key={log.id} className={`factory-log-item ${log.level}`}>
-                              <span className="factory-log-time">{formatShortTime(log.createdAt)}</span>
-                              <span className="factory-log-body">
-                                <Typography.Text strong>{executionEventLabel(log.eventType)}</Typography.Text>
-                                <Typography.Text type="secondary">
-                                  {userFriendlyExecutionMessage(log)}
-                                </Typography.Text>
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无日志" />
-                      )}
-                    </section>
+                    {renderFactoryStatusPanel()}
+                    {renderFactoryLogPanel()}
                   </aside>
                 </div>
               </div>
+              <Drawer
+                className="factory-side-drawer"
+                title={factorySidePanelOpen === 'logs' ? '工作日志' : '模型与工具状态'}
+                placement="right"
+                width={400}
+                open={Boolean(factorySidePanelOpen)}
+                onClose={() => setFactorySidePanelOpen(null)}
+                destroyOnHidden
+              >
+                {factorySidePanelOpen === 'logs'
+                  ? renderFactoryLogPanel('drawer')
+                  : renderFactoryStatusPanel('drawer')}
+              </Drawer>
             </>
           ) : (
             <div className="factory-empty-state">
@@ -5083,6 +5667,13 @@ export default function App() {
                   </Space>
                   <Button
                     size="small"
+                    icon={<MessageOutlined />}
+                    onClick={() => openIssueFeedbackModal(selectedLogTask)}
+                  >
+                    反馈此任务问题
+                  </Button>
+                  <Button
+                    size="small"
                     onClick={() => {
                       const rolePackage = runtimeState.rolePackages.find(
                         (item) => item.roleCode === selectedLogTask.roleCode
@@ -5148,6 +5739,239 @@ export default function App() {
           </section>
         </div>
       </div>
+    );
+  }
+
+  function renderRoleConfigModal() {
+    const roleConfigTemplate = roleConfigRoleCode
+      ? desktopRoleTemplateByRoleCode.get(roleConfigRoleCode)
+      : undefined;
+    const roleConfigRolePackage = runtimeState.rolePackages.find(
+      (rolePackage) => rolePackage.roleCode === roleConfigRoleCode
+    );
+    const refreshedRoleConfigRolePackage = roleConfigRoleCode
+      ? refreshedInstalledRolePackageByRoleCode.get(roleConfigRoleCode) ?? roleConfigRolePackage
+      : undefined;
+    const roleConfigPreviewPackage = roleConfigTemplate
+      ? toConfiguredRolePackagePreview(roleConfigTemplate, roleConfigRolePackage)
+      : refreshedRoleConfigRolePackage;
+    const roleConfigModelRequirements = roleConfigPreviewPackage
+      ? getRoleModelRuntimeRequirementStatuses(
+          runtimeState.modelProfiles,
+          runtimeState.localRuntime.enabledModelProfileIds,
+          roleConfigPreviewPackage,
+          {
+            roleCode: roleConfigPreviewPackage.roleCode,
+            credentials: runtimeState.modelCredentials,
+            roleBindings: runtimeState.roleModelCredentialBindings
+          }
+        )
+      : [];
+    const roleConfigCredentialInitialValues = roleConfigPreviewPackage
+      ? buildRoleModelCredentialFormValues(
+          roleConfigPreviewPackage.roleCode,
+          roleConfigPreviewPackage.modelProfileIds,
+          runtimeState.roleModelCredentialBindings
+        )
+      : {};
+    const roleConfigHasUnreadyModel = roleConfigModelRequirements.some(
+      (requirement) => !requirement.ready
+    );
+    const roleConfigApplicationLabel = roleConfigTemplate
+      ? roleApplicationTypeLabel(readRoleApplicationType(roleConfigTemplate))
+      : roleApplicationTypeLabel(selectedRoleApplicationType);
+    const roleConfigDisplayName = roleConfigTemplate?.name ?? roleConfigPreviewPackage?.name;
+    const roleConfigSkills = roleConfigTemplate?.skills ?? roleConfigPreviewPackage?.skills ?? [];
+    const roleConfigModelProfileIds = roleConfigPreviewPackage?.modelProfileIds ?? roleConfigTemplate?.modelProfileIds ?? [];
+    const roleConfigToolIds = roleConfigPreviewPackage?.toolIds ?? roleConfigTemplate?.toolIds ?? [];
+    const roleConfigKnowledgeSources =
+      roleConfigPreviewPackage?.requiredKnowledgeSources ?? roleConfigTemplate?.requiredKnowledgeSources ?? [];
+
+    return (
+      <Modal
+        open={roleConfigModalOpen}
+        title={
+          roleConfigDisplayName
+            ? `${roleConfigMode === 'install' ? '安装' : '模型与工具'}：${roleConfigDisplayName}`
+            : roleConfigMode === 'install'
+              ? `安装${roleConfigApplicationLabel}`
+              : `${roleConfigApplicationLabel}模型与工具`
+        }
+        okText={roleConfigMode === 'install' ? '安装' : '保存'}
+        onCancel={closeRoleConfig}
+        onOk={() => roleConfigForm.submit()}
+        width={820}
+        destroyOnHidden
+      >
+        {roleConfigPreviewPackage ? (
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Descriptions column={1} size="small" bordered>
+              <Descriptions.Item label="版本">{roleConfigPreviewPackage.version}</Descriptions.Item>
+              {roleConfigTemplate ? (
+                <>
+                  <Descriptions.Item label="行业">{roleConfigTemplate.industry}</Descriptions.Item>
+                  <Descriptions.Item label="场景">{roleConfigTemplate.scenario}</Descriptions.Item>
+                  <Descriptions.Item label="业务目标">{roleConfigTemplate.businessGoal}</Descriptions.Item>
+                </>
+              ) : (
+                <>
+                  <Descriptions.Item label="说明">
+                    {roleConfigPreviewPackage.summary ?? '该配置来自本机已安装包。'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="输出">
+                    {roleConfigPreviewPackage.outputFormat ?? '按工作流产物输出'}
+                  </Descriptions.Item>
+                </>
+              )}
+            </Descriptions>
+
+            {roleConfigSkills.length > 0 ? (
+              <Space size={6} wrap>
+                {roleConfigSkills.map((skill) => (
+                  <Tag key={skill.code}>{skill.name}</Tag>
+                ))}
+              </Space>
+            ) : null}
+
+            <Card size="small" bordered className="role-model-requirements-card">
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Flex align="center" justify="space-between" gap={12}>
+                  <Typography.Text strong>模型连接</Typography.Text>
+                  <Tag color={roleConfigHasUnreadyModel ? 'orange' : 'green'}>
+                    {roleConfigHasUnreadyModel ? '待配置' : '已就绪'}
+                  </Tag>
+                </Flex>
+                <List
+                  size="small"
+                  dataSource={roleConfigModelRequirements}
+                  locale={{ emptyText: `当前${roleConfigApplicationLabel}没有声明模型需求` }}
+                  renderItem={(requirement) => (
+                    <List.Item
+                      actions={[
+                        <Button
+                          key="configure"
+                          size="small"
+                          type={requirement.ready ? 'default' : 'primary'}
+                          onClick={() => openRequiredModelProfileConfig(requirement.profile)}
+                        >
+                          {requirement.ready ? '查看模型' : '配置模型'}
+                        </Button>
+                      ]}
+                    >
+                      <List.Item.Meta
+                        title={
+                          <Space size={6} wrap>
+                            <Typography.Text strong>
+                              {requirement.profile.providerName} / {requirement.profile.modelName}
+                            </Typography.Text>
+                            <Tag>{modelCapabilitySummary(requirement.profile.capabilities, requirement.profile.purpose)}</Tag>
+                            <Tag color={requirement.ready ? 'green' : 'orange'}>
+                              {renderModelRequirementStatusLabel(requirement.issue)}
+                            </Tag>
+                          </Space>
+                        }
+                        description={
+                          <Space direction="vertical" size={2}>
+                            <Typography.Text type="secondary">
+                              Profile ID：{requirement.profile.id}
+                            </Typography.Text>
+                            <Typography.Text type="secondary">
+                              Base URL：{requirement.profile.apiBaseUrl || '待填写'}
+                            </Typography.Text>
+                            <Typography.Text type="secondary">
+                              API Key：{requirement.configured ? '已填写' : '待填写'} · 启用：
+                              {requirement.enabled ? '已启用' : '未启用'} · 节点：
+                              {requirement.requiredByNodeIds.length > 0
+                                ? requirement.requiredByNodeIds.join('、')
+                                : '通用绑定'}
+                            </Typography.Text>
+                          </Space>
+                        }
+                      />
+                    </List.Item>
+                  )}
+                />
+                <Typography.Text type="secondary">
+                  API Key 只保存在当前电脑；这里可为每个模型槽位选择实际调用模型。
+                </Typography.Text>
+              </Space>
+            </Card>
+
+            <Form<RoleConfigFormValues>
+              form={roleConfigForm}
+              layout="vertical"
+              id="role-config-form"
+              initialValues={{
+                modelProfileIds: roleConfigModelProfileIds,
+                toolIds: roleConfigToolIds,
+                knowledgeSources: roleConfigKnowledgeSources,
+                modelCredentialBindings: roleConfigCredentialInitialValues
+              }}
+              onFinish={submitRoleConfig}
+            >
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                <Typography.Text strong>模型调用设置</Typography.Text>
+                {roleConfigModelRequirements.length === 0 ? (
+                  <Empty description={`当前${roleConfigApplicationLabel}没有声明模型需求`} />
+                ) : (
+                  roleConfigModelRequirements.map((requirement) =>
+                    renderRoleModelCredentialEditor(requirement.profile)
+                  )
+                )}
+              </Space>
+
+              <Form.Item name="toolIds" label="工具">
+                <Select
+                  mode="multiple"
+                  allowClear
+                  optionLabelProp="label"
+                  placeholder="选择可调用的工具"
+                  options={roleConfigToolIds.map((toolId) => ({
+                    label: resolveToolLabel(runtimeState.tools, toolId),
+                    value: toolId
+                  }))}
+                  disabled
+                />
+              </Form.Item>
+
+              <Form.Item name="knowledgeSources" label="知识">
+                <Select
+                  mode="multiple"
+                  allowClear
+                  optionLabelProp="label"
+                  placeholder="选择要使用的知识"
+                  options={knowledgeBindingCatalog.map((entry) => ({
+                    label: entry.label,
+                    value: entry.source
+                  }))}
+                />
+              </Form.Item>
+            </Form>
+
+            {roleConfigMode === 'configure' && roleConfigRolePackage ? (
+              <div className="role-config-danger-zone">
+                <Flex align="center" justify="space-between" gap={12} wrap="wrap">
+                  <Space direction="vertical" size={2}>
+                    <Typography.Text strong>本机卸载</Typography.Text>
+                    <Typography.Text type="secondary">
+                      从当前电脑移除该{roleConfigApplicationLabel}，历史任务和已生成产物仍会保留。
+                    </Typography.Text>
+                  </Space>
+                  <Button
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={() => confirmUninstallRole(roleConfigRolePackage.roleCode)}
+                  >
+                    卸载{roleConfigApplicationLabel}
+                  </Button>
+                </Flex>
+              </div>
+            ) : null}
+          </Space>
+        ) : (
+          <Empty description={`未找到${roleConfigApplicationLabel}`} />
+        )}
+      </Modal>
     );
   }
 
@@ -5419,7 +6243,7 @@ export default function App() {
         </div>
 
         <Modal
-          open={roleConfigModalOpen}
+          open={false}
           title={
             roleConfigTemplate
               ? `${roleConfigMode === 'install' ? '安装' : '配置'}：${roleConfigTemplate.name}`
@@ -5643,7 +6467,14 @@ export default function App() {
               onClick={() => input.onPick(model)}
               title={model.label ?? model.id}
             >
-              <span>{model.label ?? model.id}</span>
+              <span>
+                {model.label ?? model.id}
+                {model.source ? (
+                  <Tag color={modelCatalogSourceColor(model.source)} className="model-source-tag">
+                    {modelCatalogSourceLabel(model.source)}
+                  </Tag>
+                ) : null}
+              </span>
               <small>{model.id}</small>
               <small>{modelCapabilitySummary(model.capabilities, 'general')}</small>
             </button>
@@ -5743,8 +6574,12 @@ export default function App() {
               <Card key={preset.id} bordered={false} className="catalog-card model-provider-card">
                 <Space direction="vertical" size={12} className="catalog-card-content">
                   <Flex align="flex-start" justify="space-between" gap={12}>
-                    <span className={`model-provider-logo provider-${preset.id}`}>
-                      {modelProviderLogoText(preset.name)}
+                    <span
+                      className={`model-provider-logo provider-${preset.id}`}
+                      title={preset.name}
+                      aria-label={preset.name}
+                    >
+                      {renderModelProviderLogo(preset.id, preset.name)}
                     </span>
                     <Space size={4} wrap>
                       {preset.apiBaseUrl ? <Tag color="blue">兼容接口</Tag> : null}
@@ -5904,13 +6739,39 @@ export default function App() {
                 {modelTestNotice ? (
                   <Typography.Text
                     type={
-                      modelTestNotice.startsWith('模型连接正常') || modelTestNotice.startsWith('已拉取')
+                      isModelNoticeSuccess(modelTestNotice)
                         ? 'success'
                         : 'danger'
                     }
                   >
                     {modelTestNotice}
                   </Typography.Text>
+                ) : null}
+                {modelTestResult?.checks?.length ? (
+                  <div className="model-test-check-list">
+                    {modelTestResult.checks.map((check) => (
+                      <div key={check.id} className={`model-test-check ${check.status}`}>
+                        <Flex align="center" justify="space-between" gap={8} wrap="wrap">
+                          <Space size={6} wrap>
+                            <Tag color={modelTestCheckColor(check.status)}>
+                              {modelTestCheckLabel(check.status)}
+                            </Tag>
+                            <Typography.Text strong>{check.label}</Typography.Text>
+                            {check.costWarning ? <Tag color="gold">可能计费</Tag> : null}
+                          </Space>
+                          {typeof check.elapsedMs === 'number' ? (
+                            <Typography.Text type="secondary">{formatElapsedMs(check.elapsedMs)}</Typography.Text>
+                          ) : null}
+                        </Flex>
+                        <Typography.Text type="secondary">{check.message}</Typography.Text>
+                        {check.endpoint ? (
+                          <Typography.Text type="secondary" className="model-test-endpoint">
+                            {check.endpoint}
+                          </Typography.Text>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
                 ) : null}
               </Space>
             </Form>
@@ -5931,6 +6792,11 @@ export default function App() {
       runtimeState.modelCredentials,
       profile.providerId
     );
+    const compatibleRuntimeModelOptions = buildCompatibleRuntimeModelOptions(
+      runtimeState,
+      profile,
+      roleConfigRoleCode
+    );
     const modePath = ['modelCredentialBindings', profile.id, 'mode'];
 
     return (
@@ -5948,6 +6814,19 @@ export default function App() {
             {isRuntimeModelProfileConfigured(profile, roleConfigRoleCode) ? '已就绪' : '待配置'}
           </Tag>
         </Flex>
+
+        <Form.Item
+          name={['modelCredentialBindings', profile.id, 'runtimeModelProfileId']}
+          label="实际调用模型"
+          tooltip="只显示输入输出能力兼容的本机模型。API Key 请在模型配置里先配置好。"
+        >
+          <Select
+            showSearch
+            optionFilterProp="label"
+            placeholder="选择实际调用模型"
+            options={compatibleRuntimeModelOptions}
+          />
+        </Form.Item>
 
         <Form.Item
           name={modePath}
@@ -6977,6 +7856,7 @@ export default function App() {
 
     setIsTestingModel(true);
     setModelTestNotice('');
+    setModelTestResult(null);
 
     try {
       const values = await modelForm.validateFields();
@@ -6990,6 +7870,14 @@ export default function App() {
       if ((!apiBaseUrl && !isNativeProviderModelProfile(selectedModelProfile, capabilities)) || !apiKey) {
         setModelTestNotice('请先填写 API Key；OpenAI 兼容接口还需要填写 API Base URL。');
         return;
+      }
+
+      if (modelCapabilitiesMayCreatePaidArtifacts(capabilities)) {
+        const confirmed = await confirmPaidModelTest();
+        if (!confirmed) {
+          setModelTestNotice('已取消模型测试。');
+          return;
+        }
       }
 
       const profile: ModelProfile = {
@@ -7011,12 +7899,14 @@ export default function App() {
 
       const response = await window.qiuDesktop.testModelConnection({
         profile,
-        timeoutMs: 20_000
+        timeoutMs: modelCapabilitiesMayCreatePaidArtifacts(capabilities) ? 180_000 : 30_000
       });
 
-      setModelTestNotice(`模型连接正常：${response.providerName}/${response.modelName}。${response.message}`);
+      setModelTestResult(response);
+      setModelTestNotice(formatModelTestNotice(response));
     } catch (error) {
       setModelTestNotice(`模型连接失败：${error instanceof Error ? error.message : 'unknown error'}`);
+      setModelTestResult(null);
     } finally {
       setIsTestingModel(false);
     }
@@ -7029,6 +7919,7 @@ export default function App() {
 
     setIsPullingProviderModels(true);
     setModelTestNotice('');
+    setModelTestResult(null);
 
     try {
       const values = await modelForm.validateFields();
@@ -7064,7 +7955,7 @@ export default function App() {
       }));
       setModelTestNotice(
         catalog.models.length > 0
-          ? `已拉取 ${catalog.models.length} 个可调用模型。请选择需要启用的模型后保存。`
+          ? `已拉取 ${catalog.models.length} 个可配置模型。请选择需要启用的模型后保存。`
           : '已拉取模型列表，但供应商没有返回可用模型。'
       );
     } catch (error) {
@@ -7846,6 +8737,48 @@ function modelProviderLogoText(providerName: string): string {
   if (/qwen|通义/i.test(normalizedName)) return 'QW';
   if (/claude|anthropic/i.test(normalizedName)) return 'CL';
   return normalizedName.slice(0, 2).toUpperCase();
+}
+
+const modelProviderLogoUrlById: Record<string, string> = {
+  'aliyun-bailian': aliyunBailianLogoUrl,
+  'deepseek': deepseekLogoUrl,
+  'dashscope': qwenLogoUrl,
+  'gemini-openai': geminiLogoUrl,
+  'kimi': kimiLogoUrl,
+  'minimax': minimaxLogoUrl,
+  'moonshot': kimiLogoUrl,
+  'ollama': ollamaLogoUrl,
+  'openai': openaiLogoUrl,
+  'openrouter': openrouterLogoUrl,
+  'siliconflow': siliconcloudLogoUrl,
+  'tencent-cloud': tencentcloudLogoUrl,
+  'volcengine-ark': volcengineLogoUrl,
+  'zhipu': zhipuLogoUrl
+};
+
+function renderModelProviderLogo(providerId: string, providerName: string): ReactNode {
+  const normalized = `${providerId} ${providerName}`.toLowerCase();
+  const logoUrl =
+    modelProviderLogoUrlById[providerId] ??
+    (normalized.includes('deepseek') ? deepseekLogoUrl : undefined) ??
+    (normalized.includes('openai') ? openaiLogoUrl : undefined) ??
+    (normalized.includes('tencent') || normalized.includes('腾讯') ? tencentcloudLogoUrl : undefined) ??
+    (normalized.includes('bailian') || normalized.includes('阿里云') || normalized.includes('百炼') ? aliyunBailianLogoUrl : undefined) ??
+    (normalized.includes('dashscope') || normalized.includes('qwen') || normalized.includes('通义') ? qwenLogoUrl : undefined) ??
+    (normalized.includes('gemini') || normalized.includes('google') ? geminiLogoUrl : undefined) ??
+    (normalized.includes('moonshot') || normalized.includes('kimi') ? kimiLogoUrl : undefined) ??
+    (normalized.includes('siliconflow') || normalized.includes('siliconcloud') ? siliconcloudLogoUrl : undefined) ??
+    (normalized.includes('zhipu') || normalized.includes('glm') || normalized.includes('智谱') ? zhipuLogoUrl : undefined) ??
+    (normalized.includes('minimax') ? minimaxLogoUrl : undefined) ??
+    (normalized.includes('volcengine') || normalized.includes('火山') || normalized.includes('doubao') ? volcengineLogoUrl : undefined) ??
+    (normalized.includes('openrouter') ? openrouterLogoUrl : undefined) ??
+    (normalized.includes('ollama') ? ollamaLogoUrl : undefined);
+
+  if (logoUrl) {
+    return <img className="provider-logo-img" src={logoUrl} alt="" aria-hidden="true" />;
+  }
+
+  return <span className="provider-logo-wordmark">{modelProviderLogoText(providerName)}</span>;
 }
 
 function sectionMeta(section: SectionKey) {
@@ -9897,6 +10830,79 @@ function sortRoleFormatLabels(labels: string[]) {
   return [...new Set(labels)].sort((left, right) => orderOf(left) - orderOf(right) || left.localeCompare(right));
 }
 
+function formatModelTestNotice(response: DesktopModelTestResponse): string {
+  const checks = response.checks ?? [];
+  if (checks.length === 0) {
+    return `${response.ok ? '模型测试通过' : '模型测试失败'}：${response.providerName}/${response.modelName}。${response.message}`;
+  }
+  const passed = checks.filter((check) => check.status === 'passed').length;
+  const failed = checks.filter((check) => check.status === 'failed').length;
+  const skipped = checks.filter((check) => check.status === 'skipped').length;
+  const prefix = response.ok ? '模型测试通过' : '模型测试未全部通过';
+  return `${prefix}：${response.providerName}/${response.modelName}，通过 ${passed}，失败 ${failed}，跳过 ${skipped}。`;
+}
+
+function isModelNoticeSuccess(value: string): boolean {
+  return value.startsWith('模型测试通过') || value.startsWith('模型连接正常') || value.startsWith('已拉取');
+}
+
+function modelTestCheckColor(status: NonNullable<DesktopModelTestResponse['checks']>[number]['status']): string {
+  if (status === 'passed') return 'green';
+  if (status === 'failed') return 'red';
+  return 'default';
+}
+
+function modelTestCheckLabel(status: NonNullable<DesktopModelTestResponse['checks']>[number]['status']): string {
+  if (status === 'passed') return '通过';
+  if (status === 'failed') return '失败';
+  return '跳过';
+}
+
+function formatElapsedMs(value: number): string {
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(1)}s`;
+  }
+  return `${Math.max(0, Math.round(value))}ms`;
+}
+
+function modelCapabilitiesMayCreatePaidArtifacts(capabilities: ModelCapability[] | undefined): boolean {
+  const values = new Set(capabilities ?? []);
+  return (
+    values.has('image_generation') ||
+    values.has('text_to_image') ||
+    values.has('image_to_image') ||
+    values.has('image_editing') ||
+    values.has('video_generation') ||
+    values.has('text_to_video') ||
+    values.has('image_to_video')
+  );
+}
+
+function confirmPaidModelTest(): Promise<boolean> {
+  return new Promise((resolve) => {
+    Modal.confirm({
+      title: '确认测试高成本模型',
+      content: '生图、参考图编辑或视频模型测试可能真实调用供应商接口并产生费用。确认后继续测试。',
+      okText: '继续测试',
+      cancelText: '取消',
+      onOk: () => resolve(true),
+      onCancel: () => resolve(false)
+    });
+  });
+}
+
+function modelCatalogSourceLabel(source: NonNullable<ModelProviderCatalog['models'][number]['source']>): string {
+  if (source === 'provider') return '供应商';
+  if (source === 'built_in') return '内置';
+  return '手动';
+}
+
+function modelCatalogSourceColor(source: NonNullable<ModelProviderCatalog['models'][number]['source']>): string {
+  if (source === 'provider') return 'green';
+  if (source === 'built_in') return 'blue';
+  return 'default';
+}
+
 function findModelProviderCatalog(
   catalogs: ModelProviderCatalog[],
   providerId: string,
@@ -10246,6 +11252,7 @@ function buildRoleModelCredentialFormValues(
       return [
         modelProfileId,
         {
+          runtimeModelProfileId: binding?.runtimeModelProfileId ?? modelProfileId,
           mode: binding?.mode ?? 'provider_default',
           credentialId: binding?.credentialId,
           apiBaseUrl: binding?.apiBaseUrl,
@@ -10266,11 +11273,13 @@ function buildRoleModelCredentialBindingsFromForm(
   return modelProfileIds.map((modelProfileId) => {
     const value = values?.[modelProfileId];
     const mode = value?.mode ?? 'provider_default';
+    const runtimeModelProfileId = value?.runtimeModelProfileId?.trim() || modelProfileId;
 
     if (mode === 'credential_ref' && value?.credentialId) {
       return {
         roleCode,
         modelProfileId,
+        runtimeModelProfileId,
         mode,
         credentialId: value.credentialId,
         updatedAt: now
@@ -10281,6 +11290,7 @@ function buildRoleModelCredentialBindingsFromForm(
       return {
         roleCode,
         modelProfileId,
+        runtimeModelProfileId,
         mode,
         apiBaseUrl: value.apiBaseUrl?.trim() || undefined,
         apiKey: value.apiKey.trim(),
@@ -10291,10 +11301,56 @@ function buildRoleModelCredentialBindingsFromForm(
     return {
       roleCode,
       modelProfileId,
+      runtimeModelProfileId,
       mode: 'provider_default',
       updatedAt: now
     };
   });
+}
+
+function buildRoleModelCredentialBindingsWithRuntimeModelSelections(
+  roleCode: string,
+  modelProfileIds: string[],
+  currentBindings: RoleModelCredentialBinding[],
+  runtimeSelections: RuntimeModelQuickSwitchFormValues['runtimeModels'] | undefined
+): RoleModelCredentialBinding[] {
+  const now = new Date().toISOString();
+  const currentBindingsByModelId = new Map(
+    currentBindings
+      .filter((binding) => binding.roleCode === roleCode)
+      .map((binding) => [binding.modelProfileId, binding])
+  );
+  const nextRoleBindings = modelProfileIds.map((modelProfileId) => {
+    const currentBinding = currentBindingsByModelId.get(modelProfileId);
+    const runtimeModelProfileId =
+      runtimeSelections?.[modelProfileId]?.trim() ||
+      currentBinding?.runtimeModelProfileId ||
+      modelProfileId;
+
+    if (currentBinding) {
+      return {
+        ...currentBinding,
+        runtimeModelProfileId,
+        updatedAt:
+          currentBinding.runtimeModelProfileId === runtimeModelProfileId
+            ? currentBinding.updatedAt
+            : now
+      };
+    }
+
+    return {
+      roleCode,
+      modelProfileId,
+      runtimeModelProfileId,
+      mode: 'provider_default',
+      updatedAt: now
+    } satisfies RoleModelCredentialBinding;
+  });
+
+  return [
+    ...currentBindings.filter((binding) => binding.roleCode !== roleCode),
+    ...nextRoleBindings
+  ];
 }
 
 function rebuildRoleSummaries(
@@ -10387,6 +11443,44 @@ function buildExecutionContextForRole(
 function resolveModelProfileLabel(modelProfiles: ModelProfile[], profileId: string): string {
   const profile = modelProfiles.find((item) => item.id === profileId);
   return profile ? `${profile.providerName} / ${profile.modelName}` : profileId;
+}
+
+function buildCompatibleRuntimeModelOptions(
+  state: DesktopRuntimeState,
+  requirementProfile: ModelProfile,
+  roleCode?: string
+): Array<{ label: string; value: string }> {
+  const requiredCapabilities = readModelProfileCapabilities(requirementProfile);
+  const enabledModelIds = new Set(state.localRuntime.enabledModelProfileIds);
+  const compatibleProfiles = state.modelProfiles.filter((profile) => {
+    const isCurrentRequirement = profile.id === requirementProfile.id;
+    const isEnabled = enabledModelIds.has(profile.id);
+    const isConfigured = resolveModelProfileCredential({
+      profile,
+      roleCode,
+      credentials: state.modelCredentials,
+      roleBindings: state.roleModelCredentialBindings
+    }).configured;
+
+    return (
+      (isCurrentRequirement || (isEnabled && isConfigured)) &&
+      modelProfileSupportsAnyRequiredCapability(profile, requiredCapabilities)
+    );
+  });
+
+  const profiles = compatibleProfiles.some((profile) => profile.id === requirementProfile.id)
+    ? compatibleProfiles
+    : [requirementProfile, ...compatibleProfiles];
+
+  return profiles.map((profile) => ({
+    value: profile.id,
+    label: `${profile.providerName} / ${profile.modelName} · ${modelCapabilitySummary(profile.capabilities, profile.purpose)}`
+  }));
+}
+
+function modelProfileSupportsAnyRequiredCapability(profile: ModelProfile, requiredCapabilities: ModelCapability[]): boolean {
+  const capabilities = new Set(readModelProfileCapabilities(profile));
+  return requiredCapabilities.some((capability) => capabilities.has(capability));
 }
 
 function renderModelRequirementStatusLabel(issue: RoleModelRuntimeIssue | undefined): string {
@@ -10513,4 +11607,16 @@ function completeTaskDetail(detail: DesktopTaskDetail, completedAt: string): Des
       finishedAt: completedAt
     }
   };
+}
+
+function redactDiagnosticText(value: string): string {
+  return value
+    .replace(/[A-Za-z]:\\(?:[^\\\r\n]+\\)+([^\\\r\n]+)/g, '...\\$1')
+    .replace(/\/(?:[^/\r\n]+\/)+([^/\r\n]+)/g, '.../$1')
+    .replace(/(api[_-]?key|authorization|token|secret|password)\s*[:=]\s*['"]?[^'"\s,;}]+/gi, '$1=[REDACTED]');
+}
+
+function fileNameFromPath(value: string): string {
+  const parts = value.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? value;
 }

@@ -81,6 +81,28 @@ export interface MockDesktopAgreementAcceptanceSummary {
   updatedAt: string;
 }
 
+export interface MockDesktopIssueReportSummary {
+  id: string;
+  issueNo: string;
+  category: string;
+  severity: string;
+  status: string;
+  title: string;
+  description: string;
+  contact?: string | null;
+  workspaceId?: string | null;
+  desktopDeviceId?: string | null;
+  runtimeId?: string | null;
+  deviceId?: string | null;
+  deviceName?: string | null;
+  appVersion?: string | null;
+  platform?: string | null;
+  diagnostics?: Record<string, unknown> | null;
+  adminNote?: string | null;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+}
+
 @Injectable()
 export class MockPlatformStore {
   private readonly roleTemplates: MockRoleTemplateSummary[] = [...demoRoleTemplates];
@@ -94,6 +116,7 @@ export class MockPlatformStore {
   private readonly desktopRuntimeSyncs: MockDesktopRuntimeSyncSummary[] = [];
   private readonly desktopReleases: MockDesktopReleaseSummary[] = [];
   private readonly desktopAgreementAcceptances: MockDesktopAgreementAcceptanceSummary[] = [];
+  private readonly desktopIssueReports: MockDesktopIssueReportSummary[] = [];
 
   listRoleTemplates(): MockRoleTemplateSummary[] {
     return this.roleTemplates;
@@ -574,5 +597,56 @@ export class MockPlatformStore {
       updatedAt: new Date().toISOString()
     });
     return { ...release };
+  }
+
+  listDesktopIssueReports() {
+    return this.desktopIssueReports.map((report) => ({ ...report }));
+  }
+
+  getDesktopIssueReport(reportId: string) {
+    const report = this.desktopIssueReports.find((item) => item.id === reportId);
+    return report ? { ...report } : undefined;
+  }
+
+  createDesktopIssueReport(
+    input: Omit<MockDesktopIssueReportSummary, 'id' | 'createdAt' | 'updatedAt' | 'status'> & {
+      id?: string;
+      status?: string;
+      createdAt?: string;
+      updatedAt?: string;
+    }
+  ) {
+    const now = new Date().toISOString();
+    const report: MockDesktopIssueReportSummary = {
+      ...input,
+      id: input.id ?? `desktop_issue_${Date.now()}_${this.desktopIssueReports.length + 1}`,
+      status: input.status ?? 'NEW',
+      createdAt: input.createdAt ?? now,
+      updatedAt: input.updatedAt ?? now
+    };
+    this.desktopIssueReports.unshift(report);
+    return { ...report };
+  }
+
+  updateDesktopIssueReport(reportId: string, input: Partial<MockDesktopIssueReportSummary>) {
+    const report = this.desktopIssueReports.find((item) => item.id === reportId);
+    if (!report) {
+      return undefined;
+    }
+
+    Object.assign(report, input, {
+      updatedAt: new Date().toISOString()
+    });
+    return { ...report };
+  }
+
+  deleteDesktopIssueReport(reportId: string): boolean {
+    const index = this.desktopIssueReports.findIndex((item) => item.id === reportId);
+    if (index < 0) {
+      return false;
+    }
+
+    this.desktopIssueReports.splice(index, 1);
+    return true;
   }
 }

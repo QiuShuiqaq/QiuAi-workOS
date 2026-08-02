@@ -165,6 +165,22 @@ export class DesktopAgreementAcceptanceController {
 
 @ApiTags('desktop')
 @Controller({
+  path: 'desktop/issue-reports',
+  version: '1'
+})
+export class DesktopIssueReportController {
+  constructor(@Inject(DesktopSyncService) private readonly desktopSyncService: DesktopSyncService) {}
+
+  @Post()
+  submitIssueReport(@Body() body: unknown, @Req() request: FastifyRequest) {
+    return this.desktopSyncService.createDesktopIssueReport(body, {
+      deviceToken: readDesktopDeviceToken(request)
+    });
+  }
+}
+
+@ApiTags('desktop')
+@Controller({
   path: 'desktop/role-templates',
   version: '1'
 })

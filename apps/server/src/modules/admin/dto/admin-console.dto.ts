@@ -320,6 +320,162 @@ export class UploadAdminDesktopReleaseAssetResponseDto {
   data!: DesktopReleaseAssetSummaryDto;
 }
 
+export class DesktopIssueMessageSummaryDto {
+  @ApiProperty({ example: 'issue-id' })
+  id!: string;
+
+  @ApiProperty({ example: 'ISSUE-20260802-A1B2C3' })
+  issueNo!: string;
+
+  @ApiProperty({ enum: ['BUG', 'USAGE', 'FEATURE_REQUEST', 'BAD_OUTPUT', 'OTHER'] })
+  category!: 'BUG' | 'USAGE' | 'FEATURE_REQUEST' | 'BAD_OUTPUT' | 'OTHER';
+
+  @ApiProperty({ enum: ['NORMAL', 'IMPACTING', 'BLOCKING'] })
+  severity!: 'NORMAL' | 'IMPACTING' | 'BLOCKING';
+
+  @ApiProperty({ enum: ['NEW', 'VIEWED', 'IN_PROGRESS', 'FIXED', 'WONT_FIX', 'CLOSED'] })
+  status!: 'NEW' | 'VIEWED' | 'IN_PROGRESS' | 'FIXED' | 'WONT_FIX' | 'CLOSED';
+
+  @ApiProperty({ example: '桌面端运行任务失败' })
+  title!: string;
+
+  @ApiProperty({ example: '用户描述的问题详情。' })
+  description!: string;
+
+  @ApiPropertyOptional({ example: 'user@example.com' })
+  contact?: string;
+
+  @ApiPropertyOptional({ example: 'workspace-id' })
+  workspaceId?: string;
+
+  @ApiPropertyOptional({ example: '企业名称' })
+  workspaceName?: string;
+
+  @ApiPropertyOptional({ example: 'runtime-id' })
+  runtimeId?: string;
+
+  @ApiPropertyOptional({ example: 'device-id' })
+  deviceId?: string;
+
+  @ApiPropertyOptional({ example: 'DESKTOP-01' })
+  deviceName?: string;
+
+  @ApiPropertyOptional({ example: '1.0.0' })
+  appVersion?: string;
+
+  @ApiPropertyOptional({ example: 'win32' })
+  platform?: string;
+
+  @ApiPropertyOptional({ example: { connectionState: 'online' } })
+  diagnostics?: Record<string, unknown>;
+
+  @ApiPropertyOptional({ example: '已安排修复。' })
+  adminNote?: string;
+
+  @ApiProperty({ example: '2026-08-02T00:00:00.000Z' })
+  createdAt!: string;
+
+  @ApiProperty({ example: '2026-08-02T00:00:00.000Z' })
+  updatedAt!: string;
+}
+
+export class ListAdminIssueMessagesQueryDto {
+  @ApiPropertyOptional({ example: 1 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  page?: number;
+
+  @ApiPropertyOptional({ example: 20 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  @Type(() => Number)
+  pageSize?: number;
+
+  @ApiPropertyOptional({ example: '模型配置' })
+  @IsOptional()
+  @IsString()
+  query?: string;
+
+  @ApiPropertyOptional({ enum: ['NEW', 'VIEWED', 'IN_PROGRESS', 'FIXED', 'WONT_FIX', 'CLOSED'] })
+  @IsOptional()
+  @IsIn(['NEW', 'VIEWED', 'IN_PROGRESS', 'FIXED', 'WONT_FIX', 'CLOSED'])
+  status?: 'NEW' | 'VIEWED' | 'IN_PROGRESS' | 'FIXED' | 'WONT_FIX' | 'CLOSED';
+
+  @ApiPropertyOptional({ enum: ['BUG', 'USAGE', 'FEATURE_REQUEST', 'BAD_OUTPUT', 'OTHER'] })
+  @IsOptional()
+  @IsIn(['BUG', 'USAGE', 'FEATURE_REQUEST', 'BAD_OUTPUT', 'OTHER'])
+  category?: 'BUG' | 'USAGE' | 'FEATURE_REQUEST' | 'BAD_OUTPUT' | 'OTHER';
+
+  @ApiPropertyOptional({ enum: ['NORMAL', 'IMPACTING', 'BLOCKING'] })
+  @IsOptional()
+  @IsIn(['NORMAL', 'IMPACTING', 'BLOCKING'])
+  severity?: 'NORMAL' | 'IMPACTING' | 'BLOCKING';
+
+  @ApiPropertyOptional({ example: 'workspace-id' })
+  @IsOptional()
+  @IsUUID()
+  workspaceId?: string;
+}
+
+export class ListAdminIssueMessagesResponseDto {
+  @ApiProperty({ type: [DesktopIssueMessageSummaryDto] })
+  data!: DesktopIssueMessageSummaryDto[];
+
+  @ApiProperty({
+    example: {
+      page: 1,
+      pageSize: 20,
+      totalItems: 1,
+      totalPages: 1
+    }
+  })
+  pagination!: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
+}
+
+export class GetAdminIssueMessageResponseDto {
+  @ApiProperty({ type: DesktopIssueMessageSummaryDto })
+  data!: DesktopIssueMessageSummaryDto;
+}
+
+export class UpdateAdminIssueMessageRequestDto {
+  @ApiPropertyOptional({ enum: ['NEW', 'VIEWED', 'IN_PROGRESS', 'FIXED', 'WONT_FIX', 'CLOSED'] })
+  @IsOptional()
+  @IsIn(['NEW', 'VIEWED', 'IN_PROGRESS', 'FIXED', 'WONT_FIX', 'CLOSED'])
+  status?: 'NEW' | 'VIEWED' | 'IN_PROGRESS' | 'FIXED' | 'WONT_FIX' | 'CLOSED';
+
+  @ApiPropertyOptional({ example: '内部处理备注。', nullable: true })
+  @IsOptional()
+  @IsString()
+  adminNote?: string | null;
+}
+
+export class UpdateAdminIssueMessageResponseDto {
+  @ApiProperty({ type: DesktopIssueMessageSummaryDto })
+  data!: DesktopIssueMessageSummaryDto;
+}
+
+export class DeleteAdminIssueMessageResponseDto {
+  @ApiProperty({
+    example: {
+      id: 'issue-id',
+      deleted: true
+    }
+  })
+  data!: {
+    id: string;
+    deleted: true;
+  };
+}
+
 export class CheckDesktopUpdateQueryDto {
   @ApiPropertyOptional({ example: '1.0.0' })
   @IsOptional()

@@ -9,6 +9,7 @@ import {
   listAuthorizedRoleTemplates as fetchAuthorizedRoleTemplates,
   listPublicFreeRoleTemplates as fetchPublicFreeRoleTemplates,
   redeemDesktopBindingCode,
+  submitDesktopIssueReport,
   syncDesktopRuntimeSnapshot
 } from '../shared/desktop-sync-client.js';
 import { createTaskDetailFromSummary } from '../shared/workbench-data.js';
@@ -21,6 +22,8 @@ import type {
   DesktopAuthorizedRoleTemplateCatalog,
   DesktopRuntimeState,
   DesktopServerConnectionStatus,
+  DesktopIssueReportSubmitRequest,
+  DesktopIssueReportSubmitResult,
   DesktopUpdateCheckResult
 } from '../shared/desktop-api.js';
 import {
@@ -213,6 +216,24 @@ export async function syncDesktopRuntimeState(state: DesktopRuntimeState) {
   });
 
   return result;
+}
+
+export async function submitDesktopIssueReportFromRenderer(
+  request: DesktopIssueReportSubmitRequest
+): Promise<DesktopIssueReportSubmitResult> {
+  const appInfo = getDesktopAppInfo();
+  const identity = loadRuntimeIdentity(appInfo.userDataPath);
+
+  return submitDesktopIssueReport(appInfo.serverBaseUrl, {
+    ...request,
+    workspaceId: identity.deviceToken ? identity.workspaceId : request.workspaceId,
+    runtimeId: request.runtimeId ?? identity.runtimeId,
+    deviceId: request.deviceId ?? identity.deviceId,
+    deviceName: request.deviceName ?? appInfo.deviceName,
+    appVersion: request.appVersion ?? appInfo.appVersion,
+    platform: request.platform ?? appInfo.platform,
+    deviceToken: identity.deviceToken
+  });
 }
 
 async function applyServerDefinedToolCatalog(

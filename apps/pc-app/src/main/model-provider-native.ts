@@ -9,7 +9,7 @@ import type {
   DesktopModelTestRequest,
   DesktopModelTestResponse
 } from '../shared/desktop-api.js';
-import type { ModelCapability, ModelPurpose } from '../shared/desktop-contract.js';
+import type { ModelCapability, ModelCatalogEntry, ModelPurpose } from '../shared/desktop-contract.js';
 import { inferModelCapabilitiesFromName } from '../shared/desktop-model-capabilities.js';
 
 export type NativeProviderMode = 'openai_compatible' | 'aliyun_bailian' | 'tencent_cloud';
@@ -39,8 +39,25 @@ const aliyunPlatformModels = [
   modelCatalogEntry('qwen-max', 'Qwen Max / 高质量推理', 'reasoning'),
   modelCatalogEntry('qwen-turbo', 'Qwen Turbo / 快速低成本', 'general'),
   modelCatalogEntry('qwen-long', 'Qwen Long / 长文档', 'document'),
+  modelCatalogEntry('qwen2.5-72b-instruct', 'Qwen2.5 72B / 通用文本', 'general'),
+  modelCatalogEntry('qwen2.5-32b-instruct', 'Qwen2.5 32B / 通用文本', 'general'),
+  modelCatalogEntry('qwen2.5-14b-instruct', 'Qwen2.5 14B / 通用文本', 'general'),
+  modelCatalogEntry('qwen2.5-7b-instruct', 'Qwen2.5 7B / 快速低成本', 'general'),
+  modelCatalogEntry('qwen3-235b-a22b', 'Qwen3 235B A22B / 高质量推理', 'reasoning'),
+  modelCatalogEntry('qwen3-32b', 'Qwen3 32B / 推理文本', 'reasoning'),
+  modelCatalogEntry('qwen3-14b', 'Qwen3 14B / 通用推理', 'reasoning'),
+  modelCatalogEntry('qwen3-8b', 'Qwen3 8B / 快速推理', 'reasoning'),
   modelCatalogEntry('qwen-vl-max', 'Qwen VL Max / 图片理解', 'vision'),
   modelCatalogEntry('qwen-vl-plus', 'Qwen VL Plus / 图片理解', 'vision'),
+  modelCatalogEntry('qwen2.5-vl-72b-instruct', 'Qwen2.5 VL 72B / 图片理解', 'vision'),
+  modelCatalogEntry('qwen2.5-vl-32b-instruct', 'Qwen2.5 VL 32B / 图片理解', 'vision'),
+  modelCatalogEntry('qwen2.5-vl-7b-instruct', 'Qwen2.5 VL 7B / 图片理解', 'vision'),
+  modelCatalogEntry('text-embedding-v4', 'Text Embedding V4 / 文本向量', 'embeddings'),
+  modelCatalogEntry('text-embedding-v3', 'Text Embedding V3 / 文本向量', 'embeddings'),
+  modelCatalogEntry('gte-rerank-v2', 'GTE Rerank V2 / 重排', 'general'),
+  modelCatalogEntry('wanx2.1-t2i-turbo', '通义万相 2.1 Turbo / 文生图', 'vision'),
+  modelCatalogEntry('wanx2.1-t2i-plus', '通义万相 2.1 Plus / 文生图', 'vision'),
+  modelCatalogEntry('wanx2.1-i2v-turbo', '通义万相 2.1 / 图生视频', 'vision'),
   ...aliyunNativeAsrModels
 ];
 
@@ -117,12 +134,13 @@ export async function listNativeProviderModels(
       apiKey: request.apiKey,
       timeoutMs: request.timeoutMs
     });
+    const providerModels = await listAliyunCompatibleProviderModels(request).catch(() => []);
     return {
       providerId: request.providerId.trim(),
       providerName: request.providerName.trim(),
       apiBaseUrl: request.apiBaseUrl?.trim() || aliyunCompatibleDefaultApiBaseUrl,
       fetchedAt: new Date().toISOString(),
-      models: aliyunPlatformModels
+      models: mergeModelCatalogEntries(providerModels, aliyunPlatformModels)
     };
   }
 
@@ -409,6 +427,44 @@ async function probeTencentCloudConnection(input: {
   if (error && isTencentAuthError(error.code)) {
     throw new Error(`腾讯云鉴权失败：${error.code} ${error.message}`);
   }
+}
+
+async function listAliyunCompatibleProviderModels(
+  request: DesktopModelListRequest
+): Promise<ModelCatalogEntry[]> {
+  const apiBaseUrl = normalizeAliyunCompatibleApiBaseUrl(request.apiBaseUrl);
+  const response = await fetch(`${apiBaseUrl}/models`, {
+    method: 'GET',
+    headers: {
+      authorization: `Bearer ${requireText(request.apiKey, 'Aliyun Bailian API Key is missing.')}`
+    },
+    signal: AbortSignal.timeout(Math.min(request.timeoutMs ?? 20_000, 20_000))
+  });
+
+  const bodyText = await response.text();
+  const body = parseJsonObject(bodyText);
+  if (!response.ok || !Array.isArray(body?.data)) {
+    return [];
+  }
+
+  return body.data.flatMap((item) => {
+    if (!isRecord(item)) {
+      return [];
+    }
+
+    const id = readString(item.id);
+    if (!id) {
+      return [];
+    }
+
+    return [{
+      id,
+      label: id,
+      ownedBy: readString(item.owned_by),
+      source: 'provider' as const,
+      capabilities: inferModelCapabilitiesFromName(id)
+    }];
+  });
 }
 
 async function pollAliyunTask(input: {
@@ -987,12 +1043,27 @@ function isRecord(value: unknown): value is JsonRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function modelCatalogEntry(id: string, label: string, fallbackPurpose: ModelPurpose = 'audio') {
+function modelCatalogEntry(id: string, label: string, fallbackPurpose: ModelPurpose = 'audio'): ModelCatalogEntry {
   return {
     id,
     label,
+    source: 'built_in',
     capabilities: inferModelCapabilitiesFromName(id, fallbackPurpose) as ModelCapability[]
   };
+}
+
+function mergeModelCatalogEntries(
+  providerModels: ModelCatalogEntry[],
+  builtInModels: ModelCatalogEntry[]
+): ModelCatalogEntry[] {
+  const merged = new Map<string, ModelCatalogEntry>();
+  for (const model of builtInModels) {
+    merged.set(model.id, model);
+  }
+  for (const model of providerModels) {
+    merged.set(model.id, model);
+  }
+  return [...merged.values()].sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function isTencentPlatformProvider(providerId?: string, providerName?: string): boolean {

@@ -101,6 +101,70 @@ try {
   globalThis.fetch = originalFetch;
 }
 
+let capturedImageTestUrl = '';
+let capturedImageTestBody: Record<string, unknown> | undefined;
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  capturedImageTestUrl = String(input);
+  capturedImageTestBody = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
+
+  return new Response(
+    JSON.stringify({
+      data: [{ url: 'https://cdn.example.test/generated/model-test.png' }]
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+}) as typeof fetch;
+
+try {
+  const response = await testDesktopModelConnection({
+    profile: {
+      id: 'image-profile',
+      providerId: 'grsai',
+      providerName: 'GrsAI',
+      modelName: 'gpt-image-2',
+      purpose: 'vision',
+      capabilities: ['image_generation', 'text_to_image'],
+      apiBaseUrl: 'https://grsai.dakka.com.cn/v1',
+      apiKey: 'image-key'
+    }
+  });
+
+  assert.equal(capturedImageTestUrl, 'https://grsai.dakka.com.cn/v1/images/generations');
+  assert.equal(capturedImageTestBody?.model, 'gpt-image-2');
+  assert.equal(response.ok, true);
+  assert.equal(response.checks?.[0]?.id, 'image_generation');
+  assert.equal(response.checks?.[0]?.status, 'passed');
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+const grsaiModelListUrls: string[] = [];
+globalThis.fetch = (async (input: RequestInfo | URL) => {
+  grsaiModelListUrls.push(String(input));
+  return new Response(JSON.stringify({ error: { message: 'not found' } }), {
+    status: 404,
+    headers: { 'content-type': 'application/json' }
+  });
+}) as typeof fetch;
+
+try {
+  const catalog = await listOpenAiCompatibleModels({
+    providerId: 'custom',
+    providerName: 'GrsAI',
+    apiBaseUrl: 'https://grsai.dakka.com.cn/v1',
+    apiKey: 'grsai-key',
+    modelName: 'gpt-image-2',
+    capabilities: ['image_generation']
+  });
+
+  assert.deepEqual(grsaiModelListUrls, ['https://grsai.dakka.com.cn/v1/models']);
+  assert.ok(catalog.models.some((model) => model.id === 'gpt-image-2'));
+  assert.equal(catalog.models.find((model) => model.id === 'gpt-image-2')?.source, 'built_in');
+  assert.ok(catalog.models.some((model) => model.id === 'nano-banana-2'));
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
 let capturedTranscriptionUrl = '';
 let capturedTranscriptionAuthorization = '';
 const tempDir = mkdtempSync(path.join(os.tmpdir(), 'qiuai-model-chat-'));
@@ -189,9 +253,16 @@ try {
   globalThis.fetch = originalFetch;
 }
 
-let capturedAliyunProbeUrl = '';
+const capturedAliyunListUrls: string[] = [];
 globalThis.fetch = (async (input: RequestInfo | URL) => {
-  capturedAliyunProbeUrl = String(input);
+  const url = String(input);
+  capturedAliyunListUrls.push(url);
+  if (url.endsWith('/models')) {
+    return new Response(JSON.stringify({ data: [{ id: 'qwen-plus', owned_by: 'aliyun-provider' }] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
   return new Response(JSON.stringify({ code: 'TaskNotFound', message: 'task not found' }), {
     status: 404,
     headers: { 'content-type': 'application/json' }
@@ -207,13 +278,18 @@ try {
     capabilities: ['audio_to_text']
   });
 
-  assert.equal(capturedAliyunProbeUrl, 'https://dashscope.aliyuncs.com/api/v1/tasks/qiuai-connection-test');
+  assert.deepEqual(capturedAliyunListUrls, [
+    'https://dashscope.aliyuncs.com/api/v1/tasks/qiuai-connection-test',
+    'https://dashscope.aliyuncs.com/compatible-mode/v1/models'
+  ]);
   assert.equal(catalog.providerId, 'aliyun-bailian');
   assert.ok(catalog.models.some((model) => model.id === 'qwen-plus'));
   assert.ok(catalog.models.some((model) => model.id === 'qwen-vl-max'));
   assert.ok(catalog.models.some((model) => model.id === 'fun-asr'));
   assert.deepEqual(catalog.models.find((model) => model.id === 'qwen-plus')?.capabilities, ['text']);
+  assert.equal(catalog.models.find((model) => model.id === 'qwen-plus')?.source, 'provider');
   assert.ok(catalog.models.find((model) => model.id === 'fun-asr')?.capabilities.includes('audio_to_text'));
+  assert.equal(catalog.models.find((model) => model.id === 'fun-asr')?.source, 'built_in');
 } finally {
   globalThis.fetch = originalFetch;
 }

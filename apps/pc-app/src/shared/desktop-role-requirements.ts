@@ -6,7 +6,7 @@ import type {
 } from './desktop-contract.js';
 import { isModelProfileConfiguredByCredentials } from './desktop-model-credentials.js';
 import { inferModelCapabilitiesFromName } from './desktop-model-capabilities.js';
-import { parseWorkflowGraph } from './desktop-workflow-graph.js';
+import { parseWorkflowGraph, type WorkflowGraphNode } from './desktop-workflow-graph.js';
 
 export interface RoleModelRequirementStatus {
   profile: ModelProfile;
@@ -44,8 +44,9 @@ export function readWorkflowRequiredModelProfileIds(workflowGraph: unknown): str
                 .map((profileId) => (typeof profileId === 'string' ? profileId.trim() : ''))
                 .filter(Boolean)
             : [];
+          const semanticProfileId = node.type === 'llm' ? getSemanticModelProfileIdForWorkflowNode(node) : undefined;
           return node.type === 'llm'
-            ? [node.modelProfileId?.trim(), ...requiredModelProfileIds]
+            ? [semanticProfileId, ...requiredModelProfileIds.map(mapModelProfileIdToSemanticDefault)]
             : requiredModelProfileIds;
         })
         .filter((modelProfileId): modelProfileId is string => Boolean(modelProfileId))
@@ -63,6 +64,7 @@ export function readRequiredModelProfileIdsForRolePackage(
 
   const declaredModelProfileIds = rolePackage.modelProfileIds
     .map((profileId) => profileId.trim())
+    .map(mapModelProfileIdToSemanticDefault)
     .filter(Boolean);
   const workflowModelProfileIds = readWorkflowRequiredModelProfileIds(rolePackage.workflowGraph);
 
@@ -95,16 +97,23 @@ export function getRoleModelRequirementStatuses(
   return readRequiredModelProfileIdsForRolePackage(rolePackage).map((profileId) => {
     const profile = knownProfilesById.get(profileId);
     const normalizedProfile = profile ?? createPlaceholderModelProfile(profileId);
-
+    const configured = hasConfiguredModelApi(normalizedProfile, {
+      roleCode: credentialContext.roleCode ?? rolePackage.roleCode,
+      credentials: credentialContext.credentials,
+      roleBindings: credentialContext.roleBindings
+    });
+    const compatibleConfiguredProfile = configured
+      ? undefined
+      : findConfiguredCompatibleModelProfile(modelProfiles, profileId, {
+          roleCode: credentialContext.roleCode ?? rolePackage.roleCode,
+          credentials: credentialContext.credentials,
+          roleBindings: credentialContext.roleBindings
+        });
     return {
       profile: normalizedProfile,
       requiredByNodeIds: nodeIdsByModelId.get(profileId) ?? [],
-      configured: hasConfiguredModelApi(normalizedProfile, {
-        roleCode: credentialContext.roleCode ?? rolePackage.roleCode,
-        credentials: credentialContext.credentials,
-        roleBindings: credentialContext.roleBindings
-      }),
-      known: Boolean(profile)
+      configured: configured || Boolean(compatibleConfiguredProfile),
+      known: Boolean(profile || compatibleConfiguredProfile)
     };
   });
 }
@@ -160,6 +169,46 @@ export function findFirstUnreadyRequiredModelProfileId(
   ).find((requirement) => !requirement.ready)?.profile.id;
 }
 
+function findConfiguredCompatibleModelProfile(
+  modelProfiles: ModelProfile[],
+  requirementProfileId: string,
+  credentialContext: RoleModelCredentialContext
+): ModelProfile | undefined {
+  const requiredCapabilities = getRequiredCapabilitiesForSemanticProfileId(requirementProfileId);
+  if (requiredCapabilities.length === 0) {
+    return undefined;
+  }
+
+  return modelProfiles.find(
+    (profile) =>
+      profile.id !== requirementProfileId &&
+      modelProfileSupportsAnyCapability(profile, requiredCapabilities) &&
+      hasConfiguredModelApi(profile, credentialContext)
+  );
+}
+
+function getRequiredCapabilitiesForSemanticProfileId(profileId: string): string[] {
+  if (profileId === 'qiu-vision-default') return ['image_understanding', 'vision_understanding', 'vision_text'];
+  if (profileId === 'qiu-image-generation-default') return ['text_to_image', 'image_generation'];
+  if (profileId === 'qiu-image-editing-default') return ['image_editing', 'image_to_image'];
+  if (profileId === 'qiu-asr-default') return ['audio_to_text'];
+  if (profileId === 'qiu-embedding-default') return ['embedding'];
+  if (profileId === 'qiu-rerank-default') return ['rerank'];
+  if (profileId === 'qiu-reasoning-default') return ['reasoning_text', 'text'];
+  if (profileId === 'qiu-general-default') return ['text'];
+  return [];
+}
+
+function modelProfileSupportsAnyCapability(profile: ModelProfile, capabilities: string[]): boolean {
+  const normalizedProfileCapabilities = new Set(
+    inferModelCapabilitiesFromName(profile.modelName, profile.purpose).concat(profile.capabilities ?? [])
+      .map(normalizeModelRequirementToken)
+  );
+  return capabilities.map(normalizeModelRequirementToken).some((capability) =>
+    normalizedProfileCapabilities.has(capability)
+  );
+}
+
 export function createPlaceholderModelProfile(profileId: string): ModelProfile {
   const normalizedProfileId = profileId.trim() || 'qiu-general-default';
   const provider = inferModelProviderFromProfileId(normalizedProfileId);
@@ -188,8 +237,8 @@ function readWorkflowModelNodeIdsByModelProfileId(workflowGraph: unknown): Map<s
 
   for (const node of graph.nodes) {
     const nodeProfileIds =
-      node.type === 'llm' && node.modelProfileId?.trim()
-        ? [node.modelProfileId.trim()]
+      node.type === 'llm'
+        ? [getSemanticModelProfileIdForWorkflowNode(node)]
         : [];
     const requiredModelProfileIds = Array.isArray(node.config?.requiredModelProfileIds)
       ? node.config.requiredModelProfileIds
@@ -197,7 +246,10 @@ function readWorkflowModelNodeIdsByModelProfileId(workflowGraph: unknown): Map<s
           .filter(Boolean)
       : [];
 
-    for (const modelProfileId of [...nodeProfileIds, ...requiredModelProfileIds]) {
+    for (const modelProfileId of [...nodeProfileIds, ...requiredModelProfileIds.map(mapModelProfileIdToSemanticDefault)]) {
+      if (!modelProfileId) {
+        continue;
+      }
       result.set(modelProfileId, [...(result.get(modelProfileId) ?? []), node.id]);
     }
   }
@@ -221,7 +273,7 @@ function readDependencyManifestModelProfileIds(
 
   return mergeUniqueStrings(
     manifest.modelAssets
-      .map((asset) => asset.modelProfileId || asset.modelId || asset.key)
+      .map(readDependencyManifestSemanticModelProfileId)
       .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
     []
   );
@@ -236,7 +288,7 @@ function readDependencyManifestModelNodeIdsByModelProfileId(
   }
 
   for (const asset of manifest.modelAssets) {
-    const profileId = (asset.modelProfileId || asset.modelId || asset.key).trim();
+    const profileId = readDependencyManifestSemanticModelProfileId(asset);
     if (!profileId) {
       continue;
     }
@@ -245,6 +297,94 @@ function readDependencyManifestModelNodeIdsByModelProfileId(
   }
 
   return result;
+}
+
+function readDependencyManifestSemanticModelProfileId(
+  asset: NonNullable<RolePackageManifest['dependencyManifest']>['modelAssets'][number]
+): string {
+  const capabilityProfileId = getSemanticModelProfileIdForCapabilities({
+    capabilities: asset.capabilities,
+    inputTypes: asset.inputTypes,
+    outputTypes: asset.outputTypes
+  });
+  if (capabilityProfileId) {
+    return capabilityProfileId;
+  }
+
+  return mapModelProfileIdToSemanticDefault(asset.modelProfileId || asset.modelId || asset.key);
+}
+
+function readConfigString(config: Record<string, unknown> | undefined, key: string): string | undefined {
+  const value = config?.[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function getSemanticModelProfileIdForWorkflowNode(node: WorkflowGraphNode): string {
+  return getSemanticModelProfileIdForTaskType(readConfigString(node.config, 'llmTaskType')) ?? 'qiu-general-default';
+}
+
+function getSemanticModelProfileIdForTaskType(taskType: string | undefined): string | undefined {
+  if (taskType === 'vision') return 'qiu-vision-default';
+  if (taskType === 'audio_transcription') return 'qiu-asr-default';
+  if (taskType === 'image_generation') return 'qiu-image-generation-default';
+  if (taskType === 'image_editing') return 'qiu-image-editing-default';
+  if (taskType === 'video_understanding' || taskType === 'video_generation') return 'qiu-vision-default';
+  if (taskType === 'embedding') return 'qiu-embedding-default';
+  if (taskType === 'rerank') return 'qiu-rerank-default';
+  return 'qiu-general-default';
+}
+
+function getSemanticModelProfileIdForCapabilities(input: {
+  capabilities?: string[];
+  inputTypes?: string[];
+  outputTypes?: string[];
+}): string | undefined {
+  const capabilities = new Set((input.capabilities ?? []).map(normalizeModelRequirementToken));
+  const inputTypes = new Set((input.inputTypes ?? []).map(normalizeModelRequirementToken));
+  const outputTypes = new Set((input.outputTypes ?? []).map(normalizeModelRequirementToken));
+
+  if (capabilities.has('audio_to_text')) return 'qiu-asr-default';
+  if (capabilities.has('embedding') || outputTypes.has('embedding')) return 'qiu-embedding-default';
+  if (capabilities.has('rerank') || outputTypes.has('scores')) return 'qiu-rerank-default';
+  if (capabilities.has('image_editing') || capabilities.has('image_to_image')) return 'qiu-image-editing-default';
+  if (capabilities.has('text_to_image') || (outputTypes.has('image') && !inputTypes.has('image'))) {
+    return 'qiu-image-generation-default';
+  }
+  if (
+    capabilities.has('image_understanding') ||
+    capabilities.has('vision_understanding') ||
+    capabilities.has('vision_text') ||
+    (inputTypes.has('image') && (outputTypes.has('text') || outputTypes.has('json')))
+  ) {
+    return 'qiu-vision-default';
+  }
+  if (capabilities.has('video_generation') || outputTypes.has('video')) return 'qiu-vision-default';
+  if (capabilities.has('video_understanding') || inputTypes.has('video')) return 'qiu-vision-default';
+  if (capabilities.has('text') || capabilities.has('reasoning') || capabilities.has('reasoning_text')) {
+    return 'qiu-general-default';
+  }
+
+  return undefined;
+}
+
+function mapModelProfileIdToSemanticDefault(profileId: string): string {
+  const normalized = profileId.trim().toLowerCase();
+  if (!normalized) return '';
+  if (normalized.startsWith('qiu-')) return profileId.trim();
+  if (normalized.includes('asr') || normalized.includes('speech') || normalized.includes('audio')) return 'qiu-asr-default';
+  if (normalized.includes('gpt-image') || normalized.includes('img2img') || normalized.includes('image-edit')) {
+    return 'qiu-image-editing-default';
+  }
+  if (normalized.includes('image') || normalized.includes('vision') || normalized.includes('vl') || normalized.includes('gpt-4o')) {
+    return 'qiu-vision-default';
+  }
+  if (normalized.includes('embedding') || normalized.includes('embed')) return 'qiu-embedding-default';
+  if (normalized.includes('rerank')) return 'qiu-rerank-default';
+  return 'qiu-general-default';
+}
+
+function normalizeModelRequirementToken(value: string): string {
+  return value.trim().toLowerCase().replace(/[-\s]+/g, '_');
 }
 
 function inferModelProviderFromProfileId(profileId: string): {

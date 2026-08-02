@@ -360,7 +360,8 @@ assert.ok(
   workflowPromptTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_GRAPH_LOADED')
 );
 
-const missingWorkflowModelTask = await runDesktopTask({
+let legacyConcreteModelFallbackUsed = false;
+const legacyConcreteWorkflowModelTask = await runDesktopTask({
   task: createMockTaskDetail({
     taskId: 'task-runner-workflow-model-missing-001',
     roleCode: 'ai-ops',
@@ -401,27 +402,106 @@ const missingWorkflowModelTask = await runDesktopTask({
   enabledModelProfileIds: ['qiu-general-default'],
   enabledToolIds: [],
   enabledKnowledgeBindingIds: [],
-  modelInvoker: async () => {
-    throw new Error('Model invoker should not be called when the required workflow model is missing.');
+  modelInvoker: async (request) => {
+    legacyConcreteModelFallbackUsed = true;
+    assert.equal(request.profile.id, 'qiu-general-default');
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: 'Classified with the configured text model slot.',
+      inputTokens: 120,
+      outputTokens: 40
+    };
   },
   completedAt: '2026-07-20T10:00:06.000Z'
 });
 
-assert.equal(missingWorkflowModelTask.task.state, 'failed');
+assert.equal(legacyConcreteWorkflowModelTask.task.state, 'completed');
+assert.equal(legacyConcreteModelFallbackUsed, true);
 assert.ok(
-  missingWorkflowModelTask.task.executionLogs.some(
-    (log) =>
-      log.eventType === 'WORKFLOW_RUNTIME_NODE_FAILED' &&
-      log.message.includes('deepseek-v4-flash')
+  legacyConcreteWorkflowModelTask.task.executionLogs.every(
+    (log) => log.eventType !== 'MODEL_PROFILE_BINDING_MISSING'
   )
 );
-assert.ok(
-  missingWorkflowModelTask.task.executionLogs.some(
-    (log) =>
-      log.eventType === 'MODEL_PROFILE_BINDING_MISSING' &&
-      log.message.includes('deepseek-v4-flash')
-  )
-);
+
+let runtimeOverrideModelUsed = false;
+const runtimeOverrideModelTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-runtime-model-override-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Run workflow with selected runtime model',
+    input: 'Classify this customer request.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'classify',
+          type: 'llm',
+          name: 'Classify request',
+          modelProfileId: 'qiu-general-default',
+          config: {
+            llmTaskType: 'text'
+          }
+        }
+      ],
+      edges: [
+        {
+          id: 'start-classify',
+          sourceNodeId: 'start',
+          targetNodeId: 'classify',
+          condition: { type: 'always' }
+        }
+      ]
+    }
+  },
+  modelProfiles: modelProfiles.concat([
+    {
+      id: 'deepseek-v4-flash',
+      providerId: 'deepseek',
+      providerName: 'DeepSeek',
+      modelName: 'deepseek-v4-flash',
+      purpose: 'general',
+      capabilities: ['text'],
+      apiBaseUrl: 'https://api.deepseek.com',
+      apiKey: 'deepseek-key'
+    }
+  ]),
+  tools,
+  enabledModelProfileIds: ['qiu-general-default', 'deepseek-v4-flash'],
+  enabledToolIds: [],
+  enabledKnowledgeBindingIds: [],
+  roleModelCredentialBindings: [
+    {
+      roleCode: 'ai-ops',
+      modelProfileId: 'qiu-general-default',
+      runtimeModelProfileId: 'deepseek-v4-flash',
+      mode: 'provider_default'
+    }
+  ],
+  modelInvoker: async (request) => {
+    runtimeOverrideModelUsed = true;
+    assert.equal(request.profile.id, 'deepseek-v4-flash');
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: 'Classified with runtime-selected DeepSeek.',
+      inputTokens: 120,
+      outputTokens: 40
+    };
+  },
+  completedAt: '2026-07-20T10:00:06.500Z'
+});
+assert.equal(runtimeOverrideModelTask.task.state, 'completed');
+assert.equal(runtimeOverrideModelUsed, true);
 assert.ok(
   workflowPromptTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_GRAPH_NODE_PLANNED')
 );
@@ -2996,11 +3076,11 @@ const factoryTask = await runDesktopTask({
           id: 'generate_images',
           type: 'llm',
           name: 'Generate images',
-          modelProfileId: 'qiu-general-default',
+          modelProfileId: 'qiu-image-editing-default',
           inputVariables: ['factory_items', 'selected_packages', 'target_platform', 'package_instructions'],
           outputVariables: ['factory_generated_images'],
           config: {
-            llmTaskType: 'image_generation',
+            llmTaskType: 'image_editing',
             concurrency: 2,
             maxRetries: 0,
             timeoutMs: 20_000
@@ -3012,21 +3092,33 @@ const factoryTask = await runDesktopTask({
         { id: 'prepare-generate', sourceNodeId: 'prepare_batch', targetNodeId: 'generate_images' }
       ]
     },
-    modelProfileIds: ['qiu-general-default'],
+    modelProfileIds: ['qiu-image-editing-default'],
     toolIds: [],
     requiredKnowledgeSources: [],
     defaultTaskTypes: ['factory_image_batch'],
     syncPolicy: 'summary_only'
   },
-  modelProfiles,
+  modelProfiles: modelProfiles.concat([
+    {
+      id: 'qiu-image-editing-default',
+      providerId: 'openai-compatible',
+      providerName: 'OpenAI Compatible',
+      modelName: 'gpt-image-2',
+      purpose: 'vision',
+      capabilities: ['image_generation', 'image_to_image', 'image_editing'],
+      apiBaseUrl: 'https://image.example/v1',
+      apiKey: 'image-api-key'
+    }
+  ]),
   tools,
-  enabledModelProfileIds: ['qiu-general-default'],
+  enabledModelProfileIds: ['qiu-general-default', 'qiu-image-editing-default'],
   enabledToolIds: [],
   enabledKnowledgeBindingIds: [],
   modelInvoker: async (request) => {
     factoryActiveModelCalls += 1;
     factoryMaxActiveModelCalls = Math.max(factoryMaxActiveModelCalls, factoryActiveModelCalls);
     factoryModelInvocationCount += 1;
+    assert.equal(request.profile.id, 'qiu-image-editing-default');
     assert.equal(request.taskKind, 'image_generation');
     assert.ok(request.imageGeneration?.prompt);
     assert.match(request.imageGeneration?.sourceImagePath ?? '', /sku-[12]\.png/);

@@ -2,8 +2,11 @@
   DesktopAuthorizedRoleTemplateSummary,
   DesktopDeviceCapacitySummary,
   DesktopUpdateCheckResult,
-  DesktopAgreementAcceptanceSummary
+  DesktopAgreementAcceptanceSummary,
+  DesktopIssueReportSubmitRequest,
+  DesktopIssueReportSubmitResult
 } from './desktop-api.js';
+
 import type {
   DesktopRuntimeSnapshot,
   ListDesktopServerToolActionCatalogResponse
@@ -94,6 +97,10 @@ interface DesktopAgreementAcceptanceStatusResponse {
 
 interface AcceptDesktopAgreementResponse {
   data: DesktopAgreementAcceptanceSummary;
+}
+
+export interface SubmitDesktopIssueReportInput extends DesktopIssueReportSubmitRequest {
+  deviceToken?: string;
 }
 
 export async function syncDesktopRuntimeSnapshot(
@@ -338,6 +345,31 @@ export async function acceptDesktopAgreement(
   }
 
   return body as AcceptDesktopAgreementResponse;
+}
+
+export async function submitDesktopIssueReport(
+  baseUrl: string,
+  input: SubmitDesktopIssueReportInput
+): Promise<DesktopIssueReportSubmitResult> {
+  const { deviceToken, ...payload } = input;
+  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/api/v1/desktop/issue-reports`, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      ...(deviceToken ? { 'x-qiuai-device-token': deviceToken } : {})
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const body = (await response.json()) as DesktopIssueReportSubmitResult | { error?: { message?: string } };
+  if (!response.ok) {
+    const errorBody = body as { error?: { message?: string } };
+    const message = errorBody.error?.message ?? `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return body as DesktopIssueReportSubmitResult;
 }
 
 function normalizeBaseUrl(baseUrl: string): string {

@@ -177,19 +177,23 @@ export function augmentExecutionContextWithWorkflowPlan(
     return context;
   }
 
+  const contextModelProfileIds = uniqueStrings(
+    context.modelProfileIds.map(mapModelProfileIdToSemanticDefault)
+  );
+
   return {
     ...context,
     modelProfileIds: workflowPlan.preferredModelProfileId
       ? [
           workflowPlan.preferredModelProfileId,
           ...workflowPlan.requiredModelProfileIds.filter((profileId) => profileId !== workflowPlan.preferredModelProfileId),
-          ...context.modelProfileIds.filter(
+          ...contextModelProfileIds.filter(
             (profileId) =>
               profileId !== workflowPlan.preferredModelProfileId &&
               !workflowPlan.requiredModelProfileIds.includes(profileId)
           )
         ]
-      : [...new Set([...workflowPlan.requiredModelProfileIds, ...context.modelProfileIds])],
+      : [...new Set([...workflowPlan.requiredModelProfileIds, ...contextModelProfileIds])],
     toolIds: [...new Set([...context.toolIds, ...workflowPlan.requiredToolIds])],
     knowledgeBindingIds: [...context.knowledgeBindingIds],
     attachmentPaths: context.attachmentPaths ? [...context.attachmentPaths] : undefined
@@ -228,9 +232,9 @@ export function buildWorkflowExecutionPlan(input: {
     task: input.task,
     createdAt: input.createdAt
   });
-  const graphRequiredModelProfileIds = [
-    ...new Set(selection.orderedNodes.flatMap((node) => (node.modelProfileId ? [node.modelProfileId] : [])))
-  ];
+  const graphRequiredModelProfileIds = uniqueStrings(
+    selection.orderedNodes.flatMap((node) => readWorkflowNodeSemanticModelProfileIds(node))
+  );
   const manifestModelProfileIds = readDependencyManifestModelProfileIds(input.rolePackage.dependencyManifest);
   const requiredModelProfileIds =
     manifestModelProfileIds.length > 0 ? manifestModelProfileIds : graphRequiredModelProfileIds;
@@ -240,9 +244,7 @@ export function buildWorkflowExecutionPlan(input: {
       ? manifestToolIds
       : [...new Set(graph.nodes.flatMap((node) => readWorkflowNodeToolIds(node)))];
   const orderedNodeSummaries = selection.orderedNodes.map(toWorkflowExecutionNodeSummary);
-  const firstExplicitModelProfileId = selection.orderedNodes.find(
-    (node) => node.modelProfileId
-  )?.modelProfileId;
+  const firstExplicitModelProfileId = selection.orderedNodes.flatMap(readWorkflowNodeSemanticModelProfileIds)[0];
   const preferredModelProfileId =
     firstExplicitModelProfileId ?? requiredModelProfileIds[0];
   const promptContext = buildWorkflowPromptContext({
@@ -518,9 +520,9 @@ function buildWorkflowPromptContext(input: {
 
   const promptNodes = input.orderedNodes.slice(0, maxWorkflowPromptNodes);
   const requiredToolIds = [...new Set(input.orderedNodes.flatMap((node) => readWorkflowNodeToolIds(node)))];
-  const requiredModelProfileIds = [
-    ...new Set(input.orderedNodes.flatMap((node) => (node.modelProfileId ? [node.modelProfileId] : [])))
-  ];
+  const requiredModelProfileIds = uniqueStrings(
+    input.orderedNodes.flatMap((node) => readWorkflowNodeSemanticModelProfileIds(node))
+  );
   const artifactTypes = [
     ...new Set(input.orderedNodes.flatMap((node) => (node.artifactType ? [node.artifactType] : [])))
   ];
@@ -561,8 +563,9 @@ function formatWorkflowNodeForPrompt(node: WorkflowGraphNode, index: number): st
     lines.push(`Instruction: ${node.instruction}`);
   }
 
-  if (node.modelProfileId) {
-    lines.push(`Preferred model profile: ${node.modelProfileId}`);
+  const semanticModelProfileIds = readWorkflowNodeSemanticModelProfileIds(node);
+  if (semanticModelProfileIds.length > 0) {
+    lines.push(`Required model capability profile: ${semanticModelProfileIds.join(', ')}`);
   }
 
   if (nodeToolIds.length > 0) {
@@ -615,8 +618,90 @@ function readDependencyManifestModelProfileIds(
   }
 
   return uniqueStrings(
-    manifest.modelAssets.map((asset) => asset.modelProfileId || asset.modelId || asset.key)
+    manifest.modelAssets.map((asset) => readDependencyManifestSemanticModelProfileId(asset))
   );
+}
+
+function readWorkflowNodeSemanticModelProfileIds(node: WorkflowGraphNode): string[] {
+  if (node.type !== 'llm') {
+    return [];
+  }
+
+  return [getSemanticModelProfileIdForTaskType(readTrimmedString(node.config?.llmTaskType))];
+}
+
+function readDependencyManifestSemanticModelProfileId(
+  asset: NonNullable<RolePackageManifest['dependencyManifest']>['modelAssets'][number]
+): string {
+  return getSemanticModelProfileIdForCapabilities({
+    capabilities: asset.capabilities,
+    inputTypes: asset.inputTypes,
+    outputTypes: asset.outputTypes
+  }) ?? mapModelProfileIdToSemanticDefault(asset.modelProfileId || asset.modelId || asset.key);
+}
+
+function getSemanticModelProfileIdForTaskType(taskType: string | undefined): string {
+  if (taskType === 'vision') return 'qiu-vision-default';
+  if (taskType === 'audio_transcription') return 'qiu-asr-default';
+  if (taskType === 'image_generation') return 'qiu-image-generation-default';
+  if (taskType === 'image_editing') return 'qiu-image-editing-default';
+  if (taskType === 'video_understanding' || taskType === 'video_generation') return 'qiu-vision-default';
+  if (taskType === 'embedding') return 'qiu-embedding-default';
+  if (taskType === 'rerank') return 'qiu-rerank-default';
+  return 'qiu-general-default';
+}
+
+function getSemanticModelProfileIdForCapabilities(input: {
+  capabilities?: string[];
+  inputTypes?: string[];
+  outputTypes?: string[];
+}): string | undefined {
+  const capabilities = new Set((input.capabilities ?? []).map(normalizeModelRequirementToken));
+  const inputTypes = new Set((input.inputTypes ?? []).map(normalizeModelRequirementToken));
+  const outputTypes = new Set((input.outputTypes ?? []).map(normalizeModelRequirementToken));
+
+  if (capabilities.has('audio_to_text')) return 'qiu-asr-default';
+  if (capabilities.has('embedding') || outputTypes.has('embedding')) return 'qiu-embedding-default';
+  if (capabilities.has('rerank') || outputTypes.has('scores')) return 'qiu-rerank-default';
+  if (capabilities.has('image_editing') || capabilities.has('image_to_image')) return 'qiu-image-editing-default';
+  if (capabilities.has('text_to_image') || (outputTypes.has('image') && !inputTypes.has('image'))) {
+    return 'qiu-image-generation-default';
+  }
+  if (
+    capabilities.has('image_understanding') ||
+    capabilities.has('vision_understanding') ||
+    capabilities.has('vision_text') ||
+    (inputTypes.has('image') && (outputTypes.has('text') || outputTypes.has('json')))
+  ) {
+    return 'qiu-vision-default';
+  }
+  if (capabilities.has('video_generation') || outputTypes.has('video')) return 'qiu-vision-default';
+  if (capabilities.has('video_understanding') || inputTypes.has('video')) return 'qiu-vision-default';
+  if (capabilities.has('text') || capabilities.has('reasoning') || capabilities.has('reasoning_text')) {
+    return 'qiu-general-default';
+  }
+
+  return undefined;
+}
+
+function mapModelProfileIdToSemanticDefault(profileId: string): string {
+  const normalized = profileId.trim().toLowerCase();
+  if (!normalized) return '';
+  if (normalized.startsWith('qiu-')) return profileId.trim();
+  if (normalized.includes('asr') || normalized.includes('speech') || normalized.includes('audio')) return 'qiu-asr-default';
+  if (normalized.includes('gpt-image') || normalized.includes('img2img') || normalized.includes('image-edit')) {
+    return 'qiu-image-editing-default';
+  }
+  if (normalized.includes('image') || normalized.includes('vision') || normalized.includes('vl') || normalized.includes('gpt-4o')) {
+    return 'qiu-vision-default';
+  }
+  if (normalized.includes('embedding') || normalized.includes('embed')) return 'qiu-embedding-default';
+  if (normalized.includes('rerank')) return 'qiu-rerank-default';
+  return 'qiu-general-default';
+}
+
+function normalizeModelRequirementToken(value: string): string {
+  return value.trim().toLowerCase().replace(/[-\s]+/g, '_');
 }
 
 function readDependencyManifestToolIds(manifest: RolePackageManifest['dependencyManifest']): string[] {

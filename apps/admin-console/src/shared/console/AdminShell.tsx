@@ -9,6 +9,7 @@ import {
   DatabaseOutlined,
   DollarOutlined,
   LogoutOutlined,
+  MessageOutlined,
   PlusCircleOutlined,
   SafetyOutlined,
   UserOutlined
@@ -36,6 +37,7 @@ function selectedKey(pathname: string) {
   if (pathname.startsWith('/plans')) return 'plans';
   if (pathname.startsWith('/workspaces')) return 'workspaces';
   if (pathname.startsWith('/desktop-releases')) return 'desktop-releases';
+  if (pathname.startsWith('/issue-messages')) return 'issue-messages';
   if (pathname.startsWith('/assets')) return 'assets';
   if (pathname.startsWith('/audit')) return 'audit';
   if (pathname.startsWith('/factories')) return 'factories';
@@ -132,6 +134,11 @@ export function AdminShell({ currentAccount, children }: AdminShellProps) {
               key: 'assets',
               icon: <DatabaseOutlined />,
               label: <Link href="/assets">资产中心</Link>
+            },
+            {
+              key: 'issue-messages',
+              icon: <MessageOutlined />,
+              label: <Link href="/issue-messages">问题消息</Link>
             },
             {
               key: 'desktop-releases',

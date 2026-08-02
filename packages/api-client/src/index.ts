@@ -38,14 +38,20 @@ import type {
   ArchiveAdminRoleTemplateResponse,
   CreateAdminRoleTemplateRequest,
   CreateAdminRoleTemplateResponse,
+  CreateDesktopIssueReportRequest,
+  CreateDesktopIssueReportResponse,
   DeleteAdminRoleTemplateResponse,
   DeleteAdminAssetDefinitionResponse,
+  DeleteAdminIssueMessageResponse,
+  GetAdminIssueMessageResponse,
   GetAdminRoleTemplateResponse,
   ListAdminActionLogsResponse,
   ListAdminAssetDefinitionsQuery,
   ListAdminAssetDefinitionsResponse,
   ListAdminDesktopReleasesQuery,
   ListAdminDesktopReleasesResponse,
+  ListAdminIssueMessagesQuery,
+  ListAdminIssueMessagesResponse,
   ListAdminRoleTemplatesResponse,
   ListToolActionCatalogResponse,
   CancelWorkspaceInvitationResponse,
@@ -79,6 +85,8 @@ import type {
   TestAdminRoleTemplateResponse,
   UpdateAdminAssetDefinitionRequest,
   UpdateAdminAssetDefinitionResponse,
+  UpdateAdminIssueMessageRequest,
+  UpdateAdminIssueMessageResponse,
   UpdateAdminWorkspaceStatusRequest,
   UpdateAdminWorkspaceStatusResponse,
   UploadAdminDesktopReleaseAssetResponse,
@@ -296,6 +304,51 @@ export class QiuApiClient {
     }
 
     return body as UploadAdminDesktopReleaseAssetResponse;
+  }
+
+  listAdminIssueMessages(
+    params?: ListAdminIssueMessagesQuery
+  ): Promise<ListAdminIssueMessagesResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.page !== undefined) {
+      searchParams.set('page', String(params.page));
+    }
+    if (params?.pageSize !== undefined) {
+      searchParams.set('pageSize', String(params.pageSize));
+    }
+    if (params?.query) {
+      searchParams.set('query', params.query);
+    }
+    if (params?.status) {
+      searchParams.set('status', params.status);
+    }
+    if (params?.category) {
+      searchParams.set('category', params.category);
+    }
+    if (params?.severity) {
+      searchParams.set('severity', params.severity);
+    }
+    if (params?.workspaceId) {
+      searchParams.set('workspaceId', params.workspaceId);
+    }
+
+    const queryString = searchParams.toString();
+    return this.get(`/api/v1/admin/issue-messages${queryString ? `?${queryString}` : ''}`);
+  }
+
+  getAdminIssueMessage(issueId: string): Promise<GetAdminIssueMessageResponse> {
+    return this.get(`/api/v1/admin/issue-messages/${encodeURIComponent(issueId)}`);
+  }
+
+  updateAdminIssueMessage(
+    issueId: string,
+    input: UpdateAdminIssueMessageRequest
+  ): Promise<UpdateAdminIssueMessageResponse> {
+    return this.patch(`/api/v1/admin/issue-messages/${encodeURIComponent(issueId)}`, input);
+  }
+
+  deleteAdminIssueMessage(issueId: string): Promise<DeleteAdminIssueMessageResponse> {
+    return this.delete(`/api/v1/admin/issue-messages/${encodeURIComponent(issueId)}`);
   }
 
   listAdminRoleTemplates(): Promise<ListAdminRoleTemplatesResponse> {
@@ -553,6 +606,12 @@ export class QiuApiClient {
 
   redeemDesktopBindingCode(input: RedeemDesktopBindingCodeRequest): Promise<RedeemDesktopBindingCodeResponse> {
     return this.post('/api/v1/desktop/bindings/redeem', input);
+  }
+
+  submitDesktopIssueReport(
+    input: CreateDesktopIssueReportRequest
+  ): Promise<CreateDesktopIssueReportResponse> {
+    return this.post('/api/v1/desktop/issue-reports', input);
   }
 
   checkDesktopUpdate(params?: CheckDesktopUpdateQuery): Promise<CheckDesktopUpdateResponse> {

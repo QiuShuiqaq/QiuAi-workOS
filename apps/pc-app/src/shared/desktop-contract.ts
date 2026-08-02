@@ -14,10 +14,12 @@ export type ModelCapability =
   | 'embedding'
   | 'rerank'
   | 'long_context'
+  | 'image_understanding'
   | 'vision_understanding'
   | 'video_understanding'
   | 'text_to_image'
   | 'image_to_image'
+  | 'image_editing'
   | 'image_generation'
   | 'video_generation'
   | 'text_to_video'
@@ -197,6 +199,7 @@ export interface ModelCatalogEntry {
   id: string;
   label?: string;
   ownedBy?: string;
+  source?: 'provider' | 'built_in' | 'manual';
   capabilities: ModelCapability[];
 }
 
@@ -225,6 +228,7 @@ export type ModelCredentialBindingMode = 'provider_default' | 'credential_ref' |
 export interface RoleModelCredentialBinding {
   roleCode: string;
   modelProfileId: string;
+  runtimeModelProfileId?: string;
   mode: ModelCredentialBindingMode;
   credentialId?: string;
   apiBaseUrl?: string;

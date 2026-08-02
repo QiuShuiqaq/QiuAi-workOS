@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+
 import {
   BadRequestException,
   ConflictException,
@@ -30,10 +32,12 @@ import {
 import {
   AcceptDesktopAgreementResponse,
   CancelDesktopBindingCodeResponse,
+  CreateDesktopIssueReportResponse,
   CreateDesktopBindingCodeResponse,
   DesktopAgreementAcceptanceStatusResponse,
   DesktopAgreementAcceptanceSummary,
   DesktopDeviceSummary,
+  DesktopIssueReportSummary,
   DesktopRuntimeSnapshot,
   DesktopRuntimeSyncResponse,
   ListDesktopBindingCodesResponse,
@@ -42,6 +46,7 @@ import {
   UpdateDesktopBindingCodeResponse,
   parseAcceptDesktopAgreementRequest,
   parseAgreementAcceptanceStatusQuery,
+  parseCreateDesktopIssueReportRequest,
   parseCreateDesktopBindingCodeRequest,
   parseDesktopRuntimeSyncRequest,
   parseRedeemDesktopBindingCodeRequest,
@@ -95,6 +100,30 @@ type DesktopAgreementAcceptanceRecord = {
   minimumReadSeconds?: number | null;
   actualReadSeconds?: number | null;
   acceptedAt: DesktopReleaseDate;
+};
+
+type DesktopIssueReportRecord = {
+  id: string;
+  issueNo: string;
+  category: string;
+  severity: string;
+  status: string;
+  title: string;
+  description: string;
+  contact?: string | null;
+  workspaceId?: string | null;
+  runtimeId?: string | null;
+  deviceId?: string | null;
+  deviceName?: string | null;
+  appVersion?: string | null;
+  platform?: string | null;
+  diagnostics?: unknown;
+  adminNote?: string | null;
+  createdAt: DesktopReleaseDate;
+  updatedAt: DesktopReleaseDate;
+  workspace?: {
+    name: string;
+  } | null;
 };
 
 type DesktopApplicationType = 'digital_employee' | 'digital_factory';
@@ -355,6 +384,64 @@ export class DesktopSyncService {
 
     return {
       data: this.toDesktopAgreementAcceptanceSummary(acceptance)
+    };
+  }
+
+  async createDesktopIssueReport(
+    body: unknown,
+    context: {
+      deviceToken?: string;
+    } = {}
+  ): Promise<CreateDesktopIssueReportResponse> {
+    const request = parseCreateDesktopIssueReportRequest(body);
+    const now = new Date();
+    const diagnostics = sanitizeDesktopIssueDiagnostics(request.diagnostics);
+
+    if (isDatabasePersistenceEnabled()) {
+      const verifiedDevice = request.workspaceId && context.deviceToken
+        ? await this.tryResolveDatabaseDeviceForIssueReport(request.workspaceId, context.deviceToken)
+        : undefined;
+      const workspaceId = verifiedDevice?.workspaceId;
+      const created = await this.createDatabaseIssueReportWithUniqueNo({
+        category: request.category,
+        severity: request.severity,
+        title: request.title,
+        description: request.description,
+        contact: request.contact ?? null,
+        workspaceId,
+        desktopDeviceId: verifiedDevice?.id,
+        runtimeId: request.runtimeId ?? verifiedDevice?.runtimeId ?? null,
+        deviceId: request.deviceId ?? verifiedDevice?.deviceId ?? null,
+        deviceName: request.deviceName ?? verifiedDevice?.deviceName ?? null,
+        appVersion: request.appVersion ?? verifiedDevice?.appVersion ?? null,
+        platform: request.platform ?? verifiedDevice?.platform ?? null,
+        diagnostics,
+        now
+      });
+
+      return {
+        data: this.toDesktopIssueReportSummary(created)
+      };
+    }
+
+    const created = this.store.createDesktopIssueReport({
+      issueNo: this.createIssueNo(now),
+      category: request.category,
+      severity: request.severity,
+      title: request.title,
+      description: request.description,
+      contact: request.contact ?? null,
+      workspaceId: request.workspaceId ?? null,
+      runtimeId: request.runtimeId ?? null,
+      deviceId: request.deviceId ?? null,
+      deviceName: request.deviceName ?? null,
+      appVersion: request.appVersion ?? null,
+      platform: request.platform ?? null,
+      diagnostics: diagnostics as Record<string, unknown> | null
+    });
+
+    return {
+      data: this.toDesktopIssueReportSummary(created)
     };
   }
 
@@ -1473,6 +1560,79 @@ export class DesktopSyncService {
     return value.match(/\d+/g)?.map((item) => Number(item)) ?? [0];
   }
 
+  private async tryResolveDatabaseDeviceForIssueReport(workspaceId: string, deviceToken: string) {
+    try {
+      return await this.requireDatabaseDeviceTokenForWorkspace(workspaceId, deviceToken);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async createDatabaseIssueReportWithUniqueNo(input: {
+    category: string;
+    severity: string;
+    title: string;
+    description: string;
+    contact: string | null;
+    workspaceId?: string | null;
+    desktopDeviceId?: string | null;
+    runtimeId?: string | null;
+    deviceId?: string | null;
+    deviceName?: string | null;
+    appVersion?: string | null;
+    platform?: string | null;
+    diagnostics: Record<string, unknown> | null;
+    now: Date;
+  }) {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        return await this.prismaService.desktopIssueReport.create({
+          data: {
+            issueNo: this.createIssueNo(input.now),
+            category: input.category as never,
+            severity: input.severity as never,
+            title: input.title,
+            description: input.description,
+            contact: input.contact,
+            workspaceId: input.workspaceId,
+            desktopDeviceId: input.desktopDeviceId,
+            runtimeId: input.runtimeId,
+            deviceId: input.deviceId,
+            deviceName: input.deviceName,
+            appVersion: input.appVersion,
+            platform: input.platform,
+            diagnostics: input.diagnostics
+              ? (input.diagnostics as Prisma.InputJsonValue)
+              : Prisma.JsonNull
+          },
+          include: {
+            workspace: {
+              select: {
+                name: true
+              }
+            }
+          }
+        });
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
+          throw error;
+        }
+      }
+    }
+
+    throw new ConflictException({
+      error: {
+        code: 'CONFLICT',
+        message: 'Failed to allocate a unique issue number.'
+      }
+    });
+  }
+
+  private createIssueNo(date: Date): string {
+    const day = date.toISOString().slice(0, 10).replace(/-/g, '');
+    return `ISSUE-${day}-${randomBytes(3).toString('hex').toUpperCase()}`;
+  }
+
   private toDateTimeMs(value: DesktopReleaseDate | null | undefined): number {
     if (!value) {
       return 0;
@@ -1509,6 +1669,70 @@ export class DesktopSyncService {
       minimumReadSeconds: acceptance.minimumReadSeconds ?? undefined,
       actualReadSeconds: acceptance.actualReadSeconds ?? undefined
     };
+  }
+
+  private toDesktopIssueReportSummary(report: DesktopIssueReportRecord): DesktopIssueReportSummary {
+    const summary = {
+      id: report.id,
+      issueNo: report.issueNo,
+      category: this.toDesktopIssueCategory(report.category),
+      severity: this.toDesktopIssueSeverity(report.severity),
+      status: this.toDesktopIssueStatus(report.status),
+      title: report.title,
+      description: report.description,
+      contact: report.contact ?? undefined,
+      workspaceId: report.workspaceId ?? undefined,
+      workspaceName: report.workspace?.name,
+      runtimeId: report.runtimeId ?? undefined,
+      deviceId: report.deviceId ?? undefined,
+      deviceName: report.deviceName ?? undefined,
+      appVersion: report.appVersion ?? undefined,
+      platform: report.platform ?? undefined,
+      diagnostics: isRecord(report.diagnostics)
+        ? (report.diagnostics as Record<string, unknown>)
+        : undefined,
+      adminNote: report.adminNote ?? undefined,
+      createdAt: this.toRequiredIsoDateString(report.createdAt),
+      updatedAt: this.toRequiredIsoDateString(report.updatedAt)
+    };
+
+    return summary;
+  }
+
+  private toDesktopIssueCategory(value: string): DesktopIssueReportSummary['category'] {
+    if (
+      value === 'BUG' ||
+      value === 'USAGE' ||
+      value === 'FEATURE_REQUEST' ||
+      value === 'BAD_OUTPUT' ||
+      value === 'OTHER'
+    ) {
+      return value;
+    }
+
+    return 'OTHER';
+  }
+
+  private toDesktopIssueSeverity(value: string): DesktopIssueReportSummary['severity'] {
+    if (value === 'IMPACTING' || value === 'BLOCKING') {
+      return value;
+    }
+
+    return 'NORMAL';
+  }
+
+  private toDesktopIssueStatus(value: string): DesktopIssueReportSummary['status'] {
+    if (
+      value === 'VIEWED' ||
+      value === 'IN_PROGRESS' ||
+      value === 'FIXED' ||
+      value === 'WONT_FIX' ||
+      value === 'CLOSED'
+    ) {
+      return value;
+    }
+
+    return 'NEW';
   }
 
   private toDesktopReleaseSummary(release: DesktopReleaseRecord) {
@@ -1640,4 +1864,78 @@ export class DesktopSyncService {
 
     return 'windows';
   }
+}
+
+function sanitizeDesktopIssueDiagnostics(
+  diagnostics: Record<string, unknown> | undefined
+): Record<string, unknown> | null {
+  if (!diagnostics) {
+    return null;
+  }
+
+  return sanitizeJsonRecord(diagnostics, 0);
+}
+
+function sanitizeJsonRecord(input: Record<string, unknown>, depth: number): Record<string, unknown> {
+  const output: Record<string, unknown> = {};
+  const entries = Object.entries(input).slice(0, 80);
+
+  for (const [key, value] of entries) {
+    const normalizedKey = key.trim().slice(0, 80);
+    if (!normalizedKey || isSensitiveDiagnosticKey(normalizedKey)) {
+      continue;
+    }
+
+    const sanitizedValue = sanitizeJsonValue(value, depth + 1);
+    if (sanitizedValue !== undefined) {
+      output[normalizedKey] = sanitizedValue;
+    }
+  }
+
+  return output;
+}
+
+function sanitizeJsonValue(value: unknown, depth: number): unknown {
+  if (depth > 5 || value === undefined || typeof value === 'function' || typeof value === 'symbol') {
+    return undefined;
+  }
+
+  if (value === null || typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : undefined;
+  }
+
+  if (typeof value === 'string') {
+    return redactLocalPath(value).slice(0, 1200);
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 60)
+      .map((item) => sanitizeJsonValue(item, depth + 1))
+      .filter((item) => item !== undefined);
+  }
+
+  if (isRecord(value)) {
+    return sanitizeJsonRecord(value, depth + 1);
+  }
+
+  return undefined;
+}
+
+function isSensitiveDiagnosticKey(key: string): boolean {
+  return /api[_-]?key|secret|token|authorization|password|credential/i.test(key);
+}
+
+function redactLocalPath(value: string): string {
+  return value
+    .replace(/[A-Za-z]:\\(?:[^\\\r\n]+\\)+([^\\\r\n]+)/g, '...\\$1')
+    .replace(/\/(?:[^/\r\n]+\/)+([^/\r\n]+)/g, '.../$1');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

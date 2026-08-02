@@ -108,6 +108,7 @@ type WorkflowLlmTaskType =
   | 'vision'
   | 'video_understanding'
   | 'image_generation'
+  | 'image_editing'
   | 'video_generation'
   | 'embedding'
   | 'rerank'
@@ -347,14 +348,19 @@ const medicalCaseVideoScreeningGates: Array<{
   key: MedicalCaseVideoScreeningGateKey;
   label: string;
   description: string;
-  rules: Array<{ metric: string; operator: '>=' | '<=' | 'equals' | 'between'; value: unknown; failReason: string }>;
+  rules: Array<{
+    metric: string;
+    operator: '>=' | '<=' | '>' | '<' | 'equals' | 'notEquals' | 'between';
+    value: unknown;
+    failReason: string;
+  }>;
 }> = [
   {
     key: 'video_spec',
     label: '视频规格筛选',
     description: '先剔除比例、时长和音轨不达标的视频，减少后续模型成本。',
     rules: [
-      { metric: 'portraitRatio', operator: 'between', value: [1.72, 1.86], failReason: '视频不是合格的 9:16 竖屏比例' },
+      { metric: 'portraitRatio', operator: '<', value: 1, failReason: '视频为竖屏或非横屏比例，不符合横屏要求' },
       { metric: 'durationSeconds', operator: '>=', value: 20, failReason: '视频时长小于 20 秒' },
       { metric: 'hasAudio', operator: 'equals', value: true, failReason: '视频缺少可识别音轨' }
     ]
@@ -481,6 +487,8 @@ const modelProfileOptions = [
   { value: 'qiu-general-default', label: '企业默认通用模型（兜底，PC 端配置）' },
   { value: 'qiu-reasoning-default', label: '企业默认推理模型（兜底，PC 端配置）' },
   { value: 'qiu-vision-default', label: '企业默认视觉模型（兜底，PC 端配置）' },
+  { value: 'qiu-image-generation-default', label: '企业默认文生图模型（兜底，PC 端配置）' },
+  { value: 'qiu-image-editing-default', label: '企业默认参考图编辑模型（兜底，PC 端配置）' },
   { value: 'qiu-asr-default', label: '企业默认语音模型（兜底，PC 端配置）' },
   { value: 'aliyun-fun-asr', label: '阿里云 / fun-asr（语音转文字）' },
   { value: 'aliyun-qwen3-asr-flash-filetrans', label: '阿里云 / qwen3-asr-flash-filetrans（文件转写）' },
@@ -580,8 +588,15 @@ const llmTaskTypeOptions: Array<{
   {
     value: 'image_generation',
     label: '生成图片',
-    description: '根据文本或参考图生成图片素材。',
-    requiredCapabilities: ['image_generation', 'text_to_image', 'image_editing'],
+    description: '根据文本提示词生成图片素材。',
+    requiredCapabilities: ['image_generation', 'text_to_image'],
+    defaultOutputMode: 'json'
+  },
+  {
+    value: 'image_editing',
+    label: '参考图编辑',
+    description: '根据参考图和文本指令生成改图结果。',
+    requiredCapabilities: ['image_editing', 'image_to_image'],
     defaultOutputMode: 'json'
   },
   {
@@ -894,7 +909,7 @@ function createCanvasNode(
             ? '把最终内容生成可下载产物。'
             : '按节点目标处理任务，并把结果写入输出变量。',
     toolId,
-    modelProfileId: type === 'llm' ? 'qiu-general-default' : undefined,
+    modelProfileId: type === 'llm' ? getDefaultModelProfileIdForLlmTask('text') : undefined,
     artifactType,
     inputVariables:
       type === 'input'
@@ -1175,6 +1190,16 @@ function readWorkflowLlmTaskOption(taskType: WorkflowLlmTaskType) {
   return llmTaskTypeOptions.find((option) => option.value === taskType) ?? llmTaskTypeOptions[0];
 }
 
+function getDefaultModelProfileIdForLlmTask(taskType: WorkflowLlmTaskType): string {
+  if (taskType === 'vision') return 'qiu-vision-default';
+  if (taskType === 'audio_transcription') return 'qiu-asr-default';
+  if (taskType === 'image_generation') return 'qiu-image-generation-default';
+  if (taskType === 'image_editing') return 'qiu-image-editing-default';
+  if (taskType === 'video_understanding' || taskType === 'video_generation') return 'qiu-vision-default';
+  if (taskType === 'reasoning') return 'qiu-reasoning-default';
+  return 'qiu-general-default';
+}
+
 function normalizeModelCapability(value: string) {
   return value.trim().toLowerCase().replace(/[-\s]+/g, '_');
 }
@@ -1201,6 +1226,21 @@ function fallbackModelOptionSupportsLlmTask(option: { value: string }, taskType:
   }
   if (taskType === 'reasoning') return option.value.includes('reasoning') || option.value.includes('deepseek');
   if (taskType === 'vision') return option.value.includes('vision') || option.value.includes('gpt-4o');
+  if (taskType === 'image_generation') {
+    return option.value.includes('image-generation') ||
+      option.value.includes('gpt-image') ||
+      option.value.includes('imagen') ||
+      option.value.includes('seedream') ||
+      option.value.includes('nano-banana') ||
+      option.value.includes('qwen-image');
+  }
+  if (taskType === 'image_editing') {
+    return option.value.includes('image-editing') ||
+      option.value.includes('gpt-image') ||
+      option.value.includes('seedream') ||
+      option.value.includes('nano-banana') ||
+      option.value.includes('qwen-image');
+  }
   if (taskType === 'audio_transcription' || taskType === 'video_screening_batch') {
     return option.value.includes('asr') ||
       option.value.includes('qiu-asr') ||
@@ -1290,7 +1330,7 @@ function inferWorkflowNodeOutputType(node: RoleWorkflowGraphNode, variableName: 
   if (node.type === 'condition') return 'boolean';
   if (node.type === 'llm') {
     const taskType = readWorkflowLlmTaskType(node);
-    if (taskType === 'image_generation' || taskType === 'video_generation') return 'asset';
+    if (taskType === 'image_generation' || taskType === 'image_editing' || taskType === 'video_generation') return 'asset';
     if (taskType === 'embedding' || taskType === 'rerank' || readWorkflowModelOutputMode(node) === 'json') return 'json';
   }
   if (node.type === 'knowledge' || node.type === 'llm' || node.type === 'output') {
@@ -1320,7 +1360,7 @@ function getWorkflowNodeDefaultOutputVariables(node: RoleWorkflowGraphNode): str
   }
   if (node.type === 'llm') {
     const taskType = readWorkflowLlmTaskType(node);
-    if (taskType === 'image_generation') return [`${node.id}.image`];
+    if (taskType === 'image_generation' || taskType === 'image_editing') return [`${node.id}.image`];
     if (taskType === 'video_generation') return [`${node.id}.video`];
     if (taskType === 'embedding') return [`${node.id}.embedding`];
     if (taskType === 'rerank') return [`${node.id}.scores`];
@@ -1426,10 +1466,24 @@ function deriveWorkflowModelProfileIds(graph: RoleWorkflowGraph): string[] {
           ? node.config.requiredModelProfileIds.filter((item): item is string => typeof item === 'string')
           : [];
         return isModelNodeType(node.type)
-          ? [node.modelProfileId ?? 'qiu-general-default', ...requiredModelProfileIds]
+          ? [getDefaultModelProfileIdForLlmTask(readWorkflowLlmTaskType(node)), ...requiredModelProfileIds.map(mapModelProfileIdToSemanticDefault)]
           : requiredModelProfileIds;
       })
   );
+}
+
+function mapModelProfileIdToSemanticDefault(profileId: string): string {
+  const normalized = profileId.trim().toLowerCase();
+  if (!normalized) return '';
+  if (normalized.startsWith('qiu-')) return profileId.trim();
+  if (normalized.includes('asr') || normalized.includes('speech') || normalized.includes('audio')) return 'qiu-asr-default';
+  if (normalized.includes('gpt-image') || normalized.includes('img2img') || normalized.includes('image-edit')) {
+    return 'qiu-image-editing-default';
+  }
+  if (normalized.includes('image') || normalized.includes('vision') || normalized.includes('vl') || normalized.includes('gpt-4o')) {
+    return 'qiu-vision-default';
+  }
+  return 'qiu-general-default';
 }
 
 function deriveWorkflowArtifactTypes(graph: RoleWorkflowGraph): string[] {
@@ -1968,7 +2022,7 @@ function createCrossBorderImageFactoryWorkflowGraph(): RoleWorkflowGraph {
       name: '理解图片并生成提示词',
       instruction:
         '使用多模态模型读取商品参考图和平台规则，直接输出每个商品、每个所选产物包的生图提示词。不要生成图片，只输出 JSON。',
-      modelProfileId: 'openai-gpt-4o',
+      modelProfileId: 'qiu-vision-default',
       inputVariables: ['factory_request', 'factory_items', 'selected_packages', 'target_platform'],
       outputVariables: ['package_instructions'],
       config: {
@@ -1998,11 +2052,11 @@ function createCrossBorderImageFactoryWorkflowGraph(): RoleWorkflowGraph {
       name: '批量生成商品图',
       instruction:
         '按 package_instructions 调用图片生成模型。只处理用户勾选的产物包，保持商品主体一致，输出图片远程 URL 元数据；大图片不经过服务端。',
-      modelProfileId: 'openai-gpt-image-2',
+      modelProfileId: 'qiu-image-editing-default',
       inputVariables: ['package_instructions', 'start.images'],
       outputVariables: ['factory_generated_images'],
       config: {
-        llmTaskType: 'image_generation',
+        llmTaskType: 'image_editing',
         outputMode: 'json',
         packageKeys: crossBorderFactoryDefaultPackageKeys,
         output: {
@@ -2017,7 +2071,7 @@ function createCrossBorderImageFactoryWorkflowGraph(): RoleWorkflowGraph {
       name: '可选质检',
       instruction:
         '如果 quality_check_mode 为 none，则输出 skipped。basic 只做文件数量、命名、尺寸规则检查；smart 再用多模态模型检查主体一致性、平台合规和卖点可读性。',
-      modelProfileId: 'openai-gpt-4o',
+      modelProfileId: 'qiu-vision-default',
       inputVariables: ['factory_generated_images', 'factory_items', 'quality_check_mode', 'target_platform'],
       outputVariables: ['quality_report'],
       config: {
@@ -4049,6 +4103,7 @@ function WorkflowReactFlowEditor({
     const schema = readWorkflowModelSchema(node);
     const nextNode: RoleWorkflowGraphNode = {
       ...node,
+      modelProfileId: getDefaultModelProfileIdForLlmTask(taskType),
       config: {
         ...(node.config ?? {}),
         llmTaskType: taskType,

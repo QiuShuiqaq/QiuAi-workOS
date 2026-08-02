@@ -52,10 +52,32 @@ const initialModelProfiles: ModelProfile[] = [
     providerName: 'Pending Model Provider',
     modelName: 'vision-review',
     purpose: 'vision',
-    capabilities: ['vision_text', 'text'],
+    capabilities: ['image_understanding', 'vision_text', 'text'],
     temperature: 0.2,
     maxTokens: 4096,
     fallbackProfileId: 'qiu-general-default',
+    monthlyBudgetCents: 0
+  },
+  {
+    id: 'qiu-image-generation-default',
+    providerId: 'provider-pending',
+    providerName: 'Pending Model Provider',
+    modelName: 'text-to-image',
+    purpose: 'vision',
+    capabilities: ['image_generation', 'text_to_image'],
+    temperature: 0.2,
+    maxTokens: 4096,
+    monthlyBudgetCents: 0
+  },
+  {
+    id: 'qiu-image-editing-default',
+    providerId: 'provider-pending',
+    providerName: 'Pending Model Provider',
+    modelName: 'reference-image-editing',
+    purpose: 'vision',
+    capabilities: ['image_generation', 'image_to_image', 'image_editing'],
+    temperature: 0.2,
+    maxTokens: 4096,
     monthlyBudgetCents: 0
   },
   {

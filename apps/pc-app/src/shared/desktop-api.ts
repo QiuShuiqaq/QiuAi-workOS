@@ -96,6 +96,37 @@ export interface DesktopAgreementAcceptRequest {
   actualReadSeconds: number;
 }
 
+export type DesktopIssueCategory = 'BUG' | 'USAGE' | 'FEATURE_REQUEST' | 'BAD_OUTPUT' | 'OTHER';
+export type DesktopIssueSeverity = 'NORMAL' | 'IMPACTING' | 'BLOCKING';
+
+export interface DesktopIssueReportSubmitRequest {
+  category: DesktopIssueCategory;
+  severity: DesktopIssueSeverity;
+  title: string;
+  description: string;
+  contact?: string;
+  workspaceId?: string;
+  runtimeId?: string;
+  deviceId?: string;
+  deviceName?: string;
+  appVersion?: string;
+  platform?: string;
+  diagnostics?: Record<string, unknown>;
+}
+
+export interface DesktopIssueReportSubmitResult {
+  data: {
+    id: string;
+    issueNo: string;
+    category: DesktopIssueCategory;
+    severity: DesktopIssueSeverity;
+    status: string;
+    title: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+}
+
 export interface DesktopRuntimeSyncResponse {
   data: {
     accepted: true;
@@ -225,6 +256,16 @@ export interface DesktopModelTestRequest {
   timeoutMs?: number;
 }
 
+export interface DesktopModelTestCheck {
+  id: string;
+  label: string;
+  status: 'passed' | 'failed' | 'skipped';
+  message: string;
+  endpoint?: string;
+  elapsedMs?: number;
+  costWarning?: boolean;
+}
+
 export interface DesktopModelTestResponse {
   providerId: string;
   providerName: string;
@@ -233,6 +274,7 @@ export interface DesktopModelTestResponse {
   message: string;
   checkedAt: string;
   mode: 'openai_compatible' | 'aliyun_bailian' | 'tencent_cloud';
+  checks?: DesktopModelTestCheck[];
 }
 
 export interface DesktopModelChatResponse {
@@ -368,6 +410,7 @@ export interface QiuDesktopBridge {
   getRuntimeState(): Promise<DesktopRuntimeState>;
   getUserAgreementStatus(): Promise<DesktopAgreementStatus>;
   acceptUserAgreement(request: DesktopAgreementAcceptRequest): Promise<DesktopAgreementStatus>;
+  submitIssueReport(request: DesktopIssueReportSubmitRequest): Promise<DesktopIssueReportSubmitResult>;
   bindDesktopDevice(bindingCode: string): Promise<DesktopRuntimeState>;
   unbindDesktopDevice(): Promise<DesktopRuntimeState>;
   checkServerConnection(): Promise<DesktopServerConnectionStatus>;

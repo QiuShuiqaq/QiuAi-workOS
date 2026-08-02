@@ -14,6 +14,7 @@
 } from './desktop-contract.js';
 import { resolveModelProfileCredential } from './desktop-model-credentials.js';
 import { readModelProfileCapabilities } from './desktop-model-capabilities.js';
+import { readRequiredModelProfileIdsForRolePackage } from './desktop-role-requirements.js';
 import type {
   DesktopModelChatMessage,
   DesktopModelChatRequest,
@@ -420,6 +421,7 @@ export async function runDesktopTask(input: RunDesktopTaskInput): Promise<RunDes
     modelInvoker: input.modelInvoker,
     desktopToolInvoker: input.desktopToolInvoker,
     workspaceId: input.workspaceId,
+    roleModelCredentialBindings: input.roleModelCredentialBindings,
     createdAt: completedAt,
     onProgress: input.onProgress
   });
@@ -463,7 +465,7 @@ function buildContextFromRolePackage(rolePackage?: RolePackageManifest) {
   }
 
   return {
-    modelProfileIds: [...rolePackage.modelProfileIds],
+    modelProfileIds: readRequiredModelProfileIdsForRolePackage(rolePackage),
     toolIds: [...rolePackage.toolIds],
     knowledgeBindingIds: rolePackage.requiredKnowledgeSources.map((source) => source)
   };
@@ -485,11 +487,18 @@ function resolveRuntimeBinding(input: {
   const toolsById = new Map(input.tools.map((tool) => [tool.id, tool]));
   const knowledgeSourcesById = new Map(input.knowledgeSources.map((source) => [source.id, source]));
 
-  const modelProfiles = input.context.modelProfileIds.flatMap((profileId) => {
+  const requiredModelProfileIds = mergeUniqueStrings(
+    input.context.modelProfileIds.map(normalizeRuntimeRequirementModelProfileId)
+  );
+  const candidateModelProfileIds = mergeUniqueStrings([
+    ...requiredModelProfileIds,
+    ...input.enabledModelProfileIds
+  ]);
+  const modelProfiles = candidateModelProfileIds.flatMap((profileId) => {
     const profile = modelProfilesById.get(profileId);
     return profile && enabledModelIds.has(profileId) ? [profile] : [];
   });
-  const missingModelProfileIds = input.context.modelProfileIds.filter(
+  const missingModelProfileIds = requiredModelProfileIds.filter(
     (profileId) => !modelProfilesById.has(profileId) || !enabledModelIds.has(profileId)
   );
   const availableTools = input.context.toolIds.flatMap((toolId) => {
@@ -759,6 +768,7 @@ async function invokeConfiguredModel(input: {
   modelInvoker: DesktopModelInvoker;
   desktopToolInvoker?: DesktopToolInvoker;
   workspaceId?: string;
+  roleModelCredentialBindings?: RoleModelCredentialBinding[];
   createdAt: string;
   onProgress?: DesktopTaskProgressCallback;
 }): Promise<ModelInvocationResult> {
@@ -974,6 +984,7 @@ async function tryInvokeWorkflowRuntime(input: {
   modelInvoker: DesktopModelInvoker;
   desktopToolInvoker?: DesktopToolInvoker;
   workspaceId?: string;
+  roleModelCredentialBindings?: RoleModelCredentialBinding[];
   createdAt: string;
   onProgress?: DesktopTaskProgressCallback;
 }): Promise<ModelInvocationResult | undefined> {
@@ -1002,6 +1013,7 @@ async function runWorkflowRuntime(input: {
   modelInvoker: DesktopModelInvoker;
   desktopToolInvoker?: DesktopToolInvoker;
   workspaceId?: string;
+  roleModelCredentialBindings?: RoleModelCredentialBinding[];
   createdAt: string;
   onProgress?: DesktopTaskProgressCallback;
 }): Promise<ModelInvocationResult> {
@@ -1114,6 +1126,7 @@ async function runWorkflowRuntime(input: {
         binding: input.binding,
         rolePackage: input.rolePackage,
         profiles: input.profiles,
+        roleModelCredentialBindings: input.roleModelCredentialBindings,
         modelInvoker: input.modelInvoker,
         desktopToolInvoker: input.desktopToolInvoker,
         workspaceId: input.workspaceId,
@@ -1443,6 +1456,7 @@ async function executeWorkflowRuntimeNode(input: {
   binding: ResolvedRuntimeBinding;
   rolePackage?: RolePackageManifest;
   profiles: ModelProfile[];
+  roleModelCredentialBindings?: RoleModelCredentialBinding[];
   modelInvoker: DesktopModelInvoker;
   desktopToolInvoker?: DesktopToolInvoker;
   workspaceId?: string;
@@ -2825,6 +2839,7 @@ async function invokeWorkflowRuntimeModelNode(input: {
   binding: ResolvedRuntimeBinding;
   rolePackage?: RolePackageManifest;
   profiles: ModelProfile[];
+  roleModelCredentialBindings?: RoleModelCredentialBinding[];
   modelInvoker: DesktopModelInvoker;
   desktopToolInvoker?: DesktopToolInvoker;
   workspaceId?: string;
@@ -2841,7 +2856,13 @@ async function invokeWorkflowRuntimeModelNode(input: {
   outputVariables: string[];
   message: string;
 }> {
-  const profile = selectWorkflowRuntimeModelProfile(input.node, input.profiles, input.rolePackage);
+  const profile = selectWorkflowRuntimeModelProfile(
+    input.node,
+    input.profiles,
+    input.rolePackage,
+    input.task.roleCode,
+    input.roleModelCredentialBindings
+  );
   if (input.node.type === 'output') {
     const factoryOutputResult = completeWorkflowRuntimeFactoryVideoOutputNode(input);
     if (factoryOutputResult) {
@@ -2859,7 +2880,7 @@ async function invokeWorkflowRuntimeModelNode(input: {
     }
   }
 
-  if (readWorkflowRuntimeString(input.node.config?.llmTaskType) === 'image_generation') {
+  if (['image_generation', 'image_editing'].includes(readWorkflowRuntimeString(input.node.config?.llmTaskType) ?? '')) {
     const factoryResult = await invokeWorkflowRuntimeFactoryImageGenerationNode({
       ...input,
       profile
@@ -3735,10 +3756,12 @@ function selectFactoryAsrProfile(
   const asr = isWorkflowRuntimeRecord(factoryRequest?.asr) ? factoryRequest.asr : undefined;
   const requestedProfileId = readWorkflowRuntimeString(asr?.modelProfileId);
   if (requestedProfileId) {
-    return profiles.find((profile) => profile.id === requestedProfileId);
+    return profiles.find(
+      (profile) => profile.id === requestedProfileId && modelProfileSupportsAnyCapability(profile, ['audio_to_text'])
+    );
   }
 
-  return profiles.find((profile) => profile.capabilities?.includes('audio_to_text'));
+  return profiles.find((profile) => modelProfileSupportsAnyCapability(profile, ['audio_to_text']));
 }
 
 function hasFactoryToolAction(
@@ -5995,21 +6018,56 @@ function buildWorkflowRuntimeToolRequest(
 function selectWorkflowRuntimeModelProfile(
   node: WorkflowGraphNode,
   profiles: ModelProfile[],
-  rolePackage?: RolePackageManifest
+  rolePackage?: RolePackageManifest,
+  roleCode?: string,
+  roleModelCredentialBindings: RoleModelCredentialBinding[] = []
 ): ModelProfile {
-  const requiredModelProfileId = readDependencyManifestModelProfileIdForNode(rolePackage, node) ?? node.modelProfileId;
-  if (requiredModelProfileId) {
-    const selected = profiles.find((profile) => profile.id === requiredModelProfileId);
-    if (selected) {
-      return selected;
-    }
-
-    throw new Error(
-      `Workflow node "${node.name}" requires model profile "${requiredModelProfileId}", but it is not configured or enabled on this PC.`
-    );
+  const preferredModelProfileId = readDependencyManifestModelProfileIdForNode(rolePackage, node) ?? node.modelProfileId;
+  const requiredCapabilities = getWorkflowModelRequiredCapabilities(node);
+  const compatibleProfiles = profiles.filter((profile) =>
+    modelProfileSupportsAnyCapability(profile, requiredCapabilities)
+  );
+  const semanticDefaultProfileId = getWorkflowSemanticDefaultProfileId(node);
+  const runtimeOverrideProfileId = roleCode && semanticDefaultProfileId
+    ? roleModelCredentialBindings.find(
+        (binding) =>
+          binding.roleCode === roleCode &&
+          binding.modelProfileId === semanticDefaultProfileId &&
+          binding.runtimeModelProfileId
+      )?.runtimeModelProfileId
+    : undefined;
+  const runtimeOverrideProfile = runtimeOverrideProfileId
+    ? compatibleProfiles.find((profile) => profile.id === runtimeOverrideProfileId)
+    : undefined;
+  if (runtimeOverrideProfile) {
+    return runtimeOverrideProfile;
   }
 
-  return profiles.find(isWorkflowTextModelProfile) ?? profiles[0]!;
+  const preferredProfile = preferredModelProfileId && preferredModelProfileId.toLowerCase().startsWith('qiu-')
+    ? compatibleProfiles.find((profile) => profile.id === preferredModelProfileId)
+    : undefined;
+  if (preferredProfile) {
+    return preferredProfile;
+  }
+
+  const semanticDefaultProfile = semanticDefaultProfileId
+    ? compatibleProfiles.find((profile) => profile.id === semanticDefaultProfileId)
+    : undefined;
+  if (semanticDefaultProfile) {
+    return semanticDefaultProfile;
+  }
+
+  const configuredProviderProfile =
+    compatibleProfiles.find((profile) => profile.providerId !== 'provider-pending') ??
+    compatibleProfiles[0];
+  if (configuredProviderProfile) {
+    return configuredProviderProfile;
+  }
+
+  const capabilityLabel = requiredCapabilities.join('/');
+  throw new Error(
+    `Workflow node "${node.name}" requires a compatible model capability (${capabilityLabel}), but no enabled and configured model on this PC matches it.`
+  );
 }
 
 function isWorkflowTextModelProfile(profile: ModelProfile): boolean {
@@ -6021,10 +6079,89 @@ function isWorkflowTextModelProfile(profile: ModelProfile): boolean {
       'vision_text',
       'video_text',
       'long_context',
+      'image_understanding',
       'vision_understanding',
       'video_understanding'
     ].includes(capability)
   );
+}
+
+function getWorkflowModelRequiredCapabilities(node: WorkflowGraphNode): string[] {
+  const taskType = readWorkflowRuntimeString(node.config?.llmTaskType) ?? 'text';
+
+  if (taskType === 'reasoning') {
+    return ['reasoning_text', 'text'];
+  }
+
+  if (taskType === 'structured_extraction') {
+    return ['text', 'reasoning_text', 'long_context'];
+  }
+
+  if (taskType === 'long_document') {
+    return ['long_context', 'text'];
+  }
+
+  if (taskType === 'vision') {
+    return ['image_understanding', 'vision_understanding', 'vision_text'];
+  }
+
+  if (taskType === 'video_understanding') {
+    return ['video_understanding', 'video_text'];
+  }
+
+  if (taskType === 'audio_transcription') {
+    return ['audio_to_text'];
+  }
+
+  if (taskType === 'video_screening_batch') {
+    return ['text', 'reasoning_text'];
+  }
+
+  if (taskType === 'image_generation') {
+    return ['text_to_image', 'image_generation'];
+  }
+
+  if (taskType === 'image_editing') {
+    return ['image_editing', 'image_to_image'];
+  }
+
+  if (taskType === 'video_generation') {
+    return ['video_generation', 'text_to_video', 'image_to_video'];
+  }
+
+  if (taskType === 'embedding') {
+    return ['embedding'];
+  }
+
+  if (taskType === 'rerank') {
+    return ['rerank'];
+  }
+
+  return ['text'];
+}
+
+function getWorkflowSemanticDefaultProfileId(node: WorkflowGraphNode): string | undefined {
+  const taskType = readWorkflowRuntimeString(node.config?.llmTaskType) ?? 'text';
+
+  if (taskType === 'vision') return 'qiu-vision-default';
+  if (taskType === 'audio_transcription') return 'qiu-asr-default';
+  if (taskType === 'image_generation') return 'qiu-image-generation-default';
+  if (taskType === 'image_editing') return 'qiu-image-editing-default';
+  if (taskType === 'video_understanding' || taskType === 'video_generation') return 'qiu-vision-default';
+  return 'qiu-general-default';
+}
+
+function modelProfileSupportsAnyCapability(profile: ModelProfile, capabilities: string[]): boolean {
+  const normalizedProfileCapabilities = new Set(
+    readModelProfileCapabilities(profile).map(normalizeWorkflowModelCapability)
+  );
+  return capabilities.map(normalizeWorkflowModelCapability).some((capability) =>
+    normalizedProfileCapabilities.has(capability)
+  );
+}
+
+function normalizeWorkflowModelCapability(value: string): string {
+  return value.trim().toLowerCase().replace(/[-\s]+/g, '_');
 }
 
 function readDependencyManifestModelProfileIdForNode(
@@ -8009,6 +8146,26 @@ function sanitizeLogSuffix(value: string): string {
 
 function isModelApiConfigured(profile: ModelProfile): boolean {
   return Boolean(profile.apiBaseUrl?.trim() && profile.apiKey?.trim());
+}
+
+function normalizeRuntimeRequirementModelProfileId(profileId: string): string {
+  const normalized = profileId.trim().toLowerCase();
+  if (!normalized) return '';
+  if (normalized.startsWith('qiu-')) return profileId.trim();
+  if (normalized.includes('asr') || normalized.includes('speech') || normalized.includes('audio')) return 'qiu-asr-default';
+  if (normalized.includes('gpt-image') || normalized.includes('img2img') || normalized.includes('image-edit')) {
+    return 'qiu-image-editing-default';
+  }
+  if (normalized.includes('image') || normalized.includes('vision') || normalized.includes('vl') || normalized.includes('gpt-4o')) {
+    return 'qiu-vision-default';
+  }
+  if (normalized.includes('embedding') || normalized.includes('embed')) return 'qiu-embedding-default';
+  if (normalized.includes('rerank')) return 'qiu-rerank-default';
+  return 'qiu-general-default';
+}
+
+function mergeUniqueStrings(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
 function readErrorMessage(error: unknown): string {

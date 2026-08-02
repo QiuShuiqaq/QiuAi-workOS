@@ -34,7 +34,7 @@ export function defaultCapabilitiesForPurpose(purpose: ModelPurpose): ModelCapab
   }
 
   if (purpose === 'vision') {
-    return ['vision_text', 'text'];
+    return ['image_understanding', 'vision_text', 'text'];
   }
 
   if (purpose === 'embeddings') {
@@ -52,7 +52,11 @@ export function normalizeModelCapabilities(
   capabilities: ModelCapability[] | undefined,
   purpose: ModelPurpose
 ): ModelCapability[] {
-  const allowed = new Set(modelCapabilityOptions.map((option) => option.value));
+  const allowed = new Set<ModelCapability>([
+    ...modelCapabilityOptions.map((option) => option.value),
+    'image_understanding',
+    'image_editing'
+  ]);
   const normalized = [...new Set((capabilities ?? []).filter((item) => allowed.has(item)))];
   return normalized.length > 0 ? normalized : defaultCapabilitiesForPurpose(purpose);
 }
@@ -85,9 +89,11 @@ export function purposeForModelCapabilities(
 
   if (
     normalized.includes('vision_text') ||
+    normalized.includes('image_understanding') ||
     normalized.includes('video_text') ||
     normalized.includes('text_to_image') ||
     normalized.includes('image_to_image') ||
+    normalized.includes('image_editing') ||
     normalized.includes('vision_understanding') ||
     normalized.includes('video_understanding') ||
     normalized.includes('image_generation') ||
@@ -106,6 +112,8 @@ export function purposeForModelCapabilities(
 }
 
 export function modelCapabilityLabel(capability: ModelCapability): string {
+  if (capability === 'image_understanding') return '图片理解';
+  if (capability === 'image_editing') return '参考图编辑';
   return modelCapabilityOptions.find((option) => option.value === capability)?.label ?? capability;
 }
 
@@ -143,12 +151,12 @@ export function inferModelCapabilitiesFromName(
     return ['text_to_audio'];
   }
 
-  if (matchesAny(normalizedName, ['image-to-image', 'img2img', 'inpaint', 'edit-image'])) {
-    return ['image_to_image'];
+  if (matchesAny(normalizedName, ['image-to-image', 'img2img', 'inpaint', 'edit-image', 'image-edit', 'edit_image'])) {
+    return ['image_generation', 'image_to_image', 'image_editing'];
   }
 
-  if (matchesAny(normalizedName, ['dall-e', 'imagen', 'flux', 'stable-diffusion', 'wanx', 'text-to-image', 'cogview', 'seedream', 'midjourney', 'nano-banana'])) {
-    return ['image_generation', 'text_to_image'];
+  if (matchesAny(normalizedName, ['gpt-image', 'image-generation', 'dall-e', 'imagen', 'flux', 'stable-diffusion', 'wanx', 'text-to-image', 'cogview', 'seedream', 'midjourney', 'nano-banana'])) {
+    return ['image_generation', 'text_to_image', 'image_to_image', 'image_editing'];
   }
 
   if (matchesAny(normalizedName, ['veo', 'kling', 'pika', 'hailuo', 'runway', 'sora', 'seedance', 'text-to-video', 'image-to-video'])) {
@@ -160,7 +168,7 @@ export function inferModelCapabilitiesFromName(
   }
 
   if (matchesAny(normalizedName, ['vision', 'vl', 'gpt-4o', 'gemini', 'qwen-vl', 'glm-4v', 'minimax-vl'])) {
-    return ['vision_understanding', 'vision_text', 'text'];
+    return ['image_understanding', 'vision_understanding', 'vision_text', 'text'];
   }
 
   if (

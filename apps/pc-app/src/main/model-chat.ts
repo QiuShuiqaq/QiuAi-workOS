@@ -6,9 +6,14 @@ import type {
   DesktopModelTestRequest,
   DesktopModelTestResponse
 } from '../shared/desktop-api.js';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { inferModelCapabilitiesFromName } from '../shared/desktop-model-capabilities.js';
+import type { ModelCapability, ModelCatalogEntry } from '../shared/desktop-contract.js';
+import {
+  inferModelCapabilitiesFromName,
+  readModelProfileCapabilities
+} from '../shared/desktop-model-capabilities.js';
 import {
   detectModelProviderMode,
   invokeNativeAudioTranscription,
@@ -62,6 +67,13 @@ interface OpenAiCompatibleTranscriptionResponse {
 }
 
 const defaultTimeoutMs = 45_000;
+const imageGenerationTestTimeoutMs = 180_000;
+const lightweightPngBytes = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+  'base64'
+);
+
+type ModelTestCheck = NonNullable<DesktopModelTestResponse['checks']>[number];
 
 export async function invokeOpenAiCompatibleModelChat(
   request: DesktopModelChatRequest
@@ -275,12 +287,71 @@ export async function listOpenAiCompatibleModels(
     throw new Error('Model API Key is missing.');
   }
 
-  const response = await fetch(`${apiBaseUrl}/models`, {
+  const builtInModels = listBuiltInCompatibleProviderModels(request);
+  let providerModels: ModelCatalogEntry[] = [];
+  try {
+    providerModels = await fetchOpenAiCompatibleProviderModels({
+      apiBaseUrl,
+      apiKey,
+      timeoutMs: request.timeoutMs
+    });
+  } catch (error) {
+    if (builtInModels.length === 0) {
+      throw error;
+    }
+  }
+
+  return {
+    providerId: request.providerId.trim(),
+    providerName: request.providerName.trim(),
+    apiBaseUrl,
+    fetchedAt: new Date().toISOString(),
+    models: mergeModelCatalogEntries(providerModels, builtInModels)
+  };
+}
+
+export async function testDesktopModelConnection(
+  request: DesktopModelTestRequest
+): Promise<DesktopModelTestResponse> {
+  const nativeResult = await testNativeModelConnection(request);
+  if (nativeResult) {
+    return nativeResult;
+  }
+
+  const checks = await runOpenAiCompatibleModelTestChecks(request);
+  const failedChecks = checks.filter((check) => check.status === 'failed');
+  const passedChecks = checks.filter((check) => check.status === 'passed');
+  const ok = failedChecks.length === 0 && passedChecks.length > 0;
+  return {
+    providerId: request.profile.providerId,
+    providerName: request.profile.providerName,
+    modelName: request.profile.modelName,
+    ok,
+    checkedAt: new Date().toISOString(),
+    mode: detectModelProviderMode({
+      providerId: request.profile.providerId,
+      providerName: request.profile.providerName,
+      modelName: request.profile.modelName,
+      capabilities: request.profile.capabilities
+    }),
+    message: ok
+      ? `Model checks passed: ${passedChecks.length} passed${checks.length > passedChecks.length ? `, ${checks.length - passedChecks.length} skipped` : ''}.`
+      : `Model checks did not fully pass: ${failedChecks.length} failed, ${passedChecks.length} passed.`,
+    checks
+  };
+}
+
+async function fetchOpenAiCompatibleProviderModels(input: {
+  apiBaseUrl: string;
+  apiKey: string;
+  timeoutMs?: number;
+}): Promise<ModelCatalogEntry[]> {
+  const response = await fetch(`${input.apiBaseUrl}/models`, {
     method: 'GET',
     headers: {
-      authorization: `Bearer ${apiKey}`
+      authorization: `Bearer ${input.apiKey}`
     },
-    signal: AbortSignal.timeout(request.timeoutMs ?? 20_000)
+    signal: AbortSignal.timeout(input.timeoutMs ?? 20_000)
   });
 
   const bodyText = await response.text();
@@ -295,7 +366,7 @@ export async function listOpenAiCompatibleModels(
     throw new Error('Model list API response did not include a data array.');
   }
 
-  const models = body.data.flatMap((item) => {
+  return body.data.flatMap((item) => {
     const id = typeof item.id === 'string' ? item.id.trim() : '';
     if (!id) {
       return [];
@@ -306,74 +377,351 @@ export async function listOpenAiCompatibleModels(
         id,
         label: id,
         ownedBy: typeof item.owned_by === 'string' ? item.owned_by : undefined,
+        source: 'provider' as const,
         capabilities: inferModelCapabilitiesFromName(id)
       }
     ];
   });
+}
 
+async function runOpenAiCompatibleModelTestChecks(
+  request: DesktopModelTestRequest
+): Promise<ModelTestCheck[]> {
+  const capabilities = readModelProfileCapabilities(request.profile);
+  const checks: ModelTestCheck[] = [];
+
+  if (capabilities.includes('audio_to_text')) {
+    checks.push(await runModelTestCheck({
+      id: 'audio_probe',
+      label: '语音转文字探测',
+      endpoint: `${normalizeApiBaseUrl(request.profile.apiBaseUrl) ?? ''}/models`,
+      action: async () => {
+        const catalog = await listOpenAiCompatibleModels({
+          providerId: request.profile.providerId,
+          providerName: request.profile.providerName,
+          apiBaseUrl: request.profile.apiBaseUrl,
+          apiKey: request.profile.apiKey ?? '',
+          modelName: request.profile.modelName,
+          capabilities,
+          timeoutMs: request.timeoutMs ?? 20_000
+        });
+        return `API Key 可用，供应商返回/内置 ${catalog.models.length} 个模型。真实 ASR 需在任务中使用音频文件测试。`;
+      }
+    }));
+    return checks;
+  }
+
+  if (hasAnyCapability(capabilities, ['image_generation', 'text_to_image'])) {
+    checks.push(await runImageGenerationTestCheck(request));
+  }
+
+  if (hasAnyCapability(capabilities, ['image_to_image', 'image_editing'])) {
+    checks.push(await runImageEditingTestCheck(request));
+  }
+
+  if (hasAnyCapability(capabilities, ['vision_text', 'image_understanding', 'vision_understanding'])) {
+    checks.push(await runVisionUnderstandingTestCheck(request));
+  }
+
+  if (capabilities.includes('embedding')) {
+    checks.push(await runEmbeddingTestCheck(request));
+  }
+
+  if (capabilities.includes('rerank')) {
+    checks.push({
+      id: 'rerank',
+      label: '重排模型',
+      status: 'skipped',
+      message: '重排模型没有统一 OpenAI 兼容协议，需要按供应商适配器测试。'
+    });
+  }
+
+  if (hasAnyCapability(capabilities, ['video_generation', 'text_to_video', 'image_to_video'])) {
+    checks.push({
+      id: 'video_generation',
+      label: '视频生成',
+      status: 'skipped',
+      message: '视频生成通常是异步供应商协议，需要专门适配器；当前测试不会产生视频费用。',
+      costWarning: true
+    });
+  }
+
+  if (hasAnyCapability(capabilities, ['video_text', 'video_understanding'])) {
+    checks.push({
+      id: 'video_understanding',
+      label: '视频理解',
+      status: 'skipped',
+      message: '视频理解需要真实视频样本和供应商专用输入协议，当前仅在工作流运行中测试。'
+    });
+  }
+
+  if (checks.length === 0 || capabilities.includes('text') || capabilities.includes('reasoning_text') || capabilities.includes('long_context')) {
+    checks.push(await runTextChatTestCheck(request));
+  }
+
+  return checks;
+}
+
+async function runTextChatTestCheck(request: DesktopModelTestRequest): Promise<ModelTestCheck> {
+  const apiBaseUrl = requireOpenAiCompatibleApiBaseUrl(request.profile.apiBaseUrl);
+  return runModelTestCheck({
+    id: 'text_chat',
+    label: '文本对话',
+    endpoint: `${apiBaseUrl}/chat/completions`,
+    action: async () => {
+      const profile = {
+        ...request.profile,
+        maxTokens: Math.min(request.profile.maxTokens ?? 256, 512)
+      };
+      const response = await invokeOpenAiCompatibleModelChat({
+        profile,
+        timeoutMs: request.timeoutMs ?? 20_000,
+        messages: buildOpenAiCompatibleModelTestMessages(profile.capabilities)
+      });
+      return `返回文本正常：${response.provider}/${response.modelName}`;
+    }
+  });
+}
+
+async function runImageGenerationTestCheck(request: DesktopModelTestRequest): Promise<ModelTestCheck> {
+  const apiBaseUrl = requireOpenAiCompatibleApiBaseUrl(request.profile.apiBaseUrl);
+  return runModelTestCheck({
+    id: 'image_generation',
+    label: '文生图',
+    endpoint: `${apiBaseUrl}/images/generations`,
+    costWarning: true,
+    action: async () => {
+      const response = await invokeOpenAiCompatibleModelChat({
+        profile: request.profile,
+        taskKind: 'image_generation',
+        timeoutMs: Math.max(request.timeoutMs ?? imageGenerationTestTimeoutMs, imageGenerationTestTimeoutMs),
+        imageGeneration: {
+          prompt: 'Generate one minimal product icon on a plain white background. No text.',
+          size: '1024x1024',
+          responseFormat: 'url'
+        },
+        messages: [{ role: 'user', content: 'Generate one minimal product icon.' }]
+      });
+      const url = response.artifacts?.[0]?.remoteUrl;
+      return url ? `返回图片 URL：${url}` : '返回图片结果正常。';
+    }
+  });
+}
+
+async function runImageEditingTestCheck(request: DesktopModelTestRequest): Promise<ModelTestCheck> {
+  const apiBaseUrl = requireOpenAiCompatibleApiBaseUrl(request.profile.apiBaseUrl);
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'qiuai-model-image-edit-'));
+  const imagePath = path.join(tempDir, 'source.png');
+  writeFileSync(imagePath, lightweightPngBytes);
+
+  try {
+    return await runModelTestCheck({
+      id: 'image_editing',
+      label: '参考图编辑',
+      endpoint: `${apiBaseUrl}/images/edits`,
+      costWarning: true,
+      action: async () => {
+        const response = await invokeOpenAiCompatibleModelChat({
+          profile: request.profile,
+          taskKind: 'image_generation',
+          timeoutMs: Math.max(request.timeoutMs ?? imageGenerationTestTimeoutMs, imageGenerationTestTimeoutMs),
+          imageGeneration: {
+            prompt: 'Keep the reference image simple and place it on a white ecommerce background.',
+            sourceImagePath: imagePath,
+            size: '1024x1024',
+            responseFormat: 'url'
+          },
+          messages: [{ role: 'user', content: 'Edit the reference image.' }]
+        });
+        const url = response.artifacts?.[0]?.remoteUrl;
+        return url ? `返回编辑图片 URL：${url}` : '返回参考图编辑结果正常。';
+      }
+    });
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function runVisionUnderstandingTestCheck(request: DesktopModelTestRequest): Promise<ModelTestCheck> {
+  const apiBaseUrl = requireOpenAiCompatibleApiBaseUrl(request.profile.apiBaseUrl);
+  return runModelTestCheck({
+    id: 'vision_understanding',
+    label: '图片理解',
+    endpoint: `${apiBaseUrl}/chat/completions`,
+    action: async () => {
+      const response = await fetch(`${apiBaseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${requireModelApiKey(request.profile.apiKey)}`,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: request.profile.modelName,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: '请用一句中文描述这张测试图。' },
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: `data:image/png;base64,${lightweightPngBytes.toString('base64')}`
+                  }
+                }
+              ]
+            }
+          ],
+          max_tokens: 128
+        }),
+        signal: AbortSignal.timeout(request.timeoutMs ?? 30_000)
+      });
+      const bodyText = await response.text();
+      const body = parseJsonBody(bodyText);
+      if (!response.ok) {
+        throw new Error(readProviderErrorMessage(body) ?? bodyText.slice(0, 500));
+      }
+      const content = readAssistantContent(body);
+      if (!content) {
+        throw new Error('Vision model response did not include assistant content.');
+      }
+      return '图片输入返回文本正常。';
+    }
+  });
+}
+
+async function runEmbeddingTestCheck(request: DesktopModelTestRequest): Promise<ModelTestCheck> {
+  const apiBaseUrl = requireOpenAiCompatibleApiBaseUrl(request.profile.apiBaseUrl);
+  return runModelTestCheck({
+    id: 'embedding',
+    label: '文本向量',
+    endpoint: `${apiBaseUrl}/embeddings`,
+    action: async () => {
+      const response = await fetch(`${apiBaseUrl}/embeddings`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${requireModelApiKey(request.profile.apiKey)}`,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: request.profile.modelName,
+          input: 'QiuAI WorkOS model test'
+        }),
+        signal: AbortSignal.timeout(request.timeoutMs ?? 20_000)
+      });
+      const bodyText = await response.text();
+      const body = parseJsonObject(bodyText);
+      if (!response.ok) {
+        throw new Error(readProviderErrorMessage(body) ?? bodyText.slice(0, 500));
+      }
+      const firstEmbedding = readNestedUnknown(body, ['data', '0', 'embedding']);
+      if (!Array.isArray(firstEmbedding)) {
+        throw new Error('Embedding response did not include data[0].embedding.');
+      }
+      return `返回向量正常，维度 ${firstEmbedding.length}。`;
+    }
+  });
+}
+
+async function runModelTestCheck(input: {
+  id: string;
+  label: string;
+  endpoint?: string;
+  costWarning?: boolean;
+  action: () => Promise<string>;
+}): Promise<ModelTestCheck> {
+  const startedAt = Date.now();
+  try {
+    const message = await input.action();
+    return {
+      id: input.id,
+      label: input.label,
+      status: 'passed',
+      message,
+      endpoint: input.endpoint,
+      elapsedMs: Date.now() - startedAt,
+      costWarning: input.costWarning
+    };
+  } catch (error) {
+    return {
+      id: input.id,
+      label: input.label,
+      status: 'failed',
+      message: error instanceof Error ? error.message : 'unknown error',
+      endpoint: input.endpoint,
+      elapsedMs: Date.now() - startedAt,
+      costWarning: input.costWarning
+    };
+  }
+}
+
+function listBuiltInCompatibleProviderModels(request: DesktopModelListRequest): ModelCatalogEntry[] {
+  if (isGrsaiProvider(request)) {
+    return [
+      builtInModelCatalogEntry('gpt-image-2', 'gpt-image-2 / 文生图', ['image_generation', 'text_to_image']),
+      builtInModelCatalogEntry('gpt-image-2-vip', 'gpt-image-2-vip / 高优先生图', ['image_generation', 'text_to_image']),
+      builtInModelCatalogEntry('nano-banana', 'nano-banana / 生图编辑', ['image_generation', 'text_to_image', 'image_to_image', 'image_editing']),
+      builtInModelCatalogEntry('nano-banana-fast', 'nano-banana-fast / 快速生图编辑', ['image_generation', 'text_to_image', 'image_to_image', 'image_editing']),
+      builtInModelCatalogEntry('nano-banana-2', 'nano-banana-2 / 生图编辑', ['image_generation', 'text_to_image', 'image_to_image', 'image_editing']),
+      builtInModelCatalogEntry('nano-banana-2-cl', 'nano-banana-2-cl / 生图编辑', ['image_generation', 'text_to_image', 'image_to_image', 'image_editing']),
+      builtInModelCatalogEntry('nano-banana-2-2k-cl', 'nano-banana-2 2K / 生图编辑', ['image_generation', 'text_to_image', 'image_to_image', 'image_editing']),
+      builtInModelCatalogEntry('nano-banana-2-4k-cl', 'nano-banana-2 4K / 生图编辑', ['image_generation', 'text_to_image', 'image_to_image', 'image_editing']),
+      builtInModelCatalogEntry('nano-banana-pro', 'nano-banana-pro / 高质量生图编辑', ['image_generation', 'text_to_image', 'image_to_image', 'image_editing']),
+      builtInModelCatalogEntry('nano-banana-pro-vip', 'nano-banana-pro-vip / 高优先生图编辑', ['image_generation', 'text_to_image', 'image_to_image', 'image_editing'])
+    ];
+  }
+
+  return [];
+}
+
+function builtInModelCatalogEntry(
+  id: string,
+  label: string,
+  capabilities: ModelCapability[]
+): ModelCatalogEntry {
   return {
-    providerId: request.providerId.trim(),
-    providerName: request.providerName.trim(),
-    apiBaseUrl,
-    fetchedAt: new Date().toISOString(),
-    models
+    id,
+    label,
+    source: 'built_in',
+    capabilities
   };
 }
 
-export async function testDesktopModelConnection(
-  request: DesktopModelTestRequest
-): Promise<DesktopModelTestResponse> {
-  const nativeResult = await testNativeModelConnection(request);
-  if (nativeResult) {
-    return nativeResult;
+function mergeModelCatalogEntries(
+  providerModels: ModelCatalogEntry[],
+  builtInModels: ModelCatalogEntry[]
+): ModelCatalogEntry[] {
+  const merged = new Map<string, ModelCatalogEntry>();
+  for (const model of builtInModels) {
+    merged.set(model.id, model);
   }
-
-  if (request.profile.capabilities?.includes('audio_to_text')) {
-    const catalog = await listOpenAiCompatibleModels({
-      providerId: request.profile.providerId,
-      providerName: request.profile.providerName,
-      apiBaseUrl: request.profile.apiBaseUrl,
-      apiKey: request.profile.apiKey ?? '',
-      modelName: request.profile.modelName,
-      capabilities: request.profile.capabilities,
-      timeoutMs: request.timeoutMs ?? 20_000
-    });
-
-    return {
-      providerId: request.profile.providerId,
-      providerName: request.profile.providerName,
-      modelName: request.profile.modelName,
-      ok: true,
-      checkedAt: new Date().toISOString(),
-      mode: 'openai_compatible',
-      message: `Audio transcription endpoint is reachable. Provider returned ${catalog.models.length} model(s).`
-    };
+  for (const model of providerModels) {
+    merged.set(model.id, model);
   }
+  return [...merged.values()].sort((left, right) => left.id.localeCompare(right.id));
+}
 
-  const profile = {
-    ...request.profile,
-    maxTokens: Math.min(request.profile.maxTokens ?? 256, 512)
-  };
-  const response = await invokeOpenAiCompatibleModelChat({
-    profile,
-    timeoutMs: request.timeoutMs ?? 20_000,
-    messages: buildOpenAiCompatibleModelTestMessages(profile.capabilities)
-  });
+function hasAnyCapability(capabilities: ModelCapability[], candidates: ModelCapability[]): boolean {
+  return candidates.some((capability) => capabilities.includes(capability));
+}
 
-  return {
-    providerId: request.profile.providerId,
-    providerName: response.provider,
-    modelName: response.modelName,
-    ok: true,
-    checkedAt: new Date().toISOString(),
-    mode: detectModelProviderMode({
-      providerId: request.profile.providerId,
-      providerName: request.profile.providerName,
-      modelName: request.profile.modelName,
-      capabilities: request.profile.capabilities
-    }),
-    message: `Model connection is healthy: ${response.provider}/${response.modelName}`
-  };
+function requireModelApiKey(value: string | undefined): string {
+  const apiKey = value?.trim();
+  if (!apiKey) {
+    throw new Error('Model API Key is missing.');
+  }
+  return apiKey;
+}
+
+function isGrsaiProvider(request: {
+  providerId?: string;
+  providerName?: string;
+  apiBaseUrl?: string;
+}): boolean {
+  const text = [request.providerId, request.providerName, request.apiBaseUrl]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return text.includes('grsai') || text.includes('grsaiapi.com') || text.includes('grsai.dakka.com.cn');
 }
 
 function buildAudioTranscriptionFormData(
@@ -529,10 +877,48 @@ function parseTranscriptionJsonBody(bodyText: string): OpenAiCompatibleTranscrip
   }
 }
 
-function readProviderErrorMessage(
-  body: { error?: { message?: unknown } } | undefined
-): string | undefined {
-  return typeof body?.error?.message === 'string' ? body.error.message : undefined;
+function parseJsonObject(bodyText: string): Record<string, unknown> | undefined {
+  if (!bodyText.trim()) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(bodyText) as unknown;
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readNestedUnknown(record: Record<string, unknown> | undefined, path: string[]): unknown {
+  let current: unknown = record;
+  for (const key of path) {
+    if (Array.isArray(current) && /^\d+$/.test(key)) {
+      current = current[Number(key)];
+      continue;
+    }
+    if (typeof current !== 'object' || current === null || Array.isArray(current)) {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current;
+}
+
+function readProviderErrorMessage(body: unknown): string | undefined {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return undefined;
+  }
+
+  const error = (body as Record<string, unknown>).error;
+  if (typeof error !== 'object' || error === null || Array.isArray(error)) {
+    return undefined;
+  }
+
+  const message = (error as Record<string, unknown>).message;
+  return typeof message === 'string' ? message : undefined;
 }
 
 function readTranscriptionText(body: OpenAiCompatibleTranscriptionResponse | undefined): string | undefined {

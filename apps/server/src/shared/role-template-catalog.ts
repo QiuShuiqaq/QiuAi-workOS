@@ -1276,7 +1276,7 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
       type: 'llm',
       name: '理解图片并生成提示词',
       instruction: '使用多模态模型读取商品参考图、平台规则和品牌规则，直接输出每个商品、每个所选产物包的生图提示词。不要生成图片，只输出 JSON。',
-      modelProfileId: 'openai-gpt-4o',
+      modelProfileId: 'qiu-vision-default',
       inputVariables: ['factory_request', 'factory_items', 'selected_packages', 'target_platform', 'knowledge_context'],
       outputVariables: ['package_instructions'],
       config: {
@@ -1305,11 +1305,11 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
       type: 'llm',
       name: '批量生成商品图',
       instruction: '按 package_instructions 调用图片生成模型。只处理用户勾选的产物包，保持商品主体一致，输出图片远程 URL 元数据；大图片不经过服务端。',
-      modelProfileId: 'openai-gpt-image-2',
+      modelProfileId: 'qiu-image-editing-default',
       inputVariables: ['package_instructions', 'start.images'],
       outputVariables: ['factory_generated_images'],
       config: {
-        llmTaskType: 'image_generation',
+        llmTaskType: 'image_editing',
         outputMode: 'json',
         packageKeys: crossBorderFactoryDefaultPackageKeys,
         concurrency: 8,
@@ -1324,7 +1324,7 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
       type: 'llm',
       name: '可选质检',
       instruction: '如果 quality_check_mode 为 none，则输出 skipped。basic 只做文件数量、命名、尺寸规则检查；smart 再用多模态模型检查主体一致性、平台合规和卖点可读性。',
-      modelProfileId: 'openai-gpt-4o',
+      modelProfileId: 'qiu-vision-default',
       inputVariables: ['factory_generated_images', 'factory_items', 'quality_check_mode', 'target_platform'],
       outputVariables: ['quality_report'],
       config: {

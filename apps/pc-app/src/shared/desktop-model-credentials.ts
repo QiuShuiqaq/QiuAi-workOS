@@ -211,6 +211,7 @@ export function normalizeRoleModelCredentialBindings(
     (binding) =>
       validRoleCodes.has(binding.roleCode) &&
       validModelProfileIds.has(binding.modelProfileId) &&
+      (!binding.runtimeModelProfileId || validModelProfileIds.has(binding.runtimeModelProfileId)) &&
       (binding.mode === 'provider_default' ||
         binding.mode === 'credential_ref' ||
         binding.mode === 'inline')

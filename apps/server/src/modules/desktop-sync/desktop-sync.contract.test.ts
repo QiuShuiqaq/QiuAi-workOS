@@ -3,6 +3,7 @@ import { describe, test } from 'node:test';
 
 import {
   parseCreateDesktopBindingCodeRequest,
+  parseCreateDesktopIssueReportRequest,
   parseDesktopRuntimeSyncRequest,
   parseRedeemDesktopBindingCodeRequest
 } from './desktop-sync.contract';
@@ -103,5 +104,32 @@ describe('desktop runtime sync contract', () => {
 
     assert.equal(request.bindingCode, 'QIU-ABCD-EFGH');
     assert.equal(request.platform, 'windows');
+  });
+
+  test('parses desktop issue reports and enforces field limits', () => {
+    const request = parseCreateDesktopIssueReportRequest({
+      category: 'BUG',
+      severity: 'BLOCKING',
+      title: '任务运行失败',
+      description: '提交任务后服务端返回错误。',
+      diagnostics: {
+        connectionState: 'online',
+        logs: [{ level: 'error', message: 'failed' }]
+      }
+    });
+
+    assert.equal(request.category, 'BUG');
+    assert.equal(request.severity, 'BLOCKING');
+    assert.equal(request.diagnostics?.connectionState, 'online');
+    assert.throws(
+      () =>
+        parseCreateDesktopIssueReportRequest({
+          category: 'BUG',
+          severity: 'NORMAL',
+          title: 'x'.repeat(121),
+          description: 'description'
+        }),
+      /desktopIssueReport\.title/
+    );
   });
 });

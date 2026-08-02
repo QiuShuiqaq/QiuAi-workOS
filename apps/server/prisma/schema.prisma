@@ -201,6 +201,29 @@ enum DesktopReleaseStatus {
   ARCHIVED
 }
 
+enum DesktopIssueCategory {
+  BUG
+  USAGE
+  FEATURE_REQUEST
+  BAD_OUTPUT
+  OTHER
+}
+
+enum DesktopIssueSeverity {
+  NORMAL
+  IMPACTING
+  BLOCKING
+}
+
+enum DesktopIssueStatus {
+  NEW
+  VIEWED
+  IN_PROGRESS
+  FIXED
+  WONT_FIX
+  CLOSED
+}
+
 model Account {
   id           String        @id @default(uuid()) @db.Uuid
   primaryEmail String        @unique @map("primary_email")
@@ -278,6 +301,7 @@ model Workspace {
   desktopRuntimeSyncs DesktopRuntimeSync[]
   desktopBindingCodes DesktopBindingCode[]
   desktopDevices DesktopDevice[]
+  desktopIssueReports DesktopIssueReport[]
   invitations    Invitation[]
 
   @@index([tenantId])
@@ -422,6 +446,7 @@ model DesktopDevice {
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   bindingCodes DesktopBindingCode[]
   agreementAcceptances DesktopAgreementAcceptance[]
+  issueReports DesktopIssueReport[]
 
   @@unique([workspaceId, runtimeId])
   @@unique([workspaceId, deviceId])
@@ -848,6 +873,39 @@ model DesktopRelease {
   @@index([platform, channel, status, publishedAt])
   @@index([status])
   @@map("desktop_releases")
+}
+
+model DesktopIssueReport {
+  id              String               @id @default(uuid()) @db.Uuid
+  issueNo         String               @unique @map("issue_no")
+  category        DesktopIssueCategory
+  severity        DesktopIssueSeverity @default(NORMAL)
+  status          DesktopIssueStatus   @default(NEW)
+  title           String
+  description     String
+  contact         String?
+  workspaceId     String?              @map("workspace_id") @db.Uuid
+  desktopDeviceId String?              @map("desktop_device_id") @db.Uuid
+  runtimeId       String?              @map("runtime_id")
+  deviceId        String?              @map("device_id")
+  deviceName      String?              @map("device_name")
+  appVersion      String?              @map("app_version")
+  platform        String?
+  diagnostics     Json?
+  adminNote       String?              @map("admin_note")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+
+  workspace     Workspace?     @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  desktopDevice DesktopDevice? @relation(fields: [desktopDeviceId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([desktopDeviceId])
+  @@index([status, severity, createdAt])
+  @@index([category])
+  @@index([runtimeId])
+  @@index([createdAt])
+  @@map("desktop_issue_reports")
 }
 
 model AdminActionLog {

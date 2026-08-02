@@ -850,10 +850,12 @@ function validateModelProfile(value: unknown): ModelProfile {
       'embedding',
       'rerank',
       'long_context',
+      'image_understanding',
       'vision_understanding',
       'video_understanding',
       'text_to_image',
       'image_to_image',
+      'image_editing',
       'image_generation',
       'video_generation',
       'text_to_video',
@@ -886,6 +888,11 @@ function validateModelProviderCatalog(value: unknown): ModelProviderCatalog {
         id: requireString(modelRecord.id, `modelProviderCatalog.models[${index}].id`),
         label: optionalString(modelRecord.label, `modelProviderCatalog.models[${index}].label`),
         ownedBy: optionalString(modelRecord.ownedBy, `modelProviderCatalog.models[${index}].ownedBy`),
+        source: optionalStringEnum(
+          modelRecord.source,
+          `modelProviderCatalog.models[${index}].source`,
+          ['provider', 'built_in', 'manual']
+        ),
         capabilities: requireStringEnumArray(
           modelRecord.capabilities,
           `modelProviderCatalog.models[${index}].capabilities`,
@@ -897,10 +904,12 @@ function validateModelProviderCatalog(value: unknown): ModelProviderCatalog {
             'embedding',
             'rerank',
             'long_context',
+            'image_understanding',
             'vision_understanding',
             'video_understanding',
             'text_to_image',
             'image_to_image',
+            'image_editing',
             'image_generation',
             'video_generation',
             'text_to_video',
@@ -936,6 +945,10 @@ function validateRoleModelCredentialBinding(value: unknown): RoleModelCredential
     modelProfileId: requireString(
       record.modelProfileId,
       'roleModelCredentialBinding.modelProfileId'
+    ),
+    runtimeModelProfileId: optionalString(
+      record.runtimeModelProfileId,
+      'roleModelCredentialBinding.runtimeModelProfileId'
     ),
     mode: requireEnum(record.mode, 'roleModelCredentialBinding.mode', [
       'provider_default',
@@ -1151,6 +1164,18 @@ function optionalString(value: unknown, fieldName: string): string | undefined {
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : undefined;
+}
+
+function optionalStringEnum<T extends string>(
+  value: unknown,
+  fieldName: string,
+  allowed: readonly T[]
+): T | undefined {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+
+  return requireEnum(value, fieldName, allowed);
 }
 
 function requireBoolean(value: unknown, fieldName: string): boolean {

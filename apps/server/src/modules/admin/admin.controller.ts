@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { ApiConsumes, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
 
@@ -17,15 +17,21 @@ import {
   GetAdminWorkspaceResponseDto,
   GrantAdminWorkspaceAuthorizationRequestDto,
   GrantAdminWorkspaceAuthorizationResponseDto,
+  DeleteAdminIssueMessageResponseDto,
+  GetAdminIssueMessageResponseDto,
   ListAdminActionLogsQueryDto,
   ListAdminActionLogsResponseDto,
   ListAdminDesktopReleasesQueryDto,
   ListAdminDesktopReleasesResponseDto,
+  ListAdminIssueMessagesQueryDto,
+  ListAdminIssueMessagesResponseDto,
   ListAdminPlansResponseDto,
   ListAdminWorkspacesQueryDto,
   ListAdminWorkspacesResponseDto,
   PublishAdminDesktopReleaseResponseDto,
   RevokeAdminDesktopDeviceResponseDto,
+  UpdateAdminIssueMessageRequestDto,
+  UpdateAdminIssueMessageResponseDto,
   UpdateAdminDesktopReleaseRequestDto,
   UpdateAdminDesktopReleaseResponseDto,
   UploadAdminDesktopReleaseAssetResponseDto,
@@ -123,6 +129,43 @@ export class AdminController {
       contentType: readSingleHeader(request.headers['content-type']),
       body: Buffer.isBuffer(body) ? body : Buffer.alloc(0)
     });
+  }
+
+  @Get('issue-messages')
+  @ApiOkResponse({ type: ListAdminIssueMessagesResponseDto })
+  listIssueMessages(
+    @Query() query: ListAdminIssueMessagesQueryDto,
+    @Req() request: FastifyRequest
+  ): Promise<ListAdminIssueMessagesResponseDto> {
+    return this.adminService.listIssueMessages(query, request.headers.cookie);
+  }
+
+  @Get('issue-messages/:issueId')
+  @ApiOkResponse({ type: GetAdminIssueMessageResponseDto })
+  getIssueMessage(
+    @Param('issueId') issueId: string,
+    @Req() request: FastifyRequest
+  ): Promise<GetAdminIssueMessageResponseDto> {
+    return this.adminService.getIssueMessage(issueId, request.headers.cookie);
+  }
+
+  @Patch('issue-messages/:issueId')
+  @ApiOkResponse({ type: UpdateAdminIssueMessageResponseDto })
+  updateIssueMessage(
+    @Param('issueId') issueId: string,
+    @Body() body: UpdateAdminIssueMessageRequestDto,
+    @Req() request: FastifyRequest
+  ): Promise<UpdateAdminIssueMessageResponseDto> {
+    return this.adminService.updateIssueMessage(issueId, body, request.headers.cookie);
+  }
+
+  @Delete('issue-messages/:issueId')
+  @ApiOkResponse({ type: DeleteAdminIssueMessageResponseDto })
+  deleteIssueMessage(
+    @Param('issueId') issueId: string,
+    @Req() request: FastifyRequest
+  ): Promise<DeleteAdminIssueMessageResponseDto> {
+    return this.adminService.deleteIssueMessage(issueId, request.headers.cookie);
   }
 
   @Get('workspaces')

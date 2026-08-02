@@ -2,6 +2,8 @@ import type {
   DesktopAppInfo,
   DesktopAgreementAcceptRequest,
   DesktopAgreementStatus,
+  DesktopIssueReportSubmitRequest,
+  DesktopIssueReportSubmitResult,
   DesktopBackupSummary,
   DesktopAuthorizedRoleTemplateCatalog,
   DesktopKnowledgeSourcePathResult,
@@ -37,6 +39,7 @@ const channels = {
   getRuntimeState: 'qiuai:desktop:get-runtime-state',
   getUserAgreementStatus: 'qiuai:desktop:get-user-agreement-status',
   acceptUserAgreement: 'qiuai:desktop:accept-user-agreement',
+  submitIssueReport: 'qiuai:desktop:submit-issue-report',
   bindDesktopDevice: 'qiuai:desktop:bind-desktop-device',
   unbindDesktopDevice: 'qiuai:desktop:unbind-desktop-device',
   checkServerConnection: 'qiuai:desktop:check-server-connection',
@@ -68,6 +71,8 @@ const bridge: QiuDesktopBridge = {
     ipcRenderer.invoke(channels.getUserAgreementStatus) as Promise<DesktopAgreementStatus>,
   acceptUserAgreement: (request: DesktopAgreementAcceptRequest) =>
     ipcRenderer.invoke(channels.acceptUserAgreement, request) as Promise<DesktopAgreementStatus>,
+  submitIssueReport: (request: DesktopIssueReportSubmitRequest) =>
+    ipcRenderer.invoke(channels.submitIssueReport, request) as Promise<DesktopIssueReportSubmitResult>,
   bindDesktopDevice: (bindingCode: string) =>
     ipcRenderer.invoke(channels.bindDesktopDevice, bindingCode) as Promise<DesktopRuntimeState>,
   unbindDesktopDevice: () =>

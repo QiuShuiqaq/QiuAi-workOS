@@ -222,32 +222,38 @@ function upsertModelAsset(
   const asset = explicitAssetKey
     ? readExplicitAsset(assetByTypeAndKey, 'MODEL', explicitAssetKey, node.id, warnings)
     : findAssetByKeyOrSchemaValue(assetByTypeAndKey, 'MODEL', modelProfileId, 'modelId');
+  const mappedModelProfileId = mapModelProfileIdToSemanticDefault(modelProfileId ?? '');
+  const semanticModelProfileId = mappedModelProfileId?.startsWith('qiu-')
+    ? mappedModelProfileId
+    : getSemanticModelProfileIdForNode(node);
   const resolvedModelProfileId =
-    readSchemaString(asset, 'modelProfileId') ??
-    readSchemaString(asset, 'modelId') ??
-    modelProfileId ??
-    explicitAssetKey ??
+    semanticModelProfileId ??
+    mapModelProfileIdToSemanticDefault(readSchemaString(asset, 'modelProfileId') ?? readSchemaString(asset, 'modelId') ?? modelProfileId ?? explicitAssetKey ?? '') ??
     'qiu-general-default';
-  const key = asset?.key ?? explicitAssetKey ?? resolvedModelProfileId;
+  const key = semanticModelProfileId ?? asset?.key ?? explicitAssetKey ?? resolvedModelProfileId;
   const current = modelAssets.get(key);
+  const inferredRequirement = inferModelRequirementFromNode(node);
 
   modelAssets.set(key, {
     key,
-    name: current?.name ?? asset?.name,
+    name: current?.name ?? asset?.name ?? inferredRequirement.name,
     providerId: current?.providerId ?? readSchemaString(asset, 'providerId') ?? asset?.category,
     providerName: current?.providerName ?? readSchemaString(asset, 'providerName') ?? readSchemaString(asset, 'providerId'),
     modelId: current?.modelId ?? readSchemaString(asset, 'modelId') ?? resolvedModelProfileId,
     modelProfileId: current?.modelProfileId ?? resolvedModelProfileId,
     capabilities: uniqueStrings([
       ...(current?.capabilities ?? []),
+      ...inferredRequirement.capabilities,
       ...readSchemaStringArray(asset, 'capabilities')
     ]),
     inputTypes: uniqueStrings([
       ...(current?.inputTypes ?? []),
+      ...inferredRequirement.inputTypes,
       ...readSchemaStringArray(asset, 'inputTypes')
     ]),
     outputTypes: uniqueStrings([
       ...(current?.outputTypes ?? []),
+      ...inferredRequirement.outputTypes,
       ...readSchemaStringArray(asset, 'outputTypes')
     ]),
     credentialFields: uniqueStrings([
@@ -260,6 +266,122 @@ function upsertModelAsset(
     required: true,
     nodeIds: uniqueStrings([...(current?.nodeIds ?? []), node.id])
   });
+}
+
+function inferModelRequirementFromNode(node: ServerRoleWorkflowGraphNode): {
+  name: string;
+  capabilities: string[];
+  inputTypes: string[];
+  outputTypes: string[];
+} {
+  const taskType = readConfigString(node.config, 'llmTaskType') ?? 'text';
+
+  if (taskType === 'vision') {
+    return {
+      name: '图片理解模型',
+      capabilities: ['image_understanding', 'vision_understanding', 'vision_text'],
+      inputTypes: ['image', 'text'],
+      outputTypes: ['text', 'json']
+    };
+  }
+
+  if (taskType === 'image_generation') {
+    return {
+      name: '生图模型',
+      capabilities: ['image_generation', 'text_to_image'],
+      inputTypes: ['text'],
+      outputTypes: ['image']
+    };
+  }
+
+  if (taskType === 'image_editing') {
+    return {
+      name: '参考图编辑模型',
+      capabilities: ['image_editing', 'image_to_image'],
+      inputTypes: ['image', 'text'],
+      outputTypes: ['image']
+    };
+  }
+
+  if (taskType === 'audio_transcription') {
+    return {
+      name: '语音识别模型',
+      capabilities: ['audio_to_text'],
+      inputTypes: ['audio', 'video'],
+      outputTypes: ['text', 'json']
+    };
+  }
+
+  if (taskType === 'video_understanding') {
+    return {
+      name: '视频理解模型',
+      capabilities: ['video_understanding', 'video_text'],
+      inputTypes: ['video', 'text'],
+      outputTypes: ['text', 'json']
+    };
+  }
+
+  if (taskType === 'video_generation') {
+    return {
+      name: '生视频模型',
+      capabilities: ['video_generation', 'text_to_video', 'image_to_video'],
+      inputTypes: ['text', 'image'],
+      outputTypes: ['video']
+    };
+  }
+
+  if (taskType === 'embedding') {
+    return {
+      name: '向量模型',
+      capabilities: ['embedding'],
+      inputTypes: ['text'],
+      outputTypes: ['embedding']
+    };
+  }
+
+  if (taskType === 'rerank') {
+    return {
+      name: '重排模型',
+      capabilities: ['rerank'],
+      inputTypes: ['text'],
+      outputTypes: ['scores']
+    };
+  }
+
+  return {
+    name: taskType === 'reasoning' ? '推理文本模型' : '文本模型',
+    capabilities: taskType === 'reasoning' ? ['reasoning_text', 'text'] : ['text'],
+    inputTypes: ['text'],
+    outputTypes: ['text', 'json']
+  };
+}
+
+function getSemanticModelProfileIdForNode(node: ServerRoleWorkflowGraphNode): string | undefined {
+  const taskType = readConfigString(node.config, 'llmTaskType') ?? 'text';
+  if (taskType === 'vision') return 'qiu-vision-default';
+  if (taskType === 'audio_transcription') return 'qiu-asr-default';
+  if (taskType === 'image_generation') return 'qiu-image-generation-default';
+  if (taskType === 'image_editing') return 'qiu-image-editing-default';
+  if (taskType === 'video_understanding' || taskType === 'video_generation') return 'qiu-vision-default';
+  if (taskType === 'embedding') return 'qiu-embedding-default';
+  if (taskType === 'rerank') return 'qiu-rerank-default';
+  return 'qiu-general-default';
+}
+
+function mapModelProfileIdToSemanticDefault(profileId: string): string | undefined {
+  const normalized = profileId.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized.startsWith('qiu-')) return profileId.trim();
+  if (normalized.includes('asr') || normalized.includes('speech') || normalized.includes('audio')) return 'qiu-asr-default';
+  if (normalized.includes('gpt-image') || normalized.includes('img2img') || normalized.includes('image-edit')) {
+    return 'qiu-image-editing-default';
+  }
+  if (normalized.includes('image') || normalized.includes('vision') || normalized.includes('vl') || normalized.includes('gpt-4o')) {
+    return 'qiu-vision-default';
+  }
+  if (normalized.includes('embedding') || normalized.includes('embed')) return 'qiu-embedding-default';
+  if (normalized.includes('rerank')) return 'qiu-rerank-default';
+  return 'qiu-general-default';
 }
 
 function upsertToolAction(

@@ -38,6 +38,25 @@ export interface AcceptDesktopAgreementRequest extends DesktopAgreementAcceptanc
   actualReadSeconds?: number;
 }
 
+export type DesktopIssueCategory = 'BUG' | 'USAGE' | 'FEATURE_REQUEST' | 'BAD_OUTPUT' | 'OTHER';
+export type DesktopIssueSeverity = 'NORMAL' | 'IMPACTING' | 'BLOCKING';
+
+export interface CreateDesktopIssueReportRequest {
+  category: DesktopIssueCategory;
+  severity: DesktopIssueSeverity;
+  title: string;
+  description: string;
+  contact?: string;
+  workspaceId?: string;
+  workspaceName?: string;
+  runtimeId?: string;
+  deviceId?: string;
+  deviceName?: string;
+  appVersion?: string;
+  platform?: string;
+  diagnostics?: Record<string, unknown>;
+}
+
 export interface DesktopAgreementAcceptanceSummary {
   id: string;
   agreementKey: string;
@@ -61,6 +80,31 @@ export interface DesktopAgreementAcceptanceStatusResponse {
 
 export interface AcceptDesktopAgreementResponse {
   data: DesktopAgreementAcceptanceSummary;
+}
+
+export interface DesktopIssueReportSummary {
+  id: string;
+  issueNo: string;
+  category: DesktopIssueCategory;
+  severity: DesktopIssueSeverity;
+  status: 'NEW' | 'VIEWED' | 'IN_PROGRESS' | 'FIXED' | 'WONT_FIX' | 'CLOSED';
+  title: string;
+  description: string;
+  contact?: string;
+  workspaceId?: string;
+  runtimeId?: string;
+  deviceId?: string;
+  deviceName?: string;
+  appVersion?: string;
+  platform?: string;
+  diagnostics?: Record<string, unknown>;
+  adminNote?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateDesktopIssueReportResponse {
+  data: DesktopIssueReportSummary;
 }
 
 export interface DesktopDeviceSummary {
@@ -295,6 +339,40 @@ export function parseAcceptDesktopAgreementRequest(input: unknown): AcceptDeskto
   };
 }
 
+export function parseCreateDesktopIssueReportRequest(input: unknown): CreateDesktopIssueReportRequest {
+  const record = requireRecord(input, 'desktop issue report request');
+  const diagnostics = record.diagnostics === undefined || record.diagnostics === null
+    ? undefined
+    : requireRecord(record.diagnostics, 'desktopIssueReport.diagnostics');
+
+  return {
+    category: requireEnum(
+      record.category,
+      'desktopIssueReport.category',
+      ['BUG', 'USAGE', 'FEATURE_REQUEST', 'BAD_OUTPUT', 'OTHER']
+    ),
+    severity: requireEnum(
+      record.severity,
+      'desktopIssueReport.severity',
+      ['NORMAL', 'IMPACTING', 'BLOCKING']
+    ),
+    title: requireStringWithMaxLength(record.title, 'desktopIssueReport.title', 120),
+    description: requireStringWithMaxLength(
+      record.description,
+      'desktopIssueReport.description',
+      4000
+    ),
+    contact: optionalStringWithMaxLength(record.contact, 'desktopIssueReport.contact', 120),
+    workspaceId: optionalStringWithMaxLength(record.workspaceId, 'desktopIssueReport.workspaceId', 80),
+    runtimeId: optionalStringWithMaxLength(record.runtimeId, 'desktopIssueReport.runtimeId', 160),
+    deviceId: optionalStringWithMaxLength(record.deviceId, 'desktopIssueReport.deviceId', 160),
+    deviceName: optionalStringWithMaxLength(record.deviceName, 'desktopIssueReport.deviceName', 160),
+    appVersion: optionalStringWithMaxLength(record.appVersion, 'desktopIssueReport.appVersion', 80),
+    platform: optionalStringWithMaxLength(record.platform, 'desktopIssueReport.platform', 40),
+    diagnostics
+  };
+}
+
 function parseDesktopRuntimeSnapshot(input: unknown): DesktopRuntimeSnapshot {
   const record = requireRecord(input, 'desktop runtime snapshot');
   return {
@@ -493,6 +571,28 @@ function requireString(value: unknown, fieldName: string): string {
   const normalized = optionalString(value, fieldName);
   if (!normalized) {
     throw new Error(`${fieldName} must be a non-empty string.`);
+  }
+
+  return normalized;
+}
+
+function requireStringWithMaxLength(value: unknown, fieldName: string, maxLength: number): string {
+  const normalized = requireString(value, fieldName);
+  if (normalized.length > maxLength) {
+    throw new Error(`${fieldName} must be at most ${maxLength} characters.`);
+  }
+
+  return normalized;
+}
+
+function optionalStringWithMaxLength(
+  value: unknown,
+  fieldName: string,
+  maxLength: number
+): string | undefined {
+  const normalized = optionalString(value, fieldName);
+  if (normalized !== undefined && normalized.length > maxLength) {
+    throw new Error(`${fieldName} must be at most ${maxLength} characters.`);
   }
 
   return normalized;

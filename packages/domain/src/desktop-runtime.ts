@@ -27,10 +27,12 @@ export type ModelCapability =
   | 'embedding'
   | 'rerank'
   | 'long_context'
+  | 'image_understanding'
   | 'vision_understanding'
   | 'video_understanding'
   | 'text_to_image'
   | 'image_to_image'
+  | 'image_editing'
   | 'image_generation'
   | 'video_generation'
   | 'text_to_video'
@@ -183,10 +185,12 @@ export function validateModelProfile(input: unknown): ModelProfile {
       'embedding',
       'rerank',
       'long_context',
+      'image_understanding',
       'vision_understanding',
       'video_understanding',
       'text_to_image',
       'image_to_image',
+      'image_editing',
       'image_generation',
       'video_generation',
       'text_to_video',
