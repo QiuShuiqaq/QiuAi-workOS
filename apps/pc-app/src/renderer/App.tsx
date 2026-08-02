@@ -101,7 +101,9 @@ import type {
   ToolManifest
 } from '../shared/desktop-contract';
 import {
+  inferModelCapabilitiesFromName,
   modelCapabilityOptions,
+  modelCapabilityLabel,
   modelCapabilitySummary,
   modelProfileSupportsRequiredCapabilities,
   normalizeModelCapabilities,
@@ -171,6 +173,8 @@ type SectionKey = 'workbench' | 'factories' | 'roles' | 'logs' | 'models' | 'too
 type AccountModalKey = 'enterprise' | 'help' | 'release' | 'download' | 'logout';
 type DesktopThemePreference = 'light' | 'system';
 type DesktopDensityPreference = 'comfortable' | 'compact';
+type ProviderModelCapabilityFilter = 'all' | ModelCapability;
+type ProviderModelCatalogEntry = ModelProviderCatalog['models'][number];
 
 interface DesktopClientPreferences {
   theme: DesktopThemePreference;
@@ -359,6 +363,24 @@ const knowledgeBindingCatalog: KnowledgeBindingCatalogEntry[] = [
 const knowledgeBindingCatalogByBindingId = new Map(
   knowledgeBindingCatalog.map((entry) => [entry.bindingId, entry] as const)
 );
+
+const providerModelCapabilityFilters: Array<{
+  value: ProviderModelCapabilityFilter;
+  label: string;
+}> = [
+  { value: 'all', label: '全部' },
+  { value: 'text', label: '文本模型' },
+  { value: 'reasoning_text', label: '推理模型' },
+  { value: 'long_context', label: '长文档模型' },
+  { value: 'image_understanding', label: '图片理解' },
+  { value: 'text_to_image', label: '生图' },
+  { value: 'image_to_image', label: '参考图编辑' },
+  { value: 'video_understanding', label: '视频理解' },
+  { value: 'video_generation', label: '生视频' },
+  { value: 'audio_to_text', label: '语音转文字' },
+  { value: 'embedding', label: 'Embedding' },
+  { value: 'rerank', label: 'Rerank' }
+];
 
 const accountHelpSections: AccountHelpSection[] = [
   {
@@ -1638,6 +1660,10 @@ export default function App() {
     () => readDesktopClientPreferences()
   );
   const [selectedModelId, setSelectedModelId] = useState<string>('');
+  const [providerModelSearchQuery, setProviderModelSearchQuery] = useState('');
+  const [providerModelCapabilityFilter, setProviderModelCapabilityFilter] =
+    useState<ProviderModelCapabilityFilter>('all');
+  const [providerModelCompatibilityOnly, setProviderModelCompatibilityOnly] = useState(true);
   const [selectedTaskId, setSelectedTaskId] = useState<string>('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -2607,6 +2633,19 @@ export default function App() {
       ? findDefaultModelCredential(runtimeState.modelCredentials, selectedModelProfile.providerId)
       : undefined;
   }, [runtimeState.modelCredentials, selectedModelProfile]);
+  const selectedModelFormCapabilities = Form.useWatch('capabilities', modelForm) as ModelCapability[] | undefined;
+  const selectedModelRequiredCapabilities = useMemo(() => {
+    if (!selectedModelProfile) {
+      return [];
+    }
+
+    return normalizeModelCapabilities(
+      Array.isArray(selectedModelFormCapabilities)
+        ? selectedModelFormCapabilities
+        : selectedModelProfile.capabilities,
+      selectedModelProfile.purpose
+    );
+  }, [selectedModelFormCapabilities, selectedModelProfile]);
 
   useEffect(() => {
     if (!selectedModelProfile) {
@@ -6454,32 +6493,113 @@ export default function App() {
     selectedModelName?: string;
     onPick: (model: ModelProviderCatalog['models'][number]) => void;
   }) {
+    const search = providerModelSearchQuery.trim().toLowerCase();
+    const requiredCapabilities = selectedModelRequiredCapabilities;
+    const selectedModel = input.catalog.models.find((model) => model.id === input.selectedModelName);
+    const compatibleModels = input.catalog.models.filter((model) =>
+      modelCatalogEntrySupportsCapabilities(model, requiredCapabilities)
+    );
+    const filteredModels = input.catalog.models.filter((model) => {
+      if (
+        providerModelCompatibilityOnly &&
+        !modelCatalogEntrySupportsCapabilities(model, requiredCapabilities)
+      ) {
+        return false;
+      }
+
+      if (
+        providerModelCapabilityFilter !== 'all' &&
+        !modelCatalogEntrySupportsCapabilities(model, [providerModelCapabilityFilter])
+      ) {
+        return false;
+      }
+
+      if (!search) {
+        return true;
+      }
+
+      return modelCatalogEntrySearchText(model).includes(search);
+    });
+    const visibleModels = prioritizeProviderCatalogModels({
+      models: filteredModels,
+      selectedModel,
+      requiredCapabilities
+    });
+
     return (
       <div className="provider-model-catalog">
         <Flex align="center" justify="space-between" gap={12} wrap="wrap">
           <Space size={8} wrap>
             <Typography.Text strong>已拉取可用模型</Typography.Text>
             <Tag color="purple">{input.catalog.models.length} 个</Tag>
+            <Tag color={compatibleModels.length > 0 ? 'green' : 'orange'}>
+              匹配当前能力 {compatibleModels.length}
+            </Tag>
+            <Tag>{visibleModels.length} 个正在显示</Tag>
           </Space>
           <Typography.Text type="secondary">
             最近拉取：{formatDateTime(input.catalog.fetchedAt)}
           </Typography.Text>
         </Flex>
+        <div className="provider-model-toolbar">
+          <Input
+            allowClear
+            value={providerModelSearchQuery}
+            placeholder="搜索模型 ID、名称或能力，例如 qwen、asr、vl、image"
+            onChange={(event) => setProviderModelSearchQuery(event.target.value)}
+          />
+          <Flex align="center" justify="space-between" gap={12} wrap="wrap" className="provider-model-filter-row">
+            <Space size={6} wrap>
+              {providerModelCapabilityFilters.map((filter) => (
+                <button
+                  key={filter.value}
+                  type="button"
+                  className={
+                    providerModelCapabilityFilter === filter.value
+                      ? 'provider-model-filter active'
+                      : 'provider-model-filter'
+                  }
+                  onClick={() => setProviderModelCapabilityFilter(filter.value)}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </Space>
+            <Switch
+              checked={providerModelCompatibilityOnly}
+              checkedChildren="只看匹配"
+              unCheckedChildren="查看全部"
+              onChange={setProviderModelCompatibilityOnly}
+            />
+          </Flex>
+        </div>
         <div className="provider-model-list">
-          {input.catalog.models.map((model) => (
+          {visibleModels.map((model) => {
+            const compatible = modelCatalogEntrySupportsCapabilities(model, requiredCapabilities);
+            const inferredCapabilities = readModelCatalogEntryEffectiveCapabilities(model);
+
+            return (
             <button
               key={model.id}
               type="button"
               className={
                 input.selectedModelName === model.id
                   ? 'provider-model-option active'
-                  : 'provider-model-option'
+                  : compatible
+                    ? 'provider-model-option'
+                    : 'provider-model-option incompatible'
               }
               onClick={() => input.onPick(model)}
               title={model.label ?? model.id}
             >
               <span>
                 {model.label ?? model.id}
+                {input.selectedModelName === model.id ? (
+                  <Tag color="blue" className="model-source-tag">当前</Tag>
+                ) : null}
+                {compatible ? (
+                  <Tag color="green" className="model-source-tag">匹配</Tag>
+                ) : null}
                 {model.source ? (
                   <Tag color={modelCatalogSourceColor(model.source)} className="model-source-tag">
                     {modelCatalogSourceLabel(model.source)}
@@ -6487,10 +6607,17 @@ export default function App() {
                 ) : null}
               </span>
               <small>{model.id}</small>
-              <small>{modelCapabilitySummary(model.capabilities, 'general')}</small>
+              <small>{modelCapabilitySummary(inferredCapabilities, 'general')}</small>
             </button>
-          ))}
+          );
+          })}
         </div>
+        {visibleModels.length === 0 ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description="没有匹配的模型。可以清空搜索词，或切换为“查看全部”。"
+          />
+        ) : null}
       </div>
     );
   }
@@ -11193,6 +11320,90 @@ function confirmPaidModelTest(): Promise<boolean> {
       onCancel: () => resolve(false)
     });
   });
+}
+
+function readModelCatalogEntryEffectiveCapabilities(model: ProviderModelCatalogEntry): ModelCapability[] {
+  return normalizeModelCapabilities(
+    [
+      ...inferModelCapabilitiesFromName(model.id, 'general'),
+      ...(model.label ? inferModelCapabilitiesFromName(model.label, 'general') : []),
+      ...(model.capabilities ?? [])
+    ],
+    'general'
+  );
+}
+
+function modelCatalogEntrySupportsCapabilities(
+  model: ProviderModelCatalogEntry,
+  requiredCapabilities: ModelCapability[]
+): boolean {
+  if (requiredCapabilities.length === 0) {
+    return true;
+  }
+
+  const inferredProfile: ModelProfile = {
+    id: model.id,
+    providerId: 'catalog',
+    providerName: 'Catalog',
+    modelName: model.id,
+    purpose: purposeForModelCapabilities(model.capabilities, 'general'),
+    capabilities: readModelCatalogEntryEffectiveCapabilities(model)
+  };
+
+  return modelProfileSupportsRequiredCapabilities(inferredProfile, requiredCapabilities);
+}
+
+function modelCatalogEntrySearchText(model: ProviderModelCatalogEntry): string {
+  return [
+    model.id,
+    model.label,
+    model.ownedBy,
+    model.source,
+    ...readModelCatalogEntryEffectiveCapabilities(model).map(modelCapabilityLabel)
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(' ')
+    .toLowerCase();
+}
+
+function prioritizeProviderCatalogModels(input: {
+  models: ProviderModelCatalogEntry[];
+  selectedModel?: ProviderModelCatalogEntry;
+  requiredCapabilities: ModelCapability[];
+}): ProviderModelCatalogEntry[] {
+  const withSelectedModel =
+    input.selectedModel && !input.models.some((model) => model.id === input.selectedModel?.id)
+      ? [input.selectedModel, ...input.models]
+      : input.models;
+
+  return [...withSelectedModel].sort((left, right) => {
+    const leftSelected = left.id === input.selectedModel?.id;
+    const rightSelected = right.id === input.selectedModel?.id;
+    if (leftSelected !== rightSelected) {
+      return leftSelected ? -1 : 1;
+    }
+
+    const leftCompatible = modelCatalogEntrySupportsCapabilities(left, input.requiredCapabilities);
+    const rightCompatible = modelCatalogEntrySupportsCapabilities(right, input.requiredCapabilities);
+    if (leftCompatible !== rightCompatible) {
+      return leftCompatible ? -1 : 1;
+    }
+
+    const leftPriority = modelCatalogEntryNamePriority(left);
+    const rightPriority = modelCatalogEntryNamePriority(right);
+    if (leftPriority !== rightPriority) {
+      return leftPriority - rightPriority;
+    }
+
+    return left.id.localeCompare(right.id, undefined, { numeric: true });
+  });
+}
+
+function modelCatalogEntryNamePriority(model: ProviderModelCatalogEntry): number {
+  const name = `${model.id} ${model.label ?? ''}`.toLowerCase();
+  if (/\b(qwen|deepseek|gpt|claude|gemini|kimi|glm|minimax)\b/.test(name)) return 0;
+  if (name.includes('asr') || name.includes('vl') || name.includes('image') || name.includes('wanx')) return 1;
+  return 2;
 }
 
 function modelCatalogSourceLabel(source: NonNullable<ModelProviderCatalog['models'][number]['source']>): string {

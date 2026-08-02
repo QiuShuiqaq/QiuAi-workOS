@@ -2765,11 +2765,38 @@ body,
   background: #fafbfc;
 }
 
+.provider-model-toolbar {
+  display: grid;
+  gap: 8px;
+}
+
+.provider-model-filter-row {
+  min-width: 0;
+}
+
+.provider-model-filter {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid #d9e2ec;
+  border-radius: 999px;
+  background: #fff;
+  color: #57606a;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.provider-model-filter:hover,
+.provider-model-filter.active {
+  border-color: #1677ff;
+  background: #eef4ff;
+  color: #1677ff;
+}
+
 .provider-model-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   gap: 8px;
-  max-height: 220px;
+  max-height: 300px;
   overflow: auto;
 }
 
@@ -2791,6 +2818,12 @@ body,
 .provider-model-option.active {
   border-color: #1677ff;
   background: #eef4ff;
+}
+
+.provider-model-option.incompatible {
+  border-color: #eef2f7;
+  background: #fafbfc;
+  color: #8c959f;
 }
 
 .provider-model-option span,
