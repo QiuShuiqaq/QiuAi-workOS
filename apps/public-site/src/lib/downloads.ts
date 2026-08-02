@@ -38,8 +38,34 @@ interface GithubReleaseResponse {
   assets?: GithubReleaseAsset[];
 }
 
-function getDownloadItemsPath() {
-  return path.join(process.cwd(), "data", "download-items.json");
+function getDownloadItemsPathCandidates() {
+  const configuredPath = process.env.QIUAI_PUBLIC_DOWNLOAD_ITEMS_PATH?.trim();
+  const paths = [
+    configuredPath
+      ? path.resolve(process.cwd(), configuredPath)
+      : null,
+    path.join(process.cwd(), "apps", "public-site", "data", "download-items.json"),
+    path.join(process.cwd(), "data", "download-items.json"),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  return Array.from(new Set(paths));
+}
+
+async function readDownloadItemsSource() {
+  const candidates = getDownloadItemsPathCandidates();
+  let lastError: unknown;
+
+  for (const candidate of candidates) {
+    try {
+      return await readFile(candidate, "utf8");
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Download item configuration was not found.");
 }
 
 function createGithubHeaders() {
@@ -52,7 +78,7 @@ function createGithubHeaders() {
 }
 
 export async function getDownloadItems() {
-  const source = await readFile(getDownloadItemsPath(), "utf8");
+  const source = await readDownloadItemsSource();
   const items = JSON.parse(source) as DownloadItem[];
 
   return items

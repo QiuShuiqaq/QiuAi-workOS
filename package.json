@@ -14,7 +14,25 @@
     "services/*"
   ],
   "overrides": {
-    "postcss": "8.5.10"
+    "@nestjs/platform-fastify": {
+      "fastify": "5.11.0",
+      "find-my-way": "9.7.0"
+    },
+    "@nestjs/swagger": {
+      "js-yaml": "5.2.3"
+    },
+    "fastify": {
+      "find-my-way": "9.7.0"
+    },
+    "next": {
+      ".": "15.5.22",
+      "postcss": "8.5.25",
+      "sharp": "0.35.3"
+    },
+    "postcss": "8.5.25",
+    "sharp": "0.35.3",
+    "builder-util-runtime": "9.7.0",
+    "tar": "7.5.22"
   },
   "dependencies": {
     "@types/node": ">=20.0.0 <21",

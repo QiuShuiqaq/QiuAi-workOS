@@ -169,6 +169,71 @@ test('auth register creates an authenticated free enterprise workspace session',
   }
 });
 
+test('auth login applies rate limiting to repeated attempts', async () => {
+  const previousLimit = process.env.WORKOS_AUTH_LOGIN_IP_LIMIT;
+  const previousEmailLimit = process.env.WORKOS_AUTH_LOGIN_EMAIL_LIMIT;
+  const previousWindow = process.env.WORKOS_AUTH_LOGIN_WINDOW_SECONDS;
+
+  process.env.WORKOS_AUTH_LOGIN_IP_LIMIT = '2';
+  process.env.WORKOS_AUTH_LOGIN_EMAIL_LIMIT = '2';
+  process.env.WORKOS_AUTH_LOGIN_WINDOW_SECONDS = '60';
+
+  const app = await createApplication();
+  app.useLogger(false);
+
+  await app.init();
+  try {
+    for (let index = 0; index < 2; index += 1) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        headers: {
+          'content-type': 'application/json',
+          'x-forwarded-for': '203.0.113.42'
+        },
+        payload: {
+          email: 'admin@qiuai.local',
+          password: 'wrong-password'
+        }
+      });
+      assert.equal(response.statusCode, 401);
+    }
+
+    const limitedResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: {
+        'content-type': 'application/json',
+        'x-forwarded-for': '203.0.113.42'
+      },
+      payload: {
+        email: 'admin@qiuai.local',
+        password: 'wrong-password'
+      }
+    });
+
+    assert.equal(limitedResponse.statusCode, 429);
+    assert.equal(JSON.parse(limitedResponse.body).error.code, 'RATE_LIMITED');
+  } finally {
+    await app.close();
+    if (previousLimit === undefined) {
+      delete process.env.WORKOS_AUTH_LOGIN_IP_LIMIT;
+    } else {
+      process.env.WORKOS_AUTH_LOGIN_IP_LIMIT = previousLimit;
+    }
+    if (previousEmailLimit === undefined) {
+      delete process.env.WORKOS_AUTH_LOGIN_EMAIL_LIMIT;
+    } else {
+      process.env.WORKOS_AUTH_LOGIN_EMAIL_LIMIT = previousEmailLimit;
+    }
+    if (previousWindow === undefined) {
+      delete process.env.WORKOS_AUTH_LOGIN_WINDOW_SECONDS;
+    } else {
+      process.env.WORKOS_AUTH_LOGIN_WINDOW_SECONDS = previousWindow;
+    }
+  }
+});
+
 test('desktop agreement acceptance records device consent', async () => {
   const app = await createApplication();
   app.useLogger(false);

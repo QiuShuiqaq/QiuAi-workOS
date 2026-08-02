@@ -12,7 +12,8 @@
     "test": "node -e \"console.log('Public site test placeholder.')\""
   },
   "dependencies": {
-    "next": "15.5.19",
+    "next": "15.5.22",
+    "postcss": "8.5.25",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
@@ -22,7 +23,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "15.5.19",
+    "eslint-config-next": "15.5.22",
     "typescript": "^5"
   }
 }

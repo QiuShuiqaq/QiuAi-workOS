@@ -7,6 +7,14 @@ import { LoginRequestDto } from './dto/login-request.dto';
 import { RegisterRequestDto } from './dto/register-request.dto';
 import { AuthSessionResponseDto, LogoutResponseDto } from './dto/auth-session-response.dto';
 import { AuthService } from './auth.service';
+import { AuthRateLimitService } from './auth-rate-limit.service';
+
+function readClientIpAddress(request: FastifyRequest): string | undefined {
+  const forwardedFor = request.headers['x-forwarded-for'];
+  const forwardedValue = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
+  const firstForwardedIp = forwardedValue?.split(',')[0]?.trim();
+  return firstForwardedIp || request.ip;
+}
 
 @ApiTags('auth')
 @Controller({
@@ -14,7 +22,10 @@ import { AuthService } from './auth.service';
   version: '1'
 })
 export class AuthController {
-  constructor(@Inject(AuthService) private readonly authService: AuthService) {}
+  constructor(
+    @Inject(AuthService) private readonly authService: AuthService,
+    @Inject(AuthRateLimitService) private readonly authRateLimitService: AuthRateLimitService
+  ) {}
 
   @Post('login')
   @ApiOkResponse({ type: AuthSessionResponseDto })
@@ -23,9 +34,15 @@ export class AuthController {
     @Res({ passthrough: true }) reply: FastifyReply,
     @Req() request: FastifyRequest
   ): Promise<AuthSessionResponseDto> {
+    const ipAddress = readClientIpAddress(request);
+    this.authRateLimitService.assertLoginAllowed({
+      email: body.email,
+      ipAddress
+    });
+
     const result = await this.authService.login(body, {
       userAgent: request.headers['user-agent'],
-      ipAddress: request.ip
+      ipAddress
     });
 
     reply.header('set-cookie', serializeSessionCookie(result.sessionToken, result.maxAgeSeconds));
@@ -39,9 +56,15 @@ export class AuthController {
     @Res({ passthrough: true }) reply: FastifyReply,
     @Req() request: FastifyRequest
   ): Promise<AuthSessionResponseDto> {
+    const ipAddress = readClientIpAddress(request);
+    this.authRateLimitService.assertRegisterAllowed({
+      email: body.email,
+      ipAddress
+    });
+
     const result = await this.authService.register(body, {
       userAgent: request.headers['user-agent'],
-      ipAddress: request.ip
+      ipAddress
     });
 
     reply.header('set-cookie', serializeSessionCookie(result.sessionToken, result.maxAgeSeconds));

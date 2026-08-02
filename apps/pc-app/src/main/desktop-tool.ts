@@ -2610,26 +2610,94 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isLikelyPrivateHost(hostname: string): boolean {
-  const host = hostname.toLowerCase();
-  if (host === 'localhost' || host.endsWith('.localhost')) {
+  const host = normalizeHostnameForNetworkPolicy(hostname);
+  if (!host) {
     return true;
   }
 
-  if (host === '0.0.0.0' || host.startsWith('127.')) {
+  if (
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    host === 'metadata.google.internal'
+  ) {
     return true;
   }
 
-  if (host.startsWith('10.') || host.startsWith('192.168.')) {
-    return true;
+  const ipv4 = parseIPv4Address(host);
+  if (ipv4) {
+    return isPrivateIPv4Address(ipv4);
+  }
+
+  return isPrivateIPv6Address(host);
+}
+
+function normalizeHostnameForNetworkPolicy(hostname: string): string {
+  return hostname
+    .trim()
+    .toLowerCase()
+    .replace(/^\[(.*)\]$/, '$1')
+    .replace(/\.$/, '');
+}
+
+function parseIPv4Address(host: string): [number, number, number, number] | undefined {
+  if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) {
+    return undefined;
   }
 
   const parts = host.split('.').map((part) => Number.parseInt(part, 10));
-  if (parts.length === 4 && parts.every((part) => Number.isInteger(part))) {
-    const [first, second] = parts;
-    return first === 172 && second !== undefined && second >= 16 && second <= 31;
+  if (parts.some((part) => part < 0 || part > 255)) {
+    return undefined;
   }
 
-  return false;
+  return parts as [number, number, number, number];
+}
+
+function isPrivateIPv4Address([first, second]: [number, number, number, number]): boolean {
+  if (first === 0 || first === 10 || first === 127) {
+    return true;
+  }
+
+  if (first === 100 && second >= 64 && second <= 127) {
+    return true;
+  }
+
+  if (first === 169 && second === 254) {
+    return true;
+  }
+
+  if (first === 172 && second >= 16 && second <= 31) {
+    return true;
+  }
+
+  if (first === 192 && (second === 0 || second === 168)) {
+    return true;
+  }
+
+  if (first === 198 && (second === 18 || second === 19)) {
+    return true;
+  }
+
+  return first >= 224;
+}
+
+function isPrivateIPv6Address(host: string): boolean {
+  if (host === '::' || host === '::1' || host.startsWith('::ffff:')) {
+    return true;
+  }
+
+  const firstSegment = host.split(':')[0];
+  if (!firstSegment || !/^[0-9a-f]{1,4}$/.test(firstSegment)) {
+    return false;
+  }
+
+  const firstValue = Number.parseInt(firstSegment, 16);
+  return (
+    (firstValue >= 0xfc00 && firstValue <= 0xfdff) ||
+    (firstValue >= 0xfe80 && firstValue <= 0xfebf) ||
+    (firstValue >= 0xff00 && firstValue <= 0xffff)
+  );
 }
 
 function normalizeConfiguredString(value: string | undefined): string | undefined {

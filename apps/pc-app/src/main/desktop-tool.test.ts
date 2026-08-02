@@ -491,6 +491,30 @@ const blockedWebResult = await invokeDesktopTool(tempDir, {
 assert.equal(blockedWebResult.ok, false);
 assert.match(blockedWebResult.message ?? '', /private network URLs are blocked/);
 
+const blockedMetadataResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'web-search',
+  action: 'web.fetch_url',
+  input: {
+    url: 'http://169.254.169.254/latest/meta-data'
+  }
+});
+
+assert.equal(blockedMetadataResult.ok, false);
+assert.match(blockedMetadataResult.message ?? '', /private network URLs are blocked/);
+
+const blockedIpv6LocalhostResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'http-request',
+  action: 'http.request',
+  input: {
+    url: 'http://[::1]/api'
+  }
+});
+
+assert.equal(blockedIpv6LocalhostResult.ok, false);
+assert.match(blockedIpv6LocalhostResult.message ?? '', /private network URLs are blocked/);
+
 const blockedHttpResult = await invokeDesktopTool(tempDir, {
   workspaceId,
   toolId: 'http-request',
