@@ -222,6 +222,32 @@ interface FactoryRunPackageDefinition {
   custom?: boolean;
 }
 
+type FactoryVideoScreeningOperator = '>=' | '<=' | '>' | '<' | 'equals' | 'notEquals' | 'between';
+type FactoryVideoScreeningMetricType = 'number' | 'boolean';
+
+interface FactoryVideoScreeningRuleDefinition {
+  metric: string;
+  operator: FactoryVideoScreeningOperator;
+  value: unknown;
+  failReason: string;
+}
+
+interface FactoryVideoScreeningGateDefinition {
+  id: string;
+  name: string;
+  description?: string;
+  rules: FactoryVideoScreeningRuleDefinition[];
+}
+
+interface FactoryRunScreeningProfileDefinition {
+  key: string;
+  label: string;
+  description?: string;
+  defaultSelected?: boolean;
+  gates: FactoryVideoScreeningGateDefinition[];
+  custom?: boolean;
+}
+
 interface ComposerAttachment {
   id: string;
   name: string;
@@ -331,6 +357,7 @@ const sectionItems: Array<{ key: SectionKey; icon: ReactNode; label: string }> =
 
 const desktopClientPreferenceStorageKey = 'qiuai.pc.client.preferences.v1';
 const factoryPackagePresetStorageKey = 'qiuai.pc.factory.package.presets.v1';
+const factoryScreeningProfileStorageKey = 'qiuai.pc.factory.screening.profiles.v1';
 const defaultDesktopClientPreferences: DesktopClientPreferences = {
   theme: 'light',
   density: 'comfortable',
@@ -359,6 +386,81 @@ const issueFeedbackSeverityOptions: Array<{ value: DesktopIssueSeverity; label: 
   { value: 'NORMAL', label: '普通' },
   { value: 'IMPACTING', label: '影响工作' },
   { value: 'BLOCKING', label: '阻塞使用' }
+];
+
+const factoryVideoScreeningMetricOptions: Array<{
+  key: string;
+  label: string;
+  description: string;
+  type: FactoryVideoScreeningMetricType;
+  defaultOperator: FactoryVideoScreeningOperator;
+  defaultValue: unknown;
+  defaultFailReason: string;
+}> = [
+  {
+    key: 'portraitRatio',
+    label: '视频方向：横屏',
+    description: '横屏视频的画面高宽比通常小于 1。',
+    type: 'number',
+    defaultOperator: '<',
+    defaultValue: 1,
+    defaultFailReason: '视频为竖屏或非横屏比例，不符合横屏要求'
+  },
+  {
+    key: 'durationSeconds',
+    label: '视频时长',
+    description: '视频必须达到指定秒数后才进入后续流程。',
+    type: 'number',
+    defaultOperator: '>=',
+    defaultValue: 20,
+    defaultFailReason: '视频时长小于 20 秒'
+  },
+  {
+    key: 'hasAudio',
+    label: '必须有音轨',
+    description: '视频需要包含可识别音轨，才能执行语音转文字。',
+    type: 'boolean',
+    defaultOperator: 'equals',
+    defaultValue: true,
+    defaultFailReason: '视频缺少可识别音轨'
+  },
+  {
+    key: 'transcriptChars',
+    label: '转写文本长度',
+    description: 'ASR 转写后的文字越多，越容易判断表达质量。',
+    type: 'number',
+    defaultOperator: '>=',
+    defaultValue: 80,
+    defaultFailReason: '识别文本过短，说话内容不足'
+  },
+  {
+    key: 'unclearTokenRatio',
+    label: '语音不清晰比例',
+    description: '数值越高代表转写中“听不清、无法识别”等内容越多。',
+    type: 'number',
+    defaultOperator: '<=',
+    defaultValue: 0.25,
+    defaultFailReason: '语音含糊或识别失败比例过高'
+  },
+  {
+    key: 'beforeAfterCompleteness',
+    label: '内容完整度',
+    description: '按 0-1 判断使用前、使用后改善表达是否完整。',
+    type: 'number',
+    defaultOperator: '>=',
+    defaultValue: 0.6,
+    defaultFailReason: '使用前/使用后改善表述较简略，建议人工确认是否可用'
+  }
+];
+
+const factoryVideoScreeningOperatorOptions: Array<{ value: FactoryVideoScreeningOperator; label: string }> = [
+  { value: '>=', label: '大于等于' },
+  { value: '<=', label: '小于等于' },
+  { value: '>', label: '大于' },
+  { value: '<', label: '小于' },
+  { value: 'equals', label: '等于' },
+  { value: 'notEquals', label: '不等于' },
+  { value: 'between', label: '介于' }
 ];
 
 const knowledgeBindingCatalog: KnowledgeBindingCatalogEntry[] = [
@@ -1773,6 +1875,295 @@ function removeFactoryPackagePreset(roleCode: string) {
   }
 }
 
+function readFactoryCustomScreeningProfiles(roleCode: string): FactoryRunScreeningProfileDefinition[] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(factoryScreeningProfileStorageKey);
+    if (!rawValue) {
+      return [];
+    }
+
+    const parsed = JSON.parse(rawValue);
+    if (!isPlainObject(parsed)) {
+      return [];
+    }
+
+    return normalizeFactoryScreeningProfiles(parsed[roleCode], [], { custom: true });
+  } catch {
+    return [];
+  }
+}
+
+function writeFactoryCustomScreeningProfiles(roleCode: string, profiles: FactoryRunScreeningProfileDefinition[]) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(factoryScreeningProfileStorageKey);
+    const parsed = rawValue ? JSON.parse(rawValue) : {};
+    const current = isPlainObject(parsed) ? parsed : {};
+    window.localStorage.setItem(
+      factoryScreeningProfileStorageKey,
+      JSON.stringify({
+        ...current,
+        [roleCode]: normalizeFactoryScreeningProfiles(profiles, [], { custom: true })
+      })
+    );
+  } catch {
+    // Local factory screening profiles are optional; task execution can still use service templates.
+  }
+}
+
+function normalizeFactoryScreeningProfiles(
+  value: unknown,
+  fallback: FactoryRunScreeningProfileDefinition[],
+  options?: { custom?: boolean }
+): FactoryRunScreeningProfileDefinition[] {
+  const source = Array.isArray(value) ? value : fallback;
+  const usedKeys = new Set<string>();
+  const normalized: FactoryRunScreeningProfileDefinition[] = [];
+
+  for (const [index, item] of source.entries()) {
+    if (!isPlainObject(item)) {
+      continue;
+    }
+
+    const fallbackKey = options?.custom ? `custom_screening_${index + 1}` : `screening_${index + 1}`;
+    const key = normalizeFactoryScreeningKey(readString(item.key) ?? fallbackKey, fallbackKey);
+    const label = readString(item.label)?.trim();
+    if (!key || !label || usedKeys.has(key)) {
+      continue;
+    }
+
+    const gates = normalizeFactoryScreeningGates(item.gates, []);
+    normalized.push({
+      key,
+      label,
+      description: readString(item.description),
+      defaultSelected: typeof item.defaultSelected === 'boolean' ? item.defaultSelected : undefined,
+      gates: gates.length > 0 ? gates : cloneFactoryScreeningGates(defaultFactoryVideoScreeningGateDefinitions),
+      custom: options?.custom === true || item.custom === true
+    });
+    usedKeys.add(key);
+
+    if (normalized.length >= 30) {
+      break;
+    }
+  }
+
+  if (!normalized.length && source !== fallback) {
+    return normalizeFactoryScreeningProfiles(fallback, [], options);
+  }
+
+  return normalized;
+}
+
+function normalizeFactoryScreeningGates(
+  value: unknown,
+  fallback: FactoryVideoScreeningGateDefinition[]
+): FactoryVideoScreeningGateDefinition[] {
+  const source = Array.isArray(value) ? value : fallback;
+  const usedIds = new Set<string>();
+  const normalized: FactoryVideoScreeningGateDefinition[] = [];
+
+  for (const [index, item] of source.entries()) {
+    if (!isPlainObject(item)) {
+      continue;
+    }
+
+    const fallbackId = `gate_${index + 1}`;
+    const id = normalizeFactoryScreeningKey(readString(item.id) ?? fallbackId, fallbackId);
+    const name = readString(item.name)?.trim() ?? id;
+    const rules = normalizeFactoryScreeningRules(item.rules, []);
+    if (!id || usedIds.has(id) || rules.length === 0) {
+      continue;
+    }
+
+    normalized.push({
+      id,
+      name,
+      description: readString(item.description),
+      rules
+    });
+    usedIds.add(id);
+  }
+
+  return normalized;
+}
+
+function normalizeFactoryScreeningRules(
+  value: unknown,
+  fallback: FactoryVideoScreeningRuleDefinition[]
+): FactoryVideoScreeningRuleDefinition[] {
+  const source = Array.isArray(value) ? value : fallback;
+  const normalized: FactoryVideoScreeningRuleDefinition[] = [];
+
+  for (const item of source) {
+    if (!isPlainObject(item)) {
+      continue;
+    }
+
+    const metric = readString(item.metric);
+    const metricOption = findFactoryVideoScreeningMetric(metric);
+    if (!metricOption) {
+      continue;
+    }
+
+    const operator = readFactoryVideoScreeningOperator(item.operator, metricOption);
+    const value = normalizeFactoryScreeningRuleValue(item.value, metricOption, operator);
+    const failReason = readString(item.failReason)?.trim() || metricOption.defaultFailReason;
+    normalized.push({
+      metric: metricOption.key,
+      operator,
+      value,
+      failReason
+    });
+  }
+
+  return normalized;
+}
+
+function cloneFactoryScreeningGates(gates: FactoryVideoScreeningGateDefinition[]) {
+  return gates.map((gate) => ({
+    ...gate,
+    rules: gate.rules.map((rule) => ({
+      ...rule,
+      value: Array.isArray(rule.value) ? [...rule.value] : rule.value
+    }))
+  }));
+}
+
+function mergeFactoryScreeningProfiles(
+  baseProfiles: FactoryRunScreeningProfileDefinition[],
+  customProfiles: FactoryRunScreeningProfileDefinition[]
+) {
+  const usedKeys = new Set(baseProfiles.map((item) => item.key));
+  return [
+    ...baseProfiles.map((item) => ({ ...item, custom: false })),
+    ...customProfiles
+      .filter((item) => item.custom && !usedKeys.has(item.key))
+      .map((item) => ({ ...item, custom: true, defaultSelected: false }))
+  ];
+}
+
+function normalizeFactoryScreeningKey(value: string, fallback: string) {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 64);
+
+  return normalized || fallback;
+}
+
+function findFactoryVideoScreeningMetric(metric: string | undefined) {
+  return factoryVideoScreeningMetricOptions.find((item) => item.key === metric);
+}
+
+function readFactoryVideoScreeningOperator(
+  value: unknown,
+  metric: (typeof factoryVideoScreeningMetricOptions)[number]
+): FactoryVideoScreeningOperator {
+  if (
+    value === '>=' ||
+    value === '<=' ||
+    value === '>' ||
+    value === '<' ||
+    value === 'equals' ||
+    value === 'notEquals' ||
+    value === 'between'
+  ) {
+    if (metric.type === 'boolean' && value !== 'equals' && value !== 'notEquals') {
+      return metric.defaultOperator;
+    }
+    return value;
+  }
+
+  return metric.defaultOperator;
+}
+
+function normalizeFactoryScreeningRuleValue(
+  value: unknown,
+  metric: (typeof factoryVideoScreeningMetricOptions)[number],
+  operator: FactoryVideoScreeningOperator
+) {
+  if (metric.type === 'boolean') {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    if (value === 'false') {
+      return false;
+    }
+    return Boolean(metric.defaultValue);
+  }
+
+  if (operator === 'between') {
+    const rawBounds = Array.isArray(value) ? value : Array.isArray(metric.defaultValue) ? metric.defaultValue : [0, 1];
+    const bounds = rawBounds.map((item) => Number(item)).filter((item) => Number.isFinite(item));
+    return bounds.length >= 2 ? [bounds[0], bounds[1]] : [0, 1];
+  }
+
+  const numberValue = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  return Number.isFinite(numberValue) ? numberValue : metric.defaultValue;
+}
+
+function createFactoryScreeningRule(metricKey: string): FactoryVideoScreeningRuleDefinition {
+  const metric = findFactoryVideoScreeningMetric(metricKey) ?? factoryVideoScreeningMetricOptions[0];
+  return {
+    metric: metric.key,
+    operator: metric.defaultOperator,
+    value: metric.defaultValue,
+    failReason: metric.defaultFailReason
+  };
+}
+
+function validateFactoryScreeningProfile(profile: FactoryRunScreeningProfileDefinition | undefined): string | undefined {
+  if (!profile) {
+    return '请选择一个筛选标准。';
+  }
+  if (!profile.label.trim()) {
+    return '筛选标准名称不能为空。';
+  }
+  if (profile.gates.length === 0) {
+    return '筛选标准至少需要一个筛选分组。';
+  }
+
+  for (const gate of profile.gates) {
+    if (!gate.name.trim()) {
+      return '筛选分组名称不能为空。';
+    }
+    if (gate.rules.length === 0) {
+      return `${gate.name} 至少需要一条规则。`;
+    }
+    for (const rule of gate.rules) {
+      const metric = findFactoryVideoScreeningMetric(rule.metric);
+      if (!metric) {
+        return `${gate.name} 里存在暂不支持的指标。`;
+      }
+      if (!rule.failReason.trim()) {
+        return `${gate.name} 里有规则缺少不通过原因。`;
+      }
+      if (metric.type === 'number' && rule.operator !== 'between' && typeof rule.value !== 'number') {
+        return `${gate.name} 里有数值规则未填写阈值。`;
+      }
+      if (
+        metric.type === 'number' &&
+        rule.operator === 'between' &&
+        (!Array.isArray(rule.value) || rule.value.length < 2)
+      ) {
+        return `${gate.name} 里有区间规则未填写完整。`;
+      }
+    }
+  }
+
+  return undefined;
+}
+
 function readInitialSectionKey(): SectionKey {
   const hashValue = window.location.hash.replace(/^#/, '');
   if (hashValue === 'runtime' || hashValue === 'sync') {
@@ -1884,6 +2275,13 @@ export default function App() {
   const [factoryPackageEditorOpen, setFactoryPackageEditorOpen] = useState(false);
   const [factoryPackageEditorRoleCode, setFactoryPackageEditorRoleCode] = useState('');
   const [factoryPackageEditorDraft, setFactoryPackageEditorDraft] = useState<FactoryRunPackageDefinition[]>([]);
+  const [, refreshFactoryScreeningProfiles] = useState(0);
+  const [factoryScreeningEditorOpen, setFactoryScreeningEditorOpen] = useState(false);
+  const [factoryScreeningEditorRoleCode, setFactoryScreeningEditorRoleCode] = useState('');
+  const [factoryScreeningEditorProfiles, setFactoryScreeningEditorProfiles] = useState<
+    FactoryRunScreeningProfileDefinition[]
+  >([]);
+  const [factoryScreeningEditorSelectedKey, setFactoryScreeningEditorSelectedKey] = useState('');
 
   useEffect(() => {
     void loadRuntimeState();
@@ -3150,6 +3548,7 @@ export default function App() {
         {renderRuntimeModelQuickSwitchModal()}
         {renderRoleConfigModal()}
         {renderFactoryPackageEditorModal()}
+        {renderFactoryScreeningProfileEditorModal()}
         {renderFactoryImagePreviewModal()}
         {renderUserAgreementModal()}
       </AppProvider>
@@ -3856,6 +4255,276 @@ export default function App() {
             ))}
           </div>
         </Space>
+      </Modal>
+    );
+  }
+
+  function renderFactoryScreeningRuleValueControl(
+    gateIndex: number,
+    ruleIndex: number,
+    rule: FactoryVideoScreeningRuleDefinition,
+    readOnly: boolean
+  ) {
+    const metric = findFactoryVideoScreeningMetric(rule.metric) ?? factoryVideoScreeningMetricOptions[0];
+    if (metric.type === 'boolean') {
+      return (
+        <Select
+          size="large"
+          disabled={readOnly}
+          value={rule.value === false ? 'false' : 'true'}
+          options={[
+            { value: 'true', label: '是' },
+            { value: 'false', label: '否' }
+          ]}
+          onChange={(value) => updateFactoryScreeningRuleDraft(gateIndex, ruleIndex, { value: value === 'true' })}
+        />
+      );
+    }
+
+    if (rule.operator === 'between') {
+      const bounds = Array.isArray(rule.value) ? rule.value.map((item) => Number(item)) : [0, 1];
+      return (
+        <Space.Compact block>
+          <InputNumber
+            size="large"
+            disabled={readOnly}
+            value={Number.isFinite(bounds[0]) ? bounds[0] : undefined}
+            step={metric.key === 'durationSeconds' || metric.key === 'transcriptChars' ? 1 : 0.05}
+            placeholder="最小值"
+            onChange={(value) =>
+              updateFactoryScreeningRuleDraft(gateIndex, ruleIndex, {
+                value: [typeof value === 'number' ? value : 0, Number.isFinite(bounds[1]) ? bounds[1] : 1]
+              })
+            }
+          />
+          <InputNumber
+            size="large"
+            disabled={readOnly}
+            value={Number.isFinite(bounds[1]) ? bounds[1] : undefined}
+            step={metric.key === 'durationSeconds' || metric.key === 'transcriptChars' ? 1 : 0.05}
+            placeholder="最大值"
+            onChange={(value) =>
+              updateFactoryScreeningRuleDraft(gateIndex, ruleIndex, {
+                value: [Number.isFinite(bounds[0]) ? bounds[0] : 0, typeof value === 'number' ? value : 1]
+              })
+            }
+          />
+        </Space.Compact>
+      );
+    }
+
+    return (
+      <InputNumber
+        size="large"
+        disabled={readOnly}
+        value={typeof rule.value === 'number' ? rule.value : undefined}
+        step={metric.key === 'durationSeconds' || metric.key === 'transcriptChars' ? 1 : 0.05}
+        placeholder="阈值"
+        onChange={(value) =>
+          updateFactoryScreeningRuleDraft(gateIndex, ruleIndex, {
+            value: typeof value === 'number' ? value : metric.defaultValue
+          })
+        }
+      />
+    );
+  }
+
+  function renderFactoryScreeningProfileEditorModal() {
+    const selectedProfile = factoryScreeningEditorProfiles.find(
+      (item) => item.key === factoryScreeningEditorSelectedKey
+    );
+    const readOnly = !selectedProfile?.custom;
+
+    return (
+      <Modal
+        title="筛选标准库"
+        open={factoryScreeningEditorOpen}
+        width={980}
+        destroyOnHidden
+        onCancel={() => setFactoryScreeningEditorOpen(false)}
+        footer={[
+          <Button key="restore" onClick={restoreFactoryScreeningProfileDefaults}>
+            恢复系统模板
+          </Button>,
+          <Button key="add" icon={<PlusOutlined />} onClick={addFactoryScreeningProfileDraft}>
+            新增标准
+          </Button>,
+          <Button key="save" type="primary" onClick={applyFactoryScreeningProfileEditor}>
+            保存并应用
+          </Button>
+        ]}
+      >
+        <div className="factory-screening-editor">
+          <aside className="factory-screening-profile-list">
+            <Typography.Text type="secondary">
+              系统模板只读。需要修改时，先新增标准或复制当前模板。
+            </Typography.Text>
+            {factoryScreeningEditorProfiles.map((profile) => (
+              <button
+                key={profile.key}
+                type="button"
+                className={
+                  profile.key === factoryScreeningEditorSelectedKey
+                    ? 'factory-screening-profile-item selected'
+                    : 'factory-screening-profile-item'
+                }
+                onClick={() => setFactoryScreeningEditorSelectedKey(profile.key)}
+              >
+                <span>
+                  <Typography.Text strong ellipsis>
+                    {profile.label}
+                  </Typography.Text>
+                  <Tag color={profile.custom ? 'blue' : 'default'}>{profile.custom ? '自定义' : '系统'}</Tag>
+                </span>
+                {profile.description ? (
+                  <Typography.Text type="secondary" ellipsis>
+                    {profile.description}
+                  </Typography.Text>
+                ) : null}
+              </button>
+            ))}
+          </aside>
+
+          <section className="factory-screening-profile-detail">
+            {selectedProfile ? (
+              <>
+                <Flex align="center" justify="space-between" gap={12} wrap>
+                  <Space direction="vertical" size={2}>
+                    <Typography.Text strong>{selectedProfile.label}</Typography.Text>
+                    <Typography.Text type="secondary">
+                      {readOnly ? '这是系统模板，复制后才能编辑。' : '这是本机自定义标准，可以编辑、删除和保存。'}
+                    </Typography.Text>
+                  </Space>
+                  <Space>
+                    {readOnly ? (
+                      <Button icon={<PlusOutlined />} onClick={addFactoryScreeningProfileDraft}>
+                        复制为自定义
+                      </Button>
+                    ) : (
+                      <Popconfirm
+                        title="删除这个自定义筛选标准？"
+                        description="删除后不会影响系统模板，已完成的任务记录也会保留。"
+                        okText="删除"
+                        cancelText="取消"
+                        onConfirm={removeFactoryScreeningProfileDraft}
+                      >
+                        <Button danger icon={<DeleteOutlined />}>
+                          删除
+                        </Button>
+                      </Popconfirm>
+                    )}
+                  </Space>
+                </Flex>
+
+                <div className="factory-screening-profile-fields">
+                  <Input
+                    size="large"
+                    disabled={readOnly}
+                    value={selectedProfile.label}
+                    maxLength={40}
+                    placeholder="筛选标准名称"
+                    onChange={(event) => updateFactoryScreeningProfileDraft({ label: event.target.value })}
+                  />
+                  <Input.TextArea
+                    disabled={readOnly}
+                    value={selectedProfile.description}
+                    rows={2}
+                    maxLength={180}
+                    placeholder="说明这个标准适合什么客户或什么视频素材。"
+                    onChange={(event) => updateFactoryScreeningProfileDraft({ description: event.target.value })}
+                  />
+                </div>
+
+                <div className="factory-screening-gate-list">
+                  {selectedProfile.gates.map((gate, gateIndex) => (
+                    <div key={gate.id} className="factory-screening-gate-card">
+                      <Flex align="center" justify="space-between" gap={12} wrap>
+                        <Space direction="vertical" size={2}>
+                          <Input
+                            size="large"
+                            disabled={readOnly}
+                            value={gate.name}
+                            maxLength={24}
+                            onChange={(event) =>
+                              updateFactoryScreeningGateDraft(gateIndex, { name: event.target.value })
+                            }
+                          />
+                          {gate.description ? (
+                            <Typography.Text type="secondary">{gate.description}</Typography.Text>
+                          ) : null}
+                        </Space>
+                        <Button disabled={readOnly} icon={<PlusOutlined />} onClick={() => addFactoryScreeningRuleDraft(gateIndex)}>
+                          新增规则
+                        </Button>
+                      </Flex>
+
+                      <div className="factory-screening-rule-list">
+                        {gate.rules.map((rule, ruleIndex) => {
+                          const metric = findFactoryVideoScreeningMetric(rule.metric) ?? factoryVideoScreeningMetricOptions[0];
+                          const operatorOptions = factoryVideoScreeningOperatorOptions.filter(
+                            (operator) =>
+                              metric.type === 'number' || operator.value === 'equals' || operator.value === 'notEquals'
+                          );
+
+                          return (
+                            <div key={`${rule.metric}-${ruleIndex}`} className="factory-screening-rule-row">
+                              <Select
+                                size="large"
+                                disabled={readOnly}
+                                value={rule.metric}
+                                options={factoryVideoScreeningMetricOptions.map((item) => ({
+                                  value: item.key,
+                                  label: item.label
+                                }))}
+                                onChange={(value) => changeFactoryScreeningRuleMetric(gateIndex, ruleIndex, value)}
+                              />
+                              <Select
+                                size="large"
+                                disabled={readOnly}
+                                value={rule.operator}
+                                options={operatorOptions}
+                                onChange={(value) =>
+                                  updateFactoryScreeningRuleDraft(gateIndex, ruleIndex, {
+                                    operator: value,
+                                    value: normalizeFactoryScreeningRuleValue(rule.value, metric, value)
+                                  })
+                                }
+                              />
+                              {renderFactoryScreeningRuleValueControl(gateIndex, ruleIndex, rule, readOnly)}
+                              <Input
+                                size="large"
+                                disabled={readOnly}
+                                value={rule.failReason}
+                                maxLength={80}
+                                placeholder="不通过原因"
+                                onChange={(event) =>
+                                  updateFactoryScreeningRuleDraft(gateIndex, ruleIndex, {
+                                    failReason: event.target.value
+                                  })
+                                }
+                              />
+                              <Button
+                                danger
+                                disabled={readOnly || gate.rules.length <= 1}
+                                icon={<DeleteOutlined />}
+                                onClick={() => removeFactoryScreeningRuleDraft(gateIndex, ruleIndex)}
+                              />
+                              <Typography.Text type="secondary" className="factory-screening-rule-hint">
+                                {metric.description}
+                              </Typography.Text>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无筛选标准" />
+            )}
+          </section>
+        </div>
       </Modal>
     );
   }
@@ -4791,7 +5460,7 @@ export default function App() {
     const platformOptions = readFactoryPlatformOptions(selectedFactoryManifest);
     const qualityModes = readFactoryQualityModes(selectedFactoryManifest);
     const promptControlFields = readFactoryPromptControlFields(selectedFactoryManifest);
-    const screeningProfiles = readFactoryScreeningProfiles(selectedFactoryManifest);
+    const screeningProfiles = readFactoryScreeningProfiles(selectedFactoryManifest, selectedFactoryCode);
     const selectedFactoryPreparedPackage = selectedFactoryPackage
       ? {
           ...selectedFactoryPackage,
@@ -5267,18 +5936,51 @@ export default function App() {
                               </Form.Item>
                               <Form.Item
                                 name="screeningProfileKey"
-                                label="筛选标准"
+                                label={
+                                  <Flex align="center" justify="space-between" gap={8} className="factory-form-label-row">
+                                    <span>筛选标准</span>
+                                    <Button
+                                      size="small"
+                                      icon={<SettingOutlined />}
+                                      onMouseDown={(event) => event.preventDefault()}
+                                      onClick={(event) => {
+                                        event.preventDefault();
+                                        openFactoryScreeningProfileEditor(selectedFactoryCode);
+                                      }}
+                                    >
+                                      编辑
+                                    </Button>
+                                  </Flex>
+                                }
                                 rules={[{ required: true, message: '请选择筛选标准' }]}
                               >
                                 <Select
                                   size="large"
                                   options={screeningProfiles.map((item) => ({
                                     value: item.key,
-                                    label: item.label
+                                    label: `${item.label}${item.custom ? '（自定义）' : ''}`
                                   }))}
                                 />
                               </Form.Item>
                             </div>
+                            <Form.Item shouldUpdate noStyle>
+                              {({ getFieldValue }) => {
+                                const selectedProfile = screeningProfiles.find(
+                                  (item) => item.key === getFieldValue('screeningProfileKey')
+                                );
+
+                                return selectedProfile ? (
+                                  <div className="factory-screening-selected-summary">
+                                    <Tag color={selectedProfile.custom ? 'blue' : 'default'}>
+                                      {selectedProfile.custom ? '自定义标准' : '系统模板'}
+                                    </Tag>
+                                    <Typography.Text type="secondary">
+                                      {selectedProfile.description ?? '按当前筛选标准逐级判断视频是否进入后续流程。'}
+                                    </Typography.Text>
+                                  </div>
+                                ) : null;
+                              }}
+                            </Form.Item>
                             <div className="factory-inline-form-grid compact">
                               <Form.Item name="editEnabled" label="生成初剪" valuePropName="checked">
                                 <Switch checkedChildren="开启" unCheckedChildren="关闭" />
@@ -8073,7 +8775,7 @@ export default function App() {
 
     const factory = readFactoryManifest(template.dependencyManifest);
     if (isMedicalCaseVideoFactory(factory)) {
-      const screeningProfiles = readFactoryScreeningProfiles(factory);
+      const screeningProfiles = readFactoryScreeningProfiles(factory, roleCode);
       const defaultProfile = screeningProfiles.find((item) => item.defaultSelected) ?? screeningProfiles[0];
       const rolePackage =
         getPreparedInstalledRolePackage(roleCode) ??
@@ -8258,6 +8960,226 @@ export default function App() {
     });
     setFactoryPackageEditorDraft(defaultPackages);
     message.success('已恢复官方默认产物包。');
+  }
+
+  function openFactoryScreeningProfileEditor(roleCode: string) {
+    if (!roleCode) {
+      message.warning('请先选择一个数字工厂。');
+      return;
+    }
+
+    const factory = readFactoryManifestForRoleCode(roleCode);
+    if (!isMedicalCaseVideoFactory(factory)) {
+      message.warning('当前数字工厂不需要筛选标准。');
+      return;
+    }
+
+    const profiles = readFactoryScreeningProfiles(factory, roleCode);
+    const currentKey = factoryRunForm.getFieldValue('screeningProfileKey');
+    const selectedProfile =
+      profiles.find((item) => item.key === currentKey) ??
+      profiles.find((item) => item.defaultSelected) ??
+      profiles[0];
+    setFactoryScreeningEditorRoleCode(roleCode);
+    setFactoryScreeningEditorProfiles(profiles);
+    setFactoryScreeningEditorSelectedKey(selectedProfile?.key ?? '');
+    setFactoryScreeningEditorOpen(true);
+  }
+
+  function createFactoryScreeningProfileDraft(
+    source: FactoryRunScreeningProfileDefinition | undefined,
+    profiles: FactoryRunScreeningProfileDefinition[]
+  ): FactoryRunScreeningProfileDefinition {
+    const usedKeys = new Set(profiles.map((item) => item.key));
+    let index = profiles.filter((item) => item.custom).length + 1;
+    let key = `custom_screening_${index}`;
+    while (usedKeys.has(key)) {
+      index += 1;
+      key = `custom_screening_${index}`;
+    }
+
+    return {
+      key,
+      label: source ? `${source.label} 副本` : `自定义筛选标准 ${index}`,
+      description: source?.description ?? '',
+      defaultSelected: false,
+      gates: cloneFactoryScreeningGates(
+        source?.gates?.length ? source.gates : defaultFactoryVideoScreeningGateDefinitions
+      ),
+      custom: true
+    };
+  }
+
+  function addFactoryScreeningProfileDraft() {
+    const currentProfile = factoryScreeningEditorProfiles.find(
+      (item) => item.key === factoryScreeningEditorSelectedKey
+    );
+    const nextProfile = createFactoryScreeningProfileDraft(currentProfile, factoryScreeningEditorProfiles);
+    setFactoryScreeningEditorProfiles((current) => [...current, nextProfile]);
+    setFactoryScreeningEditorSelectedKey(nextProfile.key);
+  }
+
+  function updateFactoryScreeningProfileDraft(patch: Partial<FactoryRunScreeningProfileDefinition>) {
+    setFactoryScreeningEditorProfiles((current) =>
+      current.map((item) =>
+        item.key === factoryScreeningEditorSelectedKey && item.custom
+          ? {
+              ...item,
+              ...patch,
+              gates: patch.gates ?? item.gates
+            }
+          : item
+      )
+    );
+  }
+
+  function removeFactoryScreeningProfileDraft() {
+    const target = factoryScreeningEditorProfiles.find((item) => item.key === factoryScreeningEditorSelectedKey);
+    if (!target) {
+      return;
+    }
+    if (!target.custom) {
+      message.warning('系统模板不能删除，可以先复制为自定义标准。');
+      return;
+    }
+
+    const nextProfiles = factoryScreeningEditorProfiles.filter((item) => item.key !== target.key);
+    setFactoryScreeningEditorProfiles(nextProfiles);
+    setFactoryScreeningEditorSelectedKey(
+      nextProfiles.find((item) => item.defaultSelected)?.key ?? nextProfiles[0]?.key ?? ''
+    );
+  }
+
+  function updateFactoryScreeningGateDraft(
+    gateIndex: number,
+    patch: Partial<FactoryVideoScreeningGateDefinition>
+  ) {
+    const currentProfile = factoryScreeningEditorProfiles.find(
+      (item) => item.key === factoryScreeningEditorSelectedKey
+    );
+    if (!currentProfile?.custom) {
+      return;
+    }
+
+    updateFactoryScreeningProfileDraft({
+      gates: currentProfile.gates.map((gate, index) => (index === gateIndex ? { ...gate, ...patch } : gate))
+    });
+  }
+
+  function addFactoryScreeningRuleDraft(gateIndex: number) {
+    const currentProfile = factoryScreeningEditorProfiles.find(
+      (item) => item.key === factoryScreeningEditorSelectedKey
+    );
+    if (!currentProfile?.custom) {
+      return;
+    }
+
+    const usedMetrics = new Set(currentProfile.gates[gateIndex]?.rules.map((rule) => rule.metric) ?? []);
+    const metric =
+      factoryVideoScreeningMetricOptions.find((item) => !usedMetrics.has(item.key)) ??
+      factoryVideoScreeningMetricOptions[0];
+    updateFactoryScreeningGateDraft(gateIndex, {
+      rules: [...(currentProfile.gates[gateIndex]?.rules ?? []), createFactoryScreeningRule(metric.key)]
+    });
+  }
+
+  function updateFactoryScreeningRuleDraft(
+    gateIndex: number,
+    ruleIndex: number,
+    patch: Partial<FactoryVideoScreeningRuleDefinition>
+  ) {
+    const currentProfile = factoryScreeningEditorProfiles.find(
+      (item) => item.key === factoryScreeningEditorSelectedKey
+    );
+    if (!currentProfile?.custom) {
+      return;
+    }
+
+    const gates = currentProfile.gates.map((gate, currentGateIndex) => {
+      if (currentGateIndex !== gateIndex) {
+        return gate;
+      }
+
+      return {
+        ...gate,
+        rules: gate.rules.map((rule, currentRuleIndex) =>
+          currentRuleIndex === ruleIndex ? { ...rule, ...patch } : rule
+        )
+      };
+    });
+    updateFactoryScreeningProfileDraft({ gates });
+  }
+
+  function changeFactoryScreeningRuleMetric(gateIndex: number, ruleIndex: number, metricKey: string) {
+    updateFactoryScreeningRuleDraft(gateIndex, ruleIndex, createFactoryScreeningRule(metricKey));
+  }
+
+  function removeFactoryScreeningRuleDraft(gateIndex: number, ruleIndex: number) {
+    const currentProfile = factoryScreeningEditorProfiles.find(
+      (item) => item.key === factoryScreeningEditorSelectedKey
+    );
+    if (!currentProfile?.custom) {
+      return;
+    }
+
+    const gate = currentProfile.gates[gateIndex];
+    if (!gate || gate.rules.length <= 1) {
+      message.warning('每个筛选分组至少保留一条规则。');
+      return;
+    }
+
+    updateFactoryScreeningGateDraft(gateIndex, {
+      rules: gate.rules.filter((_, index) => index !== ruleIndex)
+    });
+  }
+
+  function restoreFactoryScreeningProfileDefaults() {
+    if (!factoryScreeningEditorRoleCode) {
+      return;
+    }
+
+    const factory = readFactoryManifestForRoleCode(factoryScreeningEditorRoleCode);
+    const defaultProfiles = readFactoryScreeningProfiles(factory);
+    writeFactoryCustomScreeningProfiles(factoryScreeningEditorRoleCode, []);
+    setFactoryScreeningEditorProfiles(defaultProfiles);
+    setFactoryScreeningEditorSelectedKey(
+      defaultProfiles.find((item) => item.defaultSelected)?.key ?? defaultProfiles[0]?.key ?? ''
+    );
+    factoryRunForm.setFieldsValue({
+      screeningProfileKey: defaultProfiles.find((item) => item.defaultSelected)?.key ?? defaultProfiles[0]?.key
+    });
+    refreshFactoryScreeningProfiles((value) => value + 1);
+    message.success('已恢复系统筛选标准。');
+  }
+
+  function applyFactoryScreeningProfileEditor() {
+    if (!factoryScreeningEditorRoleCode) {
+      return;
+    }
+
+    const selectedProfile = factoryScreeningEditorProfiles.find(
+      (item) => item.key === factoryScreeningEditorSelectedKey
+    );
+    const validationMessage = validateFactoryScreeningProfile(selectedProfile);
+    if (validationMessage) {
+      message.warning(validationMessage);
+      return;
+    }
+
+    const customProfiles = factoryScreeningEditorProfiles.filter((item) => item.custom);
+    for (const profile of customProfiles) {
+      const customValidationMessage = validateFactoryScreeningProfile(profile);
+      if (customValidationMessage) {
+        message.warning(`${profile.label || '未命名筛选标准'}：${customValidationMessage}`);
+        return;
+      }
+    }
+
+    writeFactoryCustomScreeningProfiles(factoryScreeningEditorRoleCode, customProfiles);
+    factoryRunForm.setFieldsValue({ screeningProfileKey: selectedProfile?.key });
+    refreshFactoryScreeningProfiles((value) => value + 1);
+    setFactoryScreeningEditorOpen(false);
+    message.success('筛选标准已保存并应用到当前任务。');
   }
 
   function submitFactoryRun(values: FactoryRunFormValues) {
@@ -10810,7 +11732,8 @@ interface DigitalFactoryScreeningProfileOption {
   label: string;
   description?: string;
   defaultSelected?: boolean;
-  gates?: unknown[];
+  gates?: FactoryVideoScreeningGateDefinition[];
+  custom?: boolean;
 }
 
 interface DigitalFactoryManifest {
@@ -10968,12 +11891,41 @@ const defaultFactoryAsrDialects: DigitalFactoryAsrDialectOption[] = [
   { key: 'sichuan_chongqing', label: '四川/重庆口音' }
 ];
 
+const defaultFactoryVideoScreeningGateDefinitions: FactoryVideoScreeningGateDefinition[] = [
+  {
+    id: 'video_spec',
+    name: '视频规格',
+    description: '先用本机视频工具检查画面比例、时长和音轨。',
+    rules: [
+      createFactoryScreeningRule('portraitRatio'),
+      createFactoryScreeningRule('durationSeconds'),
+      createFactoryScreeningRule('hasAudio')
+    ]
+  },
+  {
+    id: 'asr_quality',
+    name: '语音质量',
+    description: 'ASR 转写后检查文字量和不清晰内容比例。',
+    rules: [
+      createFactoryScreeningRule('transcriptChars'),
+      createFactoryScreeningRule('unclearTokenRatio')
+    ]
+  },
+  {
+    id: 'content_minimum',
+    name: '内容完整性',
+    description: '检查使用前、使用后改善表达是否足够完整。',
+    rules: [createFactoryScreeningRule('beforeAfterCompleteness')]
+  }
+];
+
 const defaultFactoryScreeningProfiles: DigitalFactoryScreeningProfileOption[] = [
   {
     key: 'default_medical_case',
     label: '医疗案例素材标准',
     description: '先检查横屏、20 秒以上、音轨可识别，再检查使用前后改善表述完整度。',
-    defaultSelected: true
+    defaultSelected: true,
+    gates: defaultFactoryVideoScreeningGateDefinitions
   }
 ];
 
@@ -11090,8 +12042,16 @@ function readFactoryAsrDialectOptions(factory: DigitalFactoryManifest): DigitalF
   return factory.asr?.dialects?.length ? factory.asr.dialects : defaultFactoryAsrDialects;
 }
 
-function readFactoryScreeningProfiles(factory: DigitalFactoryManifest): DigitalFactoryScreeningProfileOption[] {
-  return factory.screeningProfiles?.length ? factory.screeningProfiles : defaultFactoryScreeningProfiles;
+function readFactoryScreeningProfiles(
+  factory: DigitalFactoryManifest,
+  roleCode?: string
+): FactoryRunScreeningProfileDefinition[] {
+  const baseProfiles = normalizeFactoryScreeningProfiles(
+    factory.screeningProfiles?.length ? factory.screeningProfiles : defaultFactoryScreeningProfiles,
+    []
+  );
+  const customProfiles = roleCode ? readFactoryCustomScreeningProfiles(roleCode) : [];
+  return mergeFactoryScreeningProfiles(baseProfiles, customProfiles);
 }
 
 function readFactoryMaxItems(factory: DigitalFactoryManifest) {
@@ -11244,7 +12204,7 @@ function buildMedicalCaseVideoFactoryTaskInput({
   values: FactoryRunFormValues;
   attachments: ComposerAttachment[];
 }) {
-  const screeningProfiles = readFactoryScreeningProfiles(factory);
+  const screeningProfiles = readFactoryScreeningProfiles(factory, values.roleCode);
   const screeningProfile =
     screeningProfiles.find((item) => item.key === values.screeningProfileKey) ??
     screeningProfiles.find((item) => item.defaultSelected) ??
@@ -11457,7 +12417,7 @@ function readFactoryScreeningProfilesFromValue(value: unknown): DigitalFactorySc
         label,
         description: readString(item.description),
         defaultSelected: typeof item.defaultSelected === 'boolean' ? item.defaultSelected : undefined,
-        gates: Array.isArray(item.gates) ? item.gates : undefined
+        gates: normalizeFactoryScreeningGates(item.gates, [])
       }
     ];
   });

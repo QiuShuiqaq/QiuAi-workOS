@@ -1408,6 +1408,17 @@ body,
   width: 100%;
 }
 
+.factory-screening-selected-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: -4px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fbfcff;
+}
+
 .factory-prompt-control-block {
   display: grid;
   gap: 10px;
@@ -2740,6 +2751,84 @@ body,
   align-items: center;
 }
 
+.factory-screening-editor {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 14px;
+  min-height: 560px;
+}
+
+.factory-screening-profile-list,
+.factory-screening-profile-detail,
+.factory-screening-gate-list,
+.factory-screening-rule-list,
+.factory-screening-profile-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.factory-screening-profile-list {
+  align-content: start;
+  max-height: 62vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.factory-screening-profile-item {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.factory-screening-profile-item > span:first-child {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.factory-screening-profile-item.selected {
+  border-color: #1677ff;
+  background: #f2f7ff;
+}
+
+.factory-screening-profile-detail {
+  min-width: 0;
+  max-height: 62vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.factory-screening-gate-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.factory-screening-rule-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 1.2fr) minmax(100px, 0.8fr) minmax(120px, 0.9fr) minmax(160px, 1.4fr) auto;
+  gap: 8px;
+  align-items: start;
+}
+
+.factory-screening-rule-hint {
+  grid-column: 1 / -1;
+  margin-top: -4px;
+}
+
 .factory-upload-panel {
   display: grid;
   gap: 12px;
@@ -3144,7 +3233,12 @@ body,
   .factory-console-grid,
   .factory-console-right,
   .factory-inline-form-grid,
+  .factory-screening-editor,
   .factory-prompt-control-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .factory-screening-rule-row {
     grid-template-columns: 1fr;
   }
 
