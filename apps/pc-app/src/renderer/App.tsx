@@ -198,13 +198,28 @@ interface FactoryRunFormValues {
   roleCode: string;
   platform?: string;
   packageKeys?: string[];
+  packageDefinitions?: FactoryRunPackageDefinition[];
   qualityCheckMode?: 'none' | 'basic' | 'smart';
   asrModelProfileId?: string;
   dialect?: string;
   screeningProfileKey?: string;
   editEnabled?: boolean;
   editTargetSeconds?: number;
+  promptLanguage?: string;
+  promptStyle?: string;
+  promptGoal?: string;
+  promptMustKeep?: string;
+  promptAvoid?: string;
   instruction?: string;
+}
+
+interface FactoryRunPackageDefinition {
+  key: string;
+  label: string;
+  description?: string;
+  outputType?: string;
+  defaultSelected?: boolean;
+  custom?: boolean;
 }
 
 interface ComposerAttachment {
@@ -315,6 +330,7 @@ const sectionItems: Array<{ key: SectionKey; icon: ReactNode; label: string }> =
 ];
 
 const desktopClientPreferenceStorageKey = 'qiuai.pc.client.preferences.v1';
+const factoryPackagePresetStorageKey = 'qiuai.pc.factory.package.presets.v1';
 const defaultDesktopClientPreferences: DesktopClientPreferences = {
   theme: 'light',
   density: 'comfortable',
@@ -1638,6 +1654,125 @@ function writeDesktopClientPreferences(preferences: DesktopClientPreferences) {
   }
 }
 
+function normalizeFactoryPackageDefinitions(
+  value: unknown,
+  fallback: Array<DigitalFactoryPackageOption | FactoryRunPackageDefinition>
+): FactoryRunPackageDefinition[] {
+  const source = Array.isArray(value) ? value : fallback;
+  const usedKeys = new Set<string>();
+  const normalized: FactoryRunPackageDefinition[] = [];
+
+  for (const [index, item] of source.entries()) {
+    if (!isPlainObject(item)) {
+      continue;
+    }
+
+    const fallbackKey = `custom_${index + 1}`;
+    const key = normalizeFactoryPackageKey(readString(item.key) ?? fallbackKey, fallbackKey);
+    const label = readString(item.label)?.trim();
+    if (!key || !label || usedKeys.has(key)) {
+      continue;
+    }
+
+    usedKeys.add(key);
+    normalized.push({
+      key,
+      label,
+      description: readString(item.description),
+      outputType: readString(item.outputType) ?? 'image',
+      defaultSelected: typeof item.defaultSelected === 'boolean' ? item.defaultSelected : undefined,
+      custom: typeof item.custom === 'boolean' ? item.custom : key.startsWith('custom_')
+    });
+
+    if (normalized.length >= 20) {
+      break;
+    }
+  }
+
+  if (!normalized.length && source !== fallback) {
+    return normalizeFactoryPackageDefinitions(fallback, []);
+  }
+
+  return normalized;
+}
+
+function normalizeFactoryPackageKey(value: string, fallback: string) {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 64);
+
+  return normalized || fallback;
+}
+
+function readFactoryPackagePreset(
+  roleCode: string,
+  fallback: DigitalFactoryPackageOption[]
+): FactoryRunPackageDefinition[] {
+  if (typeof window === 'undefined') {
+    return normalizeFactoryPackageDefinitions(fallback, []);
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(factoryPackagePresetStorageKey);
+    if (!rawValue) {
+      return normalizeFactoryPackageDefinitions(fallback, []);
+    }
+
+    const parsed = JSON.parse(rawValue);
+    if (!isPlainObject(parsed)) {
+      return normalizeFactoryPackageDefinitions(fallback, []);
+    }
+
+    return normalizeFactoryPackageDefinitions(parsed[roleCode], fallback);
+  } catch {
+    return normalizeFactoryPackageDefinitions(fallback, []);
+  }
+}
+
+function writeFactoryPackagePreset(roleCode: string, packages: FactoryRunPackageDefinition[]) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(factoryPackagePresetStorageKey);
+    const parsed = rawValue ? JSON.parse(rawValue) : {};
+    const current = isPlainObject(parsed) ? parsed : {};
+    window.localStorage.setItem(
+      factoryPackagePresetStorageKey,
+      JSON.stringify({
+        ...current,
+        [roleCode]: normalizeFactoryPackageDefinitions(packages, [])
+      })
+    );
+  } catch {
+    // Local factory package presets are optional; task execution should not depend on storage.
+  }
+}
+
+function removeFactoryPackagePreset(roleCode: string) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(factoryPackagePresetStorageKey);
+    const parsed = rawValue ? JSON.parse(rawValue) : {};
+    if (!isPlainObject(parsed)) {
+      return;
+    }
+
+    const next = { ...parsed };
+    delete next[roleCode];
+    window.localStorage.setItem(factoryPackagePresetStorageKey, JSON.stringify(next));
+  } catch {
+    // Local factory package presets are optional.
+  }
+}
+
 function readInitialSectionKey(): SectionKey {
   const hashValue = window.location.hash.replace(/^#/, '');
   if (hashValue === 'runtime' || hashValue === 'sync') {
@@ -1746,6 +1881,9 @@ export default function App() {
   const [isFactoryDragOver, setIsFactoryDragOver] = useState(false);
   const [previewFactoryImage, setPreviewFactoryImage] = useState<FactoryArtifactPreviewItem | null>(null);
   const [factorySidePanelOpen, setFactorySidePanelOpen] = useState<'status' | 'logs' | null>(null);
+  const [factoryPackageEditorOpen, setFactoryPackageEditorOpen] = useState(false);
+  const [factoryPackageEditorRoleCode, setFactoryPackageEditorRoleCode] = useState('');
+  const [factoryPackageEditorDraft, setFactoryPackageEditorDraft] = useState<FactoryRunPackageDefinition[]>([]);
 
   useEffect(() => {
     void loadRuntimeState();
@@ -3011,6 +3149,7 @@ export default function App() {
         {renderRoleUninstallModal()}
         {renderRuntimeModelQuickSwitchModal()}
         {renderRoleConfigModal()}
+        {renderFactoryPackageEditorModal()}
         {renderFactoryImagePreviewModal()}
         {renderUserAgreementModal()}
       </AppProvider>
@@ -3653,6 +3792,69 @@ export default function App() {
               </Space>
             </div>
           ) : null}
+        </Space>
+      </Modal>
+    );
+  }
+
+  function renderFactoryPackageEditorModal() {
+    return (
+      <Modal
+        title="编辑产物包"
+        open={factoryPackageEditorOpen}
+        width={720}
+        destroyOnHidden
+        onCancel={() => setFactoryPackageEditorOpen(false)}
+        footer={[
+          <Button key="restore" onClick={restoreFactoryPackageDefaults}>
+            恢复官方默认
+          </Button>,
+          <Button key="add" icon={<PlusOutlined />} onClick={addFactoryPackageEditorDraft}>
+            新增产物包
+          </Button>,
+          <Button key="apply" onClick={() => applyFactoryPackageEditorDraft()}>
+            应用本次
+          </Button>,
+          <Button key="save" type="primary" onClick={() => applyFactoryPackageEditorDraft({ saveAsDefault: true })}>
+            保存为本机默认
+          </Button>
+        ]}
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Typography.Text type="secondary">
+            这里调整的是当前电脑的运行配置。官方模板仍由服务端维护，恢复默认可回到服务端模板。
+          </Typography.Text>
+          <div className="factory-package-editor-list">
+            {factoryPackageEditorDraft.map((item, index) => (
+              <div key={item.key} className="factory-package-editor-item">
+                <div className="factory-package-editor-row">
+                  <Input
+                    value={item.label}
+                    maxLength={32}
+                    placeholder="产物包名称"
+                    onChange={(event) =>
+                      updateFactoryPackageEditorDraft(index, { label: event.target.value })
+                    }
+                  />
+                  <Button
+                    danger
+                    icon={<DeleteOutlined />}
+                    disabled={factoryPackageEditorDraft.length <= 1}
+                    onClick={() => removeFactoryPackageEditorDraft(index)}
+                  />
+                </div>
+                <Input.TextArea
+                  value={item.description}
+                  rows={2}
+                  maxLength={160}
+                  placeholder="说明这个产物包要生成什么，提示词模型会参考这里写生图提示词。"
+                  onChange={(event) =>
+                    updateFactoryPackageEditorDraft(index, { description: event.target.value })
+                  }
+                />
+              </div>
+            ))}
+          </div>
         </Space>
       </Modal>
     );
@@ -4588,6 +4790,7 @@ export default function App() {
     const packageOptions = readFactoryPackageOptions(selectedFactoryManifest);
     const platformOptions = readFactoryPlatformOptions(selectedFactoryManifest);
     const qualityModes = readFactoryQualityModes(selectedFactoryManifest);
+    const promptControlFields = readFactoryPromptControlFields(selectedFactoryManifest);
     const screeningProfiles = readFactoryScreeningProfiles(selectedFactoryManifest);
     const selectedFactoryPreparedPackage = selectedFactoryPackage
       ? {
@@ -5113,18 +5316,40 @@ export default function App() {
                                 }))}
                               />
                             </Form.Item>
-                            <Form.Item
-                              name="packageKeys"
-                              label="选择产物包"
-                              rules={[{ required: true, message: '请至少选择一个产物包' }]}
-                            >
-                              <Checkbox.Group className="factory-package-checks">
-                                {packageOptions.map((item) => (
-                                  <Tooltip key={item.key} title={item.description}>
-                                    <Checkbox value={item.key}>{item.label}</Checkbox>
-                                  </Tooltip>
-                                ))}
-                              </Checkbox.Group>
+                            <Form.Item shouldUpdate noStyle>
+                              {({ getFieldValue }) => {
+                                const currentPackages = normalizeFactoryPackageDefinitions(
+                                  getFieldValue('packageDefinitions'),
+                                  packageOptions
+                                );
+
+                                return (
+                                  <Form.Item
+                                    name="packageKeys"
+                                    label={
+                                      <Flex align="center" justify="space-between" gap={8} className="factory-form-label-row">
+                                        <span>选择产物包</span>
+                                        <Button
+                                          size="small"
+                                          icon={<SettingOutlined />}
+                                          onClick={() => openFactoryPackageEditor(selectedFactoryCode)}
+                                        >
+                                          编辑
+                                        </Button>
+                                      </Flex>
+                                    }
+                                    rules={[{ required: true, message: '请至少选择一个产物包' }]}
+                                  >
+                                    <Checkbox.Group className="factory-package-checks">
+                                      {currentPackages.map((item) => (
+                                        <Tooltip key={item.key} title={item.description}>
+                                          <Checkbox value={item.key}>{item.label}</Checkbox>
+                                        </Tooltip>
+                                      ))}
+                                    </Checkbox.Group>
+                                  </Form.Item>
+                                );
+                              }}
                             </Form.Item>
                             <Form.Item name="qualityCheckMode" label="质检方式" rules={[{ required: true }]}>
                               <Select
@@ -5135,6 +5360,23 @@ export default function App() {
                                 }))}
                               />
                             </Form.Item>
+                            <div className="factory-prompt-control-block">
+                              <Flex align="center" justify="space-between" gap={8}>
+                                <Typography.Text strong>提示词控制</Typography.Text>
+                                <Typography.Text type="secondary">控制提示词模型怎么写生图指令</Typography.Text>
+                              </Flex>
+                              <div className="factory-prompt-control-grid">
+                                {promptControlFields.map((field) => (
+                                  <Form.Item key={field.key} name={field.key} label={field.label}>
+                                    {field.inputType === 'textarea' ? (
+                                      <Input.TextArea rows={2} placeholder={field.placeholder} />
+                                    ) : (
+                                      <Input placeholder={field.placeholder} />
+                                    )}
+                                  </Form.Item>
+                                ))}
+                              </div>
+                            </div>
                             <Form.Item name="instruction" label="补充要求">
                               <Input.TextArea
                                 rows={3}
@@ -7864,17 +8106,24 @@ export default function App() {
     }
 
     const packageOptions = readFactoryPackageOptions(factory);
+    const packageDefinitions = readFactoryPackagePreset(roleCode, packageOptions);
     const platformOptions = readFactoryPlatformOptions(factory);
     const qualityModes = readFactoryQualityModes(factory);
-    const defaultPackages = packageOptions
+    const defaultPackages = packageDefinitions
       .filter((item) => item.defaultSelected !== false)
       .map((item) => item.key);
 
     return {
       roleCode,
       platform: platformOptions[0]?.key ?? 'amazon',
-      packageKeys: defaultPackages.length ? defaultPackages : packageOptions.map((item) => item.key),
+      packageDefinitions,
+      packageKeys: defaultPackages.length ? defaultPackages : packageDefinitions.map((item) => item.key),
       qualityCheckMode: qualityModes[0]?.key ?? 'basic',
+      promptLanguage: '',
+      promptStyle: '',
+      promptGoal: '',
+      promptMustKeep: '',
+      promptAvoid: '',
       instruction: ''
     };
   }
@@ -7889,6 +8138,126 @@ export default function App() {
     factoryRunForm.setFieldsValue(defaultValues);
     setFactoryAttachments([]);
     return true;
+  }
+
+  function readFactoryManifestForRoleCode(roleCode: string) {
+    const rolePackage = runtimeState.rolePackages.find((item) => item.roleCode === roleCode);
+    const template = desktopRoleTemplateByRoleCode.get(roleCode);
+    return readFactoryManifest(rolePackage?.dependencyManifest ?? template?.dependencyManifest);
+  }
+
+  function openFactoryPackageEditor(roleCode: string) {
+    if (!roleCode) {
+      message.warning('请先选择一个数字工厂。');
+      return;
+    }
+
+    const factory = readFactoryManifestForRoleCode(roleCode);
+    const currentPackages = normalizeFactoryPackageDefinitions(
+      factoryRunForm.getFieldValue('packageDefinitions'),
+      readFactoryPackageOptions(factory)
+    );
+    setFactoryPackageEditorRoleCode(roleCode);
+    setFactoryPackageEditorDraft(currentPackages);
+    setFactoryPackageEditorOpen(true);
+  }
+
+  function updateFactoryPackageEditorDraft(index: number, patch: Partial<FactoryRunPackageDefinition>) {
+    setFactoryPackageEditorDraft((current) =>
+      current.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item))
+    );
+  }
+
+  function addFactoryPackageEditorDraft() {
+    setFactoryPackageEditorDraft((current) => {
+      if (current.length >= 20) {
+        message.warning('单个数字工厂最多保留 20 个产物包。');
+        return current;
+      }
+
+      const usedKeys = new Set(current.map((item) => item.key));
+      let index = current.length + 1;
+      let key = `custom_${index}`;
+      while (usedKeys.has(key)) {
+        index += 1;
+        key = `custom_${index}`;
+      }
+
+      return [
+        ...current,
+        {
+          key,
+          label: `自定义产物包 ${index}`,
+          description: '',
+          outputType: 'image',
+          defaultSelected: true,
+          custom: true
+        }
+      ];
+    });
+  }
+
+  function removeFactoryPackageEditorDraft(index: number) {
+    setFactoryPackageEditorDraft((current) => current.filter((_, itemIndex) => itemIndex !== index));
+  }
+
+  function applyFactoryPackageEditorDraft(options?: { saveAsDefault?: boolean }) {
+    if (!factoryPackageEditorRoleCode) {
+      return;
+    }
+
+    const factory = readFactoryManifestForRoleCode(factoryPackageEditorRoleCode);
+    const normalizedPackages = normalizeFactoryPackageDefinitions(
+      factoryPackageEditorDraft,
+      readFactoryPackageOptions(factory)
+    );
+    if (!normalizedPackages.length) {
+      message.warning('请至少保留一个产物包。');
+      return;
+    }
+
+    const currentSelectedKeys = new Set<string>(factoryRunForm.getFieldValue('packageKeys') ?? []);
+    const nextPackageKeys = normalizedPackages
+      .filter((item) => currentSelectedKeys.has(item.key) || item.custom)
+      .map((item) => item.key);
+    const selectedPackageKeys = nextPackageKeys.length
+      ? nextPackageKeys
+      : normalizedPackages
+          .filter((item) => item.defaultSelected !== false)
+          .map((item) => item.key);
+
+    factoryRunForm.setFieldsValue({
+      packageDefinitions: normalizedPackages,
+      packageKeys: selectedPackageKeys.length ? selectedPackageKeys : normalizedPackages.map((item) => item.key)
+    });
+
+    if (options?.saveAsDefault) {
+      writeFactoryPackagePreset(factoryPackageEditorRoleCode, normalizedPackages);
+      message.success('已保存为这台电脑的默认产物包。');
+    } else {
+      message.success('已应用到本次任务。');
+    }
+
+    setFactoryPackageEditorOpen(false);
+  }
+
+  function restoreFactoryPackageDefaults() {
+    if (!factoryPackageEditorRoleCode) {
+      return;
+    }
+
+    const factory = readFactoryManifestForRoleCode(factoryPackageEditorRoleCode);
+    const defaultPackages = normalizeFactoryPackageDefinitions(readFactoryPackageOptions(factory), []);
+    const selectedPackageKeys = defaultPackages
+      .filter((item) => item.defaultSelected !== false)
+      .map((item) => item.key);
+    removeFactoryPackagePreset(factoryPackageEditorRoleCode);
+    factoryRunForm.setFieldsValue({
+      packageDefinitions: defaultPackages,
+      packageKeys: selectedPackageKeys.length ? selectedPackageKeys : defaultPackages.map((item) => item.key)
+    });
+    setFactoryPackageEditorDraft(defaultPackages);
+    message.success('已恢复官方默认产物包。');
   }
 
   function submitFactoryRun(values: FactoryRunFormValues) {
@@ -7970,17 +8339,24 @@ export default function App() {
       message.warning(`单批最多处理 ${maxItems} 张商品图，请拆分批次。`);
       return;
     }
-    if (!values.packageKeys?.length) {
+    const imageFactoryValues: FactoryRunFormValues = {
+      ...values,
+      packageDefinitions: normalizeFactoryPackageDefinitions(
+        factoryRunForm.getFieldValue('packageDefinitions'),
+        readFactoryPackageOptions(factory)
+      )
+    };
+    if (!imageFactoryValues.packageKeys?.length) {
       message.warning('请至少选择一个产物包。');
       return;
     }
 
-    const platform = readFactoryPlatformOptions(factory).find((item) => item.key === values.platform);
-    const title = `${template.name} - ${platform?.label ?? values.platform} - ${imageAttachments.length} 个商品`;
+    const platform = readFactoryPlatformOptions(factory).find((item) => item.key === imageFactoryValues.platform);
+    const title = `${template.name} - ${platform?.label ?? imageFactoryValues.platform} - ${imageAttachments.length} 个商品`;
     const input = buildFactoryTaskInput({
       template,
       factory,
-      values,
+      values: imageFactoryValues,
       attachments: factoryAttachments
     });
 
@@ -10416,6 +10792,14 @@ interface DigitalFactoryQualityModeOption {
   description?: string;
 }
 
+interface DigitalFactoryPromptControlField {
+  key: string;
+  label: string;
+  placeholder?: string;
+  inputType?: 'text' | 'textarea';
+  defaultValue?: string;
+}
+
 interface DigitalFactoryAsrDialectOption {
   key: string;
   label: string;
@@ -10443,6 +10827,9 @@ interface DigitalFactoryManifest {
   qualityCheck?: {
     defaultMode?: FactoryRunFormValues['qualityCheckMode'];
     modes?: DigitalFactoryQualityModeOption[];
+  };
+  promptControls?: {
+    fields?: DigitalFactoryPromptControlField[];
   };
   asr?: {
     defaultLanguage?: string;
@@ -10536,6 +10923,39 @@ const defaultFactoryQualityModes: DigitalFactoryQualityModeOption[] = [
   { key: 'smart', label: '智能质检', description: '调用多模态模型检查主体一致性、平台合规和卖点可读性。' }
 ];
 
+const defaultFactoryPromptControlFields: DigitalFactoryPromptControlField[] = [
+  {
+    key: 'promptLanguage',
+    label: '文字语言',
+    placeholder: '例如：English、中文、Deutsch、Español；不需要文字可填：不生成文字',
+    inputType: 'text'
+  },
+  {
+    key: 'promptStyle',
+    label: '图片风格',
+    placeholder: '例如：真实摄影、欧美电商、高级极简、TikTok生活感',
+    inputType: 'text'
+  },
+  {
+    key: 'promptGoal',
+    label: '希望效果',
+    placeholder: '例如：突出材质和容量，画面干净，有购买欲',
+    inputType: 'textarea'
+  },
+  {
+    key: 'promptMustKeep',
+    label: '必须保留',
+    placeholder: '例如：产品主体、颜色、结构、品牌标识、原有角度',
+    inputType: 'textarea'
+  },
+  {
+    key: 'promptAvoid',
+    label: '不要出现',
+    placeholder: '例如：水印、乱码文字、夸张变形、多余配件、错误 Logo',
+    inputType: 'textarea'
+  }
+];
+
 const factoryImageExtensions = new Set(['png', 'jpg', 'jpeg', 'webp']);
 const factoryTableExtensions = new Set(['xlsx', 'csv']);
 const factoryVideoExtensions = new Set(['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v']);
@@ -10596,6 +11016,7 @@ function readFactoryManifest(manifest: RoleTemplateDependencyManifest | undefine
 
   const batch = isPlainObject(factory.batch) ? factory.batch : undefined;
   const qualityCheck = isPlainObject(factory.qualityCheck) ? factory.qualityCheck : undefined;
+  const promptControls = isPlainObject(factory.promptControls) ? factory.promptControls : undefined;
   const output = isPlainObject(factory.output) ? factory.output : undefined;
 
   return {
@@ -10612,6 +11033,9 @@ function readFactoryManifest(manifest: RoleTemplateDependencyManifest | undefine
     qualityCheck: {
       defaultMode: readFactoryQualityModeKey(qualityCheck?.defaultMode),
       modes: readFactoryQualityModeOptionsFromValue(qualityCheck?.modes)
+    },
+    promptControls: {
+      fields: readFactoryPromptControlFieldsFromValue(promptControls?.fields)
     },
     asr: {
       defaultLanguage: readString(isPlainObject(factory.asr) ? factory.asr.defaultLanguage : undefined),
@@ -10649,6 +11073,17 @@ function readFactoryPackageOptions(factory: DigitalFactoryManifest): DigitalFact
 
 function readFactoryQualityModes(factory: DigitalFactoryManifest): DigitalFactoryQualityModeOption[] {
   return factory.qualityCheck?.modes?.length ? factory.qualityCheck.modes : defaultFactoryQualityModes;
+}
+
+function readFactoryPromptControlFields(factory: DigitalFactoryManifest): DigitalFactoryPromptControlField[] {
+  const manifestFields = factory.promptControls?.fields ?? [];
+  const fieldsByKey = new Map<string, DigitalFactoryPromptControlField>();
+
+  for (const field of [...defaultFactoryPromptControlFields, ...manifestFields]) {
+    fieldsByKey.set(field.key, field);
+  }
+
+  return [...fieldsByKey.values()];
 }
 
 function readFactoryAsrDialectOptions(factory: DigitalFactoryManifest): DigitalFactoryAsrDialectOption[] {
@@ -10703,6 +11138,19 @@ function isMedicalCaseVideoFactory(factory: DigitalFactoryManifest) {
   return readFactoryKind(factory) === 'medical_case_video_screening_factory';
 }
 
+function buildFactoryPromptControls(values: FactoryRunFormValues) {
+  const promptControls = {
+    language: values.promptLanguage?.trim() || undefined,
+    style: values.promptStyle?.trim() || undefined,
+    desiredEffect: values.promptGoal?.trim() || undefined,
+    mustKeep: values.promptMustKeep?.trim() || undefined,
+    avoid: values.promptAvoid?.trim() || undefined,
+    extraInstruction: values.instruction?.trim() || undefined
+  };
+
+  return Object.values(promptControls).some(Boolean) ? promptControls : undefined;
+}
+
 function buildFactoryTaskInput({
   template,
   factory,
@@ -10715,12 +11163,16 @@ function buildFactoryTaskInput({
   attachments: ComposerAttachment[];
 }) {
   const platform = readFactoryPlatformOptions(factory).find((item) => item.key === values.platform);
-  const packageOptions = readFactoryPackageOptions(factory);
+  const packageOptions = normalizeFactoryPackageDefinitions(
+    values.packageDefinitions,
+    readFactoryPackageOptions(factory)
+  );
   const selectedPackageKeys = values.packageKeys ?? [];
   const selectedPackages = packageOptions.filter((item) => selectedPackageKeys.includes(item.key));
   const qualityMode = readFactoryQualityModes(factory).find((item) => item.key === values.qualityCheckMode);
   const imageAttachments = attachments.filter((attachment) => isFactoryImageAttachment(attachment));
   const tableAttachments = attachments.filter((attachment) => !isFactoryImageAttachment(attachment));
+  const promptControls = buildFactoryPromptControls(values);
   const factoryRequest = {
     applicationType: 'digital_factory',
     factoryKind: factory.kind ?? 'cross_border_product_image_factory',
@@ -10746,6 +11198,7 @@ function buildFactoryTaskInput({
       packageFormat: factory.output?.packageFormat ?? 'url_manifest',
       folder: factory.output?.folder ?? 'product-images'
     },
+    promptControls,
     attachments: attachments.map((attachment) => ({
       name: attachment.name,
       size: attachment.size,
@@ -10769,6 +11222,7 @@ function buildFactoryTaskInput({
       instructions: [
         '按 factory_request 逐项处理每张商品图片。',
         '图片理解和提示词生成在同一个多模态 LLM 节点内完成。',
+        '提示词生成必须优先遵守 factory_request.promptControls；不要出现的内容必须写入 negativePrompt。',
         '只生成用户勾选的产物包；不要生成未勾选的图片类型。',
         '生成结果只保存图片 URL 元数据；大图片不经过服务端，PC 端按 URL 展示缩略图。',
         '如果质检方式为 none，跳过额外智能质检；如果为 basic，只做文件数量、格式、命名检查。'
@@ -10932,6 +11386,34 @@ function readFactoryQualityModeOptionsFromValue(value: unknown): DigitalFactoryQ
         key,
         label,
         description: readString(item.description)
+      }
+    ];
+  });
+}
+
+function readFactoryPromptControlFieldsFromValue(value: unknown): DigitalFactoryPromptControlField[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!isPlainObject(item)) {
+      return [];
+    }
+
+    const key = readString(item.key);
+    const label = readString(item.label);
+    if (!key || !label) {
+      return [];
+    }
+
+    return [
+      {
+        key,
+        label,
+        placeholder: readString(item.placeholder),
+        inputType: item.inputType === 'textarea' ? 'textarea' : 'text',
+        defaultValue: readString(item.defaultValue)
       }
     ];
   });

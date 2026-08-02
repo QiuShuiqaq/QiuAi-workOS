@@ -1111,6 +1111,40 @@ function buildCrossBorderImageFactoryManifest() {
       outputType: item.outputType,
       defaultSelected: crossBorderFactoryDefaultPackageKeys.includes(item.key)
     })),
+    promptControls: {
+      fields: [
+        {
+          key: 'promptLanguage',
+          label: '文字语言',
+          placeholder: '例如：English、中文、Deutsch、Español；不需要文字可填：不生成文字',
+          inputType: 'text'
+        },
+        {
+          key: 'promptStyle',
+          label: '图片风格',
+          placeholder: '例如：真实摄影、欧美电商、高级极简、TikTok生活感',
+          inputType: 'text'
+        },
+        {
+          key: 'promptGoal',
+          label: '希望效果',
+          placeholder: '例如：突出材质和容量，画面干净，有购买欲',
+          inputType: 'textarea'
+        },
+        {
+          key: 'promptMustKeep',
+          label: '必须保留',
+          placeholder: '例如：产品主体、颜色、结构、品牌标识、原有角度',
+          inputType: 'textarea'
+        },
+        {
+          key: 'promptAvoid',
+          label: '不要出现',
+          placeholder: '例如：水印、乱码文字、夸张变形、多余配件、错误 Logo',
+          inputType: 'textarea'
+        }
+      ]
+    },
     qualityCheck: {
       defaultMode: 'basic',
       modes: [
@@ -1275,7 +1309,7 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
       id: 'generate_package_prompts',
       type: 'llm',
       name: '理解图片并生成提示词',
-      instruction: '使用多模态模型读取商品参考图、平台规则和品牌规则，直接输出每个商品、每个所选产物包的生图提示词。不要生成图片，只输出 JSON。',
+      instruction: '使用多模态模型读取商品参考图、平台规则、品牌规则和 factory_request.promptControls，直接输出每个商品、每个所选产物包的生图提示词。必须遵守文字语言、图片风格、希望效果、必须保留和不要出现；如果用户要求图片里出现文字，必须使用指定语言；如果用户填写不生成文字，则提示词要明确避免图片文字。不要出现的内容要写入 negativePrompt。不要生成图片，只输出 JSON。',
       modelProfileId: 'qiu-vision-default',
       inputVariables: ['factory_request', 'factory_items', 'selected_packages', 'target_platform', 'knowledge_context'],
       outputVariables: ['package_instructions'],

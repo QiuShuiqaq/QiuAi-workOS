@@ -122,6 +122,15 @@ interface FactoryRuntimePlatform {
   notes?: string;
 }
 
+interface FactoryRuntimePromptControls {
+  language?: string;
+  style?: string;
+  desiredEffect?: string;
+  mustKeep?: string;
+  avoid?: string;
+  extraInstruction?: string;
+}
+
 interface FactoryRuntimePackageInstruction {
   sku?: string;
   packageKey?: string;
@@ -3351,6 +3360,7 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
 
   const targetPlatform = readFactoryRuntimePlatform(input.pool.get('target_platform'));
   const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
+  const promptControls = readFactoryRuntimePromptControls(factoryRequest?.promptControls);
   const packageInstructions = readFactoryRuntimePackageInstructions(input.pool.get('package_instructions'));
   const concurrency = clampWorkflowRuntimeLimit(
     readFactoryRuntimeNumber(input.node.config?.concurrency ?? factoryRequest?.concurrency),
@@ -3368,6 +3378,7 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
     items,
     packages,
     targetPlatform,
+    promptControls,
     packageInstructions,
     createdAt: input.createdAt
   });
@@ -3618,6 +3629,23 @@ function readFactoryRuntimePlatform(value: WorkflowRuntimeValue | undefined): Fa
     imageRatio: readWorkflowRuntimeString(normalizedValue.imageRatio),
     notes: readWorkflowRuntimeString(normalizedValue.notes)
   };
+}
+
+function readFactoryRuntimePromptControls(value: unknown): FactoryRuntimePromptControls | undefined {
+  if (!isWorkflowRuntimeRecord(value)) {
+    return undefined;
+  }
+
+  const promptControls = {
+    language: readWorkflowRuntimeString(value.language),
+    style: readWorkflowRuntimeString(value.style),
+    desiredEffect: readWorkflowRuntimeString(value.desiredEffect),
+    mustKeep: readWorkflowRuntimeString(value.mustKeep),
+    avoid: readWorkflowRuntimeString(value.avoid),
+    extraInstruction: readWorkflowRuntimeString(value.extraInstruction)
+  };
+
+  return Object.values(promptControls).some(Boolean) ? promptControls : undefined;
 }
 
 function readFactoryRuntimeObject(value: WorkflowRuntimeValue | undefined): Record<string, unknown> | undefined {
@@ -4724,6 +4752,7 @@ function createFactoryImageGenerationTasks(input: {
   items: FactoryRuntimeItem[];
   packages: FactoryRuntimePackage[];
   targetPlatform: FactoryRuntimePlatform;
+  promptControls?: FactoryRuntimePromptControls;
   packageInstructions: FactoryRuntimePackageInstruction[];
   createdAt: string;
 }): FactoryImageGenerationTask[] {
@@ -4754,8 +4783,13 @@ function createFactoryImageGenerationTasks(input: {
         packageKey: packageItem.key,
         packageLabel: packageItem.label,
         packageDescription: packageItem.description,
-        prompt: instruction?.prompt ?? buildFactoryImageGenerationFallbackPrompt(item, packageItem, input.targetPlatform),
-        negativePrompt: instruction?.negativePrompt,
+        prompt: instruction?.prompt ?? buildFactoryImageGenerationFallbackPrompt(
+          item,
+          packageItem,
+          input.targetPlatform,
+          input.promptControls
+        ),
+        negativePrompt: instruction?.negativePrompt ?? input.promptControls?.avoid,
         targetPlatform: input.targetPlatform,
         createdAt: input.createdAt
       });
@@ -4961,7 +4995,8 @@ function readFactoryImageResultFromValue(value: unknown): {
 function buildFactoryImageGenerationFallbackPrompt(
   item: FactoryRuntimeItem,
   packageItem: FactoryRuntimePackage,
-  platform: FactoryRuntimePlatform
+  platform: FactoryRuntimePlatform,
+  promptControls?: FactoryRuntimePromptControls
 ): string {
   return [
     `Use the source product image ${item.image.localPath} as the reference.`,
@@ -4970,6 +5005,12 @@ function buildFactoryImageGenerationFallbackPrompt(
     platform.label ? `Target platform: ${platform.label}.` : undefined,
     platform.imageRatio ? `Required ratio: ${platform.imageRatio}.` : undefined,
     platform.notes ? `Platform notes: ${platform.notes}.` : undefined,
+    promptControls?.language ? `Text language: ${promptControls.language}.` : undefined,
+    promptControls?.style ? `Image style: ${promptControls.style}.` : undefined,
+    promptControls?.desiredEffect ? `Desired effect: ${promptControls.desiredEffect}.` : undefined,
+    promptControls?.mustKeep ? `Must preserve: ${promptControls.mustKeep}.` : undefined,
+    promptControls?.avoid ? `Avoid: ${promptControls.avoid}.` : undefined,
+    promptControls?.extraInstruction ? `Extra instruction: ${promptControls.extraInstruction}.` : undefined,
     'Preserve the product identity, shape, color, material, logo, and important details.'
   ].filter(Boolean).join('\n')
 }

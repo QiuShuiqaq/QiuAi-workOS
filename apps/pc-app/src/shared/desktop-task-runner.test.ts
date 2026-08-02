@@ -3018,7 +3018,11 @@ const factoryTask = await runDesktopTask({
         packages: [
           { key: 'main_image', label: 'Main image', description: 'Marketplace main product image.' },
           { key: 'white_background', label: 'White background', description: 'Pure white product image.' }
-        ]
+        ],
+        promptControls: {
+          language: 'English',
+          avoid: 'watermark, malformed logo'
+        }
       }
     }),
     state: 'queued',
@@ -3068,7 +3072,7 @@ const factoryTask = await runDesktopTask({
               '  factory_items: files.map((file, index) => ({ sku: `SKU-${index + 1}`, image: file, sourceName: file.name })),\n' +
               '  selected_packages: packages,\n' +
               '  target_platform: request.platform,\n' +
-              '  package_instructions: { items: files.map((file, index) => ({ sku: `SKU-${index + 1}`, packages: packages.map((item) => ({ key: item.key, prompt: `Generate ${item.label} for SKU-${index + 1}` })) })) }\n' +
+              '  package_instructions: { items: [] }\n' +
               '};'
           }
         },
@@ -3121,6 +3125,8 @@ const factoryTask = await runDesktopTask({
     assert.equal(request.profile.id, 'qiu-image-editing-default');
     assert.equal(request.taskKind, 'image_generation');
     assert.ok(request.imageGeneration?.prompt);
+    assert.match(request.imageGeneration?.prompt ?? '', /Text language: English/);
+    assert.equal(request.imageGeneration?.negativePrompt, 'watermark, malformed logo');
     assert.match(request.imageGeneration?.sourceImagePath ?? '', /sku-[12]\.png/);
     assert.match(request.messages[1]?.content ?? '', /Source image local path/);
     assert.match(request.messages[1]?.content ?? '', /Package:/);

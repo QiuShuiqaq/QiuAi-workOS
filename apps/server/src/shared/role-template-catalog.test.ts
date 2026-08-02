@@ -203,6 +203,14 @@ test('server role template catalog is focused and production-oriented', () => {
       );
       const batch = readRecord(factoryManifest.batch);
       assert.equal(batch?.maxItems, 50, `${template.templateId} factory batch maxItems must be 50`);
+      if (factoryManifest.kind === 'cross_border_product_image_factory') {
+        const promptControls = readRecord(factoryManifest.promptControls);
+        assert.ok(promptControls, `${template.templateId} must define prompt control fields`);
+        assert.ok(
+          Array.isArray(promptControls.fields) && promptControls.fields.length >= 5,
+          `${template.templateId} must expose cross-border prompt controls`
+        );
+      }
       assert.ok(
         template.workflowGraph.nodes.some((node) => node.type === 'input'),
         `${template.templateId} digital factory must define an input node`
