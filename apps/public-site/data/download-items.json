@@ -1,0 +1,37 @@
+[
+  {
+    "id": "workos-windows-v1",
+    "slug": "qiuai-workos-windows",
+    "projectName": "QiuAI WorkOS",
+    "titleZh": "QiuAI WorkOS Windows 客户端",
+    "titleEn": "QiuAI WorkOS Windows Client",
+    "summaryZh": "面向企业的 AI 数字员工与数字工厂桌面端，支持本地文件、Office 文档、企业知识库、模型配置和批量产物处理。",
+    "summaryEn": "Desktop client for enterprise digital workers and digital factories, with local files, Office documents, knowledge bases, model configuration, and batch artifact workflows.",
+    "platformZh": "Windows",
+    "platformEn": "Windows",
+    "formatZh": "EXE",
+    "formatEn": "EXE",
+    "version": "v1.0.0",
+    "githubRepo": "QiuShuiqaq/QiuAi-workOS",
+    "releaseTag": "v1.0.0",
+    "appAssetName": "QiuAI WorkOS Setup 1.0.0.exe",
+    "pdfAssetName": null,
+    "appDownloadUrl": null,
+    "pdfDownloadUrl": null,
+    "fileSize": "以 GitHub Release 为准",
+    "pdfFileSize": null,
+    "updatedAt": "2026-08-03",
+    "notesZh": [
+      "适用于 Windows 10/11 x64。",
+      "安装后请先绑定企业账号，再配置模型供应商。",
+      "若下载不可用，请确认 GitHub Release 的 tag 和安装包文件名已经发布。"
+    ],
+    "notesEn": [
+      "For Windows 10/11 x64.",
+      "Bind your enterprise account and configure model providers after installation.",
+      "If the download is unavailable, verify the GitHub Release tag and installer asset name."
+    ],
+    "isVisible": true,
+    "sortOrder": 10
+  }
+]

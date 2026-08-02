@@ -48,6 +48,23 @@ module.exports = {
         SERVER_INTERNAL_BASE_URL: 'http://127.0.0.1:4100',
         NEXT_PUBLIC_API_BASE_URL: ''
       }
+    },
+    {
+      name: 'qiuai-workos-public',
+      cwd: '/opt/qiuai-workos',
+      script: 'node_modules/next/dist/bin/next',
+      args: 'start apps/public-site --hostname 127.0.0.1 --port 3300',
+      instances: 1,
+      exec_mode: 'fork',
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '512M',
+      env: {
+        NODE_ENV: 'production',
+        NEXT_PUBLIC_APP_NAME: 'QiuAI WorkOS',
+        NEXT_PUBLIC_WORKOS_CONSOLE_URL: 'https://workos.qiuaihub.com',
+        NEXT_PUBLIC_ADMIN_CONSOLE_URL: 'https://admin-workos.qiuaihub.com'
+      }
     }
   ]
 };

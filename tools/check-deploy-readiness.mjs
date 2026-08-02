@@ -219,6 +219,7 @@ function checkBuildArtifacts() {
   requireFile('apps/server/dist/main.js', 'server build artifact');
   requireFile('apps/web-console/.next/BUILD_ID', 'web build artifact');
   requireFile('apps/admin-console/.next/BUILD_ID', 'admin build artifact');
+  requireFile('apps/public-site/.next/BUILD_ID', 'public site build artifact');
   requireFile('apps/server/prisma/schema.prisma', 'Prisma schema');
   console.log('build-artifacts: OK');
 }

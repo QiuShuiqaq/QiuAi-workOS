@@ -5,6 +5,11 @@ node_modules/
 
 # Local project-owned tool/cache directories
 .local/
+apps/public-site/docs/
+apps/public-site/public/downloads/
+apps/public-site/src-legacy-qiuaihub/
+apps/public-site/data/site-stats.json
+apps/public-site/data/studio-content.json
 
 # Environment files
 .env
