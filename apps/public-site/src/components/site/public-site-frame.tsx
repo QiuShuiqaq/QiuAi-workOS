@@ -26,14 +26,14 @@ const SITE_SHELL_COPY = {
     openSource: { zh: "开源", en: "Open" },
     services: { zh: "企业服务", en: "Services" },
     downloads: { zh: "下载", en: "Download" },
-    docs: { zh: "文档", en: "Docs" },
+    docs: { zh: "指南", en: "Guide" },
     team: { zh: "团队", en: "Team" },
     about: { zh: "关于", en: "About" },
     contact: { zh: "联系", en: "Contact" },
   },
   footerLinks: {
     downloads: { zh: "下载", en: "Downloads" },
-    docs: { zh: "文档", en: "Docs" },
+    docs: { zh: "指南", en: "Guide" },
     developer: { zh: "开发者", en: "Developer" },
   },
 } as const;
@@ -106,8 +106,8 @@ function getSiteFooterData(lang: SiteLanguage): SiteFooterData {
       },
       {
         label: readText(SITE_SHELL_COPY.footerLinks.docs, lang),
-        value: "/docs",
-        href: buildLocalizedHref("/docs", lang),
+        value: "/guide",
+        href: buildLocalizedHref("/guide", lang),
       },
       {
         label: readText(SITE_SHELL_COPY.footerLinks.developer, lang),
@@ -148,7 +148,7 @@ function resolveCurrentKey(pathname: string): PublicNavKey {
     return "downloads";
   }
 
-  if (pathname.startsWith("/docs")) {
+  if (pathname.startsWith("/guide") || pathname.startsWith("/docs")) {
     return "docs";
   }
 
@@ -205,7 +205,7 @@ function PublicSiteFrameInner({
     { key: "caseStudies", href: buildLocalizedHref("/case-studies", lang), label: shellText.nav.caseStudies },
     { key: "services", href: buildLocalizedHref("/services", lang), label: shellText.nav.services },
     { key: "downloads", href: buildLocalizedHref("/downloads", lang), label: shellText.nav.downloads },
-    { key: "docs", href: buildLocalizedHref("/docs", lang), label: shellText.nav.docs },
+    { key: "docs", href: buildLocalizedHref("/guide", lang), label: shellText.nav.docs },
     { key: "contact", href: buildLocalizedHref("/contact", lang), label: shellText.nav.contact },
   ];
 

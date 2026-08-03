@@ -6,6 +6,7 @@ const repoRoot = path.resolve(appDir, '../..');
 
 export default {
   root: appDir,
+  base: './',
   resolve: {
     alias: {
       '@qiuai/api-contract': path.resolve(repoRoot, 'packages/api-contract/src/index.ts'),

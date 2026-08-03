@@ -3338,6 +3338,331 @@ h6 {
   }
 }
 
+.public-stack--compact {
+  padding-bottom: 48px;
+}
+
+.simple-page-hero {
+  display: grid;
+  gap: 16px;
+  padding: 72px 0 34px;
+  border-bottom: 1px solid var(--border);
+}
+
+.simple-page-hero h1 {
+  max-width: 860px;
+  color: var(--foreground);
+  font-size: clamp(36px, 5vw, 64px);
+  line-height: 1.08;
+  font-weight: 650;
+  letter-spacing: -0.04em;
+}
+
+.simple-page-hero p {
+  max-width: 760px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.8;
+}
+
+.simple-note-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.simple-note-row span {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted-strong);
+  background: var(--surface);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.simple-section {
+  display: grid;
+  gap: 20px;
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.simple-section__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.simple-section__hint {
+  max-width: 420px;
+  color: var(--muted) !important;
+  line-height: 1.7;
+}
+
+.installer-list {
+  display: grid;
+}
+
+.installer-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.installer-row:last-child {
+  border-bottom: 0;
+}
+
+.installer-row__icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--accent);
+  background: var(--surface-muted);
+  font-size: 22px;
+}
+
+.installer-row__main {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.installer-row__title-line {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.installer-row__file {
+  color: var(--muted) !important;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.installer-row__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.installer-row__meta .ant-typography {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted-strong);
+  background: var(--surface-muted);
+  font-size: 12px;
+}
+
+.installer-row__note {
+  margin: 0 !important;
+  color: var(--muted) !important;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.installer-row__action {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.guide-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.guide-sidebar {
+  position: sticky;
+  top: 92px;
+}
+
+.guide-sidebar__inner,
+.guide-article {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.guide-sidebar__inner {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.guide-sidebar__label,
+.guide-article__eyebrow {
+  color: var(--accent) !important;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.guide-sidebar .ant-tree,
+.guide-sidebar .ant-tree-list,
+.guide-sidebar .ant-tree-treenode {
+  background: transparent !important;
+}
+
+.guide-sidebar .ant-tree .ant-tree-node-content-wrapper {
+  min-height: 34px;
+  border-radius: 8px;
+}
+
+.guide-sidebar .ant-tree .ant-tree-node-content-wrapper:hover,
+.guide-sidebar .ant-tree .ant-tree-node-selected {
+  background: var(--surface-muted) !important;
+}
+
+.guide-tree-link {
+  color: var(--foreground) !important;
+  font-size: 14px;
+}
+
+.guide-article {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+}
+
+.guide-article__header {
+  display: grid;
+  gap: 12px;
+  padding: 28px;
+  border-bottom: 1px solid var(--border);
+}
+
+.guide-article__header p {
+  max-width: 780px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+.guide-section-list {
+  display: grid;
+}
+
+.guide-section {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 18px;
+  padding: 26px 28px;
+  border-bottom: 1px solid var(--border);
+}
+
+.guide-section:last-child {
+  border-bottom: 0;
+}
+
+.guide-section__index {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid color-mix(in oklch, var(--accent), transparent 62%);
+  border-radius: 999px;
+  color: var(--accent);
+  background: color-mix(in oklch, var(--accent), transparent 91%);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.guide-section__body {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.guide-step-list {
+  display: grid;
+  gap: 8px;
+}
+
+.guide-step-list p {
+  position: relative;
+  margin: 0 !important;
+  padding-left: 16px;
+  color: var(--muted-strong) !important;
+  font-size: 15px;
+  line-height: 1.85;
+}
+
+.guide-step-list p::before {
+  content: "";
+  position: absolute;
+  top: 0.82em;
+  left: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+@media (max-width: 1024px) {
+  .guide-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .guide-sidebar {
+    position: static;
+  }
+}
+
+@media (max-width: 768px) {
+  .simple-page-hero {
+    padding: 44px 0 24px;
+  }
+
+  .simple-section,
+  .guide-article__header,
+  .guide-section {
+    padding: 20px;
+  }
+
+  .simple-section__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .installer-row,
+  .guide-section {
+    grid-template-columns: 1fr;
+  }
+
+  .installer-row {
+    align-items: start;
+  }
+
+  .installer-row__action {
+    justify-content: flex-start;
+  }
+
+  .installer-row__action .ant-btn {
+    width: 100%;
+  }
+}
+
 .content-admin-page {
   display: grid;
   gap: 22px;

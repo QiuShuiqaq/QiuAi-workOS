@@ -5,8 +5,8 @@ export const HOME_PAGE_COPY = {
   titleEn: "Qiushui Code Garden",
   primaryActionLabelZh: "查看下载",
   primaryActionLabelEn: "Open Downloads",
-  secondaryActionLabelZh: "进入文档",
-  secondaryActionLabelEn: "Open Docs",
+  secondaryActionLabelZh: "进入指南",
+  secondaryActionLabelEn: "Open Guide",
 };
 
 export const CURATED_HOME_FEED_SNAPSHOT: HomeFeedSnapshot = {

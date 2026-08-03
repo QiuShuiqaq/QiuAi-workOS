@@ -1,6 +1,6 @@
-import { DocsPageContent } from "@/components/site/docs-page-content";
+import { redirect } from "next/navigation";
+
 import { resolveSiteLanguage } from "@/modules/site/i18n";
-import { getDocsPageData } from "@/modules/site/public-service";
 
 export default async function DocsPage({
   searchParams,
@@ -9,7 +9,10 @@ export default async function DocsPage({
 }) {
   const params = await searchParams;
   const lang = resolveSiteLanguage(params.lang);
-  const data = await getDocsPageData(lang, params.doc);
+  const search = new URLSearchParams({ lang });
+  if (params.doc) {
+    search.set("doc", params.doc);
+  }
 
-  return <DocsPageContent data={data} lang={lang} />;
+  redirect(`/guide?${search.toString()}`);
 }

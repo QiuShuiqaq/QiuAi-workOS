@@ -105,7 +105,6 @@ await writeFile(
     '  ],',
     '  win: {',
     "    icon: path.resolve(__dirname, 'resources', 'icon.ico'),",
-    '    signAndEditExecutable: false,',
     '    target: [',
     '      {',
     "        target: 'nsis',",

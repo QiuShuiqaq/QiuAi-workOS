@@ -27,6 +27,8 @@ out/
 
 # Desktop/mobile outputs
 release/
+package/
+output/
 *.asar
 .expo/
 .expo-shared/

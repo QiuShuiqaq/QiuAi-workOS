@@ -155,7 +155,7 @@ export function HomePageContent({
   const guideSteps = [
     lang === "zh" ? "先看站点入口" : "Start from the site entry",
     lang === "zh" ? "需要文件就去下载" : "Go to downloads for files",
-    lang === "zh" ? "需要教程就去文档" : "Go to docs for guides",
+    lang === "zh" ? "需要教程就去指南" : "Go to the guide for usage steps",
   ];
 
   return (
@@ -188,7 +188,7 @@ export function HomePageContent({
                 {data.primaryActionLabel}
               </Button>
             </Link>
-            <Link href={buildLocalizedHref("/docs", lang)}>
+            <Link href={buildLocalizedHref("/guide", lang)}>
               <Button size="large">{data.secondaryActionLabel}</Button>
             </Link>
           </Space>

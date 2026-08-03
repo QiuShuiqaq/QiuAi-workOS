@@ -19,13 +19,13 @@ export function PublicSiteShell({
   const navItems = [
     { key: "home", href: buildLocalizedHref("/", lang), label: text.nav.home },
     { key: "downloads", href: buildLocalizedHref("/downloads", lang), label: text.nav.downloads },
-    { key: "docs", href: buildLocalizedHref("/docs", lang), label: text.nav.docs },
+    { key: "docs", href: buildLocalizedHref("/guide", lang), label: text.nav.docs },
     { key: "developer", href: buildLocalizedHref("/developer", lang), label: text.nav.developer },
   ] as const;
   const pathnameByKey = {
     home: "/",
     downloads: "/downloads",
-    docs: "/docs",
+    docs: "/guide",
     developer: "/developer",
     secondary: "/",
   } as const;

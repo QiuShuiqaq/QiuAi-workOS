@@ -26,7 +26,7 @@ export const siteShellCopy = {
   nav: {
     home: { zh: "首页", en: "Home" },
     downloads: { zh: "下载", en: "Downloads" },
-    docs: { zh: "文档", en: "Docs" },
+    docs: { zh: "指南", en: "Guide" },
     developer: { zh: "开发者", en: "Developer" },
   },
 };
@@ -74,13 +74,13 @@ export const defaultHomeEditableContent = {
   titleZh: "企业 AI 数字员工与数字工厂工作系统",
   titleEn: "Enterprise AI work system for digital workers and digital factories",
   summaryZh:
-    "这里提供 QiuAI WorkOS 的产品介绍、Windows 客户端下载、使用文档和企业部署入口。",
+    "这里提供 QiuAI WorkOS 的产品介绍、Windows 客户端下载、使用指南和企业部署入口。",
   summaryEn:
     "Product information, Windows client downloads, documentation, and enterprise deployment entry points for QiuAI WorkOS.",
   primaryActionLabelZh: "下载客户端",
   primaryActionLabelEn: "Download client",
-  secondaryActionLabelZh: "查看文档",
-  secondaryActionLabelEn: "Read docs",
+  secondaryActionLabelZh: "查看指南",
+  secondaryActionLabelEn: "Read guide",
   contactTitleZh: "联系与备案",
   contactTitleEn: "Contact and filing",
   contactDescriptionZh: "企业试用、部署和问题反馈可以通过页脚邮箱联系。",
@@ -107,12 +107,12 @@ export const defaultResourcesEditableContent = {
 };
 
 export const defaultDocsEditableContent = {
-  eyebrowZh: "使用文档",
-  eyebrowEn: "Docs",
-  titleZh: "QiuAI WorkOS 使用文档",
-  titleEn: "QiuAI WorkOS Documentation",
-  summaryZh: "这里会逐步沉淀客户端安装、模型配置、知识库、数字员工和数字工厂使用说明，并保留必要的 AI 基础概念资料。",
-  summaryEn: "Client setup, model configuration, knowledge bases, digital workers, and digital factories will be documented here, alongside essential AI concept notes.",
+  eyebrowZh: "使用指南",
+  eyebrowEn: "Guide",
+  titleZh: "QiuAI WorkOS 使用指南",
+  titleEn: "QiuAI WorkOS Guide",
+  summaryZh: "这里沉淀客户端安装、模型配置、知识库、数字员工和数字工厂的使用说明，帮助用户按步骤完成实际任务。",
+  summaryEn: "Client setup, model configuration, knowledge bases, digital workers, and digital factories are documented here for practical usage.",
 };
 
 export const defaultHomeFeedSettings: HomeFeedSettings = {
@@ -494,10 +494,10 @@ export const defaultResourceItems: EditableResourceItem[] = [
     formatEn: "EXE",
     platformZh: "Windows",
     platformEn: "Windows",
-    version: "v1.0.2",
+    version: "v1.0.3",
     fileSize: "以 GitHub Release 为准",
     updatedAt: "2026-08-03",
-    fileName: "QiuAI WorkOS Setup 1.0.2.exe",
+    fileName: "QiuAI WorkOS Setup 1.0.3.exe",
     downloadPath: null,
     tutorialPdfName: null,
     tutorialPdfPath: null,

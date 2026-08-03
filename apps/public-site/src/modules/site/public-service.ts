@@ -1822,6 +1822,10 @@ export function getSiteFooterData(lang: SiteLanguage): SiteFooterData {
         ? "QiuAI WorkOS 面向企业提供 Windows 桌面端、数字员工、数字工厂、模型配置、知识库和稳定产物交付。"
         : "QiuAI WorkOS provides Windows desktop execution, digital workers, digital factories, model configuration, knowledge bases, and artifact delivery for enterprise teams.",
     contacts: resolvePublicContactEmails(),
+    footerLinks: [
+      { label: lang === "zh" ? "下载" : "Downloads", value: "/downloads", href: `/downloads?lang=${lang}` },
+      { label: lang === "zh" ? "指南" : "Guide", value: "/guide", href: `/guide?lang=${lang}` },
+    ],
     beianText: beian.text,
     beianUrl: beian.url,
     publicSecurityBeianText: lang === "zh" ? "浙公网安备33052302001399号" : "Zhejiang Public Security Filing 33052302001399",
@@ -1862,12 +1866,12 @@ export async function getDownloadsPageData(lang: SiteLanguage): Promise<Download
     .filter((item) => item.slug !== workosWindowsItem.slug);
 
   return {
-    title: lang === "zh" ? "QiuAI WorkOS Windows 客户端下载" : "QiuAI WorkOS Windows Client Download",
-    eyebrow: lang === "zh" ? "客户端下载" : "Client Download",
+    title: lang === "zh" ? "下载 QiuAI WorkOS" : "Download QiuAI WorkOS",
+    eyebrow: lang === "zh" ? "下载中心" : "Download Center",
     summary:
       lang === "zh"
-        ? "这里维护 WorkOS 客户端安装包、版本信息和必要的安装说明。"
-        : "WorkOS client installers, version information, and setup notes are maintained here.",
+        ? "获取 Windows 桌面客户端安装包。安装完成后，可按指南完成企业绑定、模型配置和任务使用。"
+        : "Get the Windows desktop installer. After installation, follow the guide to bind your organization, configure models, and run tasks.",
     notes:
       lang === "zh"
         ? ["适用于 Windows 10/11 x64。", "安装后先绑定企业账号。", "再配置模型和知识库。"]
@@ -1880,25 +1884,316 @@ export async function getDownloadsPageData(lang: SiteLanguage): Promise<Download
   };
 }
 
+function buildWorkosGuideItems(): EditableDocItem[] {
+  return [
+    {
+      slug: "getting-started",
+      parentSlug: null,
+      sortOrder: 10,
+      titleZh: "快速开始",
+      titleEn: "Quick Start",
+      summaryZh: "从下载安装到完成第一次任务，按最短路径跑通 QiuAI WorkOS。",
+      summaryEn: "Get from installation to your first completed task with the shortest path.",
+      sections: [
+        {
+          titleZh: "准备工作",
+          titleEn: "Preparation",
+          bodyZh: [
+            "准备一台 Windows 10/11 x64 电脑，确认可以访问企业控制台和模型供应商接口。",
+            "如果你属于企业用户，先确认企业账号、套餐权限和设备绑定入口已经由管理员开通。",
+          ],
+          bodyEn: [
+            "Prepare a Windows 10/11 x64 computer and make sure it can access the enterprise console and model provider APIs.",
+            "For enterprise users, confirm that the organization account, plan permissions, and device binding entry are ready.",
+          ],
+        },
+        {
+          titleZh: "下载安装",
+          titleEn: "Download And Install",
+          bodyZh: [
+            "进入下载页，下载最新的 QiuAI WorkOS Windows 客户端安装包。",
+            "安装过程中如果系统提示未知发布者，可以先确认安装包来源为 qiuaihub.com，再继续安装。",
+            "安装完成后从桌面或开始菜单启动 QiuAI WorkOS。",
+          ],
+          bodyEn: [
+            "Open the downloads page and download the latest QiuAI WorkOS Windows installer.",
+            "If Windows warns about an unknown publisher, verify that the installer comes from qiuaihub.com before continuing.",
+            "After installation, start QiuAI WorkOS from the desktop shortcut or Start menu.",
+          ],
+        },
+        {
+          titleZh: "第一次使用",
+          titleEn: "First Run",
+          bodyZh: [
+            "打开客户端后，先登录账号并绑定企业设备。",
+            "进入模型配置，至少配置一个文本模型；如果要使用图片、视频或语音能力，再配置对应类型的模型。",
+            "进入数字市场，安装一个数字员工或数字工厂，然后按界面提示上传文件、填写参数并发起任务。",
+          ],
+          bodyEn: [
+            "After opening the client, sign in and bind the device to your organization.",
+            "Configure at least one text model first. Add image, video, or speech models when those capabilities are needed.",
+            "Open the digital marketplace, install a digital worker or factory, then upload files, fill parameters, and start a task.",
+          ],
+        },
+      ],
+    },
+    {
+      slug: "model-configuration",
+      parentSlug: null,
+      sortOrder: 20,
+      titleZh: "模型配置",
+      titleEn: "Model Configuration",
+      summaryZh: "配置模型供应商、自定义兼容接口、拉取模型，并在数字员工和数字工厂中切换模型槽位。",
+      summaryEn: "Configure providers, custom compatible APIs, model discovery, and model slots used by workers and factories.",
+      sections: [
+        {
+          titleZh: "模型供应商",
+          titleEn: "Providers",
+          bodyZh: [
+            "客户端支持按供应商保存模型配置，例如阿里云、腾讯云以及自定义兼容接口。",
+            "自定义兼容接口适合接入第三方中转平台。填写 API 地址、API Key、模型名称和能力类型后，先点击测试模型。",
+          ],
+          bodyEn: [
+            "The client stores model settings by provider, such as Alibaba Cloud, Tencent Cloud, and custom compatible APIs.",
+            "Custom compatible APIs are for third-party gateways. Fill the API base URL, API key, model name, and capability type, then test the model first.",
+          ],
+        },
+        {
+          titleZh: "模型能力",
+          titleEn: "Capabilities",
+          bodyZh: [
+            "常用能力包括文本模型、图片理解模型、生图模型、参考图编辑模型、视频模型和语音模型。",
+            "节点只关心输入输出能力是否匹配。比如文本输入输出节点可以切换任意已配置的文本模型；生图节点可以切换输出图片的模型。",
+          ],
+          bodyEn: [
+            "Common capabilities include text, image understanding, image generation, reference image editing, video, and speech models.",
+            "Nodes care about input and output compatibility. A text-in/text-out node can use any configured text model; an image generation node can use models that output images.",
+          ],
+        },
+        {
+          titleZh: "拉取与测试",
+          titleEn: "Discover And Test",
+          bodyZh: [
+            "配置供应商后，可以拉取模型列表，并按名称、能力、供应商筛选模型。",
+            "如果测试模型超时，优先检查 API 地址、网络连通性、密钥权限和模型名称是否正确。",
+          ],
+          bodyEn: [
+            "After configuring a provider, discover models and filter them by name, capability, and provider.",
+            "If model testing times out, check the API URL, network connectivity, key permissions, and model name first.",
+          ],
+        },
+      ],
+    },
+    {
+      slug: "digital-workers",
+      parentSlug: null,
+      sortOrder: 30,
+      titleZh: "数字员工",
+      titleEn: "Digital Workers",
+      summaryZh: "数字员工适合对话式任务，例如文档整理、表格整理、会议纪要和文案生成。",
+      summaryEn: "Digital workers are for conversational tasks such as document cleanup, spreadsheet cleanup, meeting notes, and copywriting.",
+      sections: [
+        {
+          titleZh: "安装数字员工",
+          titleEn: "Install A Worker",
+          bodyZh: [
+            "进入数字市场，选择需要的数字员工。免费员工会显示免费标签，企业员工需要企业权限才能安装。",
+            "现在可以先安装再配置。缺少模型或知识库时，客户端会在使用前提示你补齐配置。",
+          ],
+          bodyEn: [
+            "Open the digital marketplace and choose a worker. Free workers are labeled as free; enterprise workers require organization permissions.",
+            "You can install first and configure later. The client will prompt for missing model or knowledge settings before use.",
+          ],
+        },
+        {
+          titleZh: "发起任务",
+          titleEn: "Start A Task",
+          bodyZh: [
+            "数字员工以对话方式接收任务。输入你的要求，按需要上传 TXT、PDF、Word、Excel、CSV、图片或音视频文件。",
+            "任务执行中可以查看日志，完成后在产物区下载生成文件。",
+          ],
+          bodyEn: [
+            "Digital workers accept requests through chat. Type the requirement and upload TXT, PDF, Word, Excel, CSV, image, audio, or video files when needed.",
+            "View logs while the task is running. Download generated files from the artifact area after completion.",
+          ],
+        },
+        {
+          titleZh: "卸载重装",
+          titleEn: "Uninstall And Reinstall",
+          bodyZh: [
+            "如果模板或配置更新后需要重新安装，进入数字员工详情，点击卸载，再从数字市场重新安装。",
+            "卸载只影响本机安装状态，不会删除企业市场中的模板。",
+          ],
+          bodyEn: [
+            "If a template or configuration has changed, open the worker details, uninstall it, then reinstall from the marketplace.",
+            "Uninstalling only changes the local installation state. It does not remove the template from the enterprise marketplace.",
+          ],
+        },
+      ],
+    },
+    {
+      slug: "digital-factories",
+      parentSlug: null,
+      sortOrder: 40,
+      titleZh: "数字工厂",
+      titleEn: "Digital Factories",
+      summaryZh: "数字工厂适合批量化、参数化、可审查的流程，例如跨境商品图生成和视频质检剪辑。",
+      summaryEn: "Digital factories are for batch, parameterized, reviewable workflows such as product image generation and video QA/editing.",
+      sections: [
+        {
+          titleZh: "界面结构",
+          titleEn: "Interface",
+          bodyZh: [
+            "数字工厂不是对话式界面。左侧上传文件和设置参数，中间查看任务队列和输出队列，右侧查看模型状态和工作日志。",
+            "窗口宽度不足时，模型状态和工作日志会收进侧边栏，避免主工作区被挤压。",
+          ],
+          bodyEn: [
+            "A digital factory is not a chat interface. Upload files and set parameters on the left, review task and output queues in the center, and inspect model status and logs on the right.",
+            "When the window is narrow, model status and logs collapse into a side panel so the main workspace stays usable.",
+          ],
+        },
+        {
+          titleZh: "输出队列",
+          titleEn: "Output Queue",
+          bodyZh: [
+            "输出队列展示产物和每一个可审查输出物。图片可以看缩略图，视频可以打开本地播放器预览。",
+            "审核员可以对输出物修改状态、删除无效项、单个下载或打包下载。",
+          ],
+          bodyEn: [
+            "The output queue shows final artifacts and each reviewable output item. Images show thumbnails, and videos can open in the local player.",
+            "Reviewers can edit status, delete invalid items, download individual files, or package outputs.",
+          ],
+        },
+        {
+          titleZh: "典型工厂",
+          titleEn: "Common Factories",
+          bodyZh: [
+            "跨境商品图工厂适合批量生成主图、白底图、尺寸图、场景图、换背景、换模特等商品图片。",
+            "视频质检剪辑工厂适合按筛选标准处理视频，输出合格视频清单，并可按需生成初剪产物。",
+          ],
+          bodyEn: [
+            "The cross-border product image factory generates main images, white-background images, size diagrams, scenes, background replacements, and model changes.",
+            "The video QA/editing factory screens videos by rules, outputs qualified video lists, and can generate rough-cut outputs when enabled.",
+          ],
+        },
+      ],
+    },
+    {
+      slug: "knowledge-base",
+      parentSlug: null,
+      sortOrder: 50,
+      titleZh: "知识库",
+      titleEn: "Knowledge Base",
+      summaryZh: "本地知识库和企业知识库会在任务执行时合并使用，帮助模型结合企业资料回答和处理文件。",
+      summaryEn: "Local and enterprise knowledge bases are merged during task execution so models can use company context.",
+      sections: [
+        {
+          titleZh: "本地知识库",
+          titleEn: "Local Knowledge",
+          bodyZh: [
+            "本地知识库由当前设备维护，可以上传一份完整 PDF 作为本机知识资产。",
+            "本地知识库可以为空，适合保存只在当前设备使用的补充资料。",
+          ],
+          bodyEn: [
+            "Local knowledge is maintained on the current device. Upload one complete PDF as the device-level knowledge asset.",
+            "Local knowledge can be empty and is suitable for device-only reference material.",
+          ],
+        },
+        {
+          titleZh: "企业知识库",
+          titleEn: "Enterprise Knowledge",
+          bodyZh: [
+            "企业知识库由 web-console 维护，上传完整企业 PDF 文档后，企业绑定设备可以同步使用。",
+            "企业资料建议包括企业基础信息、产品资料、服务政策、销售话术和常见问题。",
+          ],
+          bodyEn: [
+            "Enterprise knowledge is maintained in web-console. After uploading a complete enterprise PDF, bound devices can sync and use it.",
+            "Recommended content includes company profile, product information, service policies, sales scripts, and FAQs.",
+          ],
+        },
+        {
+          titleZh: "任务调用",
+          titleEn: "Task Usage",
+          bodyZh: [
+            "数字员工和数字工厂调用知识库时，会合并本地知识库和企业知识库。",
+            "如果任务不需要知识库，可以在模板或配置中关闭对应能力，减少无关信息干扰。",
+          ],
+          bodyEn: [
+            "When workers or factories use knowledge, local and enterprise knowledge are merged.",
+            "If a task does not need knowledge, disable the capability in the template or configuration to reduce irrelevant context.",
+          ],
+        },
+      ],
+    },
+    {
+      slug: "troubleshooting",
+      parentSlug: null,
+      sortOrder: 60,
+      titleZh: "常见问题",
+      titleEn: "Troubleshooting",
+      summaryZh: "处理安装、登录、模型连接、产物生成和任务失败等常见问题。",
+      summaryEn: "Resolve common issues around installation, sign-in, model connectivity, artifacts, and task failures.",
+      sections: [
+        {
+          titleZh: "安装和启动",
+          titleEn: "Installation And Startup",
+          bodyZh: [
+            "如果安装后白屏，优先确认已安装最新版本；旧版本可能因为本地资源路径错误导致界面无法加载。",
+            "如果卸载后文件删不掉，先确认 QiuAI WorkOS 进程已经退出，再重新执行卸载或覆盖安装。",
+          ],
+          bodyEn: [
+            "If the app shows a blank screen after installation, first make sure the latest version is installed; older versions may fail to load local renderer assets.",
+            "If files remain after uninstalling, make sure the QiuAI WorkOS process has exited, then uninstall again or install over it.",
+          ],
+        },
+        {
+          titleZh: "模型连接失败",
+          titleEn: "Model Connection Failed",
+          bodyZh: [
+            "检查 API 地址是否包含正确路径，API Key 是否有效，模型名称是否与供应商后台一致。",
+            "如果供应商后台没有请求记录，通常说明请求还没发出去，优先检查本地模型配置和节点能力匹配。",
+          ],
+          bodyEn: [
+            "Check whether the API URL includes the correct path, the API key is valid, and the model name matches the provider console.",
+            "If the provider console has no request log, the request likely did not leave the client. Check local model settings and node capability matching first.",
+          ],
+        },
+        {
+          titleZh: "任务失败和反馈",
+          titleEn: "Task Failure And Feedback",
+          bodyZh: [
+            "任务失败时，打开客户端日志查看失败节点、输入输出和原始错误。",
+            "如果无法自行判断，使用问题反馈提交现象、任务日志和必要截图，管理员可在后台问题消息中查看。",
+          ],
+          bodyEn: [
+            "When a task fails, open the client logs to inspect the failed node, inputs, outputs, and raw error.",
+            "If you cannot diagnose it, submit feedback with symptoms, task logs, and screenshots. Administrators can review it in issue messages.",
+          ],
+        },
+      ],
+    },
+  ];
+}
+
 export async function getDocsPageData(lang: SiteLanguage, docSlug?: string): Promise<DocsPageData> {
-  const tree = buildDocTree(buildStructuredDocItems(), lang);
+  const tree = buildDocTree(buildWorkosGuideItems(), lang);
   const flattened = flattenDocs(tree);
   const activeDoc =
     flattened.find((item) => item.slug === docSlug) ??
-    flattened.find((item) => item.slug === "ai-agent") ??
+    flattened.find((item) => item.slug === "getting-started") ??
     tree[0];
 
   return {
-    title: lang === "zh" ? "QiuAI WorkOS 使用文档" : "QiuAI WorkOS Documentation",
-    eyebrow: lang === "zh" ? "使用文档" : "Docs",
+    title: lang === "zh" ? "QiuAI WorkOS 使用指南" : "QiuAI WorkOS Guide",
+    eyebrow: lang === "zh" ? "使用指南" : "Guide",
     summary:
       lang === "zh"
-        ? "这里会逐步沉淀客户端安装、模型配置、知识库、数字员工和数字工厂使用说明，并保留必要的 AI 基础概念资料。"
-        : "Client setup, model configuration, knowledge bases, digital workers, and digital factories will be documented here, alongside essential AI concept notes.",
+        ? "围绕安装、企业绑定、模型配置、数字员工、数字工厂、知识库和常见问题，帮助用户直接上手 QiuAI WorkOS。"
+        : "Practical instructions for installation, organization binding, model setup, digital workers, digital factories, knowledge bases, and common issues.",
     notes:
       lang === "zh"
-        ? ["先看安装和配置。", "再按产品选择专题。", "右侧查看本页章节。"]
-        : ["Start with setup and configuration.", "Choose a product topic next.", "Use page anchors on the right."],
+        ? ["先完成安装和企业绑定。", "再配置模型和知识库。", "最后安装数字员工或数字工厂。"]
+        : ["Install and bind the organization first.", "Configure models and knowledge next.", "Then install workers or factories."],
     tree,
     activeDoc,
   };
