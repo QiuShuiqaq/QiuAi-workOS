@@ -73,6 +73,14 @@ const capacityFeatureLabels: Record<string, string> = {
 };
 
 const capacityFeatureOrder = ['maxDesktopDevices', 'maxRoleInstances', 'maxDigitalFactories'];
+const editableEntitlementLabels: Record<string, string> = {
+  maxDesktopDevices: '企业可绑定设备数',
+  maxRoleInstances: '单设备数字员工',
+  maxDigitalFactories: '单设备数字工厂',
+  maxTasksPerMonth: '月任务额度'
+};
+const editableEntitlementOrder = ['maxDesktopDevices', 'maxRoleInstances', 'maxDigitalFactories', 'maxTasksPerMonth'];
+const editableEntitlementKeys = new Set(editableEntitlementOrder);
 
 function capacityEntitlements(plan: AdminPlanDetail) {
   return plan.entitlements
@@ -86,6 +94,48 @@ function entitlementValue(value: AdminPlanDetail['entitlements'][number]) {
   }
 
   return value.limitValue.toLocaleString('zh-CN');
+}
+
+function editableEntitlements(plan: AdminPlanDetail) {
+  return plan.entitlements
+    .filter((item) => editableEntitlementKeys.has(item.featureKey))
+    .sort((left, right) => editableEntitlementOrder.indexOf(left.featureKey) - editableEntitlementOrder.indexOf(right.featureKey))
+    .map((item) => ({
+      featureKey: item.featureKey,
+      enabled: item.enabled,
+      limitValue: item.limitValue,
+      limitUnit: item.limitUnit
+    }));
+}
+
+function mergeHiddenEntitlements(editingPlan: AdminPlanDetail, values: EditablePlanForm): EditablePlanForm {
+  const editedByKey = new Map(
+    (values.entitlements ?? [])
+      .filter((item) => item.featureKey && editableEntitlementKeys.has(item.featureKey))
+      .map((item) => [item.featureKey, item])
+  );
+  const hiddenEntitlements = editingPlan.entitlements
+    .filter((item) => !editableEntitlementKeys.has(item.featureKey))
+    .map((item) => ({
+      featureKey: item.featureKey,
+      enabled: item.enabled,
+      limitValue: item.limitValue,
+      limitUnit: item.limitUnit
+    }));
+  const editedEntitlements = editableEntitlementOrder
+    .map((featureKey) => editedByKey.get(featureKey))
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .map((item) => ({
+      featureKey: item.featureKey,
+      enabled: Boolean(item.enabled),
+      limitValue: item.limitValue,
+      limitUnit: item.limitUnit
+    }));
+
+  return {
+    ...values,
+    entitlements: [...hiddenEntitlements, ...editedEntitlements]
+  };
 }
 
 export function AdminPlansPageClient({ currentAccount, plans }: AdminPlansPageClientProps) {
@@ -110,12 +160,7 @@ export function AdminPlansPageClient({ currentAccount, plans }: AdminPlansPageCl
       priceCents: editingPlan.priceCents,
       currency: editingPlan.currency ?? 'CNY',
       status: editingPlan.status,
-      entitlements: editingPlan.entitlements.map((item) => ({
-        featureKey: item.featureKey,
-        enabled: item.enabled,
-        limitValue: item.limitValue,
-        limitUnit: item.limitUnit
-      }))
+      entitlements: editableEntitlements(editingPlan)
     });
   }, [editingPlan, form]);
 
@@ -127,7 +172,7 @@ export function AdminPlansPageClient({ currentAccount, plans }: AdminPlansPageCl
     setSaving(true);
     try {
       const apiClient = createBrowserApiClient();
-      const response = await apiClient.updateAdminPlan(editingPlan.code, values);
+      const response = await apiClient.updateAdminPlan(editingPlan.code, mergeHiddenEntitlements(editingPlan, values));
       setRows((current) =>
         current.map((plan) => (plan.code === editingPlan.code ? response.data : plan))
       );
@@ -260,8 +305,8 @@ export function AdminPlansPageClient({ currentAccount, plans }: AdminPlansPageCl
           <Alert
             showIcon
             type="info"
-            message="公开套餐只建议调整容量权益"
-            description="当前建议只把 maxDesktopDevices、maxRoleInstances、maxDigitalFactories 作为套餐差异；maxDesktopDevices 是企业可绑定设备数，maxRoleInstances 和 maxDigitalFactories 是每台设备容量。其他 featureKey 保持企业版一致，用于系统内部兜底。"
+            message="这里只展示当前产品化的套餐权益"
+            description="可编辑项为 maxDesktopDevices、maxRoleInstances、maxDigitalFactories、maxTasksPerMonth。canUseXXX、maxMembers 等历史预留字段会自动隐藏并在保存时按原值保留。"
             style={{ marginBottom: 16 }}
           />
 
@@ -308,10 +353,15 @@ export function AdminPlansPageClient({ currentAccount, plans }: AdminPlansPageCl
                           {...field}
                           name={[field.name, 'featureKey']}
                           label="featureKey"
-                          rules={[{ required: true, message: '请输入 featureKey' }]}
+                          rules={[{ required: true, message: '请选择 featureKey' }]}
                           style={{ flex: 2 }}
                         >
-                          <Input placeholder="maxRoleInstances" />
+                          <Select
+                            options={editableEntitlementOrder.map((featureKey) => ({
+                              value: featureKey,
+                              label: `${editableEntitlementLabels[featureKey]} (${featureKey})`
+                            }))}
+                          />
                         </Form.Item>
                         <Form.Item
                           {...field}
@@ -344,10 +394,10 @@ export function AdminPlansPageClient({ currentAccount, plans }: AdminPlansPageCl
                 <Button
                   type="dashed"
                   icon={<PlusOutlined />}
-                  onClick={() => add({ enabled: true })}
+                  onClick={() => add({ featureKey: 'maxTasksPerMonth', enabled: true, limitUnit: 'count' })}
                   block
                 >
-                  添加权益
+                  添加可编辑权益
                 </Button>
               </Space>
             )}
