@@ -28,6 +28,34 @@ initialState.knowledgeSources = [
     summary: 'Local customer documentation folder'
   }
 ];
+initialState.watchConfigs = [
+  {
+    id: 'watch_sales_general',
+    roleCode: 'sales_general_sales_v1',
+    enabled: true,
+    sourceUrls: ['https://example.com/leads'],
+    intervalMinutes: 30,
+    rules: 'Extract new leads and keep external actions in approval.',
+    approvalMode: 'draft',
+    sourceCursor: 0,
+    seenFingerprints: ['fp_existing'],
+    lastStatus: 'completed',
+    createdAt: '2026-07-20T01:00:00.000Z',
+    updatedAt: '2026-07-20T01:00:00.000Z'
+  }
+];
+initialState.watchRuns = [
+  {
+    id: 'watch_run_sales_general_001',
+    configId: 'watch_sales_general',
+    roleCode: 'sales_general_sales_v1',
+    sourceUrl: 'https://example.com/leads',
+    status: 'completed',
+    startedAt: '2026-07-20T01:00:00.000Z',
+    finishedAt: '2026-07-20T01:01:00.000Z',
+    message: 'Completed.'
+  }
+];
 const layout = getDesktopStorageLayout(tempDir, initialState.localRuntime.workspaceId);
 
 await saveDesktopRuntimeState(tempDir, initialState);
@@ -44,6 +72,8 @@ assert.equal(storedBundle?.profile?.schemaVersion, 1);
 assert.equal(storedBundle?.catalog?.schemaVersion, 1);
 assert.equal(storedBundle?.runtime?.schemaVersion, 1);
 assert.equal((storedBundle?.runtime?.knowledgeSources as unknown[])?.length, 1);
+assert.equal((storedBundle?.runtime?.watchConfigs as unknown[])?.length, 1);
+assert.equal((storedBundle?.runtime?.watchRuns as unknown[])?.length, 1);
 const storedTaskDetails = storedBundle?.runtime?.taskDetails;
 assert.ok(Array.isArray(storedTaskDetails));
 assert.equal(storedTaskDetails.length, initialState.taskDetails?.length);
@@ -64,6 +94,8 @@ assert.equal(loadedState?.modelProfiles[0].apiBaseUrl, 'https://api.example.com/
 assert.equal(loadedState?.modelProfiles[0].apiKey, 'local-test-key');
 assert.equal(loadedState?.knowledgeSources[0]?.localPath, 'C:\\QiuAI\\CustomerDocs');
 assert.equal(loadedState?.taskDetails?.length, initialState.taskDetails?.length);
+assert.equal(loadedState?.watchConfigs?.[0]?.sourceUrls[0], 'https://example.com/leads');
+assert.equal(loadedState?.watchRuns?.[0]?.status, 'completed');
 
 const legacyTempDir = mkdtempSync(path.join(os.tmpdir(), 'qiuai-workos-runtime-legacy-'));
 const legacyState = createDesktopRuntimePreviewState();

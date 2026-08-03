@@ -32,6 +32,28 @@ export interface RoleTemplateWorkflowStep {
   requiresApproval?: boolean;
 }
 
+export interface RoleTemplateExecutionProfile {
+  mode: 'conversation' | 'watch' | 'hybrid';
+  summary: string;
+  triggerModes: string[];
+  inputSources: string[];
+  toolCapabilities: string[];
+  outputTargets: string[];
+  approval: {
+    required: boolean;
+    requiredActions: string[];
+  };
+  dataBoundary: string;
+  externalConnectors?: Array<{
+    key: string;
+    name: string;
+    type: string;
+    status: string;
+  }>;
+  rolloutPhase?: string;
+  notes?: string[];
+}
+
 export interface RoleTemplateCatalogEntry {
   templateId: string;
   applicationType?: 'digital_employee' | 'digital_factory';
@@ -54,6 +76,7 @@ export interface RoleTemplateCatalogEntry {
   skills: RoleSkill[];
   workflowSteps?: RoleTemplateWorkflowStep[];
   workflowGraph?: RoleWorkflowGraph;
+  executionProfile?: RoleTemplateExecutionProfile;
   sampleInputs?: string[];
   outputFormat?: string;
   modelProfileIds: string[];

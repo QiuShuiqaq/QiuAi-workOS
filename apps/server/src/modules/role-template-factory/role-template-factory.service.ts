@@ -16,6 +16,13 @@ import {
   buildRoleTemplateDependencyManifest,
   type RoleTemplateDependencyAsset
 } from '../../shared/role-template-dependencies';
+import {
+  buildRoleTemplateExecutionProfile,
+  normalizeRoleTemplateExecutionProfile,
+  readRoleTemplateExecutionProfile,
+  type RoleTemplateExecutionProfileSource,
+  type ServerRoleTemplateExecutionProfile
+} from '../../shared/role-template-execution-profile';
 import { getServerToolAction } from '../../shared/tool-action-catalog';
 import {
   buildWorkflowGraphFromSteps,
@@ -107,6 +114,7 @@ type RoleTemplateRecord = {
   workflowSteps: unknown;
   workflowGraph: unknown;
   dependencyManifest?: unknown;
+  executionProfile?: unknown;
   sampleInputs: unknown;
   outputFormat?: string | null;
   approvalPolicy: string;
@@ -137,8 +145,10 @@ interface NormalizedRoleTemplateInput {
   }>;
   workflowSteps: RoleTemplateWorkflowStep[];
   workflowGraph: ServerRoleWorkflowGraph;
+  executionProfile?: ServerRoleTemplateExecutionProfile;
   dependencyManifest: ReturnType<typeof buildRoleTemplateDependencyManifest> & {
     applicationType: PublicRoleTemplateApplicationType;
+    executionProfile?: ServerRoleTemplateExecutionProfile;
     factory?: unknown;
   };
   sampleInputs: string[];
@@ -338,17 +348,25 @@ export class RoleTemplateFactoryService {
 
       if (
         normalizedUpdate.applicationType !== undefined ||
-        input.dependencyManifest !== undefined
+        input.dependencyManifest !== undefined ||
+        input.executionProfile !== undefined
       ) {
         const nextApplicationType =
           normalizedUpdate.applicationType ?? this.toDatabaseApplicationTypeFromRecord(current.applicationType);
         const graph = normalizedUpdate.workflowGraph ??
           normalizeWorkflowGraphOrFallback(current.workflowGraph, this.toWorkflowSteps(current.workflowSteps));
         normalizedUpdate.workflowGraph = graph;
+        const nextTemplate = {
+          ...current,
+          ...normalizedUpdate,
+          applicationType: nextApplicationType
+        };
         normalizedUpdate.dependencyManifest = this.buildDependencyManifest(
           graph,
           nextApplicationType,
-          this.normalizeFactoryManifestInput(input.dependencyManifest ?? current.dependencyManifest, nextApplicationType)
+          this.normalizeFactoryManifestInput(input.dependencyManifest ?? current.dependencyManifest, nextApplicationType),
+          getDefaultAssetDefinitions(),
+          normalizedUpdate.executionProfile ?? this.resolveTemplateExecutionProfile(nextTemplate)
         );
       }
 
@@ -377,17 +395,25 @@ export class RoleTemplateFactoryService {
 
     if (
       normalizedUpdate.applicationType !== undefined ||
-      input.dependencyManifest !== undefined
+      input.dependencyManifest !== undefined ||
+      input.executionProfile !== undefined
     ) {
       const nextApplicationType =
         normalizedUpdate.applicationType ?? this.toDatabaseApplicationTypeFromRecord(existing.applicationType);
       const graph = normalizedUpdate.workflowGraph ??
         normalizeWorkflowGraphOrFallback(existing.workflowGraph, this.toWorkflowSteps(existing.workflowSteps));
       normalizedUpdate.workflowGraph = graph;
+      const nextTemplate = {
+        ...existing,
+        ...normalizedUpdate,
+        applicationType: nextApplicationType
+      };
       normalizedUpdate.dependencyManifest = this.buildDependencyManifest(
         graph,
         nextApplicationType,
-        this.normalizeFactoryManifestInput(input.dependencyManifest ?? existing.dependencyManifest, nextApplicationType)
+        this.normalizeFactoryManifestInput(input.dependencyManifest ?? existing.dependencyManifest, nextApplicationType),
+        getDefaultAssetDefinitions(),
+        normalizedUpdate.executionProfile ?? this.resolveTemplateExecutionProfile(nextTemplate)
       );
     }
 
@@ -733,6 +759,23 @@ export class RoleTemplateFactoryService {
     const workflowSteps = this.normalizeWorkflowSteps(input.workflowSteps ?? []);
     const workflowGraph = this.normalizeWorkflowGraphInput(input.workflowGraph, workflowSteps);
     const factoryManifest = this.normalizeFactoryManifestInput(input.dependencyManifest, applicationType);
+    const knowledgeSources = this.normalizeStringArray(input.knowledgeSources);
+    const tools = this.normalizeStringArray(input.tools);
+    const skills = this.normalizeSkills(input.skills);
+    const executionProfile = this.resolveExecutionProfileFromInput(input.executionProfile, {
+      templateId: input.id,
+      applicationType,
+      name: input.name,
+      industry: input.industry,
+      scenario: input.scenario,
+      description: input.description,
+      businessGoal: input.businessGoal,
+      knowledgeSources,
+      tools,
+      skills,
+      outputFormat: input.outputFormat,
+      approvalPolicy: input.approvalPolicy
+    });
 
     return {
       applicationType,
@@ -743,12 +786,18 @@ export class RoleTemplateFactoryService {
       description: this.requireText(input.description, 'Description cannot be empty.'),
       recommendedPlanCode,
       businessGoal: this.requireText(input.businessGoal, 'Business goal cannot be empty.'),
-      knowledgeSources: this.normalizeStringArray(input.knowledgeSources),
-      tools: this.normalizeStringArray(input.tools),
-      skills: this.normalizeSkills(input.skills),
+      knowledgeSources,
+      tools,
+      skills,
       workflowSteps,
       workflowGraph,
-      dependencyManifest: this.buildDependencyManifest(workflowGraph, applicationType, factoryManifest),
+      dependencyManifest: this.buildDependencyManifest(
+        workflowGraph,
+        applicationType,
+        factoryManifest,
+        getDefaultAssetDefinitions(),
+        executionProfile
+      ),
       sampleInputs: this.normalizeStringArray(input.sampleInputs ?? []),
       outputFormat: this.normalizeOptionalText(
         input.outputFormat,
@@ -796,10 +845,14 @@ export class RoleTemplateFactoryService {
     } else if (normalized.workflowSteps !== undefined) {
       normalized.workflowGraph = buildWorkflowGraphFromSteps(normalized.workflowSteps);
     }
+    if (input.executionProfile !== undefined) {
+      normalized.executionProfile = this.resolveExecutionProfileFromInput(input.executionProfile);
+    }
     if (
       normalized.workflowGraph !== undefined ||
       normalized.applicationType !== undefined ||
-      input.dependencyManifest !== undefined
+      input.dependencyManifest !== undefined ||
+      input.executionProfile !== undefined
     ) {
       const graph = normalized.workflowGraph;
       if (graph !== undefined) {
@@ -807,7 +860,10 @@ export class RoleTemplateFactoryService {
         normalized.dependencyManifest = this.buildDependencyManifest(
           graph,
           applicationType ?? 'DIGITAL_EMPLOYEE',
-          this.normalizeFactoryManifestInput(input.dependencyManifest, applicationType ?? 'DIGITAL_EMPLOYEE')
+          this.normalizeFactoryManifestInput(input.dependencyManifest, applicationType ?? 'DIGITAL_EMPLOYEE'),
+          getDefaultAssetDefinitions(),
+          normalized.executionProfile ??
+            readRoleTemplateExecutionProfile(this.toRecord(input.dependencyManifest)?.executionProfile)
         );
       }
     }
@@ -898,6 +954,12 @@ export class RoleTemplateFactoryService {
   private toAdminTemplateDetail(template: RoleTemplateRecord): AdminRoleTemplateDetailDto {
     const workflowSteps = this.toWorkflowSteps(template.workflowSteps);
     const workflowGraph = normalizeWorkflowGraphOrFallback(template.workflowGraph, workflowSteps);
+    const dependencyManifest = this.toDependencyManifest(
+      template.dependencyManifest,
+      workflowGraph,
+      this.toDatabaseApplicationTypeFromRecord(template.applicationType),
+      this.resolveTemplateExecutionProfile(template)
+    );
 
     return {
       id: template.id,
@@ -914,11 +976,8 @@ export class RoleTemplateFactoryService {
       skills: this.toSkillSummaries(template.skills),
       workflowSteps,
       workflowGraph,
-      dependencyManifest: this.toDependencyManifest(
-        template.dependencyManifest,
-        workflowGraph,
-        this.toDatabaseApplicationTypeFromRecord(template.applicationType)
-      ),
+      dependencyManifest,
+      executionProfile: dependencyManifest.executionProfile,
       sampleInputs: this.toStringArray(template.sampleInputs),
       outputFormat: template.outputFormat?.trim() || '',
       approvalPolicy: template.approvalPolicy,
@@ -2297,19 +2356,60 @@ export class RoleTemplateFactoryService {
     return undefined;
   }
 
+  private resolveExecutionProfileFromInput(
+    value: unknown,
+    fallbackSource?: RoleTemplateExecutionProfileSource
+  ): ServerRoleTemplateExecutionProfile | undefined {
+    return normalizeRoleTemplateExecutionProfile(value, fallbackSource);
+  }
+
+  private resolveTemplateExecutionProfile(
+    template: Partial<RoleTemplateRecord> & { templateId?: string }
+  ): ServerRoleTemplateExecutionProfile {
+    const manifestProfile = readRoleTemplateExecutionProfile(
+      this.toRecord(template.dependencyManifest)?.executionProfile
+    );
+    if (manifestProfile) {
+      return manifestProfile;
+    }
+
+    const explicitProfile = readRoleTemplateExecutionProfile(template.executionProfile);
+    if (explicitProfile) {
+      return explicitProfile;
+    }
+
+    return buildRoleTemplateExecutionProfile({
+      templateId: template.id ?? template.templateId,
+      applicationType: template.applicationType,
+      name: template.name,
+      industry: template.industry,
+      scenario: template.scenario,
+      description: template.description,
+      businessGoal: template.businessGoal,
+      knowledgeSources: this.toStringArray(template.knowledgeSources),
+      tools: this.toStringArray(template.tools),
+      skills: this.toSkillSummaries(template.skills),
+      outputFormat: template.outputFormat,
+      approvalPolicy: template.approvalPolicy
+    });
+  }
+
   private buildDependencyManifest(
     workflowGraph: ServerRoleWorkflowGraph,
     applicationType: DatabaseRoleTemplateApplicationType,
     factoryManifest?: unknown,
-    assets: RoleTemplateDependencyAsset[] = getDefaultAssetDefinitions()
+    assets: RoleTemplateDependencyAsset[] = getDefaultAssetDefinitions(),
+    executionProfile?: ServerRoleTemplateExecutionProfile
   ): ReturnType<typeof buildRoleTemplateDependencyManifest> & {
     applicationType: PublicRoleTemplateApplicationType;
+    executionProfile?: ServerRoleTemplateExecutionProfile;
     factory?: unknown;
   } {
     return {
       ...buildRoleTemplateDependencyManifest({
         workflowGraph,
-        assets
+        assets,
+        executionProfile
       }),
       applicationType: this.toPublicApplicationType(applicationType),
       ...(factoryManifest === undefined ? {} : { factory: factoryManifest })
@@ -2436,23 +2536,32 @@ export class RoleTemplateFactoryService {
       workflowGraph,
       this.toDatabaseApplicationTypeFromRecord(template.applicationType),
       this.normalizeFactoryManifestInput(template.dependencyManifest, this.toDatabaseApplicationTypeFromRecord(template.applicationType)),
-      assets
+      assets,
+      this.resolveTemplateExecutionProfile(template)
     );
   }
 
   private toDependencyManifest(
     value: unknown,
     workflowGraph: ServerRoleWorkflowGraph,
-    applicationType: DatabaseRoleTemplateApplicationType = 'DIGITAL_EMPLOYEE'
+    applicationType: DatabaseRoleTemplateApplicationType = 'DIGITAL_EMPLOYEE',
+    executionProfile?: ServerRoleTemplateExecutionProfile
   ) {
     if (this.isDependencyManifest(value)) {
       const record = value as ReturnType<typeof buildRoleTemplateDependencyManifest> & {
         applicationType?: PublicRoleTemplateApplicationType;
+        executionProfile?: ServerRoleTemplateExecutionProfile;
         factory?: unknown;
       };
       return {
         ...record,
         applicationType: this.toPublicApplicationType(applicationType),
+        executionProfile:
+          readRoleTemplateExecutionProfile(record.executionProfile) ??
+          executionProfile ??
+          buildRoleTemplateExecutionProfile({
+            applicationType
+          }),
         ...(applicationType === 'DIGITAL_FACTORY'
           ? { factory: this.normalizeFactoryManifestInput(record, applicationType) }
           : {})
@@ -2462,7 +2571,9 @@ export class RoleTemplateFactoryService {
     return this.buildDependencyManifest(
       workflowGraph,
       applicationType,
-      this.normalizeFactoryManifestInput(value, applicationType)
+      this.normalizeFactoryManifestInput(value, applicationType),
+      getDefaultAssetDefinitions(),
+      executionProfile
     );
   }
 

@@ -4,6 +4,7 @@ import {
   type ServerRoleSkill,
   type ServerRoleTemplateWorkflowStep
 } from '../role-template-catalog';
+import type { ServerRoleTemplateExecutionProfile } from '../role-template-execution-profile';
 import type { ServerRoleWorkflowGraph } from '../workflow-graph';
 import {
   buildRoleTemplateDependencyManifest,
@@ -50,6 +51,7 @@ export interface MockRoleTemplateSummary {
   skills: ServerRoleSkill[];
   workflowSteps: ServerRoleTemplateWorkflowStep[];
   workflowGraph: ServerRoleWorkflowGraph;
+  executionProfile?: ServerRoleTemplateExecutionProfile;
   dependencyManifest?: ServerRoleTemplateDependencyManifest;
   sampleInputs: string[];
   outputFormat: string;
@@ -342,10 +344,12 @@ export const demoRoleTemplates: MockRoleTemplateSummary[] = serverRoleTemplateCa
       toolIds: step.toolIds ? [...step.toolIds] : undefined
     })),
     workflowGraph: template.workflowGraph,
+    executionProfile: template.executionProfile,
     dependencyManifest: {
       ...buildRoleTemplateDependencyManifest({
         workflowGraph: template.workflowGraph,
-        generatedAt: '2026-07-24T00:00:00.000Z'
+        generatedAt: '2026-07-24T00:00:00.000Z',
+        executionProfile: template.executionProfile
       }),
       applicationType: template.applicationType === 'DIGITAL_FACTORY' ? 'digital_factory' : 'digital_employee',
       ...(template.dependencyManifestFactory === undefined

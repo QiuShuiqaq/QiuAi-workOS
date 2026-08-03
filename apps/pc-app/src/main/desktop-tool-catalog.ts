@@ -21,6 +21,9 @@ const localAdapterActionIds = new Set([
   'document.extract_text',
   'web.fetch_url',
   'web.search',
+  'browser.open_url',
+  'browser.extract_text',
+  'browser.run_steps',
   'http.request',
   'mcp.call',
   'office.write_markdown_document',
@@ -66,7 +69,7 @@ export async function buildDesktopToolStateFromServerCatalog(input: {
       version: 'server-defined',
       scope: resolveToolScope(toolPackage.category),
       entryPoint: resolveToolEntryPoint(toolPackage.id),
-      capabilities: resolveToolCapabilities(toolPackage.category),
+      capabilities: resolveToolCapabilities(toolPackage.category, toolPackage.id),
       requiresApproval: false,
       actions: actions.map((action) => ({
         action: action.actionId,
@@ -136,11 +139,13 @@ function resolveToolScope(category: string): ToolScope {
 
 function resolveToolEntryPoint(toolId: string): ToolEntryPoint {
   if (toolId === 'mcp') return 'mcp';
-  if (toolId === 'local-filesystem' || toolId === 'video-processing') return 'native';
+  if (toolId === 'local-filesystem' || toolId === 'video-processing' || toolId === 'browser-automation') return 'native';
   return 'bridge';
 }
 
-function resolveToolCapabilities(category: string): ToolCapability[] {
+function resolveToolCapabilities(category: string, toolId?: string): ToolCapability[] {
+  if (toolId === 'browser-automation') return ['browser_automation'];
+
   switch (category) {
     case 'web':
       return ['web_search'];

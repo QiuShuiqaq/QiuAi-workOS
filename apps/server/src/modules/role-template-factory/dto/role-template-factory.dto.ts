@@ -93,6 +93,9 @@ export class AdminRoleTemplateDetailDto {
   @ApiPropertyOptional({ type: Object })
   dependencyManifest?: unknown;
 
+  @ApiPropertyOptional({ type: Object })
+  executionProfile?: unknown;
+
   @ApiProperty({ type: [String] })
   sampleInputs!: string[];
 
@@ -267,6 +270,11 @@ export class CreateAdminRoleTemplateRequestDto {
   @IsObject()
   dependencyManifest?: Record<string, unknown>;
 
+  @ApiPropertyOptional({ type: Object })
+  @IsOptional()
+  @IsObject()
+  executionProfile?: Record<string, unknown>;
+
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()
   @IsArray()
@@ -384,6 +392,11 @@ export class UpdateAdminRoleTemplateRequestDto {
   @IsOptional()
   @IsObject()
   dependencyManifest?: Record<string, unknown>;
+
+  @ApiPropertyOptional({ type: Object })
+  @IsOptional()
+  @IsObject()
+  executionProfile?: Record<string, unknown>;
 
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()

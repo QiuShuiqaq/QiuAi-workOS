@@ -1,5 +1,8 @@
 import type { DesktopToolActionHealthSummary } from './desktop-sync';
-import type { RoleTemplateDependencyManifest } from './dependency-manifest';
+import type {
+  RoleTemplateDependencyManifest,
+  RoleTemplateExecutionProfile
+} from './dependency-manifest';
 import type { PaginationMeta } from './pagination';
 import type { RoleSkillSummary, RoleTemplateWorkflowStep } from './role';
 import type { RoleWorkflowGraph } from './workflow-graph';
@@ -24,6 +27,7 @@ export interface AdminRoleTemplateDetail {
   workflowSteps: RoleTemplateWorkflowStep[];
   workflowGraph?: RoleWorkflowGraph;
   dependencyManifest?: RoleTemplateDependencyManifest;
+  executionProfile?: RoleTemplateExecutionProfile;
   sampleInputs: string[];
   outputFormat: string;
   approvalPolicy: string;
@@ -62,6 +66,7 @@ export interface CreateAdminRoleTemplateRequest {
   workflowSteps?: RoleTemplateWorkflowStep[];
   workflowGraph?: RoleWorkflowGraph;
   dependencyManifest?: RoleTemplateDependencyManifest;
+  executionProfile?: RoleTemplateExecutionProfile;
   sampleInputs?: string[];
   outputFormat?: string;
   approvalPolicy: string;
@@ -85,6 +90,7 @@ export interface UpdateAdminRoleTemplateRequest {
   workflowSteps?: RoleTemplateWorkflowStep[];
   workflowGraph?: RoleWorkflowGraph;
   dependencyManifest?: RoleTemplateDependencyManifest;
+  executionProfile?: RoleTemplateExecutionProfile;
   sampleInputs?: string[];
   outputFormat?: string;
   approvalPolicy?: string;

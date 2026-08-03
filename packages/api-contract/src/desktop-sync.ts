@@ -1,4 +1,7 @@
-import type { RoleTemplateDependencyManifest } from './dependency-manifest';
+import type {
+  RoleTemplateDependencyManifest,
+  RoleTemplateExecutionProfile
+} from './dependency-manifest';
 
 export type DesktopPlatform = 'windows' | 'macos' | 'linux';
 
@@ -62,6 +65,7 @@ export interface DesktopAuthorizedRoleTemplateSummary {
   }>;
   workflowGraph?: unknown;
   dependencyManifest?: RoleTemplateDependencyManifest;
+  executionProfile?: RoleTemplateExecutionProfile;
   sampleInputs: string[];
   outputFormat: string;
   approvalPolicy: string;

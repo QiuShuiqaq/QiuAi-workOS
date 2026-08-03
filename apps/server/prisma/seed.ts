@@ -259,7 +259,8 @@ function buildSeedRoleTemplateDependencyManifest(
     ...buildRoleTemplateDependencyManifest({
       workflowGraph: template.workflowGraph,
       assets,
-      generatedAt
+      generatedAt,
+      executionProfile: template.executionProfile
     }),
     applicationType: template.applicationType === 'DIGITAL_FACTORY' ? 'digital_factory' : 'digital_employee',
     ...(template.dependencyManifestFactory === undefined

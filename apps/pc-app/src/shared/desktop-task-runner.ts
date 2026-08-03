@@ -259,6 +259,9 @@ const supportedToolActions: DesktopToolInvocationAction[] = [
   'document.extract_text',
   'web.fetch_url',
   'web.search',
+  'browser.open_url',
+  'browser.extract_text',
+  'browser.run_steps',
   'http.request',
   'mcp.call',
   'office.write_markdown_document',
@@ -5978,6 +5981,30 @@ function buildWorkflowRuntimeToolRequest(
     };
   }
 
+  if (toolId === 'browser-automation') {
+    const explicitUrl =
+      typeof config.url === 'string'
+        ? String(resolveWorkflowRuntimeConfigValue(config.url, pool))
+        : undefined;
+    const url = explicitUrl || extractFirstUrl(query || String(pool.get('start.text') ?? ''));
+    if (!url) {
+      return undefined;
+    }
+
+    return {
+      toolId,
+      action: 'browser.extract_text',
+      input: {
+        url,
+        waitForUserSeconds: readWorkflowRuntimeNumber(config.waitForUserSeconds, 1),
+        maxChars: readWorkflowRuntimeNumber(config.maxChars, 50_000),
+        show: config.show !== false,
+        closeAfter: config.closeAfter === true,
+        allowPrivateNetwork: config.allowPrivateNetwork === true
+      }
+    };
+  }
+
   if (toolId === 'office-document') {
     const file = findFirstWorkflowRuntimeFile(variables) ?? findFirstWorkflowRuntimeFile([
       { ref: 'start.files', value: pool.get('start.files') ?? [] }
@@ -6064,6 +6091,11 @@ function buildWorkflowRuntimeToolRequest(
   }
 
   return undefined;
+}
+
+function extractFirstUrl(text: string): string | undefined {
+  const match = text.match(/https?:\/\/[^\s"'<>，。；、）)]+/i);
+  return match?.[0];
 }
 
 function selectWorkflowRuntimeModelProfile(

@@ -62,6 +62,7 @@ export const serverToolPackages: ServerToolPackageDefinition[] = [
   { id: 'office-document', name: '办公文档', category: 'document', description: '读取文档文本，生成 Word、Excel、CSV 和 PPT。' },
   { id: 'local-filesystem', name: '本地文件', category: 'file', description: '读取、写入和列出本地授权文件。' },
   { id: 'video-processing', name: '视频处理', category: 'video', description: '读取视频信息、抽取关键帧和导出剪辑视频。' },
+  { id: 'browser-automation', name: 'RPA 浏览器', category: 'integration', description: '在 PC 本机打开网页、执行基础点击填表和页面文本提取。' },
   { id: 'http-request', name: 'HTTP 接口', category: 'integration', description: '调用外部 HTTP API。' },
   { id: 'mcp', name: 'MCP 工具', category: 'integration', description: '调用本地或远程 MCP 工具。' }
 ];
@@ -450,6 +451,91 @@ export const serverToolActions: ServerToolActionDefinition[] = [
     requiredDependencies: ['ffmpeg'],
     artifactFormat: 'mp4',
     maturity: 'stable'
+  },
+  {
+    packageId: 'browser-automation',
+    actionId: 'browser.open_url',
+    name: '打开网页',
+    category: 'integration',
+    description: '在 PC 本机 RPA 浏览器中打开网页，支持用户手动登录或确认。',
+    input: [
+      { key: 'url', label: 'URL', type: 'text', required: true },
+      { key: 'waitForUserSeconds', label: '人工停留秒数', type: 'number' }
+    ],
+    output: [
+      { key: 'url', label: '当前 URL', type: 'text' },
+      { key: 'title', label: '页面标题', type: 'text' }
+    ],
+    defaultInput: { url: 'https://example.com', waitForUserSeconds: 1, show: true, closeAfter: false },
+    uiFields: [
+      { key: 'url', label: 'URL' },
+      { key: 'waitForUserSeconds', label: '人工停留秒数', type: 'number' },
+      { key: 'show', label: '显示浏览器', type: 'boolean' },
+      { key: 'closeAfter', label: '完成后关闭', type: 'boolean' }
+    ],
+    requiredConfig: [],
+    requiredDependencies: [],
+    maturity: 'experimental'
+  },
+  {
+    packageId: 'browser-automation',
+    actionId: 'browser.extract_text',
+    name: '提取网页文本',
+    category: 'integration',
+    description: '打开网页并提取当前页面标题、正文和链接，用于招聘、销售等页面信息整理。',
+    input: [
+      { key: 'url', label: 'URL', type: 'text', required: true },
+      { key: 'waitForUserSeconds', label: '人工停留秒数', type: 'number' },
+      { key: 'maxChars', label: '最大字符数', type: 'number' }
+    ],
+    output: [
+      { key: 'text', label: '页面文本', type: 'text' },
+      { key: 'links', label: '页面链接', type: 'json' }
+    ],
+    defaultInput: { url: 'https://example.com', waitForUserSeconds: 1, maxChars: 50000, show: true, closeAfter: false },
+    uiFields: [
+      { key: 'url', label: 'URL' },
+      { key: 'waitForUserSeconds', label: '人工停留秒数', type: 'number' },
+      { key: 'maxChars', label: '最大字符数', type: 'number' },
+      { key: 'show', label: '显示浏览器', type: 'boolean' },
+      { key: 'closeAfter', label: '完成后关闭', type: 'boolean' }
+    ],
+    requiredConfig: [],
+    requiredDependencies: [],
+    maturity: 'experimental'
+  },
+  {
+    packageId: 'browser-automation',
+    actionId: 'browser.run_steps',
+    name: '执行网页步骤',
+    category: 'integration',
+    description: '按步骤执行 navigate、wait、fill、click、extract_text，用于低成本网页 RPA。',
+    input: [
+      { key: 'steps', label: '步骤 JSON', type: 'json', required: true },
+      { key: 'timeoutMs', label: '超时毫秒', type: 'number' }
+    ],
+    output: [
+      { key: 'outputs', label: '步骤结果', type: 'json' },
+      { key: 'text', label: '提取文本', type: 'text' }
+    ],
+    defaultInput: {
+      steps: [
+        { type: 'navigate', url: 'https://example.com' },
+        { type: 'extract_text' }
+      ],
+      timeoutMs: 30000,
+      show: true,
+      closeAfter: false
+    },
+    uiFields: [
+      { key: 'steps', label: '步骤 JSON', type: 'textarea', format: 'json' },
+      { key: 'timeoutMs', label: '超时毫秒', type: 'number' },
+      { key: 'show', label: '显示浏览器', type: 'boolean' },
+      { key: 'closeAfter', label: '完成后关闭', type: 'boolean' }
+    ],
+    requiredConfig: [],
+    requiredDependencies: [],
+    maturity: 'experimental'
   },
   {
     packageId: 'http-request',

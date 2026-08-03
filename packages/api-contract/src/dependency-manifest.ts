@@ -61,6 +61,72 @@ export interface RoleTemplateDependencyNodeTemplate {
   nodeIds: string[];
 }
 
+export type RoleTemplateExecutionMode = 'conversation' | 'watch' | 'hybrid';
+
+export type RoleTemplateTriggerMode =
+  | 'manual'
+  | 'scheduled'
+  | 'event'
+  | 'folder_watch'
+  | 'platform_watch';
+
+export type RoleTemplateInputSource =
+  | 'chat'
+  | 'uploaded_files'
+  | 'local_folder'
+  | 'enterprise_knowledge'
+  | 'web'
+  | 'external_platform';
+
+export type RoleTemplateExecutionToolCapability =
+  | 'llm'
+  | 'knowledge'
+  | 'office'
+  | 'web_search'
+  | 'browser_automation'
+  | 'external_api'
+  | 'mcp'
+  | 'local_files'
+  | 'approval_queue';
+
+export type RoleTemplateOutputTarget =
+  | 'chat_response'
+  | 'artifact'
+  | 'task_queue'
+  | 'approval_queue'
+  | 'daily_report'
+  | 'external_platform';
+
+export type RoleTemplateDataBoundary = 'local_first' | 'summary_sync' | 'workspace_sync';
+
+export type RoleTemplateExternalConnectorType = 'browser' | 'api' | 'mcp' | 'manual';
+
+export type RoleTemplateExternalConnectorStatus = 'supported' | 'requires_setup' | 'planned';
+
+export interface RoleTemplateExternalConnector {
+  key: string;
+  name: string;
+  type: RoleTemplateExternalConnectorType;
+  status: RoleTemplateExternalConnectorStatus;
+}
+
+export interface RoleTemplateExecutionProfile {
+  mode: RoleTemplateExecutionMode;
+  summary: string;
+  triggerModes: RoleTemplateTriggerMode[];
+  inputSources: RoleTemplateInputSource[];
+  toolCapabilities: RoleTemplateExecutionToolCapability[];
+  outputTargets: RoleTemplateOutputTarget[];
+  approval: {
+    required: boolean;
+    requiredActions: string[];
+  };
+  dataBoundary: RoleTemplateDataBoundary;
+  externalConnectors?: RoleTemplateExternalConnector[];
+  rolloutPhase?: 'ready' | 'foundation' | 'planned';
+  notes?: string[];
+}
+
 export interface RoleTemplateDependencyManifest {
   version: '1.0.0';
   applicationType?: 'digital_employee' | 'digital_factory';
@@ -70,6 +136,7 @@ export interface RoleTemplateDependencyManifest {
   toolActions: RoleTemplateDependencyToolAction[];
   artifactTemplates: RoleTemplateDependencyArtifactTemplate[];
   nodeTemplates: RoleTemplateDependencyNodeTemplate[];
+  executionProfile?: RoleTemplateExecutionProfile;
   factory?: unknown;
   warnings: string[];
 }

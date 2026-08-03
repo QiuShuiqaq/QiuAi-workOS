@@ -7,6 +7,11 @@ import {
   normalizeWorkflowGraphOrFallback,
   type WorkflowStepLike
 } from '../../shared/workflow-graph';
+import {
+  buildRoleTemplateExecutionProfile,
+  readRoleTemplateExecutionProfile,
+  type ServerRoleTemplateExecutionProfile
+} from '../../shared/role-template-execution-profile';
 
 const workflowStepTypeSet = new Set<string>([
   'input',
@@ -42,6 +47,7 @@ type DatabaseRoleTemplate = {
   workflowSteps: unknown;
   workflowGraph: unknown;
   dependencyManifest?: unknown;
+  executionProfile?: unknown;
   sampleInputs: unknown;
   outputFormat?: string | null;
   approvalPolicy: string;
@@ -461,6 +467,18 @@ export class RoleService {
     access: TemplateAccessSummary = {}
   ) {
     const workflowSteps = this.toWorkflowSteps(template.workflowSteps);
+    const knowledgeSources = this.toStringArray(template.knowledgeSources);
+    const tools = this.toStringArray(template.tools);
+    const skills = this.toSkillSummaries(template.skills);
+    const executionProfile = this.resolveTemplateExecutionProfile(template, {
+      knowledgeSources,
+      tools,
+      skills
+    });
+    const dependencyManifest = this.withTemplateExecutionProfile(
+      template.dependencyManifest,
+      executionProfile
+    );
 
     return {
       id: template.id,
@@ -476,12 +494,13 @@ export class RoleService {
       accessLabel: access.accessLabel,
       accessReason: access.accessReason,
       businessGoal: template.businessGoal,
-      knowledgeSources: this.toStringArray(template.knowledgeSources),
-      tools: this.toStringArray(template.tools),
-      skills: this.toSkillSummaries(template.skills),
+      knowledgeSources,
+      tools,
+      skills,
       workflowSteps,
       workflowGraph: normalizeWorkflowGraphOrFallback(template.workflowGraph, workflowSteps),
-      dependencyManifest: template.dependencyManifest,
+      dependencyManifest,
+      executionProfile,
       sampleInputs: this.toStringArray(template.sampleInputs),
       outputFormat: template.outputFormat?.trim() || '',
       approvalPolicy: template.approvalPolicy
@@ -776,6 +795,63 @@ export class RoleService {
     }
 
     return value.filter((item): item is string => typeof item === 'string');
+  }
+
+  private resolveTemplateExecutionProfile(
+    template: DatabaseRoleTemplate,
+    normalized?: {
+      knowledgeSources?: string[];
+      tools?: string[];
+      skills?: Array<{ code: string; name: string; summary: string }>;
+    }
+  ): ServerRoleTemplateExecutionProfile {
+    const manifestProfile = readRoleTemplateExecutionProfile(
+      this.toRecord(template.dependencyManifest)?.executionProfile
+    );
+    if (manifestProfile) {
+      return manifestProfile;
+    }
+
+    const explicitProfile = readRoleTemplateExecutionProfile(template.executionProfile);
+    if (explicitProfile) {
+      return explicitProfile;
+    }
+
+    return buildRoleTemplateExecutionProfile({
+      templateId: template.id,
+      applicationType: template.applicationType,
+      name: template.name,
+      industry: template.industry,
+      scenario: template.scenario,
+      description: template.description,
+      businessGoal: template.businessGoal,
+      knowledgeSources: normalized?.knowledgeSources ?? this.toStringArray(template.knowledgeSources),
+      tools: normalized?.tools ?? this.toStringArray(template.tools),
+      skills: normalized?.skills ?? this.toSkillSummaries(template.skills),
+      outputFormat: template.outputFormat,
+      approvalPolicy: template.approvalPolicy
+    });
+  }
+
+  private withTemplateExecutionProfile(
+    dependencyManifest: unknown,
+    executionProfile: ServerRoleTemplateExecutionProfile
+  ): unknown {
+    const record = this.toRecord(dependencyManifest);
+    if (!record) {
+      return dependencyManifest;
+    }
+
+    return {
+      ...record,
+      executionProfile: readRoleTemplateExecutionProfile(record.executionProfile) ?? executionProfile
+    };
+  }
+
+  private toRecord(value: unknown): Record<string, unknown> | undefined {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : undefined;
   }
 
   private toSkillSummaries(value: unknown) {

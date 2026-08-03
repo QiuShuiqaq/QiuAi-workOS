@@ -72,10 +72,33 @@ test('server role template catalog is focused and production-oriented', () => {
 
   const salesTemplates = serverRoleTemplateCatalog.filter((template) => template.templateId.startsWith('sales_'));
   assert.ok(salesTemplates.length >= 70);
+  assert.ok(
+    salesTemplates.every((template) => template.tools.includes('browser-automation')),
+    'all sales templates must include browser automation for lead/customer webpage collection'
+  );
+  assert.ok(
+    salesTemplates.every((template) => template.workflowGraph.nodes.some((node) => node.id === 'rpa_browser_collect')),
+    'all sales templates must define an executable RPA browser collection node'
+  );
   assert.ok(salesTemplates.some((template) => template.industry.includes('软件与企业服务')));
   assert.ok(salesTemplates.some((template) => template.industry.includes('医疗健康')));
   assert.ok(salesTemplates.some((template) => template.industry.includes('制造工业')));
   assert.ok(salesTemplates.some((template) => template.industry.includes('政企项目')));
+
+  const recruitingTemplate = templateById.get('core_recruiting_v1');
+  assert.ok(recruitingTemplate, 'recruiting template must exist');
+  assert.ok(recruitingTemplate.tools.includes('browser-automation'));
+  assert.ok(recruitingTemplate.workflowGraph.nodes.some((node) => node.id === 'rpa_browser_collect'));
+  const recruitingDependencyManifest = buildRoleTemplateDependencyManifest({
+    workflowGraph: recruitingTemplate.workflowGraph,
+    generatedAt: '2026-07-30T00:00:00.000Z'
+  });
+  assert.ok(
+    recruitingDependencyManifest.toolActions.some(
+      (action) => action.packageId === 'browser-automation' && action.actionId === 'browser.extract_text'
+    ),
+    'recruiting template dependency manifest must expose the browser extraction action'
+  );
 
   const factoryTemplateIds = [
     'factory_cross_border_product_images_v1',

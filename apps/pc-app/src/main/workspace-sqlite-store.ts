@@ -182,7 +182,9 @@ export async function writeWorkspaceSnapshotBundle(
       savedAt,
       runtimeSnapshot: state.runtimeSnapshot,
       knowledgeSources: state.knowledgeSources,
-      taskDetails: state.taskDetails ?? []
+      taskDetails: state.taskDetails ?? [],
+      watchConfigs: state.watchConfigs ?? [],
+      watchRuns: state.watchRuns ?? []
     };
 
     db.exec('BEGIN');

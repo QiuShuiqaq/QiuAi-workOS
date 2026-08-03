@@ -26,14 +26,18 @@ import { loadPdfParse } from './pdf-parse-loader.js';
 const localFilesystemToolId = 'local-filesystem';
 const webSearchToolId = 'web-search';
 const officeDocumentToolId = 'office-document';
+const browserAutomationToolId = 'browser-automation';
 const httpRequestToolId = 'http-request';
 const mcpToolId = 'mcp';
 const videoProcessingToolId = 'video-processing';
 const maxReadBytes = 64 * 1024;
 const maxDirectoryEntries = 100;
 const maxWebTextChars = 24_000;
+const maxBrowserTextChars = 50_000;
+const maxBrowserSteps = 30;
 const maxExtractedDocumentChars = 30_000;
 const webFetchTimeoutMs = 15_000;
+const browserLoadTimeoutMs = 30_000;
 const builtInWebSearchBingEndpoint = 'https://cn.bing.com/search';
 const builtInWebSearchHtmlEndpoint = 'https://html.duckduckgo.com/html/';
 const builtInWebSearchInstantEndpoint = 'https://api.duckduckgo.com/';
@@ -57,6 +61,10 @@ export async function invokeDesktopTool(
 
     if (request.toolId === officeDocumentToolId) {
       return await invokeOfficeDocumentTool(userDataPath, request);
+    }
+
+    if (request.toolId === browserAutomationToolId) {
+      return await invokeBrowserAutomationTool(userDataPath, request);
     }
 
     if (request.toolId === httpRequestToolId) {
@@ -134,6 +142,22 @@ async function invokeOfficeDocumentTool(
       return writePresentationOutline(userDataPath, request);
     default:
       return fail(request, `Unsupported office document action: ${request.action}`);
+  }
+}
+
+async function invokeBrowserAutomationTool(
+  userDataPath: string,
+  request: DesktopToolInvocationRequest
+): Promise<DesktopToolInvocationResult> {
+  switch (request.action) {
+    case 'browser.open_url':
+      return await openBrowserAutomationUrl(userDataPath, request, false);
+    case 'browser.extract_text':
+      return await openBrowserAutomationUrl(userDataPath, request, true);
+    case 'browser.run_steps':
+      return await runBrowserAutomationSteps(userDataPath, request);
+    default:
+      return fail(request, `Unsupported browser automation action: ${request.action}`);
   }
 }
 
@@ -235,6 +259,149 @@ async function invokeMcpTool(
       text: extractMcpTextContent(parsed) ?? truncate(bodyText, maxWebTextChars)
     },
     message: errorMessage ?? (response.ok ? undefined : `MCP gateway returned HTTP ${response.status}.`)
+  };
+}
+
+async function openBrowserAutomationUrl(
+  userDataPath: string,
+  request: DesktopToolInvocationRequest,
+  extractText: boolean
+): Promise<DesktopToolInvocationResult> {
+  const url = normalizePublicHttpUrl(
+    readRequiredString(request.input.url, 'url'),
+    request.input.allowPrivateNetwork === true
+  );
+  const window = await createRpaBrowserWindow(userDataPath, request);
+  await loadRpaBrowserUrl(window, url.toString(), readOptionalPositiveInteger(request.input.timeoutMs, browserLoadTimeoutMs));
+  const waitForUserSeconds = Math.min(readOptionalPositiveInteger(request.input.waitForUserSeconds, 1), 600);
+  if (waitForUserSeconds > 1) {
+    await delay(waitForUserSeconds * 1000);
+  }
+
+  const snapshot = extractText
+    ? await extractRpaBrowserSnapshot(
+        window,
+        Math.min(readOptionalPositiveInteger(request.input.maxChars, maxBrowserTextChars), 120_000)
+      )
+    : undefined;
+  const currentUrl = await readRpaBrowserUrl(window);
+  const currentTitle = await readRpaBrowserTitle(window);
+  const windowId = typeof window.id === 'number' ? window.id : undefined;
+
+  if (request.input.closeAfter === true) {
+    window.close();
+  }
+
+  return {
+    toolId: request.toolId,
+    action: request.action,
+    ok: true,
+    output: {
+      url: currentUrl,
+      title: currentTitle,
+      windowId,
+      manualLoginSupported: true,
+      ...(snapshot ?? {})
+    }
+  };
+}
+
+async function runBrowserAutomationSteps(
+  userDataPath: string,
+  request: DesktopToolInvocationRequest
+): Promise<DesktopToolInvocationResult> {
+  const steps = normalizeBrowserAutomationSteps(request.input.steps);
+  if (steps.length === 0) {
+    return fail(request, 'Tool input steps must contain at least one browser automation step.');
+  }
+
+  const window = await createRpaBrowserWindow(userDataPath, request);
+  const outputs: Array<Record<string, unknown>> = [];
+  const timeoutMs = readOptionalPositiveInteger(request.input.timeoutMs, browserLoadTimeoutMs);
+  const maxChars = Math.min(readOptionalPositiveInteger(request.input.maxChars, maxBrowserTextChars), 120_000);
+
+  for (const [index, step] of steps.entries()) {
+    const type = readString(step.type, '');
+    if (type === 'navigate') {
+      const url = normalizePublicHttpUrl(readRequiredString(step.url, `steps[${index}].url`), step.allowPrivateNetwork === true);
+      await loadRpaBrowserUrl(window, url.toString(), timeoutMs);
+      outputs.push({ index, type, ok: true, url: await readRpaBrowserUrl(window) });
+      continue;
+    }
+
+    if (type === 'wait') {
+      const milliseconds = Math.min(readOptionalPositiveInteger(step.ms ?? step.timeoutMs, 1000), 120_000);
+      await delay(milliseconds);
+      outputs.push({ index, type, ok: true, ms: milliseconds });
+      continue;
+    }
+
+    if (type === 'fill') {
+      const selector = readRequiredString(step.selector, `steps[${index}].selector`);
+      const value = readString(step.value, '');
+      const ok = await executeRpaBrowserBoolean(
+        window,
+        `(() => {
+          const el = document.querySelector(${JSON.stringify(selector)});
+          if (!el) return false;
+          el.focus?.();
+          el.value = ${JSON.stringify(value)};
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        })()`
+      );
+      outputs.push({ index, type, ok, selector });
+      if (!ok && step.optional !== true) {
+        return fail(request, `Browser automation step ${index + 1} failed: selector not found (${selector}).`);
+      }
+      continue;
+    }
+
+    if (type === 'click') {
+      const selector = readRequiredString(step.selector, `steps[${index}].selector`);
+      const ok = await executeRpaBrowserBoolean(
+        window,
+        `(() => {
+          const el = document.querySelector(${JSON.stringify(selector)});
+          if (!el) return false;
+          el.scrollIntoView?.({ block: 'center', inline: 'center' });
+          el.click();
+          return true;
+        })()`
+      );
+      outputs.push({ index, type, ok, selector });
+      if (!ok && step.optional !== true) {
+        return fail(request, `Browser automation step ${index + 1} failed: selector not found (${selector}).`);
+      }
+      continue;
+    }
+
+    if (type === 'extract_text') {
+      const snapshot = await extractRpaBrowserSnapshot(window, maxChars);
+      outputs.push({ index, type, ok: true, ...snapshot });
+      continue;
+    }
+
+    return fail(request, `Unsupported browser automation step type: ${type || '(empty)'}.`);
+  }
+
+  const currentUrl = await readRpaBrowserUrl(window);
+  const currentTitle = await readRpaBrowserTitle(window);
+
+  if (request.input.closeAfter === true) {
+    window.close();
+  }
+
+  return {
+    toolId: request.toolId,
+    action: request.action,
+    ok: true,
+    output: {
+      url: currentUrl,
+      title: currentTitle,
+      outputs
+    }
   };
 }
 
@@ -2390,6 +2557,143 @@ function extractTextFromXml(xml: string): string {
 
 function normalizeExtractedText(value: string): string {
   return value.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+type RpaBrowserWindow = {
+  id?: number;
+  loadURL(url: string): Promise<void>;
+  close(): void;
+  webContents: {
+    executeJavaScript(script: string): Promise<unknown>;
+    getURL(): string;
+    getTitle(): string;
+    once(eventName: string, listener: (...args: unknown[]) => void): void;
+    removeListener(eventName: string, listener: (...args: unknown[]) => void): void;
+  };
+};
+
+async function createRpaBrowserWindow(
+  userDataPath: string,
+  request: DesktopToolInvocationRequest
+): Promise<RpaBrowserWindow> {
+  let electronModule: unknown;
+  try {
+    electronModule = await import('electron');
+  } catch {
+    throw new Error('Browser automation is only available inside the desktop app runtime.');
+  }
+
+  const BrowserWindowValue = isRecord(electronModule) ? electronModule.BrowserWindow : undefined;
+  if (typeof BrowserWindowValue !== 'function') {
+    throw new Error('Electron BrowserWindow is not available for browser automation.');
+  }
+  const BrowserWindow = BrowserWindowValue as new (options: Record<string, unknown>) => RpaBrowserWindow;
+
+  const workspaceSegment = normalizePathSegment(request.workspaceId || 'workspace');
+  const partition = readString(request.input.partition, `persist:qiuai-rpa-${workspaceSegment}`);
+  const width = Math.min(readOptionalPositiveInteger(request.input.width, 1280), 3840);
+  const height = Math.min(readOptionalPositiveInteger(request.input.height, 860), 2160);
+
+  return new BrowserWindow({
+    width,
+    height,
+    show: request.input.show !== false,
+    title: 'QiuAI RPA Browser',
+    webPreferences: {
+      partition,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  }) as RpaBrowserWindow;
+}
+
+async function loadRpaBrowserUrl(
+  window: RpaBrowserWindow,
+  url: string,
+  timeoutMs: number
+): Promise<void> {
+  const loadPromise = new Promise<void>((resolve, reject) => {
+    const finish = () => {
+      cleanup();
+      resolve();
+    };
+    const failLoad = (_event: unknown, errorCode: unknown, errorDescription: unknown) => {
+      cleanup();
+      reject(new Error(`Browser failed to load page: ${String(errorDescription || errorCode || 'unknown error')}`));
+    };
+    const cleanup = () => {
+      window.webContents.removeListener('did-finish-load', finish);
+      window.webContents.removeListener('did-fail-load', failLoad);
+    };
+    window.webContents.once('did-finish-load', finish);
+    window.webContents.once('did-fail-load', failLoad);
+  });
+
+  await window.loadURL(url);
+  await Promise.race([
+    loadPromise,
+    delay(timeoutMs).then(() => {
+      throw new Error(`Browser page load timed out after ${timeoutMs}ms.`);
+    })
+  ]);
+}
+
+async function extractRpaBrowserSnapshot(
+  window: RpaBrowserWindow,
+  maxChars: number
+): Promise<Record<string, unknown>> {
+  const snapshot = await window.webContents.executeJavaScript(`(() => {
+    const links = Array.from(document.querySelectorAll('a'))
+      .slice(0, 80)
+      .map((link) => ({
+        text: (link.innerText || link.textContent || '').trim().slice(0, 160),
+        href: link.href
+      }))
+      .filter((link) => link.text || link.href);
+    return {
+      title: document.title,
+      url: location.href,
+      text: (document.body?.innerText || '').replace(/\\n{3,}/g, '\\n\\n').trim(),
+      links
+    };
+  })()`);
+
+  const record = isRecord(snapshot) ? snapshot : {};
+  const text = typeof record.text === 'string' ? truncate(record.text, maxChars) : '';
+  return {
+    title: typeof record.title === 'string' ? record.title : await readRpaBrowserTitle(window),
+    url: typeof record.url === 'string' ? record.url : await readRpaBrowserUrl(window),
+    text,
+    links: Array.isArray(record.links) ? record.links : [],
+    truncated: typeof record.text === 'string' && record.text.length > text.length
+  };
+}
+
+async function executeRpaBrowserBoolean(window: RpaBrowserWindow, script: string): Promise<boolean> {
+  const result = await window.webContents.executeJavaScript(script);
+  return result === true;
+}
+
+async function readRpaBrowserTitle(window: RpaBrowserWindow): Promise<string> {
+  return window.webContents.getTitle();
+}
+
+async function readRpaBrowserUrl(window: RpaBrowserWindow): Promise<string> {
+  return window.webContents.getURL();
+}
+
+function normalizeBrowserAutomationSteps(value: unknown): Array<Record<string, unknown>> {
+  const rawSteps = typeof value === 'string' ? parseJson(value) : value;
+  if (!Array.isArray(rawSteps)) {
+    return [];
+  }
+
+  return rawSteps.filter(isRecord).slice(0, maxBrowserSteps);
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function fail(

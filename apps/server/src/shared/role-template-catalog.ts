@@ -1,3 +1,7 @@
+import {
+  buildRoleTemplateExecutionProfile,
+  type ServerRoleTemplateExecutionProfile
+} from './role-template-execution-profile';
 import type { ServerRoleWorkflowGraph, ServerRoleWorkflowGraphNode } from './workflow-graph';
 
 export interface ServerRoleSkill {
@@ -39,6 +43,7 @@ export interface ServerRoleTemplateCatalogEntry {
   skills: ServerRoleSkill[];
   workflowSteps: ServerRoleTemplateWorkflowStep[];
   workflowGraph: ServerRoleWorkflowGraph;
+  executionProfile?: ServerRoleTemplateExecutionProfile;
   sampleInputs: string[];
   outputFormat: string;
   approvalPolicy: string;
@@ -52,6 +57,7 @@ type BaseServerRoleTemplateCatalogEntry = Omit<
 > & {
   workflowSteps?: ServerRoleTemplateWorkflowStep[];
   workflowGraph?: ServerRoleWorkflowGraph;
+  executionProfile?: ServerRoleTemplateExecutionProfile;
   sampleInputs?: string[];
   outputFormat?: string;
   allowedPlanCodes?: string[];
@@ -175,6 +181,10 @@ function inferWorkflowToolIds(template: BaseServerRoleTemplateCatalogEntry): str
     toolIds.push('web-search');
   }
 
+  if (shouldUseBrowserAutomation(template)) {
+    toolIds.push('browser-automation');
+  }
+
   if (
     text.includes('draft') ||
     text.includes('proposal') ||
@@ -200,6 +210,36 @@ function inferWorkflowToolIds(template: BaseServerRoleTemplateCatalogEntry): str
   }
 
   return toolIds.length > 0 ? [...new Set(toolIds)] : ['office-document'];
+}
+
+function shouldUseBrowserAutomation(template: BaseServerRoleTemplateCatalogEntry): boolean {
+  return shouldUseBrowserAutomationText([
+    template.templateId,
+    template.name,
+    template.industry,
+    template.scenario,
+    template.description,
+    template.businessGoal,
+    ...template.tools,
+    ...template.skills.flatMap((item) => [item.code, item.name, item.summary])
+  ]);
+}
+
+function shouldUseBrowserAutomationText(parts: string[]): boolean {
+  const text = parts.join(' ').toLowerCase();
+  return [
+    'recruit',
+    'resume',
+    'candidate',
+    'sales',
+    'customer_support',
+    'after_sales',
+    'enterprise_researcher',
+    'boss',
+    'zhilian',
+    'liepin',
+    'rpa'
+  ].some((keyword) => text.includes(keyword));
 }
 
 function inferWorkflowArtifactType(
@@ -533,6 +573,7 @@ function graphEdge(sourceNodeId: string, targetNodeId: string): ServerRoleWorkfl
 function buildOfficeProductionWorkflowSteps(input: {
   artifactType: OfficeProductionWorkflowArtifactType;
   includeWebSearch: boolean;
+  includeBrowserAutomation: boolean;
   scenario: string;
 }): ServerRoleTemplateWorkflowStep[] {
   const steps: ServerRoleTemplateWorkflowStep[] = [
@@ -575,6 +616,18 @@ function buildOfficeProductionWorkflowSteps(input: {
       name: '联网检索',
       instruction: '需要外部公开资料时检索网页，并把来源标题、链接和摘要带入后续分析。',
       toolIds: ['web-search']
+    });
+  }
+
+  if (input.includeBrowserAutomation) {
+    steps.push({
+      id: 'rpa_browser_collect',
+      order: steps.length + 1,
+      type: 'tool',
+      name: 'RPA 网页采集',
+      instruction: '需要从招聘、销售、客服或外部业务平台读取页面信息时，调用本机 RPA 浏览器打开网页、等待登录并提取页面文本；对外发送前必须人工确认。',
+      toolIds: ['browser-automation'],
+      requiresApproval: true
     });
   }
 
@@ -630,6 +683,7 @@ function buildOfficeProductionWorkflowGraph(input: {
   qualityInstruction: string;
   finalInstruction: string;
   includeWebSearch?: boolean;
+  includeBrowserAutomation?: boolean;
   analysisModelProfileId?: string;
   analysisTimeoutMs?: number;
   draftTimeoutMs?: number;
@@ -709,6 +763,26 @@ function buildOfficeProductionWorkflowGraph(input: {
           }
         ]
       : []),
+    ...(input.includeBrowserAutomation
+      ? [
+          {
+            id: 'rpa_browser_collect',
+            type: 'tool' as const,
+            name: 'RPA 网页采集',
+            instruction: '当用户提供招聘、销售、客服或外部业务平台 URL 时，调用本机 RPA 浏览器打开页面，允许用户登录后提取页面文本。不得自动发送外部消息。',
+            toolId: 'browser-automation',
+            inputVariables: ['start.text', 'task_parameters'],
+            outputVariables: ['rpa_page_text'],
+            config: {
+              action: 'browser.extract_text',
+              waitForUserSeconds: 1,
+              maxChars: 50000,
+              show: true,
+              closeAfter: false
+            }
+          }
+        ]
+      : []),
     {
       id: 'analyze_work',
       type: 'llm',
@@ -720,7 +794,8 @@ function buildOfficeProductionWorkflowGraph(input: {
         'task_parameters',
         'gather_context.text',
         'read_attachments.text',
-        input.includeWebSearch ? 'web_research.text' : undefined
+        input.includeWebSearch ? 'web_research.text' : undefined,
+        input.includeBrowserAutomation ? 'rpa_browser_collect.text' : undefined
       ].filter((value): value is string => Boolean(value)),
       outputVariables: ['analysis_result'],
       config: input.analysisTimeoutMs ? { timeoutMs: input.analysisTimeoutMs } : undefined
@@ -733,7 +808,9 @@ function buildOfficeProductionWorkflowGraph(input: {
         ? buildSpreadsheetDraftInstruction(input.draftInstruction, spreadsheetArtifactType)
         : input.draftInstruction,
       modelProfileId: 'qiu-general-default',
-      inputVariables: ['analysis_result', 'knowledge_context', 'attachment_text'],
+      inputVariables: ['analysis_result', 'knowledge_context', 'attachment_text', input.includeBrowserAutomation ? 'rpa_page_text' : undefined].filter(
+        (value): value is string => Boolean(value)
+      ),
       outputVariables: ['deliverable_content'],
       config: spreadsheetArtifactType
         ? {
@@ -787,7 +864,14 @@ function buildOfficeProductionWorkflowGraph(input: {
     }
   ];
 
-  const afterAttachmentNodeId = input.includeWebSearch ? 'web_research' : 'analyze_work';
+  const contextToolNodeIds = [
+    input.includeWebSearch ? 'web_research' : undefined,
+    input.includeBrowserAutomation ? 'rpa_browser_collect' : undefined
+  ].filter((value): value is string => Boolean(value));
+  const afterAttachmentNodeId = contextToolNodeIds[0] ?? 'analyze_work';
+  const contextToolEdges = contextToolNodeIds.map((nodeId, index) =>
+    graphEdge(nodeId, contextToolNodeIds[index + 1] ?? 'analyze_work')
+  );
   const edges: ServerRoleWorkflowGraph['edges'] = [
     graphEdge('start', 'receive_input'),
     graphEdge('receive_input', 'extract_parameters'),
@@ -810,7 +894,7 @@ function buildOfficeProductionWorkflowGraph(input: {
       }
     },
     graphEdge('read_attachments', afterAttachmentNodeId),
-    ...(input.includeWebSearch ? [graphEdge('web_research', 'analyze_work')] : []),
+    ...contextToolEdges,
     graphEdge('analyze_work', 'draft_deliverable'),
     graphEdge('draft_deliverable', 'quality_check'),
     graphEdge('quality_check', 'write_artifact'),
@@ -827,6 +911,7 @@ function buildOfficeProductionWorkflowGraph(input: {
       { name: 'task_parameters', type: 'json', description: '结构化任务参数', required: true },
       { name: 'knowledge_context', type: 'text', description: '企业和本地知识上下文' },
       { name: 'attachment_text', type: 'text', description: '附件提取文本' },
+      { name: 'rpa_page_text', type: 'text', description: 'RPA 浏览器提取的业务平台页面文本' },
       { name: 'analysis_result', type: 'text', description: '分析和处理计划' },
       {
         name: 'deliverable_content',
@@ -1655,12 +1740,19 @@ function completeCatalogEntry(
   template: BaseServerRoleTemplateCatalogEntry
 ): ServerRoleTemplateCatalogEntry {
   const workflowSteps = template.workflowSteps ?? defaultWorkflowSteps(template);
+  const applicationType = template.applicationType ?? 'DIGITAL_EMPLOYEE';
 
   return {
     ...template,
-    applicationType: template.applicationType ?? 'DIGITAL_EMPLOYEE',
+    applicationType,
     workflowSteps,
     workflowGraph: template.workflowGraph ?? buildRunnableWorkflowGraphForTemplate(template, workflowSteps),
+    executionProfile:
+      template.executionProfile ??
+      buildRoleTemplateExecutionProfile({
+        ...template,
+        applicationType
+      }),
     sampleInputs: template.sampleInputs ?? [
       `请按「${template.name}」的标准处理这个任务：${template.scenario}。`,
       `基于企业资料，输出一份可直接给负责人确认的${template.industry}工作结果。`
@@ -1795,7 +1887,7 @@ const baseServerRoleTemplateCatalog: BaseServerRoleTemplateCatalogEntry[] = [
     recommendedPlanCode: 'ENTERPRISE_BASIC_MONTHLY',
     businessGoal: '提升商品上架、售后分流和活动复盘效率，让运营动作更稳定可追踪。',
     knowledgeSources: ['商品资料库', '店铺运营规则', '售后处理标准', '历史活动数据'],
-    tools: ['web-search', 'office-document', 'local-filesystem'],
+    tools: ['web-search', 'browser-automation', 'office-document', 'local-filesystem'],
     skills: [
       additionalSkills.catalogOptimization,
       additionalSkills.orderIssueTriage,
@@ -2476,11 +2568,23 @@ type DesignedOfficeRoleTemplateInput = {
 };
 
 function createOfficeRoleTemplate(input: DesignedOfficeRoleTemplateInput): BaseServerRoleTemplateCatalogEntry {
+  const inferredBrowserAutomation = shouldUseBrowserAutomationText([
+    input.templateId,
+    input.name,
+    input.industry,
+    input.scenario,
+    input.description,
+    input.businessGoal,
+    ...input.knowledgeSources,
+    ...input.skills.flatMap((item) => [item.code, item.name, item.summary])
+  ]);
   const tools = input.tools ?? [
     ...(input.includeWebSearch ? ['web-search'] : []),
+    ...(inferredBrowserAutomation ? ['browser-automation'] : []),
     'office-document',
     'local-filesystem'
   ];
+  const includeBrowserAutomation = tools.includes('browser-automation');
   const artifactType = input.artifactType ?? 'docx';
   const includeWebSearch = input.includeWebSearch ?? tools.includes('web-search');
 
@@ -2499,6 +2603,7 @@ function createOfficeRoleTemplate(input: DesignedOfficeRoleTemplateInput): BaseS
     workflowSteps: buildOfficeProductionWorkflowSteps({
       artifactType,
       includeWebSearch,
+      includeBrowserAutomation,
       scenario: input.scenario
     }),
     sampleInputs: input.sampleInputs,
@@ -2525,6 +2630,7 @@ function createOfficeRoleTemplate(input: DesignedOfficeRoleTemplateInput): BaseS
         input.finalInstruction ??
         '返回生成文件位置、核心结论、需要人工确认的问题和下一步建议。',
       includeWebSearch,
+      includeBrowserAutomation,
       analysisModelProfileId: input.analysisModelProfileId,
       analysisTimeoutMs: input.analysisTimeoutMs,
       draftTimeoutMs: input.draftTimeoutMs,
@@ -2691,7 +2797,7 @@ function createSalesRoleTemplate(input: SalesRoleTemplateDefinition): BaseServer
       `${input.focus}行业资料`,
       '历史成交案例'
     ],
-    tools: ['web-search', 'office-document', 'local-filesystem'],
+    tools: ['web-search', 'browser-automation', 'office-document', 'local-filesystem'],
     skills: salesRoleSkills,
     sampleInputs: [
       `请作为${input.name}，根据这个客户背景和我司产品资料，生成一份拜访准备和跟进话术。`,

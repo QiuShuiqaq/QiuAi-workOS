@@ -156,6 +156,8 @@ export function createInitialDesktopRuntimeState(
     tools: [],
     knowledgeSources: [],
     taskDetails,
+    watchConfigs: [],
+    watchRuns: [],
     serverConnection:
       input.serverConnection ??
       {

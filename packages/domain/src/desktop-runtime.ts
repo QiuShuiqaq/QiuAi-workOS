@@ -103,6 +103,30 @@ export interface ToolManifest {
   }>;
 }
 
+export type RoleExecutionMode = 'conversation' | 'watch' | 'hybrid';
+
+export interface RoleExecutionProfile {
+  mode: RoleExecutionMode;
+  summary: string;
+  triggerModes: string[];
+  inputSources: string[];
+  toolCapabilities: string[];
+  outputTargets: string[];
+  approval: {
+    required: boolean;
+    requiredActions: string[];
+  };
+  dataBoundary: string;
+  externalConnectors?: Array<{
+    key: string;
+    name: string;
+    type: string;
+    status: string;
+  }>;
+  rolloutPhase?: string;
+  notes?: string[];
+}
+
 export type RoleWorkflowStepType =
   | 'input'
   | 'reasoning'
@@ -137,6 +161,7 @@ export interface RolePackageManifest {
   workflowSteps?: RoleWorkflowStep[];
   workflowGraph?: RoleWorkflowGraph;
   dependencyManifest?: Record<string, unknown>;
+  executionProfile?: RoleExecutionProfile;
   sampleInputs?: string[];
   outputFormat?: string;
   modelProfileIds: string[];
@@ -298,6 +323,10 @@ export function validateRolePackageManifest(input: unknown): RolePackageManifest
         ? undefined
         : validateRoleWorkflowGraph(record.workflowGraph, 'rolePackage.workflowGraph'),
     dependencyManifest: optionalRecord(record.dependencyManifest, 'rolePackage.dependencyManifest'),
+    executionProfile:
+      record.executionProfile === undefined
+        ? undefined
+        : validateRoleExecutionProfile(record.executionProfile, 'rolePackage.executionProfile'),
     sampleInputs: requireStringArray(record.sampleInputs, 'rolePackage.sampleInputs'),
     outputFormat: optionalString(record.outputFormat, 'rolePackage.outputFormat'),
     modelProfileIds,
@@ -308,6 +337,46 @@ export function validateRolePackageManifest(input: unknown): RolePackageManifest
       'summary_only',
       'summary_plus_metadata'
     ])
+  };
+}
+
+function validateRoleExecutionProfile(input: unknown, fieldName: string): RoleExecutionProfile {
+  const record = requireRecord(input, fieldName);
+  const approval = requireRecord(record.approval, `${fieldName}.approval`);
+
+  return {
+    mode: requireEnum(record.mode, `${fieldName}.mode`, ['conversation', 'watch', 'hybrid']),
+    summary: requireString(record.summary, `${fieldName}.summary`),
+    triggerModes: requireStringArray(record.triggerModes, `${fieldName}.triggerModes`),
+    inputSources: requireStringArray(record.inputSources, `${fieldName}.inputSources`),
+    toolCapabilities: requireStringArray(record.toolCapabilities, `${fieldName}.toolCapabilities`),
+    outputTargets: requireStringArray(record.outputTargets, `${fieldName}.outputTargets`),
+    approval: {
+      required: record.approval === undefined ? false : optionalBoolean(approval.required, `${fieldName}.approval.required`),
+      requiredActions: requireStringArray(approval.requiredActions, `${fieldName}.approval.requiredActions`)
+    },
+    dataBoundary: requireString(record.dataBoundary, `${fieldName}.dataBoundary`),
+    externalConnectors: Array.isArray(record.externalConnectors)
+      ? record.externalConnectors.map((connector, index) =>
+          validateRoleExecutionConnector(connector, `${fieldName}.externalConnectors[${index}]`)
+        )
+      : undefined,
+    rolloutPhase: optionalString(record.rolloutPhase, `${fieldName}.rolloutPhase`),
+    notes: requireStringArray(record.notes, `${fieldName}.notes`)
+  };
+}
+
+function validateRoleExecutionConnector(
+  input: unknown,
+  fieldName: string
+): NonNullable<RoleExecutionProfile['externalConnectors']>[number] {
+  const record = requireRecord(input, fieldName);
+
+  return {
+    key: requireString(record.key, `${fieldName}.key`),
+    name: requireString(record.name, `${fieldName}.name`),
+    type: requireString(record.type, `${fieldName}.type`),
+    status: requireString(record.status, `${fieldName}.status`)
   };
 }
 

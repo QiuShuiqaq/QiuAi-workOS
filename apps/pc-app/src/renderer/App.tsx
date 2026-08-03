@@ -75,6 +75,9 @@ import type {
   DesktopIssueReportSubmitRequest,
   DesktopIssueSeverity,
   DesktopModelTestResponse,
+  DesktopRoleWatchApprovalMode,
+  DesktopRoleWatchConfig,
+  DesktopRoleWatchRun,
   DesktopRuntimeState,
   DesktopUpdateCheckResult,
   DesktopWindowControlAction
@@ -184,7 +187,9 @@ interface DesktopClientPreferences {
 
 type DesktopRoleTemplate = RoleTemplateCatalogEntry & {
   dependencyManifest?: RoleTemplateDependencyManifest;
+  executionProfile?: RoleTemplateDependencyManifest['executionProfile'];
 };
+type DesktopRoleExecutionProfile = NonNullable<RoleTemplateDependencyManifest['executionProfile']>;
 
 interface TaskFormValues {
   roleCode: string;
@@ -315,6 +320,14 @@ interface RuntimeModelQuickSwitchFormValues {
   runtimeModels?: Record<string, string | undefined>;
 }
 
+interface WatchConfigFormValues {
+  enabled?: boolean;
+  sourceUrls?: string;
+  intervalMinutes?: number;
+  rules?: string;
+  approvalMode?: DesktopRoleWatchApprovalMode;
+}
+
 interface ToolSettingsFormValues {
   webSearchEndpoint?: string;
   webSearchApiKey?: string;
@@ -386,6 +399,12 @@ const issueFeedbackSeverityOptions: Array<{ value: DesktopIssueSeverity; label: 
   { value: 'NORMAL', label: '普通' },
   { value: 'IMPACTING', label: '影响工作' },
   { value: 'BLOCKING', label: '阻塞使用' }
+];
+
+const watchApprovalModeOptions: Array<{ value: DesktopRoleWatchApprovalMode; label: string; description: string }> = [
+  { value: 'readonly', label: '只读分析', description: '自动采集、分析并生成结果，不回填外部网页。' },
+  { value: 'draft', label: '生成草稿', description: '允许生成回复、邀约或跟进草稿，但不自动提交。' },
+  { value: 'manual_submit', label: '人工确认提交', description: '关键对外动作进入人工确认，确认后再由用户执行。' }
 ];
 
 const factoryVideoScreeningMetricOptions: Array<{
@@ -1389,6 +1408,9 @@ function toDesktopRoleTemplate(summary: DesktopAuthorizedRoleTemplateSummary): D
   const roleCode = createRoleCodeFromTemplateId(summary.id);
   const workflowGraph = cloneJsonValue(summary.workflowGraph) as DesktopRoleTemplate['workflowGraph'];
   const dependencyManifest = cloneRoleTemplateDependencyManifest(summary.dependencyManifest);
+  const executionProfile = cloneJsonValue(
+    summary.executionProfile ?? dependencyManifest?.executionProfile
+  ) as DesktopRoleTemplate['executionProfile'];
   const manifestModelProfileIds = readDependencyManifestModelProfileIds(dependencyManifest);
   const manifestToolIds = readDependencyManifestToolIds(dependencyManifest);
 
@@ -1418,6 +1440,7 @@ function toDesktopRoleTemplate(summary: DesktopAuthorizedRoleTemplateSummary): D
     })),
     workflowGraph,
     dependencyManifest,
+    executionProfile,
     sampleInputs: [...(summary.sampleInputs ?? [])],
     outputFormat: summary.outputFormat ?? '',
     modelProfileIds:
@@ -1521,6 +1544,10 @@ function inferDesktopToolIds(summary: DesktopAuthorizedRoleTemplateSummary): str
     toolIds.push('web-search');
   }
 
+  if (includesAny(text, ['rpa', 'browser automation', 'browser-automation', 'boss', 'zhipin', 'liepin', 'zhilian'])) {
+    toolIds.push('browser-automation');
+  }
+
   if (includesAny(text, ['office', 'word', 'document', 'ppt', 'presentation', 'excel', 'spreadsheet', '文档', '报告', '提案', '合同', '简历', '发票'])) {
     toolIds.push('office-document');
   }
@@ -1607,6 +1634,86 @@ function roleTemplateAccessLabel(template: Pick<DesktopRoleTemplate, 'accessLabe
 
 function roleTemplateAccessReason(template: Pick<DesktopRoleTemplate, 'accessReason'>): string {
   return template.accessReason?.trim() || '\u5f53\u524d\u7248\u672c\u6682\u4e0d\u652f\u6301\u5b89\u88c5\u8be5\u6a21\u677f\u3002';
+}
+
+function roleExecutionModeMeta(profile: DesktopRoleExecutionProfile | undefined): {
+  label: string;
+  color: string;
+} {
+  switch (profile?.mode) {
+    case 'watch':
+      return { label: '值守式', color: 'gold' };
+    case 'hybrid':
+      return { label: '混合式', color: 'cyan' };
+    default:
+      return { label: '对话式', color: 'blue' };
+  }
+}
+
+function roleExecutionProfileTooltip(profile: DesktopRoleExecutionProfile | undefined): ReactNode {
+  if (!profile) {
+    return '由用户发起任务，按模板读取资料并输出结果。';
+  }
+
+  return (
+    <Space direction="vertical" size={4}>
+      <span>{profile.summary}</span>
+      <span>触发方式：{formatRoleExecutionValues(profile.triggerModes, roleExecutionTriggerLabel)}</span>
+      <span>输入来源：{formatRoleExecutionValues(profile.inputSources, roleExecutionInputSourceLabel)}</span>
+      <span>输出位置：{formatRoleExecutionValues(profile.outputTargets, roleExecutionOutputTargetLabel)}</span>
+      {profile.approval.required ? (
+        <span>需审批：{profile.approval.requiredActions.join('、') || '关键动作'}</span>
+      ) : null}
+      {profile.externalConnectors?.length ? (
+        <span>
+          外部连接：{profile.externalConnectors.map((connector) => connector.name).join('、')}
+        </span>
+      ) : null}
+    </Space>
+  );
+}
+
+function formatRoleExecutionValues(
+  values: string[],
+  labeler: (value: string) => string
+): string {
+  const labels = values.map(labeler).filter(Boolean);
+  return labels.length > 0 ? labels.join('、') : '未声明';
+}
+
+function roleExecutionTriggerLabel(value: string): string {
+  const labels: Record<string, string> = {
+    manual: '手动',
+    scheduled: '定时',
+    event: '事件',
+    folder_watch: '文件夹监听',
+    platform_watch: '平台值守'
+  };
+  return labels[value] ?? value;
+}
+
+function roleExecutionInputSourceLabel(value: string): string {
+  const labels: Record<string, string> = {
+    chat: '对话',
+    uploaded_files: '上传文件',
+    local_folder: '本地文件夹',
+    enterprise_knowledge: '企业知识库',
+    web: '网页',
+    external_platform: '外部平台'
+  };
+  return labels[value] ?? value;
+}
+
+function roleExecutionOutputTargetLabel(value: string): string {
+  const labels: Record<string, string> = {
+    chat_response: '对话回复',
+    artifact: '产物文件',
+    task_queue: '任务队列',
+    approval_queue: '审批队列',
+    daily_report: '日报',
+    external_platform: '外部平台'
+  };
+  return labels[value] ?? value;
 }
 
 type RoleApplicationUsage = Record<RoleApplicationType, number>;
@@ -2239,6 +2346,7 @@ export default function App() {
   const [onboardingForm] = Form.useForm<OnboardingFormValues>();
   const [roleConfigForm] = Form.useForm<RoleConfigFormValues>();
   const [runtimeModelQuickSwitchForm] = Form.useForm<RuntimeModelQuickSwitchFormValues>();
+  const [watchConfigForm] = Form.useForm<WatchConfigFormValues>();
   const [issueFeedbackForm] = Form.useForm<IssueFeedbackFormValues>();
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [roleConfigModalOpen, setRoleConfigModalOpen] = useState(false);
@@ -2246,6 +2354,8 @@ export default function App() {
   const [roleConfigRoleCode, setRoleConfigRoleCode] = useState('');
   const [runtimeModelQuickSwitchOpen, setRuntimeModelQuickSwitchOpen] = useState(false);
   const [runtimeModelQuickSwitchRoleCode, setRuntimeModelQuickSwitchRoleCode] = useState('');
+  const [watchConfigModalOpen, setWatchConfigModalOpen] = useState(false);
+  const [watchConfigRoleCode, setWatchConfigRoleCode] = useState('');
   const [toolSettingsNotice, setToolSettingsNotice] = useState('');
   const [isSavingToolSettings, setIsSavingToolSettings] = useState(false);
   const [modelSearchQuery, setModelSearchQuery] = useState('');
@@ -2283,11 +2393,17 @@ export default function App() {
     FactoryRunScreeningProfileDefinition[]
   >([]);
   const [factoryScreeningEditorSelectedKey, setFactoryScreeningEditorSelectedKey] = useState('');
+  const runtimeStateRef = useRef(runtimeState);
+  const runningWatchRoleCodesRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     void loadRuntimeState();
     void loadUserAgreementStatus();
   }, []);
+
+  useEffect(() => {
+    runtimeStateRef.current = runtimeState;
+  }, [runtimeState]);
 
   useEffect(() => {
     if (!userAgreementStatus || userAgreementStatus.accepted) {
@@ -2337,6 +2453,23 @@ export default function App() {
 
     void loadAuthorizedRoleTemplates();
   }, [hasLoadedPersistedState, runtimeState.localRuntime.workspaceId]);
+
+  useEffect(() => {
+    if (!hasLoadedPersistedState) {
+      return;
+    }
+
+    const tick = () => {
+      void triggerDueWatchJobs();
+    };
+    const initialHandle = window.setTimeout(tick, 3000);
+    const intervalHandle = window.setInterval(tick, 30000);
+
+    return () => {
+      window.clearTimeout(initialHandle);
+      window.clearInterval(intervalHandle);
+    };
+  }, [hasLoadedPersistedState]);
 
   useEffect(() => {
     const bridge = window.qiuDesktop;
@@ -3550,6 +3683,7 @@ export default function App() {
         {renderIssueFeedbackModal()}
         {renderRoleUninstallModal()}
         {renderRuntimeModelQuickSwitchModal()}
+        {renderWatchConfigModal()}
         {renderRoleConfigModal()}
         {renderFactoryPackageEditorModal()}
         {renderFactoryScreeningProfileEditorModal()}
@@ -4746,6 +4880,81 @@ export default function App() {
     );
   }
 
+  function renderWatchConfigModal() {
+    const rolePackage = watchConfigRoleCode
+      ? refreshedInstalledRolePackageByRoleCode.get(watchConfigRoleCode) ??
+        runtimeState.rolePackages.find((item) => item.roleCode === watchConfigRoleCode)
+      : undefined;
+
+    return (
+      <Modal
+        open={watchConfigModalOpen}
+        title={`值守配置${rolePackage ? `：${rolePackage.name}` : ''}`}
+        width={680}
+        destroyOnHidden
+        onCancel={closeWatchConfig}
+        onOk={() => watchConfigForm.submit()}
+      >
+        <Form<WatchConfigFormValues>
+          form={watchConfigForm}
+          layout="vertical"
+          onFinish={saveWatchConfig}
+        >
+          <Form.Item name="enabled" valuePropName="checked">
+            <Switch checkedChildren="启用" unCheckedChildren="暂停" />
+          </Form.Item>
+          <Form.Item
+            name="sourceUrls"
+            label="值守网页 URL"
+            extra="每行一个 URL。第一版每次按顺序巡检一个来源，保留登录态；遇到登录失效或验证码会停在页面等待人工处理。"
+            rules={[{ required: true, message: '请填写至少一个 URL' }]}
+          >
+            <Input.TextArea autoSize={{ minRows: 4, maxRows: 8 }} placeholder="https://example.com/list" />
+          </Form.Item>
+          <Flex gap={12} wrap="wrap">
+            <Form.Item
+              name="intervalMinutes"
+              label="巡检间隔"
+              className="watch-config-inline-field"
+              rules={[{ required: true, message: '请设置巡检间隔' }]}
+            >
+              <InputNumber min={5} max={1440} addonAfter="分钟" />
+            </Form.Item>
+            <Form.Item
+              name="approvalMode"
+              label="动作边界"
+              className="watch-config-inline-field wide"
+              rules={[{ required: true, message: '请选择动作边界' }]}
+            >
+              <Select
+                options={watchApprovalModeOptions.map((option) => ({
+                  value: option.value,
+                  label: option.label
+                }))}
+              />
+            </Form.Item>
+          </Flex>
+          <Form.Item
+            name="rules"
+            label="值守规则"
+            extra="写清楚筛选、评分、排除、输出和人工确认要求。"
+            rules={[{ required: true, message: '请填写值守规则' }]}
+          >
+            <Input.TextArea autoSize={{ minRows: 5, maxRows: 10 }} />
+          </Form.Item>
+          <div className="watch-approval-hints">
+            {watchApprovalModeOptions.map((option) => (
+              <div key={option.value}>
+                <Typography.Text strong>{option.label}</Typography.Text>
+                <Typography.Text type="secondary">{option.description}</Typography.Text>
+              </div>
+            ))}
+          </div>
+        </Form>
+      </Modal>
+    );
+  }
+
   function buildRuntimeModelSummaryItems(rolePackage: RolePackageManifest | undefined) {
     if (!rolePackage) {
       return [];
@@ -4820,6 +5029,66 @@ export default function App() {
         </span>
         <SettingOutlined />
       </button>
+    );
+  }
+
+  function renderWatchControlPanel(rolePackage: RolePackageManifest, disabled: boolean) {
+    const config = findRoleWatchConfig(runtimeState, rolePackage.roleCode);
+    const latestRun = getRuntimeWatchRuns(runtimeState, rolePackage.roleCode)[0];
+    const enabled = config?.enabled === true;
+    const ready = Boolean(config?.sourceUrls.length);
+    const nextRunText = config?.nextRunAt ? formatDate(config.nextRunAt) : enabled ? '等待调度' : '未启用';
+    const statusColor =
+      config?.lastStatus === 'failed'
+        ? 'red'
+        : enabled
+          ? 'green'
+          : config?.lastStatus === 'running'
+            ? 'blue'
+            : 'default';
+
+    return (
+      <div className="watch-control-panel">
+        <Flex align="center" justify="space-between" gap={12} wrap="wrap">
+          <Space direction="vertical" size={2}>
+            <Space size={8} wrap>
+              <Typography.Text strong>值守模式</Typography.Text>
+              <Tag color={statusColor}>{enabled ? '已启用' : config ? '已暂停' : '未配置'}</Tag>
+              <Tag>{config?.sourceUrls.length ?? 0} 个来源</Tag>
+              <Tag>{config ? `${config.intervalMinutes} 分钟/次` : '未设置频率'}</Tag>
+              <Tag>{config ? watchApprovalModeLabel(config.approvalMode) : '人工确认边界'}</Tag>
+            </Space>
+            <Typography.Text type="secondary" className="watch-control-meta">
+              下次运行：{nextRunText}
+              {latestRun ? ` · 最近运行：${watchRunStatusLabel(latestRun.status)} / ${formatShortTime(latestRun.startedAt)}` : ''}
+              {config?.lastError ? ` · ${config.lastError}` : ''}
+            </Typography.Text>
+          </Space>
+          <Space size={8} wrap>
+            <Switch
+              size="small"
+              checked={enabled}
+              disabled={disabled || (!ready && !enabled)}
+              checkedChildren="启用"
+              unCheckedChildren="暂停"
+              onChange={(checked) => toggleWatchConfig(rolePackage.roleCode, checked)}
+            />
+            <Button size="small" onClick={() => openWatchConfig(rolePackage.roleCode)}>
+              配置值守
+            </Button>
+            <Button
+              size="small"
+              type="primary"
+              ghost
+              icon={<PlayCircleOutlined />}
+              disabled={disabled || !ready || runningWatchRoleCodesRef.current.has(rolePackage.roleCode)}
+              onClick={() => void runWatchNow(rolePackage.roleCode)}
+            >
+              立即巡检
+            </Button>
+          </Space>
+        </Flex>
+      </div>
     );
   }
 
@@ -5056,6 +5325,10 @@ export default function App() {
               </Button>
             </Space>
           </header>
+
+          {conversationRole && isWatchRolePackage(conversationRole)
+            ? renderWatchControlPanel(conversationRole, activeRoleDeleted)
+            : null}
 
           <div
             ref={chatMessageListRef}
@@ -7111,6 +7384,7 @@ export default function App() {
               const hasTemplateUpdate = isInstalledRoleTemplateOutdated(template, installedRolePackage);
               const fileContract = buildRoleFileContractSummary(template);
               const freeTemplate = isFreeRoleTemplate(template);
+              const executionModeMeta = roleExecutionModeMeta(template.executionProfile);
               const installAvailability = resolveRoleInstallAvailability(
                 template,
                 installedRoleApplicationUsage,
@@ -7138,6 +7412,9 @@ export default function App() {
                         ) : null}
                         {hasTemplateUpdate ? <Tag color="orange">有新版</Tag> : null}
                         {isFactory ? <Tag color="purple">工厂</Tag> : null}
+                        <Tooltip title={roleExecutionProfileTooltip(template.executionProfile)}>
+                          <Tag color={executionModeMeta.color}>{executionModeMeta.label}</Tag>
+                        </Tooltip>
                         <Tag>{roleTemplateCategory(template)}</Tag>
                       </Space>
                     </Flex>
@@ -10054,6 +10331,331 @@ export default function App() {
     return preparedState;
   }
 
+  function prepareRoleForWatchRun(
+    sourceState: DesktopRuntimeState,
+    roleCode: string,
+    notifyUser: boolean
+  ): DesktopRuntimeState | undefined {
+    const rolePackage = sourceState.rolePackages.find((item) => item.roleCode === roleCode);
+    if (!rolePackage) {
+      if (notifyUser) {
+        message.warning('该值守数字员工未安装在当前电脑。');
+      }
+      return undefined;
+    }
+
+    if (isRuntimeRolePackageDeleted(sourceState, roleCode)) {
+      if (notifyUser) {
+        message.warning('该值守数字员工已被服务端删除，不能继续执行。');
+      }
+      return undefined;
+    }
+
+    const preparedRolePackage = normalizeRolePackageRequiredModelProfiles(rolePackage);
+    const preparedModelProfiles = ensureModelProfilesForRolePackage(
+      sourceState.modelProfiles,
+      preparedRolePackage
+    );
+    const modelReadiness = getRoleModelRuntimeRequirementStatuses(
+      preparedModelProfiles,
+      sourceState.localRuntime.enabledModelProfileIds,
+      preparedRolePackage,
+      {
+        roleCode: preparedRolePackage.roleCode,
+        credentials: sourceState.modelCredentials,
+        roleBindings: sourceState.roleModelCredentialBindings
+      }
+    );
+    const firstUnreadyModel = modelReadiness.find((requirement) => !requirement.ready);
+    const preparedState = replaceRolePackageAndModelProfiles(
+      sourceState,
+      preparedRolePackage,
+      preparedModelProfiles
+    );
+
+    if (firstUnreadyModel) {
+      if (notifyUser) {
+        setRuntimeState(preparedState);
+        setSelectedModelId(firstUnreadyModel.profile.id);
+        setModelConfigOpen(true);
+        setModelTestNotice('值守数字员工需要先完成模型配置。');
+        navigateToSection('models');
+      }
+      return undefined;
+    }
+
+    const runtimeReadiness = buildRoleRuntimeReadiness(preparedState, preparedRolePackage);
+    if (!runtimeReadiness.ready) {
+      if (notifyUser) {
+        setRuntimeState(preparedState);
+        message.warning(runtimeReadiness.issueText || '该值守数字员工运行所需配置不完整。');
+        navigateToSection(
+          runtimeReadiness.missingToolIds.length > 0 || runtimeReadiness.disabledToolIds.length > 0
+            ? 'tools'
+            : 'models'
+        );
+      }
+      return undefined;
+    }
+
+    return preparedState;
+  }
+
+  function openWatchConfig(roleCode: string) {
+    const rolePackage = getPreparedInstalledRolePackage(roleCode);
+    if (!rolePackage || !isWatchRolePackage(rolePackage)) {
+      message.warning('该数字员工不是值守式员工。');
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const config = findRoleWatchConfig(runtimeState, roleCode) ?? createDefaultWatchConfig(rolePackage, now);
+    setWatchConfigRoleCode(roleCode);
+    watchConfigForm.setFieldsValue({
+      enabled: config.enabled,
+      sourceUrls: config.sourceUrls.join('\n'),
+      intervalMinutes: config.intervalMinutes,
+      rules: config.rules,
+      approvalMode: config.approvalMode
+    });
+    setWatchConfigModalOpen(true);
+  }
+
+  function closeWatchConfig() {
+    setWatchConfigModalOpen(false);
+    setWatchConfigRoleCode('');
+    watchConfigForm.resetFields();
+  }
+
+  function saveWatchConfig(values: WatchConfigFormValues) {
+    const rolePackage = getPreparedInstalledRolePackage(watchConfigRoleCode);
+    if (!rolePackage || !isWatchRolePackage(rolePackage)) {
+      message.warning('该数字员工不是值守式员工。');
+      return;
+    }
+
+    const sourceUrls = normalizeWatchSourceUrls(values.sourceUrls);
+    if (sourceUrls.length === 0) {
+      message.warning('至少填写一个值守网页 URL。');
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const previous = findRoleWatchConfig(runtimeState, watchConfigRoleCode);
+    const enabled = values.enabled === true;
+    const config: DesktopRoleWatchConfig = {
+      ...(previous ?? createDefaultWatchConfig(rolePackage, now)),
+      enabled,
+      sourceUrls,
+      intervalMinutes: normalizeWatchIntervalMinutes(values.intervalMinutes),
+      rules: normalizeWatchRules(values.rules, rolePackage),
+      approvalMode: values.approvalMode ?? previous?.approvalMode ?? 'draft',
+      lastStatus: enabled ? previous?.lastStatus ?? 'idle' : 'paused',
+      lastError: enabled ? undefined : previous?.lastError,
+      nextRunAt: enabled
+        ? previous?.nextRunAt ?? now
+        : undefined,
+      updatedAt: now
+    };
+
+    setRuntimeState((current) => {
+      const nextState = upsertRoleWatchConfigInRuntimeState(current, config);
+      runtimeStateRef.current = nextState;
+      return nextState;
+    });
+    message.success(enabled ? '值守已启用。' : '值守配置已保存，当前为暂停状态。');
+    closeWatchConfig();
+  }
+
+  function toggleWatchConfig(roleCode: string, enabled: boolean) {
+    const rolePackage = getPreparedInstalledRolePackage(roleCode);
+    if (!rolePackage || !isWatchRolePackage(rolePackage)) {
+      return;
+    }
+
+    const existing = findRoleWatchConfig(runtimeState, roleCode);
+    if (!existing || existing.sourceUrls.length === 0) {
+      openWatchConfig(roleCode);
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const nextConfig: DesktopRoleWatchConfig = {
+      ...existing,
+      enabled,
+      lastStatus: enabled ? existing.lastStatus ?? 'idle' : 'paused',
+      nextRunAt: enabled ? now : undefined,
+      updatedAt: now
+    };
+    setRuntimeState((current) => {
+      const nextState = upsertRoleWatchConfigInRuntimeState(current, nextConfig);
+      runtimeStateRef.current = nextState;
+      return nextState;
+    });
+  }
+
+  async function runWatchNow(roleCode: string) {
+    const config = findRoleWatchConfig(runtimeStateRef.current, roleCode);
+    if (!config || config.sourceUrls.length === 0) {
+      openWatchConfig(roleCode);
+      return;
+    }
+
+    await triggerWatchRun(config, { manual: true });
+  }
+
+  async function triggerDueWatchJobs() {
+    const sourceState = runtimeStateRef.current;
+    const nowMs = Date.now();
+    const configs = getRuntimeWatchConfigs(sourceState)
+      .filter((config) => config.enabled && config.sourceUrls.length > 0)
+      .sort((left, right) => String(left.nextRunAt ?? '').localeCompare(String(right.nextRunAt ?? '')));
+
+    for (const config of configs) {
+      if (runningWatchRoleCodesRef.current.has(config.roleCode)) {
+        continue;
+      }
+      if (hasActiveRoleTask(sourceState, config.roleCode)) {
+        continue;
+      }
+      const nextRunAtMs = config.nextRunAt ? Date.parse(config.nextRunAt) : 0;
+      if (Number.isFinite(nextRunAtMs) && nextRunAtMs > nowMs) {
+        continue;
+      }
+
+      await triggerWatchRun(config, { manual: false });
+      break;
+    }
+  }
+
+  async function triggerWatchRun(
+    inputConfig: DesktopRoleWatchConfig,
+    options: { manual: boolean }
+  ) {
+    const sourceState = runtimeStateRef.current;
+    const config = findRoleWatchConfig(sourceState, inputConfig.roleCode) ?? inputConfig;
+    const rolePackage = sourceState.rolePackages.find((item) => item.roleCode === config.roleCode);
+    if (!rolePackage || !isWatchRolePackage(rolePackage) || config.sourceUrls.length === 0) {
+      return;
+    }
+    if (runningWatchRoleCodesRef.current.has(config.roleCode) || hasActiveRoleTask(sourceState, config.roleCode)) {
+      if (options.manual) {
+        message.info('该值守员工已有任务在运行或排队。');
+      }
+      return;
+    }
+
+    const preparedState = prepareRoleForWatchRun(sourceState, config.roleCode, options.manual);
+    if (!preparedState) {
+      markWatchConfigFailed(config, '模型、工具或知识库配置不完整，值守已暂停。');
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const selectedSource = selectWatchSourceUrl(config);
+    const nextConfig = markWatchConfigRunning(config, selectedSource.nextCursor, now);
+    const runRecord: DesktopRoleWatchRun = {
+      id: createWatchRunId(config.roleCode, now),
+      configId: config.id,
+      roleCode: config.roleCode,
+      sourceUrl: selectedSource.url,
+      status: 'running',
+      startedAt: now,
+      message: options.manual ? '手动触发值守巡检。' : '自动触发值守巡检。'
+    };
+    const roleName = resolveRoleName(preparedState.rolePackages, config.roleCode);
+    const taskDetail = createMockTaskDetail({
+      roleCode: config.roleCode,
+      roleName,
+      title: buildWatchTaskTitle(rolePackage, selectedSource.url),
+      taskType: 'watch_monitoring',
+      input: buildWatchTaskInput(rolePackage, nextConfig, selectedSource.url),
+      state: 'queued',
+      artifactCount: 0,
+      costCents: 0,
+      executionContext: buildExecutionContextForRole(preparedState.rolePackages, config.roleCode)
+    });
+    const runningTask = startTaskRun(taskDetail, now);
+    const startedRun: DesktopRoleWatchRun = {
+      ...runRecord,
+      taskId: runningTask.taskId
+    };
+    const nextState = upsertTaskDetailInRuntimeState(
+      upsertRoleWatchRunInRuntimeState(
+        upsertRoleWatchConfigInRuntimeState(preparedState, {
+          ...nextConfig,
+          lastTaskId: runningTask.taskId
+        }),
+        startedRun
+      ),
+      runningTask
+    );
+
+    runningWatchRoleCodesRef.current.add(config.roleCode);
+    runtimeStateRef.current = nextState;
+    setRuntimeState(nextState);
+    setSelectedTaskId(runningTask.taskId);
+
+    try {
+      const completedTask = await runTaskDetail(nextState, runningTask, {
+        completedEventType: 'WORKOS_WATCH_RUN_COMPLETED',
+        completedMessage: '值守巡检完成，已生成结果并保留人工确认边界。',
+        failedEventType: 'WORKOS_WATCH_RUN_FAILED',
+        failedMessage: '值守巡检失败，请查看日志后处理。'
+      });
+      const finishedAt = new Date().toISOString();
+      const fingerprint = createWatchTaskFingerprint(completedTask);
+      setRuntimeState((current) => {
+        const nextFinishedState = finishWatchRunInRuntimeState(current, startedRun.id, {
+          status: completedTask.state === 'completed' ? 'completed' : 'failed',
+          finishedAt,
+          message: completedTask.state === 'completed' ? '值守巡检完成。' : '值守巡检未完成。',
+          fingerprint,
+          configPatch: finishWatchConfigPatch(
+            nextConfig,
+            completedTask.state === 'completed' ? 'completed' : 'failed',
+            finishedAt,
+            fingerprint,
+            completedTask.state === 'completed' ? undefined : '任务未完成，请查看日志。'
+          )
+        });
+        runtimeStateRef.current = nextFinishedState;
+        return nextFinishedState;
+      });
+    } catch (error) {
+      const failedAt = new Date().toISOString();
+      const messageText = error instanceof Error ? error.message : 'unknown error';
+      setRuntimeState((current) => {
+        const nextFailedState = finishWatchRunInRuntimeState(current, startedRun.id, {
+          status: 'failed',
+          finishedAt: failedAt,
+          message: messageText,
+          configPatch: finishWatchConfigPatch(nextConfig, 'failed', failedAt, undefined, messageText)
+        });
+        runtimeStateRef.current = nextFailedState;
+        return nextFailedState;
+      });
+    } finally {
+      runningWatchRoleCodesRef.current.delete(config.roleCode);
+    }
+  }
+
+  function markWatchConfigFailed(config: DesktopRoleWatchConfig, error: string) {
+    const now = new Date().toISOString();
+    setRuntimeState((current) => {
+      const nextState = upsertRoleWatchConfigInRuntimeState(current, {
+        ...config,
+        enabled: false,
+        lastStatus: 'failed',
+        lastError: error,
+        nextRunAt: undefined,
+        updatedAt: now
+      });
+      runtimeStateRef.current = nextState;
+      return nextState;
+    });
+  }
+
   function createTask(values: TaskFormValues & { attachments?: ComposerAttachment[]; extraModelProfileIds?: string[] }): boolean {
     const title = values.title.trim();
     if (!title) {
@@ -10215,6 +10817,291 @@ export default function App() {
     }
   }
 
+}
+
+function isWatchRolePackage(rolePackage: RolePackageManifest | undefined): boolean {
+  const mode = rolePackage?.executionProfile?.mode;
+  return mode === 'watch' || rolePackage?.toolIds.includes('browser-automation') === true;
+}
+
+function getRuntimeWatchConfigs(state: DesktopRuntimeState): DesktopRoleWatchConfig[] {
+  return state.watchConfigs ?? [];
+}
+
+function getRuntimeWatchRuns(state: DesktopRuntimeState, roleCode?: string): DesktopRoleWatchRun[] {
+  const runs = state.watchRuns ?? [];
+  return runs
+    .filter((run) => !roleCode || run.roleCode === roleCode)
+    .sort((left, right) => right.startedAt.localeCompare(left.startedAt));
+}
+
+function findRoleWatchConfig(
+  state: DesktopRuntimeState,
+  roleCode: string
+): DesktopRoleWatchConfig | undefined {
+  return getRuntimeWatchConfigs(state).find((config) => config.roleCode === roleCode);
+}
+
+function createDefaultWatchConfig(rolePackage: RolePackageManifest, now: string): DesktopRoleWatchConfig {
+  return {
+    id: `watch_${rolePackage.roleCode}`,
+    roleCode: rolePackage.roleCode,
+    enabled: false,
+    sourceUrls: [],
+    intervalMinutes: 60,
+    rules: buildDefaultWatchRules(rolePackage),
+    approvalMode: 'draft',
+    sourceCursor: 0,
+    seenFingerprints: [],
+    lastStatus: 'idle',
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function buildDefaultWatchRules(rolePackage: RolePackageManifest): string {
+  const name = rolePackage.name;
+  const profileMode = rolePackage.executionProfile?.mode === 'watch' ? '值守式' : '辅助式';
+  return [
+    `你是${name}，当前以${profileMode}数字员工方式巡检网页业务信息。`,
+    '只读取用户配置的网页来源，不绕过登录、验证码或平台风控。',
+    '根据网页内容提取新增对象、关键字段、优先级、风险点和建议动作。',
+    '输出必须区分：已处理/疑似重复/新增/需要人工确认。',
+    '涉及对外发送、报价、拒绝、退款、承诺效果、敏感行业判断的动作，只能生成草稿或建议，不得自动提交。'
+  ].join('\n');
+}
+
+function normalizeWatchSourceUrls(value: unknown): string[] {
+  const raw = typeof value === 'string' ? value : '';
+  const urls = raw
+    .split(/\r?\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .filter((item) => /^https?:\/\//i.test(item));
+
+  return [...new Set(urls)].slice(0, 20);
+}
+
+function normalizeWatchIntervalMinutes(value: unknown): number {
+  const numeric = typeof value === 'number' && Number.isFinite(value) ? value : 60;
+  return Math.max(5, Math.min(1440, Math.round(numeric)));
+}
+
+function normalizeWatchRules(value: unknown, rolePackage: RolePackageManifest): string {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text || buildDefaultWatchRules(rolePackage);
+}
+
+function watchApprovalModeLabel(mode: DesktopRoleWatchApprovalMode): string {
+  return watchApprovalModeOptions.find((option) => option.value === mode)?.label ?? '人工确认';
+}
+
+function watchRunStatusLabel(status: DesktopRoleWatchRun['status']): string {
+  const labels: Record<DesktopRoleWatchRun['status'], string> = {
+    idle: '待运行',
+    running: '运行中',
+    completed: '已完成',
+    failed: '失败',
+    paused: '已暂停'
+  };
+  return labels[status] ?? status;
+}
+
+function selectWatchSourceUrl(config: DesktopRoleWatchConfig): { url: string; nextCursor: number } {
+  const sourceUrls = config.sourceUrls.length > 0 ? config.sourceUrls : [''];
+  const cursor = Math.max(0, config.sourceCursor ?? 0);
+  const index = cursor % sourceUrls.length;
+  return {
+    url: sourceUrls[index],
+    nextCursor: (index + 1) % sourceUrls.length
+  };
+}
+
+function markWatchConfigRunning(
+  config: DesktopRoleWatchConfig,
+  nextCursor: number,
+  startedAt: string
+): DesktopRoleWatchConfig {
+  return {
+    ...config,
+    enabled: true,
+    sourceCursor: nextCursor,
+    lastRunAt: startedAt,
+    nextRunAt: addMinutesIso(startedAt, config.intervalMinutes),
+    lastStatus: 'running',
+    lastError: undefined,
+    updatedAt: startedAt
+  };
+}
+
+function finishWatchConfigPatch(
+  config: DesktopRoleWatchConfig,
+  status: DesktopRoleWatchConfig['lastStatus'],
+  finishedAt: string,
+  fingerprint?: string,
+  error?: string
+): Partial<DesktopRoleWatchConfig> {
+  const seenFingerprints = fingerprint
+    ? [...new Set([...(config.seenFingerprints ?? []), fingerprint])].slice(-100)
+    : config.seenFingerprints ?? [];
+
+  return {
+    lastStatus: status,
+    lastError: error,
+    lastFingerprint: fingerprint ?? config.lastFingerprint,
+    seenFingerprints,
+    nextRunAt: config.enabled ? config.nextRunAt ?? addMinutesIso(finishedAt, config.intervalMinutes) : undefined,
+    updatedAt: finishedAt
+  };
+}
+
+function upsertRoleWatchConfigInRuntimeState(
+  state: DesktopRuntimeState,
+  config: DesktopRoleWatchConfig
+): DesktopRuntimeState {
+  const configs = getRuntimeWatchConfigs(state);
+  const exists = configs.some((item) => item.id === config.id);
+  const watchConfigs = exists
+    ? configs.map((item) => (item.id === config.id ? config : item))
+    : [config, ...configs];
+
+  return {
+    ...state,
+    watchConfigs
+  };
+}
+
+function upsertRoleWatchRunInRuntimeState(
+  state: DesktopRuntimeState,
+  run: DesktopRoleWatchRun
+): DesktopRuntimeState {
+  const runs = state.watchRuns ?? [];
+  const exists = runs.some((item) => item.id === run.id);
+  const watchRuns = (exists
+    ? runs.map((item) => (item.id === run.id ? run : item))
+    : [run, ...runs]
+  )
+    .sort((left, right) => right.startedAt.localeCompare(left.startedAt))
+    .slice(0, 100);
+
+  return {
+    ...state,
+    watchRuns
+  };
+}
+
+function finishWatchRunInRuntimeState(
+  state: DesktopRuntimeState,
+  runId: string,
+  patch: {
+    status: DesktopRoleWatchRun['status'];
+    finishedAt: string;
+    message?: string;
+    fingerprint?: string;
+    configPatch?: Partial<DesktopRoleWatchConfig>;
+  }
+): DesktopRuntimeState {
+  const existingRun = (state.watchRuns ?? []).find((run) => run.id === runId);
+  const updatedRun = existingRun
+    ? {
+        ...existingRun,
+        status: patch.status,
+        finishedAt: patch.finishedAt,
+        message: patch.message,
+        fingerprint: patch.fingerprint ?? existingRun.fingerprint
+      }
+    : undefined;
+  const config = existingRun ? findRoleWatchConfig(state, existingRun.roleCode) : undefined;
+  const nextState = updatedRun ? upsertRoleWatchRunInRuntimeState(state, updatedRun) : state;
+
+  if (!config || !patch.configPatch) {
+    return nextState;
+  }
+
+  return upsertRoleWatchConfigInRuntimeState(nextState, {
+    ...config,
+    ...patch.configPatch
+  });
+}
+
+function hasActiveRoleTask(state: DesktopRuntimeState, roleCode: string): boolean {
+  return getRuntimeTaskDetails(state).some(
+    (task) =>
+      task.roleCode === roleCode &&
+      (task.state === 'queued' || task.state === 'running' || task.state === 'waiting_approval')
+  );
+}
+
+function buildWatchTaskTitle(rolePackage: RolePackageManifest, sourceUrl: string): string {
+  const host = readUrlHost(sourceUrl);
+  return `值守巡检：${rolePackage.name}${host ? ` / ${host}` : ''}`;
+}
+
+function buildWatchTaskInput(
+  rolePackage: RolePackageManifest,
+  config: DesktopRoleWatchConfig,
+  sourceUrl: string
+): string {
+  return [
+    `【值守巡检任务】${rolePackage.name}`,
+    `值守来源：${sourceUrl}`,
+    `巡检间隔：${config.intervalMinutes} 分钟`,
+    `动作边界：${watchApprovalModeLabel(config.approvalMode)}`,
+    '',
+    '值守规则：',
+    config.rules,
+    '',
+    '历史状态：',
+    `最近指纹：${config.lastFingerprint ?? '无'}`,
+    `已处理指纹数量：${config.seenFingerprints?.length ?? 0}`,
+    '',
+    '执行要求：',
+    '1. 先通过 RPA 浏览器读取值守来源页面。',
+    '2. 如果页面要求登录、验证码或人工确认，保留现场并在结果中说明。',
+    '3. 从页面内容中提取可处理对象，判断新增、重复、风险和优先级。',
+    '4. 只生成建议、草稿、清单或报告；不得自动提交外部动作。',
+    '5. 最终输出要包含：本次处理摘要、发现的新对象、需要人工确认的动作、下一步建议。'
+  ].join('\n');
+}
+
+function createWatchTaskFingerprint(task: DesktopTaskDetail): string {
+  const text = [
+    task.title,
+    task.state,
+    readConversationFinalAnswer(task),
+    ...task.artifacts.map((artifact) => `${artifact.title}:${artifact.localPath ?? artifact.remoteUrl ?? ''}`)
+  ].join('\n');
+  return simpleStringHash(text || task.taskId);
+}
+
+function createWatchRunId(roleCode: string, timestamp: string): string {
+  return `watch_run_${roleCode}_${Date.parse(timestamp) || Date.now()}_${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+}
+
+function addMinutesIso(iso: string, minutes: number): string {
+  const base = Date.parse(iso);
+  const time = Number.isFinite(base) ? base : Date.now();
+  return new Date(time + normalizeWatchIntervalMinutes(minutes) * 60_000).toISOString();
+}
+
+function readUrlHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return '';
+  }
+}
+
+function simpleStringHash(text: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return `fp_${(hash >>> 0).toString(16)}`;
 }
 
 function getRuntimeTaskDetails(state: DesktopRuntimeState): DesktopTaskDetail[] {
@@ -11625,6 +12512,7 @@ function toInstalledRolePackage(template: DesktopRoleTemplate): RolePackageManif
     })),
     workflowGraph: cloneJsonValue(template.workflowGraph),
     dependencyManifest: cloneRoleTemplateDependencyManifest(template.dependencyManifest),
+    executionProfile: cloneJsonValue(template.executionProfile ?? template.dependencyManifest?.executionProfile),
     sampleInputs: [...(template.sampleInputs ?? [])],
     outputFormat: template.outputFormat,
     modelProfileIds: [...template.modelProfileIds],

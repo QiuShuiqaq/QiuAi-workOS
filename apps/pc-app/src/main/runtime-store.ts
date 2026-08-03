@@ -64,6 +64,8 @@ interface StoredDesktopWorkspaceRuntime {
   runtimeSnapshot: DesktopRuntimeSnapshot;
   knowledgeSources: DesktopKnowledgeSourceSummary[];
   taskDetails?: DesktopRuntimeState['taskDetails'];
+  watchConfigs?: DesktopRuntimeState['watchConfigs'];
+  watchRuns?: DesktopRuntimeState['watchRuns'];
 }
 
 const identityFileName = 'runtime-identity.json';
@@ -286,6 +288,8 @@ function readSplitDesktopRuntimeState(
     tools: catalog.tools,
     knowledgeSources: runtime.knowledgeSources,
     taskDetails: runtime.taskDetails,
+    watchConfigs: runtime.watchConfigs,
+    watchRuns: runtime.watchRuns,
     serverConnection: profile.serverConnection
   };
 }
@@ -315,6 +319,8 @@ function readPersistedDesktopRuntimeState(snapshot: {
     tools: catalog.tools,
     knowledgeSources: runtime.knowledgeSources,
     taskDetails: runtime.taskDetails,
+    watchConfigs: runtime.watchConfigs,
+    watchRuns: runtime.watchRuns,
     serverConnection: profile.serverConnection
   };
 }
@@ -428,7 +434,9 @@ function readWorkspaceRuntimeRecord(
     savedAt: record.savedAt,
     runtimeSnapshot: record.runtimeSnapshot,
     knowledgeSources: readKnowledgeSourcesRecord(record.knowledgeSources),
-    taskDetails: readTaskDetailsRecord(record.taskDetails)
+    taskDetails: readTaskDetailsRecord(record.taskDetails),
+    watchConfigs: readWatchConfigsRecord(record.watchConfigs),
+    watchRuns: readWatchRunsRecord(record.watchRuns)
   };
 }
 
@@ -459,7 +467,9 @@ function readDesktopRuntimeState(filePath: string): DesktopRuntimeState | undefi
       ...parsed.state,
       modelCredentials: parsed.state.modelCredentials ?? [],
       modelCatalogs: parsed.state.modelCatalogs ?? [],
-      roleModelCredentialBindings: parsed.state.roleModelCredentialBindings ?? []
+      roleModelCredentialBindings: parsed.state.roleModelCredentialBindings ?? [],
+      watchConfigs: parsed.state.watchConfigs ?? [],
+      watchRuns: parsed.state.watchRuns ?? []
     };
   } catch {
     return undefined;
@@ -845,6 +855,8 @@ function isDesktopRuntimeState(value: unknown): value is DesktopRuntimeState {
     Array.isArray(record.tools) &&
     (record.knowledgeSources === undefined || Array.isArray(record.knowledgeSources)) &&
     (record.taskDetails === undefined || Array.isArray(record.taskDetails)) &&
+    (record.watchConfigs === undefined || Array.isArray(record.watchConfigs)) &&
+    (record.watchRuns === undefined || Array.isArray(record.watchRuns)) &&
     typeof record.serverConnection === 'object' &&
     record.serverConnection !== null
   );
@@ -920,5 +932,83 @@ function isDesktopTaskDetail(value: unknown): value is NonNullable<DesktopRuntim
     Array.isArray(record.artifacts) &&
     Array.isArray(record.executionLogs) &&
     Array.isArray(record.costRecords)
+  );
+}
+
+function readWatchConfigsRecord(value: unknown): DesktopRuntimeState['watchConfigs'] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isDesktopRoleWatchConfig);
+}
+
+function readWatchRunsRecord(value: unknown): DesktopRuntimeState['watchRuns'] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isDesktopRoleWatchRun).slice(-100);
+}
+
+function isDesktopRoleWatchConfig(value: unknown): value is NonNullable<DesktopRuntimeState['watchConfigs']>[number] {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === 'string' &&
+    typeof record.roleCode === 'string' &&
+    typeof record.enabled === 'boolean' &&
+    Array.isArray(record.sourceUrls) &&
+    record.sourceUrls.every((item) => typeof item === 'string') &&
+    typeof record.intervalMinutes === 'number' &&
+    Number.isFinite(record.intervalMinutes) &&
+    typeof record.rules === 'string' &&
+    (record.approvalMode === 'readonly' ||
+      record.approvalMode === 'draft' ||
+      record.approvalMode === 'manual_submit') &&
+    (record.sourceCursor === undefined ||
+      (typeof record.sourceCursor === 'number' && Number.isInteger(record.sourceCursor))) &&
+    (record.seenFingerprints === undefined ||
+      (Array.isArray(record.seenFingerprints) && record.seenFingerprints.every((item) => typeof item === 'string'))) &&
+    (record.lastFingerprint === undefined || typeof record.lastFingerprint === 'string') &&
+    (record.lastTaskId === undefined || typeof record.lastTaskId === 'string') &&
+    (record.lastRunAt === undefined || typeof record.lastRunAt === 'string') &&
+    (record.nextRunAt === undefined || typeof record.nextRunAt === 'string') &&
+    (record.lastStatus === undefined ||
+      record.lastStatus === 'idle' ||
+      record.lastStatus === 'running' ||
+      record.lastStatus === 'completed' ||
+      record.lastStatus === 'failed' ||
+      record.lastStatus === 'paused') &&
+    (record.lastError === undefined || typeof record.lastError === 'string') &&
+    typeof record.createdAt === 'string' &&
+    typeof record.updatedAt === 'string'
+  );
+}
+
+function isDesktopRoleWatchRun(value: unknown): value is NonNullable<DesktopRuntimeState['watchRuns']>[number] {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === 'string' &&
+    typeof record.configId === 'string' &&
+    typeof record.roleCode === 'string' &&
+    typeof record.sourceUrl === 'string' &&
+    (record.taskId === undefined || typeof record.taskId === 'string') &&
+    (record.status === 'idle' ||
+      record.status === 'running' ||
+      record.status === 'completed' ||
+      record.status === 'failed' ||
+      record.status === 'paused') &&
+    typeof record.startedAt === 'string' &&
+    (record.finishedAt === undefined || typeof record.finishedAt === 'string') &&
+    (record.message === undefined || typeof record.message === 'string') &&
+    (record.fingerprint === undefined || typeof record.fingerprint === 'string')
   );
 }

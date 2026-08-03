@@ -818,8 +818,8 @@ body,
 }
 
 .chat-workspace {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -828,6 +828,7 @@ body,
 }
 
 .chat-workspace-header {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -835,6 +836,42 @@ body,
   min-height: 70px;
   padding: 14px 20px;
   border-bottom: 1px solid #eef2f7;
+}
+
+.watch-control-panel {
+  flex: 0 0 auto;
+  margin: 10px 14px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  border-radius: 8px;
+  background: rgba(239, 246, 255, 0.72);
+}
+
+.watch-control-meta {
+  font-size: 12px;
+}
+
+.watch-config-inline-field {
+  flex: 0 0 180px;
+  margin-bottom: 12px;
+}
+
+.watch-config-inline-field.wide {
+  flex: 1 1 260px;
+}
+
+.watch-approval-hints {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.watch-approval-hints > div {
+  display: grid;
+  gap: 2px;
 }
 
 .chat-agent-avatar {
@@ -845,6 +882,7 @@ body,
 }
 
 .chat-message-list {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: 16px;

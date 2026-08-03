@@ -145,6 +145,42 @@ export interface DesktopRuntimeSyncResponse {
   };
 }
 
+export type DesktopRoleWatchStatus = 'idle' | 'running' | 'completed' | 'failed' | 'paused';
+export type DesktopRoleWatchApprovalMode = 'readonly' | 'draft' | 'manual_submit';
+
+export interface DesktopRoleWatchConfig {
+  id: string;
+  roleCode: string;
+  enabled: boolean;
+  sourceUrls: string[];
+  intervalMinutes: number;
+  rules: string;
+  approvalMode: DesktopRoleWatchApprovalMode;
+  sourceCursor?: number;
+  seenFingerprints?: string[];
+  lastFingerprint?: string;
+  lastTaskId?: string;
+  lastRunAt?: string;
+  nextRunAt?: string;
+  lastStatus?: DesktopRoleWatchStatus;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DesktopRoleWatchRun {
+  id: string;
+  configId: string;
+  roleCode: string;
+  sourceUrl: string;
+  taskId?: string;
+  status: DesktopRoleWatchStatus;
+  startedAt: string;
+  finishedAt?: string;
+  message?: string;
+  fingerprint?: string;
+}
+
 export interface DesktopRuntimeState {
   app: DesktopAppInfo;
   localRuntime: LocalRuntimeContract;
@@ -157,6 +193,8 @@ export interface DesktopRuntimeState {
   tools: ToolManifest[];
   knowledgeSources: DesktopKnowledgeSourceSummary[];
   taskDetails?: DesktopTaskDetail[];
+  watchConfigs?: DesktopRoleWatchConfig[];
+  watchRuns?: DesktopRoleWatchRun[];
   serverConnection: DesktopServerConnectionStatus;
 }
 
@@ -204,6 +242,7 @@ export interface DesktopAuthorizedRoleTemplateSummary {
   workflowSteps: DesktopAuthorizedRoleTemplateWorkflowStep[];
   workflowGraph?: unknown;
   dependencyManifest?: RoleTemplateDependencyManifest;
+  executionProfile?: RoleTemplateDependencyManifest['executionProfile'];
   sampleInputs: string[];
   outputFormat: string;
   approvalPolicy: string;
@@ -383,6 +422,9 @@ export type DesktopToolInvocationAction =
   | 'document.extract_text'
   | 'web.fetch_url'
   | 'web.search'
+  | 'browser.open_url'
+  | 'browser.extract_text'
+  | 'browser.run_steps'
   | 'http.request'
   | 'mcp.call'
   | 'office.write_markdown_document'

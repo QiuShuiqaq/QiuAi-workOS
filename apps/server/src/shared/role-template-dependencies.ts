@@ -1,4 +1,5 @@
 import { getServerToolAction } from './tool-action-catalog';
+import type { ServerRoleTemplateExecutionProfile } from './role-template-execution-profile';
 import type { ServerRoleWorkflowGraph, ServerRoleWorkflowGraphNode } from './workflow-graph';
 
 export interface ServerRoleTemplateDependencyManifest {
@@ -61,6 +62,7 @@ export interface ServerRoleTemplateDependencyManifest {
     outputVariables: string[];
     nodeIds: string[];
   }>;
+  executionProfile?: ServerRoleTemplateExecutionProfile;
   factory?: unknown;
   warnings: string[];
 }
@@ -90,6 +92,7 @@ export function buildRoleTemplateDependencyManifest(input: {
   workflowGraph: ServerRoleWorkflowGraph;
   assets?: RoleTemplateDependencyAsset[];
   generatedAt?: Date | string;
+  executionProfile?: ServerRoleTemplateExecutionProfile;
 }): ServerRoleTemplateDependencyManifest {
   const assets = input.assets ?? [];
   const assetByTypeAndKey = new Map(
@@ -184,6 +187,7 @@ export function buildRoleTemplateDependencyManifest(input: {
     toolActions: sortByKey([...toolActions.values()]),
     artifactTemplates: sortByKey([...artifactTemplates.values()]),
     nodeTemplates: sortByKey([...nodeTemplates.values()]),
+    ...(input.executionProfile === undefined ? {} : { executionProfile: input.executionProfile }),
     warnings: [...warnings].sort()
   };
 }
