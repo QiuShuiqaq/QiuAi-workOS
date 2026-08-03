@@ -156,6 +156,7 @@ export interface DesktopRoleWatchConfig {
   intervalMinutes: number;
   rules: string;
   approvalMode: DesktopRoleWatchApprovalMode;
+  useKnowledge?: boolean;
   sourceCursor?: number;
   seenFingerprints?: string[];
   lastFingerprint?: string;

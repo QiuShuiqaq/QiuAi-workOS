@@ -102,6 +102,14 @@ interface ResolvedRuntimeBinding {
   unconfiguredKnowledgeBindingIds: string[];
 }
 
+function isTaskKnowledgeEnabled(context: DesktopTaskDetail['executionContext'] | undefined): boolean {
+  return context?.useKnowledge !== false;
+}
+
+function isTaskKnowledgeExplicitlyEnabled(context: DesktopTaskDetail['executionContext'] | undefined): boolean {
+  return context?.useKnowledge === true;
+}
+
 interface FactoryRuntimeItem {
   sku: string;
   image: WorkflowFileValue;
@@ -429,6 +437,30 @@ export async function runDesktopTask(input: RunDesktopTaskInput): Promise<RunDes
     };
   }
 
+  if (
+    isTaskKnowledgeExplicitlyEnabled(context) &&
+    context.knowledgeBindingIds.length > 0 &&
+    credentialedBinding.availableKnowledgeSources.length === 0
+  ) {
+    const failedTask = failTask(
+      input.task,
+      completedAt,
+      '本次任务已启用知识库，但当前没有可用的知识库来源。请先配置知识库，或关闭“使用知识库”后再运行。',
+      buildWarningLogs(input.task, credentialedBinding, completedAt)
+    );
+    await emitTaskProgress({
+      onProgress: input.onProgress,
+      task: failedTask,
+      updatedAt: completedAt,
+      state: 'failed',
+      currentRunStatus: 'failed'
+    });
+    return {
+      task: failedTask,
+      usedToolIds: []
+    };
+  }
+
   const invocation = await invokeConfiguredModel({
     task: input.task,
     binding: credentialedBinding,
@@ -506,7 +538,9 @@ function resolveRuntimeBinding(input: {
     input.knowledgeSources.map((source) => [normalizeKnowledgeBindingId(source.id), source])
   );
   const requiredKnowledgeBindingIds = mergeUniqueStrings(
-    input.context.knowledgeBindingIds.map(normalizeKnowledgeBindingId)
+    isTaskKnowledgeEnabled(input.context)
+      ? input.context.knowledgeBindingIds.map(normalizeKnowledgeBindingId)
+      : []
   );
 
   const requiredModelProfileIds = mergeUniqueStrings(
@@ -1682,6 +1716,36 @@ async function completeWorkflowRuntimeKnowledgeNode(input: {
   outputVariables: string[];
   message: string;
 }> {
+  if (!isTaskKnowledgeEnabled(input.task.executionContext)) {
+    const skippedMessage = 'Knowledge base disabled for this task.';
+    const outputVariables = writeWorkflowNodeOutputs({
+      pool: input.pool,
+      node: input.node,
+      text: ''
+    });
+    input.pool.set('runtime.previous_text', '');
+
+    return Promise.resolve({
+      response: input.currentResponse,
+      primaryProfile: input.primaryProfile,
+      logs: [
+        createLog(
+          input.task.taskId,
+          'info',
+          'WORKFLOW_RUNTIME_KNOWLEDGE_SKIPPED',
+          skippedMessage,
+          input.createdAt,
+          sanitizeLogSuffix(input.node.id)
+        )
+      ],
+      usedToolIds: [],
+      generatedArtifacts: [],
+      inputVariables: input.node.inputVariables ?? [],
+      outputVariables,
+      message: 'Knowledge node skipped because the task disabled knowledge base usage.'
+    });
+  }
+
   const retrievedKnowledge = await retrieveWorkflowRuntimeKnowledgeContext(input);
   const knowledgeContext = input.binding.availableKnowledgeSources
     .map((source) => formatKnowledgeSourceForPrompt(source))

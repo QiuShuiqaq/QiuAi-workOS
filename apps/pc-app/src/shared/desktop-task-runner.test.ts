@@ -3798,6 +3798,142 @@ assert.ok(
   unconfiguredKnowledge.task.executionLogs.some((log) => log.eventType === 'KNOWLEDGE_SOURCE_UNCONFIGURED')
 );
 
+let disabledKnowledgeReadCalls = 0;
+const disabledKnowledgeTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-knowledge-disabled-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Skip knowledge by task option',
+    input: 'Create a short follow-up summary.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0,
+    executionContext: {
+      modelProfileIds: ['qiu-general-default'],
+      toolIds: ['office-document'],
+      knowledgeBindingIds: ['local_file'],
+      useKnowledge: false
+    }
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    toolIds: ['office-document'],
+    requiredKnowledgeSources: ['local_file'],
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'gather_context',
+          type: 'knowledge',
+          name: 'Gather optional knowledge',
+          outputVariables: ['knowledge_context']
+        },
+        {
+          id: 'summarize',
+          type: 'llm',
+          name: 'Summarize',
+          inputVariables: ['knowledge_context']
+        }
+      ],
+      edges: [
+        { id: 'start-knowledge', sourceNodeId: 'start', targetNodeId: 'gather_context' },
+        { id: 'knowledge-summary', sourceNodeId: 'gather_context', targetNodeId: 'summarize' }
+      ]
+    }
+  },
+  workspaceId: 'workspace-knowledge-disabled',
+  modelProfiles,
+  tools,
+  knowledgeSources: [
+    {
+      id: 'local_file',
+      source: 'local_file',
+      label: 'Policy File',
+      enabled: true,
+      createdAt: '2026-07-20T10:00:00.000Z',
+      localPath: 'C:\\QiuAI\\Knowledge\\policy.md',
+      summary: 'Customer policy source.'
+    }
+  ],
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['office-document'],
+  enabledKnowledgeBindingIds: ['local_file'],
+  modelInvoker: async (request) => {
+    const prompt = request.messages.map((message) => message.content).join('\n');
+    assert.doesNotMatch(prompt, /Customer policy snippet/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: 'Summary without knowledge.'
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    disabledKnowledgeReadCalls += 1;
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        text: 'Customer policy snippet should not be read.'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:15.500Z'
+});
+
+assert.equal(disabledKnowledgeTask.task.state, 'completed');
+assert.equal(disabledKnowledgeReadCalls, 0);
+assert.ok(
+  disabledKnowledgeTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_RUNTIME_KNOWLEDGE_SKIPPED')
+);
+assert.ok(
+  disabledKnowledgeTask.task.executionLogs.every(
+    (log) =>
+      log.eventType !== 'KNOWLEDGE_BINDING_MISSING' &&
+      log.eventType !== 'KNOWLEDGE_SOURCE_UNCONFIGURED'
+  )
+);
+
+let explicitKnowledgeModelCalled = false;
+const explicitKnowledgeUnavailableTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-knowledge-unavailable-001',
+    roleCode: 'ai-ops',
+    roleName: 'AI Ops',
+    title: 'Require configured knowledge',
+    input: 'Use enterprise policy to prepare a reply.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0,
+    executionContext: {
+      modelProfileIds: ['qiu-general-default'],
+      toolIds: [],
+      knowledgeBindingIds: ['kb-enterprise'],
+      useKnowledge: true
+    }
+  }),
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: [],
+  enabledKnowledgeBindingIds: ['kb-enterprise'],
+  modelInvoker: async () => {
+    explicitKnowledgeModelCalled = true;
+    throw new Error('model should not run when enabled knowledge is unavailable');
+  },
+  completedAt: '2026-07-20T10:00:15.750Z'
+});
+
+assert.equal(explicitKnowledgeUnavailableTask.task.state, 'failed');
+assert.equal(explicitKnowledgeModelCalled, false);
+assert.match(
+  explicitKnowledgeUnavailableTask.task.executionLogs.at(-1)?.message ?? '',
+  /本次任务已启用知识库/
+);
+
 const unconfigured = await runDesktopTask({
   task,
   modelProfiles: modelProfiles.map((profile) => ({

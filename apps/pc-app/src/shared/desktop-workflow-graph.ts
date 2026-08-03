@@ -196,6 +196,7 @@ export function augmentExecutionContextWithWorkflowPlan(
       : [...new Set([...workflowPlan.requiredModelProfileIds, ...contextModelProfileIds])],
     toolIds: [...new Set([...context.toolIds, ...workflowPlan.requiredToolIds])],
     knowledgeBindingIds: [...context.knowledgeBindingIds],
+    useKnowledge: context.useKnowledge,
     attachmentPaths: context.attachmentPaths ? [...context.attachmentPaths] : undefined
   };
 }

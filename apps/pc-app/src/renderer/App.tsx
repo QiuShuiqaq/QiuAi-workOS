@@ -195,12 +195,14 @@ interface TaskFormValues {
   roleCode: string;
   title: string;
   input?: string;
+  useKnowledge?: boolean;
 }
 
 type RoleApplicationType = 'digital_employee' | 'digital_factory';
 
 interface FactoryRunFormValues {
   roleCode: string;
+  useKnowledge?: boolean;
   platform?: string;
   packageKeys?: string[];
   packageDefinitions?: FactoryRunPackageDefinition[];
@@ -326,6 +328,7 @@ interface WatchConfigFormValues {
   intervalMinutes?: number;
   rules?: string;
   approvalMode?: DesktopRoleWatchApprovalMode;
+  useKnowledge?: boolean;
 }
 
 interface ToolSettingsFormValues {
@@ -2564,7 +2567,16 @@ export default function App() {
       installedDigitalEmployeePackages.find(
         (rolePackage) => !isRuntimeRolePackageDeleted(runtimeState, rolePackage.roleCode)
       )?.roleCode;
-    taskForm.setFieldsValue({ roleCode: activeRoleCode ?? '' });
+    const activeRolePackage = installedDigitalEmployeePackages.find(
+      (rolePackage) => rolePackage.roleCode === activeRoleCode
+    );
+    const shouldResetKnowledgeUsage = taskForm.getFieldValue('roleCode') !== activeRoleCode;
+    taskForm.setFieldsValue({
+      roleCode: activeRoleCode ?? '',
+      ...(shouldResetKnowledgeUsage
+        ? { useKnowledge: getDefaultUseKnowledgeForRolePackage(activeRolePackage) }
+        : {})
+    });
   }, [installedDigitalEmployeePackages, runtimeState, taskForm]);
 
   useEffect(() => {
@@ -4904,6 +4916,14 @@ export default function App() {
             <Switch checkedChildren="启用" unCheckedChildren="暂停" />
           </Form.Item>
           <Form.Item
+            name="useKnowledge"
+            label="巡检时使用知识库"
+            valuePropName="checked"
+            extra="开启后，每次巡检都会结合已启用的本地知识库和企业知识库；未开启时直接跳过知识库。"
+          >
+            <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+          </Form.Item>
+          <Form.Item
             name="sourceUrls"
             label="值守网页 URL"
             extra="每行一个 URL。第一版每次按顺序巡检一个来源，保留登录态；遇到登录失效或验证码会停在页面等待人工处理。"
@@ -5597,7 +5617,8 @@ export default function App() {
                 roleCode: activeRoleCode,
                 title: createChatTaskTitle(taskInput),
                 input: taskInput,
-                attachments: composerAttachments
+                attachments: composerAttachments,
+                useKnowledge: values.useKnowledge === true
               });
               setComposerAttachments([]);
             }}
@@ -5673,6 +5694,12 @@ export default function App() {
                 <Button icon={<PaperClipOutlined />} onClick={() => composerFileInputRef.current?.click()}>
                   添加文件
                 </Button>
+                <Form.Item name="useKnowledge" valuePropName="checked" noStyle>
+                  <Switch size="small" />
+                </Form.Item>
+                <Tooltip title="开启后，本次任务会结合已启用的本地知识库和企业知识库；未开启时直接跳过知识库。">
+                  <Typography.Text type="secondary">使用知识库</Typography.Text>
+                </Tooltip>
                 <input
                   ref={composerFileInputRef}
                   className="composer-file-input"
@@ -6182,6 +6209,14 @@ export default function App() {
                             重置
                           </Button>
                         </Flex>
+                        <Form.Item
+                          name="useKnowledge"
+                          label="使用知识库"
+                          valuePropName="checked"
+                          extra="开启后，本次任务会结合已启用的本地知识库和企业知识库；未开启时直接跳过知识库。"
+                        >
+                          <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+                        </Form.Item>
 
                         {isVideoFactory ? (
                           <>
@@ -9111,6 +9146,7 @@ export default function App() {
 
       return {
         roleCode,
+        useKnowledge: false,
         asrModelProfileId: readyAudioProfile?.id ?? firstAudioProfile?.id,
         dialect: factory.asr?.defaultDialect ?? 'auto',
         screeningProfileKey: defaultProfile?.key ?? 'default_medical_case',
@@ -9130,6 +9166,7 @@ export default function App() {
 
     return {
       roleCode,
+      useKnowledge: false,
       platform: platformOptions[0]?.key ?? 'amazon',
       packageDefinitions,
       packageKeys: defaultPackages.length ? defaultPackages : packageDefinitions.map((item) => item.key),
@@ -9548,7 +9585,8 @@ export default function App() {
         title,
         input,
         attachments: videoAttachments,
-        extraModelProfileIds: [values.asrModelProfileId]
+        extraModelProfileIds: [values.asrModelProfileId],
+        useKnowledge: values.useKnowledge === true
       });
       if (created) {
         resetFactoryRunFormForRole(values.roleCode);
@@ -9599,7 +9637,8 @@ export default function App() {
       roleCode: values.roleCode,
       title,
       input,
-      attachments: factoryAttachments
+      attachments: factoryAttachments,
+      useKnowledge: values.useKnowledge === true
     });
     if (created) {
       resetFactoryRunFormForRole(values.roleCode);
@@ -10447,7 +10486,8 @@ export default function App() {
       sourceUrls: config.sourceUrls.join('\n'),
       intervalMinutes: config.intervalMinutes,
       rules: config.rules,
-      approvalMode: config.approvalMode
+      approvalMode: config.approvalMode,
+      useKnowledge: config.useKnowledge ?? getDefaultUseKnowledgeForRolePackage(rolePackage)
     });
     setWatchConfigModalOpen(true);
   }
@@ -10481,6 +10521,7 @@ export default function App() {
       intervalMinutes: normalizeWatchIntervalMinutes(values.intervalMinutes),
       rules: normalizeWatchRules(values.rules, rolePackage),
       approvalMode: values.approvalMode ?? previous?.approvalMode ?? 'draft',
+      useKnowledge: values.useKnowledge === true,
       lastStatus: enabled ? previous?.lastStatus ?? 'idle' : 'paused',
       lastError: enabled ? undefined : previous?.lastError,
       nextRunAt: enabled
@@ -10604,7 +10645,10 @@ export default function App() {
       state: 'queued',
       artifactCount: 0,
       costCents: 0,
-      executionContext: buildExecutionContextForRole(preparedState.rolePackages, config.roleCode)
+      executionContext: buildTaskExecutionContextWithKnowledgeUsage(
+        buildExecutionContextForRole(preparedState.rolePackages, config.roleCode),
+        config.useKnowledge ?? getDefaultUseKnowledgeForRolePackage(rolePackage)
+      )
     });
     const runningTask = startTaskRun(taskDetail, now);
     const startedRun: DesktopRoleWatchRun = {
@@ -10687,7 +10731,13 @@ export default function App() {
     });
   }
 
-  function createTask(values: TaskFormValues & { attachments?: ComposerAttachment[]; extraModelProfileIds?: string[] }): boolean {
+  function createTask(
+    values: TaskFormValues & {
+      attachments?: ComposerAttachment[];
+      extraModelProfileIds?: string[];
+      useKnowledge?: boolean;
+    }
+  ): boolean {
     const title = values.title.trim();
     if (!title) {
       return false;
@@ -10702,9 +10752,12 @@ export default function App() {
     const roleName = resolveRoleName(preparedState.rolePackages, roleCode);
     const input = values.input?.trim() || `请处理任务：${title}`;
     const executionContext = buildTaskExecutionContextWithAttachments(
-      buildTaskExecutionContextWithExtraModels(
-        buildExecutionContextForRole(preparedState.rolePackages, roleCode),
-        values.extraModelProfileIds ?? []
+      buildTaskExecutionContextWithKnowledgeUsage(
+        buildTaskExecutionContextWithExtraModels(
+          buildExecutionContextForRole(preparedState.rolePackages, roleCode),
+          values.extraModelProfileIds ?? []
+        ),
+        values.useKnowledge
       ),
       values.attachments ?? []
     );
@@ -10882,6 +10935,7 @@ function createDefaultWatchConfig(rolePackage: RolePackageManifest, now: string)
     intervalMinutes: 60,
     rules: buildDefaultWatchRules(rolePackage),
     approvalMode: 'draft',
+    useKnowledge: getDefaultUseKnowledgeForRolePackage(rolePackage),
     sourceCursor: 0,
     seenFingerprints: [],
     lastStatus: 'idle',
@@ -12158,6 +12212,20 @@ function buildTaskExecutionContextWithExtraModels(
   return {
     ...executionContext,
     modelProfileIds: [...new Set([...executionContext.modelProfileIds, ...extraModelProfileIds])]
+  };
+}
+
+function buildTaskExecutionContextWithKnowledgeUsage(
+  executionContext: NonNullable<DesktopTaskDetail['executionContext']> | undefined,
+  useKnowledge: boolean | undefined
+): NonNullable<DesktopTaskDetail['executionContext']> | undefined {
+  if (!executionContext || useKnowledge === undefined) {
+    return executionContext;
+  }
+
+  return {
+    ...executionContext,
+    useKnowledge
   };
 }
 
@@ -14332,6 +14400,18 @@ function resolveRoleName(rolePackages: RolePackageManifest[], roleCode: string):
   return rolePackages.find((rolePackage) => rolePackage.roleCode === roleCode)?.name ?? roleCode;
 }
 
+function getDefaultUseKnowledgeForRolePackage(rolePackage: RolePackageManifest | undefined): boolean {
+  if (!rolePackage) {
+    return false;
+  }
+
+  if (readRoleApplicationType(rolePackage) === 'digital_factory') {
+    return false;
+  }
+
+  return !rolePackage.roleCode.startsWith('basic_') && rolePackage.requiredKnowledgeSources.length > 0;
+}
+
 function buildExecutionContextForRole(
   rolePackages: RolePackageManifest[],
   roleCode: string
@@ -14344,7 +14424,8 @@ function buildExecutionContextForRole(
   return {
     modelProfileIds: [...rolePackage.modelProfileIds],
     toolIds: [...rolePackage.toolIds],
-    knowledgeBindingIds: rolePackage.requiredKnowledgeSources.map((source) => getKnowledgeBindingId(source))
+    knowledgeBindingIds: rolePackage.requiredKnowledgeSources.map((source) => getKnowledgeBindingId(source)),
+    useKnowledge: getDefaultUseKnowledgeForRolePackage(rolePackage)
   };
 }
 

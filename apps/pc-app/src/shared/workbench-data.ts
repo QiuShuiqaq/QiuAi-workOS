@@ -100,6 +100,7 @@ export function createMockTaskDetail(seed: MockTaskDetailSeed): DesktopTaskDetai
           modelProfileIds: [...seed.executionContext.modelProfileIds],
           toolIds: [...seed.executionContext.toolIds],
           knowledgeBindingIds: [...seed.executionContext.knowledgeBindingIds],
+          useKnowledge: seed.executionContext.useKnowledge,
           attachmentPaths: seed.executionContext.attachmentPaths
             ? [...seed.executionContext.attachmentPaths]
             : undefined
@@ -171,7 +172,8 @@ export function createTaskDetailFromSummary(
       ? {
           modelProfileIds: [...summary.executionContext.modelProfileIds],
           toolIds: [...summary.executionContext.toolIds],
-          knowledgeBindingIds: [...summary.executionContext.knowledgeBindingIds]
+          knowledgeBindingIds: [...summary.executionContext.knowledgeBindingIds],
+          useKnowledge: summary.executionContext.useKnowledge
         }
       : undefined
   });
@@ -190,7 +192,8 @@ export function toDesktopTaskSummary(detail: DesktopTaskDetail): DesktopTaskSumm
       ? {
           modelProfileIds: [...detail.executionContext.modelProfileIds],
           toolIds: [...detail.executionContext.toolIds],
-          knowledgeBindingIds: [...detail.executionContext.knowledgeBindingIds]
+          knowledgeBindingIds: [...detail.executionContext.knowledgeBindingIds],
+          useKnowledge: detail.executionContext.useKnowledge
         }
       : undefined
   };

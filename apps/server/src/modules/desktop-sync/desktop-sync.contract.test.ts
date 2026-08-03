@@ -55,7 +55,8 @@ describe('desktop runtime sync contract', () => {
             executionContext: {
               modelProfileIds: ['qiu-general-default'],
               toolIds: ['web-search'],
-              knowledgeBindingIds: ['kb-local-folder']
+              knowledgeBindingIds: ['kb-local-folder'],
+              useKnowledge: false
             }
           }
         ]
@@ -67,6 +68,7 @@ describe('desktop runtime sync contract', () => {
     assert.equal(request.data.tools[0].enabled, true);
     assert.equal(request.data.tasks[0].state, 'completed');
     assert.equal(request.data.tasks[0].executionContext?.toolIds.length, 1);
+    assert.equal(request.data.tasks[0].executionContext?.useKnowledge, false);
   });
 
   test('rejects malformed runtime snapshot payloads', () => {

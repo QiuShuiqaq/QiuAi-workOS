@@ -793,6 +793,10 @@ function validateDesktopTaskExecutionContext(
       record.knowledgeBindingIds,
       'taskExecutionContext.knowledgeBindingIds'
     ),
+    useKnowledge:
+      record.useKnowledge === undefined
+        ? undefined
+        : requireBoolean(record.useKnowledge, 'taskExecutionContext.useKnowledge'),
     attachmentPaths:
       record.attachmentPaths === undefined
         ? undefined

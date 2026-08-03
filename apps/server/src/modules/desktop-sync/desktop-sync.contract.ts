@@ -243,6 +243,7 @@ export interface DesktopTaskExecutionContext {
   modelProfileIds: string[];
   toolIds: string[];
   knowledgeBindingIds: string[];
+  useKnowledge?: boolean;
 }
 
 export function parseDesktopRuntimeSyncRequest(input: unknown): DesktopRuntimeSyncRequest {
@@ -555,7 +556,11 @@ function parseDesktopTaskExecutionContext(
     knowledgeBindingIds: requireStringArray(
       record.knowledgeBindingIds,
       `${labelPrefix}.knowledgeBindingIds`
-    )
+    ),
+    useKnowledge:
+      record.useKnowledge === undefined
+        ? undefined
+        : requireBoolean(record.useKnowledge, `${labelPrefix}.useKnowledge`)
   };
 }
 

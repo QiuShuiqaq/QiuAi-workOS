@@ -173,6 +173,7 @@ export interface DesktopTaskExecutionContext {
   modelProfileIds: string[];
   toolIds: string[];
   knowledgeBindingIds: string[];
+  useKnowledge?: boolean;
   attachmentPaths?: string[];
 }
 
