@@ -13,13 +13,19 @@ const electronPackageJsonPath = require.resolve('electron/package.json');
 const electronDistDir = path.join(path.dirname(electronPackageJsonPath), 'dist');
 const sqlJsEntryPath = require.resolve('sql.js/dist/sql-wasm.js');
 const sqlJsPackageDir = path.dirname(path.dirname(sqlJsEntryPath));
-const sqlJsReleaseDir = path.join(releaseDir, 'node_modules', 'sql.js');
+const runtimePackageDescriptors = [
+  { name: 'sql.js', packageDir: sqlJsPackageDir },
+  { name: 'jszip', packageDir: resolvePackageDir('jszip') },
+  { name: 'pdf-parse', packageDir: resolvePackageDir('pdf-parse') }
+];
 
 await ensureExists(distDir, 'build output directory');
 await ensureExists(path.join(resourcesDir, 'icon.png'), 'desktop window icon');
 await ensureExists(path.join(resourcesDir, 'icon.ico'), 'Windows app icon');
 await ensureExists(electronDistDir, 'Electron runtime directory');
-await ensureExists(sqlJsPackageDir, 'sql.js package directory');
+for (const runtimePackage of runtimePackageDescriptors) {
+  await ensureExists(runtimePackage.packageDir, `${runtimePackage.name} package directory`);
+}
 
 await rm(releaseDir, { recursive: true, force: true });
 await mkdir(releaseDir, { recursive: true });
@@ -27,7 +33,11 @@ await mkdir(path.join(releaseDir, 'node_modules'), { recursive: true });
 await cp(distDir, path.join(releaseDir, 'dist'), { recursive: true });
 await cp(resourcesDir, path.join(releaseDir, 'resources'), { recursive: true });
 await cp(electronDistDir, path.join(releaseDir, 'electron'), { recursive: true });
-await cp(sqlJsPackageDir, sqlJsReleaseDir, { recursive: true });
+for (const runtimePackage of runtimePackageDescriptors) {
+  await cp(runtimePackage.packageDir, path.join(releaseDir, 'node_modules', runtimePackage.name), {
+    recursive: true
+  });
+}
 await cp(packageJsonPath, path.join(releaseDir, 'package.json'));
 
 await writeFile(
@@ -54,4 +64,8 @@ async function ensureExists(target, label) {
   } catch {
     throw new Error(`Missing ${label}: ${target}`);
   }
+}
+
+function resolvePackageDir(packageName) {
+  return path.dirname(require.resolve(`${packageName}/package.json`));
 }

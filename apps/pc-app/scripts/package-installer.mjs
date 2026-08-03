@@ -23,24 +23,39 @@ const electronPackageJsonPath = require.resolve('electron/package.json');
 const electronDistDir = path.join(path.dirname(electronPackageJsonPath), 'dist');
 const sqlJsEntryPath = require.resolve('sql.js/dist/sql-wasm.js');
 const sqlJsPackageDir = path.dirname(path.dirname(sqlJsEntryPath));
+const runtimePackageDescriptors = [
+  { name: 'sql.js', packageDir: sqlJsPackageDir },
+  { name: 'jszip', packageDir: resolvePackageDir('jszip') },
+  { name: 'pdf-parse', packageDir: resolvePackageDir('pdf-parse') }
+];
 
 await ensureExists(distDir, 'build output directory');
 await ensureExists(path.join(resourcesDir, 'icon.png'), 'desktop window icon');
 await ensureExists(path.join(resourcesDir, 'icon.ico'), 'Windows app icon');
 await ensureExists(electronDistDir, 'Electron runtime directory');
-await ensureExists(sqlJsPackageDir, 'sql.js package directory');
 await ensureExists(electronBuilderCliPath, 'electron-builder CLI');
+for (const runtimePackage of runtimePackageDescriptors) {
+  await ensureExists(runtimePackage.packageDir, `${runtimePackage.name} package directory`);
+}
 
 const appPackageJson = JSON.parse(await readFile(appPackageJsonPath, 'utf8'));
 const electronVersion = normalizePackageVersion(
   appPackageJson.devDependencies?.electron ?? appPackageJson.dependencies?.electron
+);
+const runtimeDependencies = Object.fromEntries(
+  runtimePackageDescriptors.map((runtimePackage) => [
+    runtimePackage.name,
+    appPackageJson.dependencies?.[runtimePackage.name] ?? readPackageVersion(runtimePackage.packageDir)
+  ])
 );
 
 await rm(stageDir, { recursive: true, force: true });
 await mkdir(stageNodeModulesDir, { recursive: true });
 await cp(distDir, path.join(stageDir, 'dist'), { recursive: true });
 await cp(resourcesDir, path.join(stageDir, 'resources'), { recursive: true });
-await cp(sqlJsPackageDir, path.join(stageNodeModulesDir, 'sql.js'), { recursive: true });
+for (const runtimePackage of runtimePackageDescriptors) {
+  await cp(runtimePackage.packageDir, path.join(stageNodeModulesDir, runtimePackage.name), { recursive: true });
+}
 
 await writeFile(
   stagePackageJsonPath,
@@ -53,9 +68,7 @@ await writeFile(
       description: appPackageJson.description,
       author: appPackageJson.author,
       main: 'dist/main/main.js',
-      dependencies: {
-        'sql.js': appPackageJson.dependencies?.['sql.js'] ?? '1.14.1'
-      }
+      dependencies: runtimeDependencies
     },
     null,
     2
@@ -82,6 +95,8 @@ await writeFile(
     "    'dist/**/*',",
     "    'resources/**/*',",
     "    'node_modules/sql.js/**/*',",
+    "    'node_modules/jszip/**/*',",
+    "    'node_modules/pdf-parse/**/*',",
     "    'package.json'",
     '  ],',
     '  win: {',
@@ -161,4 +176,13 @@ function normalizePackageVersion(version) {
   }
 
   return normalizedVersion;
+}
+
+function resolvePackageDir(packageName) {
+  return path.dirname(require.resolve(`${packageName}/package.json`));
+}
+
+function readPackageVersion(packageDir) {
+  const packageJson = require(path.join(packageDir, 'package.json'));
+  return packageJson.version;
 }
