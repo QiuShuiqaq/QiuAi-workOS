@@ -25,8 +25,16 @@ interface OpenAiCompatibleChatResponse {
   choices?: Array<{
     message?: {
       content?: unknown;
+      reasoning_content?: unknown;
     };
+    delta?: {
+      content?: unknown;
+    };
+    text?: unknown;
   }>;
+  output?: unknown;
+  output_text?: unknown;
+  text?: unknown;
   usage?: {
     prompt_tokens?: unknown;
     completion_tokens?: unknown;
@@ -996,10 +1004,60 @@ function inferAudioMimeType(filePath: string): string {
 }
 
 function readAssistantContent(body: OpenAiCompatibleChatResponse | undefined): string | undefined {
-  const content = body?.choices?.[0]?.message?.content;
-  if (typeof content === 'string') {
-    const normalized = content.trim();
+  const contentCandidates: unknown[] = [];
+  for (const choice of body?.choices ?? []) {
+    contentCandidates.push(choice.message?.content);
+    contentCandidates.push(choice.message?.reasoning_content);
+    contentCandidates.push(choice.delta?.content);
+    contentCandidates.push(choice.text);
+  }
+
+  contentCandidates.push(body?.output_text);
+  contentCandidates.push(body?.text);
+  contentCandidates.push(readResponsesApiOutputText(body?.output));
+
+  return contentCandidates.map(readTextFromModelContent).find((content): content is string => Boolean(content));
+}
+
+function readResponsesApiOutputText(value: unknown): string | undefined {
+  if (Array.isArray(value)) {
+    return value.map(readResponsesApiOutputText).filter(Boolean).join('\n').trim() || undefined;
+  }
+
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const directText = readTextFromModelContent(record.text ?? record.content);
+  if (directText) {
+    return directText;
+  }
+
+  return readResponsesApiOutputText(record.output ?? record.message ?? record.data);
+}
+
+function readTextFromModelContent(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const normalized = value.trim();
     return normalized.length > 0 ? normalized : undefined;
+  }
+
+  if (Array.isArray(value)) {
+    const text = value.map(readTextFromModelContent).filter(Boolean).join('\n').trim();
+    return text || undefined;
+  }
+
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const key of ['text', 'content', 'output_text', 'reasoning_content']) {
+    const text = readTextFromModelContent(record[key]);
+    if (text) {
+      return text;
+    }
   }
 
   return undefined;

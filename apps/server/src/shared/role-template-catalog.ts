@@ -769,7 +769,7 @@ function buildOfficeProductionWorkflowGraph(input: {
             id: 'rpa_browser_collect',
             type: 'tool' as const,
             name: 'RPA 网页采集',
-            instruction: '当用户提供招聘、销售、客服或外部业务平台 URL 时，调用本机 RPA 浏览器打开页面，允许用户登录后提取页面文本。不得自动发送外部消息。',
+            instruction: '当用户提供招聘、销售、客服或外部业务平台 URL 时，调用本机 RPA 浏览器打开页面，允许用户登录后提取页面文本。不得自动发送外部消息；如果页面无法读取、需要站点专属流程或用户未提供 URL，应跳过采集并在后续产物中列为待人工补充，不得编造页面数据。',
             toolId: 'browser-automation',
             inputVariables: ['start.text', 'task_parameters'],
             outputVariables: ['rpa_page_text'],
@@ -2619,16 +2619,16 @@ function createOfficeRoleTemplate(input: DesignedOfficeRoleTemplateInput): BaseS
       },
       analysisInstruction:
         input.analysisInstruction ??
-        `围绕「${input.scenario}」读取附件和企业知识库，提炼事实、任务边界、缺失信息、风险点和处理计划。不要编造没有依据的企业资料。`,
+        `围绕「${input.scenario}」读取用户输入、附件、企业知识库和工具结果，提炼可验证事实、任务边界、缺失信息、风险点和交付结构。没有依据的信息只能写为“待确认”，不要编造企业资料、客户信息或执行结果。`,
       draftInstruction:
         input.draftInstruction ??
-        `生成可直接交付的「${input.name}」产物，结构清晰、口径正式，只保留与任务相关的内容；需要人工确认的内容单独列出，不写入为确定结论。`,
+        `生成可直接交付的「${input.name}」产物，结构清晰、口径正式、内容简洁，只保留与任务相关的信息。缺失或不确定内容单独列为“待确认”，不要写成确定结论；不要输出空泛建议、执行日志、节点输入输出或与任务无关的扩写。`,
       qualityInstruction:
         input.qualityInstruction ??
-        '检查是否存在编造事实、越权承诺、输出格式不适合落地、缺少人工确认项的问题，并把最终内容修订到可交付状态。',
+        '检查是否存在编造事实、越权承诺、格式混乱、内容冗余、无依据建议、缺少人工确认项的问题，并把最终内容修订为简洁、有序、可交付的状态。',
       finalInstruction:
         input.finalInstruction ??
-        '返回生成文件位置、核心结论、需要人工确认的问题和下一步建议。',
+        '返回生成文件位置、核心结果、异常或待确认事项，以及用户下一步需要人工处理的动作；不要重复展示节点输入输出明细。',
       includeWebSearch,
       includeBrowserAutomation,
       analysisModelProfileId: input.analysisModelProfileId,
@@ -2665,7 +2665,7 @@ const freeBasicRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     analysisInstruction:
       '读取附件全文，识别主题、章节、核心事实、必须保留的参数、可压缩的冗余内容和不能擅自补充的信息。',
     draftInstruction:
-      '生成简洁正式的 Word 正文。只保留附件中的核心内容，不额外发挥；不要把用户指令写入产物；后续建议只在确有原文依据时保留。',
+      '生成简洁正式的 Word 正文。结构固定为：标题、摘要、正文分节、关键参数或清单、待确认信息。只保留附件中的核心内容，不额外发挥；不要把用户指令写入产物；不要重复标题；后续建议只在确有原文依据时保留。',
     qualityInstruction:
       '检查标题、摘要和正文是否重复；删除没有原文依据的建议；确保正文适合直接写入 Word。',
     finalInstruction: '返回 Word 文件位置、整理范围、保留的核心内容和需要用户确认的缺失信息。',
@@ -2699,7 +2699,7 @@ const freeBasicRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     analysisInstruction:
       '读取表格或文本，识别字段、重复项、缺失值、异常值、分类维度和用户要求的汇总口径。',
     draftInstruction:
-      '生成适合写入 Excel 的结构化结果。必须包含整理后明细、异常项、字段说明、可选汇总表；无法确认的数据标记为空或待确认。',
+      '生成适合写入 Excel 的结构化 JSON。必须包含 sheets：整理后明细、异常项、字段说明、汇总。整理后明细只放用户要求或原始资料可支持的字段；字段说明解释每列来源和口径；汇总只做基于明细的计数、合计或分组，不写空泛建议；无法确认的数据标记为空或待确认。',
     qualityInstruction:
       '检查每一列是否有明确含义，避免把自然语言长段落塞进单元格；缺失和异常必须单独列出。',
     finalInstruction: '返回 Excel 文件位置、整理行数、发现的异常和建议用户确认的字段。',
@@ -2725,7 +2725,7 @@ const freeBasicRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     analysisInstruction:
       '从会议材料中提取参会背景、主题、事实、争议、明确决议、待办事项、责任人、截止时间和待确认问题。',
     draftInstruction:
-      '生成正式会议纪要。必须区分“已决议”和“待确认”；没有明确责任人或日期时标记待补充。',
+      '生成正式会议纪要正文。结构固定为：会议信息、核心结论、已决议事项、待办清单、风险与阻塞、待确认问题。必须区分“已决议”和“待确认”；没有明确责任人或日期时标记待补充；不要把闲聊、重复发言和无结论讨论写入正文。',
     qualityInstruction:
       '检查是否把讨论意见误写为决议；检查待办是否可执行、是否包含责任人和截止时间。',
     finalInstruction: '返回 Word 文件位置、会议结论、待办数量和需要补充确认的信息。',
@@ -2755,7 +2755,7 @@ const freeBasicRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     analysisInstruction:
       '识别源语言、目标语言、语气、受众、术语和可能存在歧义的句子；保留 deepseek 等专有名词原样。',
     draftInstruction:
-      '输出自然、准确、正式的翻译或润色正文；不要扩写事实；专有名词保持一致。',
+      '输出自然、准确、正式的翻译或润色正文。结构固定为：处理后正文、术语说明、歧义与待确认。不要扩写事实；专有名词保持一致；如果用户只要求润色，不要改写成另一种语言；如果用户只要求翻译，不要额外写评价。',
     qualityInstruction:
       '检查是否遗漏原文信息、是否改变事实含义、是否存在术语不一致和过度润色。',
     finalInstruction: '返回 Word 文件位置、处理语言、术语处理说明和需要用户确认的歧义点。',
@@ -2821,13 +2821,25 @@ function createSalesRoleTemplate(input: SalesRoleTemplateDefinition): BaseServer
       `你是${input.name}，面向${input.focus}销售场景。`,
       '必须优先结合企业知识库里的产品资料、案例、价格政策、服务边界和销售话术。',
       '可以使用网页搜索补充客户或行业公开背景，但不能把未验证信息当成确定事实。',
+      '如果用户提供 URL，RPA 网页采集只作为辅助读取页面文本；采集为空、页面需要登录或网站结构不支持时，直接列为待人工补充，不要编造客户资料。',
       '输出分析时要区分客户已知信息、合理推断、待确认问题和不能承诺事项。'
     ].join('\n'),
-    draftInstruction: [
-      `生成一份${input.name}可直接使用的销售交付内容。`,
-      '必须包含：客户画像、核心痛点、需求判断、我司产品/服务匹配、差异化卖点、沟通话术、异议处理、下一步跟进计划、需要人工确认的报价/承诺事项。',
-      '内容要服务于真实成交推进，不要写成泛泛营销文章。'
-    ].join('\n'),
+    draftInstruction:
+      artifactType === 'xlsx'
+        ? [
+            `生成${input.name}可直接使用的销售跟进 Excel JSON。`,
+            '必须包含 sheets：整理后明细、异议处理、下一步动作、待确认事项。',
+            '整理后明细表头固定为：客户/线索、行业或角色、当前阶段、核心需求、匹配卖点、风险或异议、优先级、建议动作。',
+            '异议处理表头固定为：异议类型、客户原话或依据、建议回应、不能承诺事项、需确认资料。',
+            '下一步动作表头固定为：动作、目标、负责人、建议时间、所需材料。',
+            '没有来源依据的信息填“待确认”，不要写泛泛营销话术。'
+          ].join('\n')
+        : [
+            `生成一份${input.name}可直接使用的销售交付内容。`,
+            '章节固定为：1. 客户画像；2. 核心痛点；3. 需求判断；4. 我司产品/服务匹配；5. 沟通话术；6. 异议处理；7. 下一步跟进计划；8. 待确认事项。',
+            '内容要服务于真实成交推进，话术要短、具体、可直接复制使用；不要写成泛泛营销文章。',
+            '报价、交付周期、效果承诺、合规表述没有企业知识库依据时，一律写入待确认事项。'
+          ].join('\n'),
     qualityInstruction:
       '检查是否有越权承诺、价格/交付/效果保证、行业合规风险、缺少企业知识依据的问题；不确定内容必须标记为待确认。',
     finalInstruction:
@@ -2951,6 +2963,10 @@ const enterpriseCoreRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     ],
     outputFormat: 'Word 调研报告，包含执行摘要、来源列表、竞品矩阵、机会风险和下一步行动。',
     includeWebSearch: true,
+    draftInstruction:
+      '生成简洁正式的企业调研 Word 报告。章节固定为：1. 执行摘要；2. 资料来源；3. 目标企业/行业概况；4. 关键业务信息；5. 竞品或对标对象；6. 机会与风险；7. 下一步行动；8. 待验证信息。公开检索内容必须保留来源标题或链接；无法验证的信息只能写入待验证信息，不要写成确定结论。',
+    qualityInstruction:
+      '检查是否存在无来源事实、过度推断、战略结论过满、来源缺失和行动建议空泛的问题；保留事实、推断、待验证的边界。',
     approvalPolicy: '对外引用、投资判断、战略结论和客户承诺必须由负责人复核。'
   }),
   createOfficeRoleTemplate({
@@ -2966,7 +2982,12 @@ const enterpriseCoreRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
       '请整理这批客服聊天记录，按咨询、售后、退款、投诉和高风险情绪分组。',
       '请根据这 20 条高频问题，生成客服回复模板和需要补充到知识库的条目。'
     ],
-    outputFormat: 'Word 客服处理文档，包含问题分流、建议回复、升级条件和知识库补全清单。',
+    outputFormat: 'Excel 客服处理表，包含问题分流、建议回复、升级条件和知识库补全清单。',
+    artifactType: 'xlsx',
+    draftInstruction:
+      '生成客服处理 Excel JSON。必须包含 sheets：整理后明细、建议回复、升级处理、知识库补充。整理后明细表头固定为：客户/会话、问题摘要、问题类型、情绪或风险、依据摘录、建议动作、优先级。建议回复表头固定为：问题类型、回复口径、可直接发送话术、禁止承诺、需人工确认。升级处理表头固定为：客户/会话、升级原因、建议负责人、处理时限、备注。知识库补充表头固定为：缺失问题、建议答案、来源依据、适用场景。',
+    qualityInstruction:
+      '检查回复是否越权承诺、是否把退款赔偿写成确定结论、是否缺少升级条件；话术必须简洁可复制。',
     approvalPolicy: '涉及退款、赔偿、承诺、投诉升级和敏感客户时必须人工确认。'
   }),
   createOfficeRoleTemplate({
@@ -2984,6 +3005,10 @@ const enterpriseCoreRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     ],
     outputFormat: 'Excel 工单表，包含客户、问题类型、优先级、建议回复、负责人和截止时间。',
     artifactType: 'xlsx',
+    draftInstruction:
+      '生成售后工单 Excel JSON。必须包含 sheets：整理后明细、异常与升级、建议回复、待补充信息。整理后明细表头固定为：工单编号、客户、问题摘要、问题类型、优先级、责任建议、建议动作、截止时间、当前状态。异常与升级表头固定为：工单编号、升级原因、风险等级、建议负责人、处理建议。建议回复表头固定为：问题类型、可发送回复、需避免承诺、人工确认项。待补充信息表头固定为：工单编号、缺失信息、补充方式、影响。',
+    qualityInstruction:
+      '检查工单是否能被售后负责人直接分派；赔付、退款、召回和责任认定必须列为人工确认，不得写成已批准。',
     approvalPolicy: '涉及赔付、退款、召回、投诉升级和责任认定时必须人工确认。'
   }),
   createOfficeRoleTemplate({
@@ -3001,6 +3026,10 @@ const enterpriseCoreRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
       '请把这份协议里的高风险条款整理成风险清单和修改建议。'
     ],
     outputFormat: 'Word 合同初审报告，包含关键条款、风险等级、修改建议和人工确认项。',
+    draftInstruction:
+      '生成合同初审 Word 报告。章节固定为：1. 审核摘要；2. 合同基础信息；3. 关键条款摘录；4. 风险清单；5. 修改建议；6. 需业务确认事项；7. 需法务确认事项。风险清单按高/中/低分级；每条风险必须对应条款依据或原文摘录；不得输出最终法律意见。',
+    qualityInstruction:
+      '检查是否遗漏付款、交付、违约、保密、终止、争议解决等关键条款；检查是否把法律判断写成确定结论；所有建议都要保持初审口径。',
     approvalPolicy: '不得替代正式法律意见；所有合同结论必须经过法务或负责人确认。'
   }),
   createOfficeRoleTemplate({
@@ -3019,6 +3048,12 @@ const enterpriseCoreRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     ],
     outputFormat: 'Excel 候选人排序表，包含评分、匹配点、风险、面试问题和建议动作。',
     artifactType: 'xlsx',
+    analysisInstruction:
+      '读取岗位 JD、候选人简历、面试记录和用户补充要求。基础版以附件简历筛选为主；如果用户提供招聘网站 URL，RPA 只做页面文本辅助采集，采集不到时列为待人工补充，不影响已上传简历的筛选。提炼硬性要求、加分项、淘汰项、候选人事实依据和缺失信息，不得根据性别、年龄、婚育等敏感信息做歧视性判断。',
+    draftInstruction:
+      '生成招聘筛选 Excel JSON。必须包含 sheets：整理后明细、筛选评分、风险与淘汰、面试建议。整理后明细表头固定为：候选人、来源、当前岗位/经历、核心技能、年限、教育背景、匹配摘要、资料完整度。筛选评分表头固定为：候选人、总分、硬性要求匹配、经验匹配、技能匹配、稳定性/风险、推荐等级、推荐理由。风险与淘汰表头固定为：候选人、风险或淘汰原因、依据摘录、是否建议人工复核。面试建议表头固定为：候选人、建议面试问题、重点验证项、建议下一步。',
+    qualityInstruction:
+      '检查评分是否有 JD 和简历依据；缺失信息不能扣成确定结论，只能标记待确认；不得输出歧视性或敏感个人信息判断。',
     approvalPolicy: '涉及录用、薪资、淘汰和敏感个人信息处理时必须人工确认。'
   }),
   createOfficeRoleTemplate({
@@ -3039,6 +3074,10 @@ const enterpriseCoreRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
       '请根据这些流程说明整理一份员工入职 SOP。'
     ],
     outputFormat: 'Word 制度文档，包含适用范围、规则、流程、责任和执行注意事项。',
+    draftInstruction:
+      '生成公司内部制度或 SOP Word 文档。章节固定为：1. 文件目的；2. 适用范围；3. 基本原则；4. 具体规则；5. 操作流程；6. 责任分工；7. 执行注意事项；8. 待负责人确认。没有企业知识库依据的处罚、薪酬、劳动关系和合规条款必须列为待确认，不得自行编造。',
+    qualityInstruction:
+      '检查制度是否清晰可执行、是否存在过度处罚或越权规定、是否缺少适用范围和责任边界；正式发布内容必须保留人工确认项。',
     approvalPolicy: '正式发布制度、处罚条款、薪酬福利和劳动关系内容前必须由负责人确认。'
   }),
   createOfficeRoleTemplate({
@@ -3057,6 +3096,10 @@ const enterpriseCoreRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     ],
     outputFormat: 'Excel 报销整理表，包含费用科目、金额、票据状态、异常项和补充材料。',
     artifactType: 'xlsx',
+    draftInstruction:
+      '生成报销整理 Excel JSON。必须包含 sheets：整理后明细、异常项、费用汇总、待补充材料。整理后明细表头固定为：申请人、日期、费用类型、费用科目、金额、发票/票据状态、用途摘要、合规初判。异常项表头固定为：申请人、问题类型、异常说明、影响、建议处理。费用汇总表头固定为：费用科目、笔数、金额合计、备注。待补充材料表头固定为：申请人、缺失材料、补充要求、截止建议。',
+    qualityInstruction:
+      '检查金额、费用科目、票据状态和异常项是否分开；不能直接批准付款或报销，只能给初筛建议。',
     approvalPolicy: '涉及付款、税务、报销通过和异常费用认定时必须由财务确认。'
   }),
   createOfficeRoleTemplate({
@@ -3079,6 +3122,10 @@ const enterpriseCoreRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     ],
     outputFormat: 'Excel 应收跟进表，包含客户、金额、账龄、风险、负责人、催款建议。',
     artifactType: 'xlsx',
+    draftInstruction:
+      '生成应收账款跟进 Excel JSON。必须包含 sheets：整理后明细、逾期风险、催款话术、待确认事项。整理后明细表头固定为：客户、合同/订单、应收金额、到期日、账龄、逾期天数、负责人、当前状态、建议动作。逾期风险表头固定为：客户、风险等级、风险原因、影响金额、建议处理。催款话术表头固定为：客户类型、沟通目标、可发送话术、禁止表述、升级条件。待确认事项表头固定为：客户、缺失信息、需要谁确认、原因。',
+    qualityInstruction:
+      '检查是否把催款、停服、法律动作写成已执行；所有高风险客户和正式动作必须列为人工确认。',
     approvalPolicy: '涉及正式催收、停服、法律动作和客户信用判断时必须由负责人确认。'
   }),
   createOfficeRoleTemplate({
@@ -3095,6 +3142,10 @@ const enterpriseCoreRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
       '请把这些用户评价整理成可用于详情页的卖点和 FAQ。'
     ],
     outputFormat: 'Word 商品文案，包含标题、卖点、详情页结构、FAQ、活动话术和风险提醒。',
+    draftInstruction:
+      '生成电商商品文案 Word 文档。章节固定为：1. 商品定位；2. 标题备选；3. 核心卖点；4. 详情页结构；5. FAQ；6. 活动/客服话术；7. 平台风险提醒；8. 待确认信息。文案必须基于商品资料和用户评价，不要编造功效、材质、认证、价格和售后承诺；每段话尽量短，便于复制到平台后台。',
+    qualityInstruction:
+      '检查是否存在功效夸大、医疗健康暗示、绝对化用语、价格权益承诺和平台敏感词风险；风险项单独列出。',
     approvalPolicy: '涉及功效承诺、医疗健康、价格权益和平台敏感词时必须人工确认。'
   }),
   createOfficeRoleTemplate({
@@ -3112,6 +3163,10 @@ const enterpriseCoreRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
       '请根据这些材料生成一份项目需求分析和待确认问题清单。'
     ],
     outputFormat: 'Word 需求文档，包含背景、目标、范围、功能点、验收标准、风险和待确认问题。',
+    draftInstruction:
+      '生成需求分析 Word 文档。章节固定为：1. 背景与目标；2. 使用角色；3. 业务流程；4. 功能需求；5. 非功能需求；6. 范围边界；7. 验收标准；8. 风险与依赖；9. 待确认问题。功能需求必须可执行、可验证；不确定内容写入待确认问题，不要替客户做隐藏决策。',
+    qualityInstruction:
+      '检查需求是否可研发、可验收、边界是否清楚；避免把建议写成已确认范围；报价和排期相关结论必须待人工确认。',
     approvalPolicy: '进入报价、排期和研发实施前必须由客户或项目负责人确认。'
   }),
   createOfficeRoleTemplate({
@@ -3129,6 +3184,10 @@ const enterpriseCoreRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
       '请把这些产品资料整理成面向客户的项目交付方案。'
     ],
     outputFormat: 'Word 项目方案，包含客户背景、目标、方案、里程碑、交付物、风险和验收。',
+    draftInstruction:
+      '生成项目方案 Word 文档。章节固定为：1. 客户背景；2. 项目目标；3. 解决方案；4. 实施路径；5. 里程碑计划；6. 交付物清单；7. 验收标准；8. 风险与应对；9. 待确认事项。方案要具体、可交付，不写空泛宣传；工期、价格、资源承诺没有依据时必须列为待确认。',
+    qualityInstruction:
+      '检查方案是否能被售前或交付负责人直接复核；避免过度承诺、范围不清和验收标准缺失。',
     approvalPolicy: '正式对外发送方案、报价、工期和承诺前必须由负责人确认。'
   }),
   createOfficeRoleTemplate({
@@ -3149,6 +3208,10 @@ const enterpriseCoreRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     outputFormat: 'Excel 供应商对比表，包含报价、交期、付款、风险、验收标准和推荐结论。',
     artifactType: 'xlsx',
     includeWebSearch: true,
+    draftInstruction:
+      '生成采购对比 Excel JSON。必须包含 sheets：整理后明细、供应商对比、风险清单、采购建议。整理后明细表头固定为：供应商、产品/服务、报价、交期、付款条件、资质或来源、备注。供应商对比表头固定为：供应商、价格评分、交付评分、资质评分、风险评分、综合建议。风险清单表头固定为：供应商、风险类型、风险说明、影响、建议处理。采购建议表头固定为：推荐方案、推荐理由、需谈判事项、需确认资料。',
+    qualityInstruction:
+      '检查报价、交期、付款和资质是否可追溯；推荐结论必须保留依据和待确认事项，不替采购负责人做最终决定。',
     approvalPolicy: '涉及最终供应商选择、付款条件和合同条款时必须由采购负责人确认。'
   })
 ];

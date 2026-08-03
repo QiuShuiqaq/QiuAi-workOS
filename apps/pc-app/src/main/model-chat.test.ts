@@ -54,6 +54,79 @@ try {
   globalThis.fetch = originalFetch;
 }
 
+globalThis.fetch = (async () => {
+  return new Response(
+    JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: '',
+            reasoning_content: 'Reasoning-only compatible response.'
+          }
+        }
+      ]
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+}) as typeof fetch;
+
+try {
+  const response = await invokeOpenAiCompatibleModelChat({
+    profile: {
+      id: 'reasoning-profile',
+      providerId: 'openai-compatible',
+      providerName: 'OpenAI Compatible',
+      modelName: 'qwen3-reasoning',
+      purpose: 'reasoning',
+      capabilities: ['reasoning_text', 'text'],
+      apiBaseUrl: 'https://api.example.test/v1',
+      apiKey: 'reasoning-key'
+    },
+    messages: [{ role: 'user', content: 'Analyze this page.' }]
+  });
+
+  assert.equal(response.content, 'Reasoning-only compatible response.');
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+globalThis.fetch = (async () => {
+  return new Response(
+    JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: [
+              { type: 'text', text: 'Array content response.' }
+            ]
+          }
+        }
+      ]
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+}) as typeof fetch;
+
+try {
+  const response = await invokeOpenAiCompatibleModelChat({
+    profile: {
+      id: 'array-content-profile',
+      providerId: 'openai-compatible',
+      providerName: 'OpenAI Compatible',
+      modelName: 'array-content-model',
+      purpose: 'general',
+      capabilities: ['text'],
+      apiBaseUrl: 'https://api.example.test/v1',
+      apiKey: 'array-key'
+    },
+    messages: [{ role: 'user', content: 'Reply with array content.' }]
+  });
+
+  assert.equal(response.content, 'Array content response.');
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
 let capturedImageUrl = '';
 let capturedImageBody: Record<string, unknown> | undefined;
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
