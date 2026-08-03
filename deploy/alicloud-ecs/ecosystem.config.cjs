@@ -53,8 +53,7 @@ module.exports = {
     {
       name: 'qiuai-workos-public',
       cwd: '/opt/qiuai-workos',
-      script: 'node_modules/next/dist/bin/next',
-      args: 'start apps/public-site --hostname 127.0.0.1 --port 3300',
+      script: 'apps/public-site/.next/standalone/apps/public-site/server.js',
       instances: 1,
       exec_mode: 'fork',
       autorestart: true,
@@ -62,6 +61,8 @@ module.exports = {
       max_memory_restart: '512M',
       env: {
         NODE_ENV: 'production',
+        HOSTNAME: '127.0.0.1',
+        PORT: '3300',
         SERVER_API_BASE_URL: 'http://127.0.0.1:4100',
         SERVER_INTERNAL_BASE_URL: 'http://127.0.0.1:4100',
         WORKOS_PUBLIC_BASE_URL: 'https://workos.qiuaihub.com',
