@@ -11,12 +11,14 @@ const appDir = path.resolve(scriptDir, '..');
 const appPackageJsonPath = path.join(appDir, 'package.json');
 const distDir = path.join(appDir, 'dist');
 const resourcesDir = path.join(appDir, 'resources');
+const installerIncludeSourcePath = path.join(appDir, 'build', 'installer.nsh');
 const releaseDir = path.join(appDir, 'release');
 const stageDir = path.join(releaseDir, 'installer-stage');
 const outputDir = path.join(releaseDir, 'installers');
 const stageNodeModulesDir = path.join(stageDir, 'node_modules');
 const stageConfigPath = path.join(stageDir, 'electron-builder.config.cjs');
 const stagePackageJsonPath = path.join(stageDir, 'package.json');
+const stageInstallerIncludePath = path.join(stageDir, 'installer.nsh');
 
 const electronBuilderCliPath = require.resolve('electron-builder/cli.js');
 const electronPackageJsonPath = require.resolve('electron/package.json');
@@ -32,6 +34,7 @@ const runtimePackageDescriptors = [
 await ensureExists(distDir, 'build output directory');
 await ensureExists(path.join(resourcesDir, 'icon.png'), 'desktop window icon');
 await ensureExists(path.join(resourcesDir, 'icon.ico'), 'Windows app icon');
+await ensureExists(installerIncludeSourcePath, 'Windows installer process guard include');
 await ensureExists(electronDistDir, 'Electron runtime directory');
 await ensureExists(electronBuilderCliPath, 'electron-builder CLI');
 for (const runtimePackage of runtimePackageDescriptors) {
@@ -53,6 +56,7 @@ await rm(stageDir, { recursive: true, force: true });
 await mkdir(stageNodeModulesDir, { recursive: true });
 await cp(distDir, path.join(stageDir, 'dist'), { recursive: true });
 await cp(resourcesDir, path.join(stageDir, 'resources'), { recursive: true });
+await cp(installerIncludeSourcePath, stageInstallerIncludePath);
 for (const runtimePackage of runtimePackageDescriptors) {
   await cp(runtimePackage.packageDir, path.join(stageNodeModulesDir, runtimePackage.name), { recursive: true });
 }
@@ -112,10 +116,12 @@ await writeFile(
     '  nsis: {',
     '    oneClick: false,',
     '    perMachine: false,',
+    '    runAfterFinish: false,',
     '    allowToChangeInstallationDirectory: true,',
     '    createDesktopShortcut: true,',
     '    createStartMenuShortcut: true,',
-    "    shortcutName: 'QiuAI WorkOS'",
+    "    shortcutName: 'QiuAI WorkOS',",
+    "    include: path.resolve(__dirname, 'installer.nsh')",
     '  }',
     '};',
     ''

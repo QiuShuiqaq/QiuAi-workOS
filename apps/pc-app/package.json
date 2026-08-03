@@ -71,10 +71,12 @@
     "nsis": {
       "oneClick": false,
       "perMachine": false,
+      "runAfterFinish": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "QiuAI WorkOS"
+      "shortcutName": "QiuAI WorkOS",
+      "include": "build/installer.nsh"
     }
   }
 }
