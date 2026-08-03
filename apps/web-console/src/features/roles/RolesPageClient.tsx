@@ -65,7 +65,7 @@ export function RolesPageClient({
 
   return (
     <ConsoleShell currentAccount={currentAccount}>
-      <QiuPage title="数字员工" description="查看本企业已安装数字员工的运行状态。安装和执行在 PC 端完成。">
+      <QiuPage title="数字员工" description="查看本企业已安装数字员工的可用状态、任务统计和配置风险。安装、模型配置和任务执行在 PC 端完成。">
         {isApiFallback ? <Alert showIcon type="warning" message="后端 API 未连接，当前显示 fallback 数据。" /> : null}
 
         <Row gutter={[16, 16]}>
@@ -73,7 +73,7 @@ export function RolesPageClient({
             <QiuMetricCard title="已安装" value={String(roleCount)} trend={`${runningCount} 个运行中`} />
           </Col>
           <Col xs={24} md={8}>
-            <QiuMetricCard title="待处理" value={String(pendingCount)} trend="试运行或待配置" />
+            <QiuMetricCard title="需要关注" value={String(pendingCount)} trend="试运行或待配置" />
           </Col>
           <Col xs={24} md={8}>
             <QiuMetricCard title="已完成任务" value={String(completedTasks)} trend={`月成本 ¥${monthlyCost.toFixed(2)}`} />
@@ -127,11 +127,11 @@ export function RolesPageClient({
               <Space direction="vertical" size={12}>
                 <Typography.Text strong>PC 端负责安装和执行</Typography.Text>
                 <Typography.Text type="secondary">
-                  admin-console 上架的数字员工会进入 PC 端目录。企业成员在 PC 端安装、配置模型和工具，并通过对话发布任务。
+                  admin-console 上架的数字员工会进入 PC 端数字市场。企业成员在 PC 端安装、配置模型和工具，并通过对话发布任务。
                 </Typography.Text>
                 <Typography.Text strong>web-console 负责企业管理</Typography.Text>
                 <Typography.Text type="secondary">
-                  这里保留运行状态、成员协作、知识库、设备和账单入口，不再展示可安装模板目录。
+                  这里保留运行状态、配置风险、知识库、设备授权和套餐入口，不替代 PC 端的任务操作界面。
                 </Typography.Text>
               </Space>
             </Card>

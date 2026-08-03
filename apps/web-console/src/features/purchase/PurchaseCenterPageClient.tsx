@@ -17,6 +17,7 @@ import message from 'antd/es/message';
 import Row from 'antd/es/row';
 import Space from 'antd/es/space';
 import Table from 'antd/es/table';
+import Tag from 'antd/es/tag';
 import type { ColumnsType } from 'antd/es/table';
 import Typography from 'antd/es/typography';
 import { useRouter } from 'next/navigation';
@@ -73,9 +74,21 @@ function orderStatusTone(status: string): 'default' | 'success' | 'warning' | 'd
   return 'processing';
 }
 
-function configStatusText(isConfigured?: boolean) {
-  if (isConfigured === undefined) return '未配置';
-  return isConfigured ? '已配置' : '未完成';
+function orderStatusLabel(status: string) {
+  return {
+    PENDING: '待支付',
+    PAID: '已支付',
+    CLOSED: '已关闭',
+    CANCELLED: '已取消',
+    FAILED: '支付失败'
+  }[status] ?? status;
+}
+
+function entitlementText(plan: PlanDetail | undefined, featureKey: string, fallback = '-') {
+  const entitlement = plan?.entitlements.find((item) => item.featureKey === featureKey);
+  if (!entitlement?.enabled) return fallback;
+  if (entitlement.limitValue === undefined) return '已开放';
+  return `${entitlement.limitValue.toLocaleString('zh-CN')} ${entitlement.limitUnit ?? ''}`.trim();
 }
 
 function getPlanPaymentDisabledReason(
@@ -90,7 +103,7 @@ function getPlanPaymentDisabledReason(
   if (!isPaidPlan) return '免费套餐无需购买';
   if (options.isApiFallback) return '后端 API 未连接';
   if (options.workspaceType !== 'enterprise') return '当前仅企业空间可购买套餐';
-  if (!options.isAlipayConfigured) return '请先在服务端配置支付宝支付通道';
+  if (!options.isAlipayConfigured) return '在线支付暂不可用，请联系服务商开通或线下处理';
   if (!plan.priceCents) return '该套餐尚未配置正式价格';
   return undefined;
 }
@@ -108,10 +121,33 @@ export function PurchaseCenterPageClient({
     currentAccount.workspaces[0];
   const currentPlan = plans.find((plan) => plan.code === activeWorkspace.planCode) ?? plans[0];
   const alipayStatus = billing.paymentProviders.find((provider) => provider.provider === 'ALIPAY');
-  const missingAlipayKeys = alipayStatus?.missingEnvKeys.join(', ') || '-';
-  const purchasablePlans = plans.filter(
-    (plan) => plan.billingCycle === 'MONTHLY' || plan.billingCycle === 'ANNUAL'
-  );
+  const planGroups = [
+    {
+      key: 'BASIC',
+      name: '企业基础版',
+      fitFor: '适合小团队试点 AI 工作流。',
+      monthly: plans.find((plan) => plan.code === 'ENTERPRISE_BASIC_MONTHLY'),
+      annual: plans.find((plan) => plan.code === 'ENTERPRISE_BASIC_ANNUAL'),
+      highlight: false
+    },
+    {
+      key: 'STANDARD',
+      name: '企业标准版',
+      fitFor: '适合多个部门正常使用数字员工和数字工厂。',
+      monthly: plans.find((plan) => plan.code === 'ENTERPRISE_STANDARD_MONTHLY'),
+      annual: plans.find((plan) => plan.code === 'ENTERPRISE_STANDARD_ANNUAL'),
+      highlight: true
+    },
+    {
+      key: 'PRO',
+      name: '企业专业版',
+      fitFor: '适合高频生产、多设备和批量工厂场景。',
+      monthly: plans.find((plan) => plan.code === 'ENTERPRISE_PRO_MONTHLY'),
+      annual: plans.find((plan) => plan.code === 'ENTERPRISE_PRO_ANNUAL'),
+      highlight: false
+    }
+  ];
+  const customPlan = plans.find((plan) => plan.code === 'ENTERPRISE_CUSTOM');
 
   async function createAlipayOrder(plan: PlanDetail) {
     if (!plan.priceCents) {
@@ -141,65 +177,6 @@ export function PurchaseCenterPageClient({
     }
   }
 
-  const planColumns: ColumnsType<PlanDetail> = [
-    {
-      title: '版本',
-      dataIndex: 'name',
-      render: (_value, plan) => (
-        <Space direction="vertical" size={2}>
-          <Typography.Text strong>{plan.name}</Typography.Text>
-          <Typography.Text type="secondary">{plan.code}</Typography.Text>
-        </Space>
-      )
-    },
-    {
-      title: '计费',
-      dataIndex: 'billingCycle',
-      render: (value: string) => billingCycleLabel(value)
-    },
-    {
-      title: '价格',
-      key: 'price',
-      render: (_value, plan) => planPriceText(plan)
-    },
-    {
-      title: '说明',
-      dataIndex: 'description',
-      responsive: ['md']
-    },
-    {
-      title: '当前',
-      key: 'current',
-      render: (_value, plan) =>
-        plan.code === activeWorkspace.planCode ? <QiuStatusTag tone="processing">当前版本</QiuStatusTag> : null
-    },
-    {
-      title: '操作',
-      key: 'action',
-      render: (_value, plan) => {
-        const disabledReason = getPlanPaymentDisabledReason(plan, {
-          isApiFallback,
-          workspaceType: activeWorkspace.workspaceType,
-          isAlipayConfigured: Boolean(alipayStatus?.isConfigured)
-        });
-
-        return (
-          <Button
-            icon={<CreditCardOutlined />}
-            size="small"
-            type={plan.code === activeWorkspace.planCode ? 'default' : 'primary'}
-            disabled={Boolean(disabledReason)}
-            title={disabledReason}
-            loading={payingPlanCode === plan.code}
-            onClick={() => void createAlipayOrder(plan)}
-          >
-            {plan.code === activeWorkspace.planCode ? '续费' : '购买'}
-          </Button>
-        );
-      }
-    }
-  ];
-
   const billingOrderColumns: ColumnsType<BillingOrderSummary> = [
     {
       title: '订单号',
@@ -219,7 +196,7 @@ export function PurchaseCenterPageClient({
     {
       title: '状态',
       dataIndex: 'status',
-      render: (status: string) => <QiuStatusTag tone={orderStatusTone(status)}>{status}</QiuStatusTag>
+      render: (status: string) => <QiuStatusTag tone={orderStatusTone(status)}>{orderStatusLabel(status)}</QiuStatusTag>
     },
     {
       title: '支付',
@@ -227,7 +204,7 @@ export function PurchaseCenterPageClient({
       render: (_value, order) =>
         order.paymentUrl ? (
           <Typography.Link href={order.paymentUrl} target="_blank">
-            打开
+            继续支付
           </Typography.Link>
         ) : (
           <Typography.Text type="secondary">未生成</Typography.Text>
@@ -242,7 +219,10 @@ export function PurchaseCenterPageClient({
 
   return (
     <ConsoleShell currentAccount={currentAccount}>
-      <QiuPage title="购买中心" description="购买、续费和查看企业套餐。">
+      <QiuPage
+        title="套餐与购买"
+        description="为当前企业空间选择套餐。购买后，套餐容量会同步到该企业绑定的 PC 设备。"
+      >
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           {isApiFallback ? <Alert showIcon type="warning" message="后端 API 未连接，当前显示 fallback 数据。" /> : null}
 
@@ -251,7 +231,7 @@ export function PurchaseCenterPageClient({
               <QiuMetricCard title="当前空间" value={activeWorkspace.name} trend={activeWorkspace.workspaceType === 'enterprise' ? '企业空间' : '个人空间'} />
             </Col>
             <Col xs={24} md={8}>
-              <QiuMetricCard title="当前版本" value={currentPlan.name} trend={billingCycleLabel(currentPlan.billingCycle)} />
+              <QiuMetricCard title="当前套餐" value={currentPlan.name} trend={billingCycleLabel(currentPlan.billingCycle)} />
             </Col>
             <Col xs={24} md={8}>
               <QiuMetricCard title="账号" value={currentAccount.account.status} trend={currentAccount.account.primaryEmail} />
@@ -261,7 +241,7 @@ export function PurchaseCenterPageClient({
           <Card bordered={false}>
             <Row gutter={[16, 16]}>
               <Col xs={24} xl={12}>
-                <Descriptions column={1} title="订阅与付款主体">
+                <Descriptions column={1} title="当前订阅">
                   <Descriptions.Item label="计费主体">
                     {billing.billingAccount?.billingName ?? '-'}
                   </Descriptions.Item>
@@ -282,36 +262,107 @@ export function PurchaseCenterPageClient({
                 </Descriptions>
               </Col>
               <Col xs={24} xl={12}>
-                <Descriptions column={1} title="支付通道">
-                  <Descriptions.Item label="默认通道">
-                    {paymentProviderLabel(alipayStatus?.provider ?? 'ALIPAY')}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="配置状态">
-                    <QiuStatusTag tone={alipayStatus?.isConfigured ? 'success' : 'warning'}>
-                      {configStatusText(alipayStatus?.isConfigured)}
-                    </QiuStatusTag>
-                  </Descriptions.Item>
-                  <Descriptions.Item label="网关地址">{alipayStatus?.gatewayUrl ?? '-'}</Descriptions.Item>
-                  <Descriptions.Item label="异步回调">{alipayStatus?.notifyPath ?? '-'}</Descriptions.Item>
-                  <Descriptions.Item label="缺失配置">
-                    <Typography.Text type="secondary" style={{ wordBreak: 'break-word' }}>
-                      {missingAlipayKeys}
-                    </Typography.Text>
-                  </Descriptions.Item>
+                <Descriptions column={1} title="套餐容量说明">
+                  <Descriptions.Item label="授权范围">按企业空间购买</Descriptions.Item>
+                  <Descriptions.Item label="设备规则">企业绑定的每台 PC 设备单独遵守套餐容量</Descriptions.Item>
+                  <Descriptions.Item label="模型费用">模型 API 由 PC 端自行配置，实际费用以模型供应商账单为准</Descriptions.Item>
+                  <Descriptions.Item label="在线支付">{paymentProviderLabel(alipayStatus?.provider ?? 'ALIPAY')}</Descriptions.Item>
                 </Descriptions>
               </Col>
             </Row>
           </Card>
 
-          <Card title="可购买套餐" bordered={false}>
+          <Card title="选择企业套餐" bordered={false}>
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
               <Alert
                 showIcon
                 type="info"
-                message="企业套餐正式价格"
-                description="企业基础版 588 元/月，企业标准版 1088 元/月，企业专业版 2888 元/月；年付按 10 个月计费。"
+                message="套餐费用不包含模型 API 调用费"
+                description="QiuAI WorkOS 负责企业权限、设备容量、数字员工、数字工厂、知识库和任务管理；模型调用由用户在 PC 端自行配置供应商。年付按 10 个月计费。"
               />
-              <Table rowKey="code" columns={planColumns} dataSource={purchasablePlans} pagination={false} />
+              {!alipayStatus?.isConfigured ? (
+                <Alert
+                  showIcon
+                  type="warning"
+                  message="在线支付暂不可用"
+                  description="请联系服务商开通或线下处理，企业端不会展示支付网关和服务器环境变量。"
+                />
+              ) : null}
+              <Row gutter={[16, 16]}>
+                {planGroups.map((group) => {
+                  const basePlan = group.monthly ?? group.annual;
+                  const isCurrentGroup = activeWorkspace.planCode.includes(group.key);
+                  return (
+                    <Col key={group.key} xs={24} lg={8}>
+                      <Card
+                        bordered
+                        title={
+                          <Space size={8} wrap>
+                            <Typography.Text strong>{group.name}</Typography.Text>
+                            {group.highlight ? <Tag color="blue">推荐</Tag> : null}
+                            {isCurrentGroup ? <Tag color="green">当前套餐</Tag> : null}
+                          </Space>
+                        }
+                      >
+                        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                          <Typography.Text type="secondary">{group.fitFor}</Typography.Text>
+                          <Typography.Title level={3} style={{ margin: 0 }}>
+                            {group.monthly ? `${planPriceText(group.monthly)} / 月` : '待配置'}
+                          </Typography.Title>
+                          <Space direction="vertical" size={4}>
+                            <Typography.Text>绑定设备：{entitlementText(basePlan, 'maxDesktopDevices')}</Typography.Text>
+                            <Typography.Text>每台设备数字员工：{entitlementText(basePlan, 'maxRoleInstances')}</Typography.Text>
+                            <Typography.Text>每台设备数字工厂：{entitlementText(basePlan, 'maxDigitalFactories')}</Typography.Text>
+                          </Space>
+                          <Space wrap>
+                            {[group.monthly, group.annual].filter(Boolean).map((plan) => {
+                              const targetPlan = plan as PlanDetail;
+                              const disabledReason = getPlanPaymentDisabledReason(targetPlan, {
+                                isApiFallback,
+                                workspaceType: activeWorkspace.workspaceType,
+                                isAlipayConfigured: Boolean(alipayStatus?.isConfigured)
+                              });
+                              const isCurrentPlan = targetPlan.code === activeWorkspace.planCode;
+                              return (
+                                <Button
+                                  key={targetPlan.code}
+                                  icon={<CreditCardOutlined />}
+                                  type={isCurrentPlan ? 'default' : 'primary'}
+                                  disabled={Boolean(disabledReason)}
+                                  title={disabledReason}
+                                  loading={payingPlanCode === targetPlan.code}
+                                  onClick={() => void createAlipayOrder(targetPlan)}
+                                >
+                                  {isCurrentPlan ? `续费${billingCycleLabel(targetPlan.billingCycle)}` : `开通${billingCycleLabel(targetPlan.billingCycle)}`}
+                                </Button>
+                              );
+                            })}
+                          </Space>
+                        </Space>
+                      </Card>
+                    </Col>
+                  );
+                })}
+              </Row>
+              {customPlan ? (
+                <Card bordered>
+                  <Row gutter={[16, 16]} align="middle">
+                    <Col xs={24} lg={18}>
+                      <Typography.Title level={4} style={{ marginTop: 0 }}>
+                        企业定制版
+                      </Typography.Title>
+                      <Typography.Text type="secondary">
+                        适合私有化部署、行业数字员工、深度数字工厂和企业流程改造。
+                      </Typography.Text>
+                    </Col>
+                    <Col xs={24} lg={6}>
+                      <Button block href="mailto:3431752914@qq.com">
+                        联系开通
+                      </Button>
+                    </Col>
+                  </Row>
+                </Card>
+              ) : null}
             </Space>
           </Card>
 

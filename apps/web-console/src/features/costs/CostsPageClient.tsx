@@ -70,15 +70,22 @@ export function CostsPageClient({ currentAccount, taskDetails, isApiFallback }: 
 
   return (
     <ConsoleShell currentAccount={currentAccount}>
-      <QiuPage title="成本中心" description="按任务汇总模型调用、Token 消耗和执行成本。">
+      <QiuPage title="调用统计" description="按任务汇总模型调用、Token 消耗和费用估算。实际费用以用户配置的模型供应商账单为准。">
         {isApiFallback ? <Alert showIcon type="warning" message="后端 API 未连接，当前显示 fallback 数据。" /> : null}
+        <Alert
+          showIcon
+          type="info"
+          message="这里不是平台扣费账单"
+          description="QiuAI WorkOS 主要记录任务执行过程中的模型调用和 Token 使用情况。当前系统采用 PC 端自配模型，最终费用请以对应模型供应商后台为准。"
+          style={{ marginBottom: 16 }}
+        />
 
         <Row gutter={[16, 16]}>
           <Col xs={24} md={6}>
-            <QiuMetricCard title="总成本" value={formatCurrency(totalCost, currency)} trend="当前任务样本" />
+            <QiuMetricCard title="费用估算" value={formatCurrency(totalCost, currency)} trend="当前任务样本" />
           </Col>
           <Col xs={24} md={6}>
-            <QiuMetricCard title="调用记录" value={String(rows.length)} trend="costRecords" />
+            <QiuMetricCard title="调用记录" value={String(rows.length)} trend="模型调用次数" />
           </Col>
           <Col xs={24} md={6}>
             <QiuMetricCard title="输入 Token" value={totalInputTokens.toLocaleString('zh-CN')} />
@@ -88,7 +95,7 @@ export function CostsPageClient({ currentAccount, taskDetails, isApiFallback }: 
           </Col>
         </Row>
 
-        <Card title="成本明细" bordered={false}>
+        <Card title="模型调用明细" bordered={false}>
           <Table rowKey="id" columns={columns} dataSource={rows} pagination={false} />
         </Card>
       </QiuPage>

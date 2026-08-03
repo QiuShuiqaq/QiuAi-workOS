@@ -1,7 +1,6 @@
 import type {
   CurrentAccountResponse,
-  ListDesktopBindingCodesResponse,
-  ListDesktopDevicesResponse,
+  GetBillingOverviewResponse,
   ListPlansResponse
 } from '@qiuai/api-contract';
 
@@ -9,35 +8,33 @@ import { createServerApiClient } from '../../shared/api/server-api';
 import { rethrowIfFrontendFallbackDisabled } from '../common/api-fallback';
 import { loadCurrentAccount } from '../common/load-current-account';
 import { resolveWorkspaceId } from '../common/resolve-workspace-id';
-import { fallbackPlans } from './fallback-data';
+import { createFallbackBillingOverview, fallbackPlans } from '../settings/fallback-data';
 
-export interface SettingsPageData {
+export interface PurchasePageData {
   currentAccount: CurrentAccountResponse;
   plans: ListPlansResponse;
-  desktopDevices: ListDesktopDevicesResponse;
-  desktopBindingCodes: ListDesktopBindingCodesResponse;
+  billing: GetBillingOverviewResponse;
   isApiFallback: boolean;
 }
 
-export async function loadSettingsPageData(requestedWorkspaceId?: string): Promise<SettingsPageData> {
+export async function loadPurchasePageData(requestedWorkspaceId?: string): Promise<PurchasePageData> {
   const currentAccount = await loadCurrentAccount();
   const workspaceId = resolveWorkspaceId(currentAccount, requestedWorkspaceId);
 
   try {
     const apiClient = await createServerApiClient();
-    const [plans, desktopDevices, desktopBindingCodes] = await Promise.all([
+    const [plans, billing] = await Promise.all([
       apiClient.listPlans(),
-      apiClient.listDesktopDevices(workspaceId),
-      apiClient.listDesktopBindingCodes(workspaceId)
+      apiClient.getBillingOverview(workspaceId)
     ]);
+
     return {
       currentAccount: {
         ...currentAccount,
         activeWorkspaceId: workspaceId
       },
       plans,
-      desktopDevices,
-      desktopBindingCodes,
+      billing,
       isApiFallback: false
     };
   } catch (error) {
@@ -49,12 +46,7 @@ export async function loadSettingsPageData(requestedWorkspaceId?: string): Promi
         activeWorkspaceId: workspaceId
       },
       plans: fallbackPlans,
-      desktopDevices: {
-        data: []
-      },
-      desktopBindingCodes: {
-        data: []
-      },
+      billing: createFallbackBillingOverview(workspaceId),
       isApiFallback: true
     };
   }

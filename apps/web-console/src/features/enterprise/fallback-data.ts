@@ -57,6 +57,7 @@ function buildEnterpriseOverview(workspace: WorkspaceSummary): EnterpriseWorkspa
     ],
     usage: [
       { metricKey: 'roleInstances.count', title: '数字员工数量', usedValue: 3, limitValue: 10, limitUnit: 'count' },
+      { metricKey: 'digitalFactories.count', title: '数字工厂数量', usedValue: 1, limitValue: 1, limitUnit: 'count' },
       { metricKey: 'desktopDevices.count', title: '桌面端设备数量', usedValue: 1, limitValue: 3, limitUnit: 'count' }
     ]
   };
@@ -91,6 +92,7 @@ function buildPersonalOverview(workspace: WorkspaceSummary): EnterpriseWorkspace
     ],
     usage: [
       { metricKey: 'roleInstances.count', title: '数字员工数量', usedValue: 1, limitValue: 3, limitUnit: 'count' },
+      { metricKey: 'digitalFactories.count', title: '数字工厂数量', usedValue: 0, limitValue: 0, limitUnit: 'count' },
       { metricKey: 'desktopDevices.count', title: '桌面端设备数量', usedValue: 1, limitValue: 1, limitUnit: 'count' }
     ]
   };

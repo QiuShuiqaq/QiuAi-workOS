@@ -2939,7 +2939,8 @@ h6 {
   pointer-events: none;
 }
 
-.launch-logos {
+.launch-logos,
+.launch-audience {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2947,7 +2948,8 @@ h6 {
   text-align: center;
 }
 
-.launch-logos h2 {
+.launch-logos h2,
+.launch-audience h2 {
   max-width: 680px;
   color: var(--foreground);
   font-size: clamp(18px, 2vw, 24px);
@@ -2955,7 +2957,8 @@ h6 {
   font-weight: 600;
 }
 
-.launch-logo-row {
+.launch-logo-row,
+.launch-audience-grid {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -2967,6 +2970,38 @@ h6 {
   color: var(--muted);
   font-size: 14px;
   font-weight: 600;
+}
+
+.launch-audience-grid {
+  width: min(100%, 1080px);
+  gap: 12px;
+}
+
+.launch-audience-item {
+  display: flex;
+  min-height: 96px;
+  min-width: min(100%, 250px);
+  flex: 1 1 250px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in oklch, var(--surface), transparent 20%);
+  text-align: left;
+}
+
+.launch-audience-item strong {
+  color: var(--foreground);
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.launch-audience-item span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .launch-heading {
@@ -3000,6 +3035,12 @@ h6 {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
+}
+
+.launch-section-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 28px;
 }
 
 .launch-item {

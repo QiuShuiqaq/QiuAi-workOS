@@ -64,7 +64,7 @@ export function RegisterPageClient({ nextPath }: RegisterPageClientProps) {
             <Typography.Title level={2} style={{ marginBottom: 8 }}>
               注册 QiuAI WorkOS
             </Typography.Title>
-            <Typography.Text type="secondary">创建免费企业工作空间，后续可在购买中心升级。</Typography.Text>
+            <Typography.Text type="secondary">创建免费企业工作空间，后续可在套餐与购买中升级。</Typography.Text>
           </div>
           {errorMessage ? <Alert type="error" showIcon message={errorMessage} /> : null}
           <Form<RegisterFormValues> layout="vertical" onFinish={handleSubmit}>

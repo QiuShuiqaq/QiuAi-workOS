@@ -35,24 +35,24 @@ export function ApprovalsPageClient({
 
   return (
     <ConsoleShell currentAccount={currentAccount}>
-      <QiuPage title="审批中心" description="查看待确认任务和待验收结果。">
+      <QiuPage title="待处理" description="查看需要人工确认、产物验收或异常复核的任务。">
         {isApiFallback ? <Alert showIcon type="warning" message="后端 API 未连接，当前显示 fallback 数据。" /> : null}
 
         <Row gutter={[16, 16]}>
           <Col xs={24} md={8}>
-            <QiuMetricCard title="待审批任务" value={String(waitingTasks.length)} trend="waiting_approval" />
+            <QiuMetricCard title="待处理任务" value={String(waitingTasks.length)} trend="waiting_approval" />
           </Col>
           <Col xs={24} md={8}>
-            <QiuMetricCard title="紧急审批" value={String(urgentCount)} trend="优先处理" />
+            <QiuMetricCard title="优先处理" value={String(urgentCount)} trend="高优先级" />
           </Col>
           <Col xs={24} md={8}>
             <QiuMetricCard title="待验收产物" value={String(approvalArtifacts)} trend="来自任务执行结果" />
           </Col>
         </Row>
 
-        <Card title="审批队列" bordered={false}>
+        <Card title="待处理队列" bordered={false}>
           {waitingTasks.length === 0 ? (
-            <Empty description="暂无待审批任务" />
+            <Empty description="暂无待处理任务" />
           ) : (
             <List
               dataSource={waitingTasks}

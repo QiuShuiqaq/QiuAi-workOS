@@ -278,7 +278,7 @@ export function KnowledgePageClient({
     <ConsoleShell currentAccount={currentAccount}>
       <QiuPage
         title="企业知识库"
-        description={`维护当前企业的基础信息和一份启用中的完整 PDF 知识文档 · ${activeWorkspace.name}`}
+        description={`维护企业基础信息和一份启用中的完整 PDF 知识文档，并同步给已绑定 PC 设备 · ${activeWorkspace.name}`}
         actions={
           <Space>
             <Button icon={<ReloadOutlined />} onClick={() => router.refresh()}>
@@ -312,10 +312,17 @@ export function KnowledgePageClient({
             <Alert showIcon type="warning" message="后端 API 未连接，当前显示 fallback 数据。" />
           ) : null}
 
+          <Alert
+            showIcon
+            type="info"
+            message="企业知识库不会强制参与每一次任务"
+            description="这里维护的是企业共享知识资产。同步到 PC 设备后，数字员工和数字工厂在执行任务时会让用户选择是否启用知识库。"
+          />
+
           <Row gutter={[16, 16]}>
             <Col xs={24} lg={8}>
               <Card bordered={false}>
-                <Descriptions column={1} size="small" title="当前状态">
+                <Descriptions column={1} size="small" title="知识库状态">
                   <Descriptions.Item label="知识库">
                     <Space>
                       <DatabaseOutlined />
@@ -339,6 +346,9 @@ export function KnowledgePageClient({
                   </Descriptions.Item>
                   <Descriptions.Item label="最近更新">
                     {formatDateTime(knowledgeBase.updatedAt)}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="同步范围">
+                    当前企业已绑定的 PC 设备
                   </Descriptions.Item>
                 </Descriptions>
               </Card>

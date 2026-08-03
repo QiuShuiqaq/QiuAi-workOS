@@ -84,12 +84,15 @@ function LaunchSection({
 
 function LaunchHeading({
   title,
+  summary,
 }: {
   title: string;
+  summary?: string;
 }) {
   return (
     <div className="launch-heading">
       <h2>{title}</h2>
+      {summary ? <p>{summary}</p> : null}
     </div>
   );
 }
@@ -215,6 +218,45 @@ export function StudioHomePage({ content, lang }: { content: StudioContent; lang
   const isZh = lang === "zh";
   const featureItems = content.solutions.slice(0, 8);
   const logos = content.trustedLogos.slice(0, 6);
+  const caseItems = content.caseStudies.slice(0, 3);
+  const serviceItems = content.services.slice(0, 4);
+  const scenarioItems = [
+    {
+      title: isZh ? "办公资料整理" : "Office material processing",
+      summary: isZh
+        ? "把文档、表格、会议记录和业务资料整理成 Word、Excel 或清单，减少重复办公。"
+        : "Turn documents, spreadsheets, meeting notes, and business materials into Word files, Excel sheets, and clean checklists.",
+      tags: ["Office", "Word", "Excel"],
+    },
+    {
+      title: isZh ? "企业知识应用" : "Enterprise knowledge use",
+      summary: isZh
+        ? "把企业 PDF 知识库同步到设备，让数字员工结合产品、制度、话术和 FAQ 输出结果。"
+        : "Sync enterprise PDF knowledge to devices so workers can use product, policy, script, and FAQ context.",
+      tags: ["Knowledge", "PDF", "RAG"],
+    },
+    {
+      title: isZh ? "跨境商品图生产" : "Cross-border product images",
+      summary: isZh
+        ? "上传商品参考图，批量生成主图、白底图、尺寸图、场景图、换背景和换模特素材。"
+        : "Upload product references and batch-generate main images, white-background images, size charts, scenes, background changes, and model changes.",
+      tags: ["Commerce", "Image", "Batch"],
+    },
+    {
+      title: isZh ? "视频质检剪辑" : "Video QA and rough cuts",
+      summary: isZh
+        ? "批量筛选视频，结合 ASR 转写和规则判断质量，输出合格视频清单和可选初剪产物。"
+        : "Screen videos in batches, combine ASR transcripts with rules, and output qualified lists plus optional rough cuts.",
+      tags: ["Video", "ASR", "Factory"],
+    },
+    {
+      title: isZh ? "企业岗位辅助" : "Role-based business assistance",
+      summary: isZh
+        ? "面向销售、客服、人事、法务、项目等岗位，生成可复核的表格、报告、话术和行动清单。"
+        : "Support sales, service, HR, legal, and project roles with reviewable sheets, reports, scripts, and action lists.",
+      tags: ["Worker", "Business", "Review"],
+    },
+  ];
 
   return (
     <main className="launch-page launch-page--home">
@@ -228,22 +270,48 @@ export function StudioHomePage({ content, lang }: { content: StudioContent; lang
           <p>{text(content.home.subtitle, lang)}</p>
           <div className="launch-actions">
             <LaunchButton href={localizedHref("/downloads", lang)}>{text(content.home.primaryCta, lang)}</LaunchButton>
-            <LaunchButton href={workosConsoleUrl} variant="secondary">
+            <LaunchButton href={localizedHref("/services", lang)} variant="secondary">
               {text(content.home.secondaryCta, lang)}
+            </LaunchButton>
+            <LaunchButton href={workosConsoleUrl} variant="secondary">
+              {text(content.home.tertiaryCta, lang)}
             </LaunchButton>
           </div>
         </div>
         <HeroMockup lang={lang} />
       </LaunchSection>
 
-      <LaunchSection className="launch-logos">
+      <LaunchSection className="launch-audience">
         <div className="launch-badge launch-badge--quiet">
-          {isZh ? "适用场景" : "Scenario fit"}
+          {isZh ? "面向企业团队" : "Built for enterprise teams"}
         </div>
-        <h2>{isZh ? "给有本地文件、批量任务和企业知识库的团队" : "For teams with local files, batch work, and enterprise knowledge"}</h2>
-        <div className="launch-logo-row">
+        <h2>{isZh ? "适合有本地文件、批量任务、企业知识库和部门协作需求的团队" : "For teams with local files, batch work, enterprise knowledge, and cross-department workflows"}</h2>
+        <div className="launch-audience-grid">
           {logos.map((item) => (
-            <span key={item.id}>{text(item.name, lang)}</span>
+            <article key={item.id} className="launch-audience-item">
+              <strong>{text(item.name, lang)}</strong>
+              <span>{text(item.category, lang)}</span>
+            </article>
+          ))}
+        </div>
+      </LaunchSection>
+
+      <LaunchSection>
+        <LaunchHeading
+          title={isZh ? "企业可以直接落地的 AI 应用场景" : "AI scenarios companies can use directly"}
+          summary={
+            isZh
+              ? "围绕办公资料、企业知识、商品图片、视频素材和岗位协作，把 AI 能力放进可执行的企业场景。"
+              : "Apply AI to executable enterprise scenarios across office materials, knowledge, product images, video assets, and role-based collaboration."
+          }
+        />
+        <div className="launch-card-grid">
+          {scenarioItems.map((item) => (
+            <article className="launch-card" key={item.title}>
+              <h3>{item.title}</h3>
+              <p>{item.summary}</p>
+              <Tags tags={item.tags} />
+            </article>
           ))}
         </div>
       </LaunchSection>
@@ -251,6 +319,11 @@ export function StudioHomePage({ content, lang }: { content: StudioContent; lang
       <LaunchSection>
         <LaunchHeading
           title={isZh ? "从模型配置到稳定产物，能力收在一套系统里" : "From model setup to reliable artifacts in one system"}
+          summary={
+            isZh
+              ? "QiuAI WorkOS 不只提供聊天入口，而是把模型、知识库、工具、日志和交付文件放进同一套工作系统。"
+              : "QiuAI WorkOS is not just a chat entry point; it connects models, knowledge, tools, logs, and deliverable files."
+          }
         />
         <div className="launch-item-grid">
           {featureItems.map((item) => (
@@ -275,8 +348,54 @@ export function StudioHomePage({ content, lang }: { content: StudioContent; lang
         ))}
       </LaunchSection>
 
+      <LaunchSection>
+        <LaunchHeading
+          title={isZh ? "已经沉淀的行业场景" : "Practical scenarios already shaped"}
+          summary={
+            isZh
+              ? "从已落地和已验证的场景开始，展示数字员工与数字工厂在真实业务中的使用方式。"
+              : "Start from shaped and validated scenarios to show how digital workers and factories support real work."
+          }
+        />
+        <div className="launch-card-grid">
+          {caseItems.map((item) => (
+            <CaseCard key={item.id} item={item} lang={lang} />
+          ))}
+        </div>
+        <div className="launch-section-actions">
+          <LaunchButton href={localizedHref("/case-studies", lang)} variant="secondary">
+            {isZh ? "查看行业案例" : "View cases"}
+          </LaunchButton>
+        </div>
+      </LaunchSection>
+
+      <LaunchSection>
+        <LaunchHeading
+          title={isZh ? "企业 AI 升级可以从这几件事开始" : "Start enterprise AI upgrades from these services"}
+          summary={
+            isZh
+              ? "如果企业需要部署、搭建数字员工、落地数字工厂或整理知识库，可以先从企业服务入口沟通。"
+              : "For deployment, worker setup, factory rollout, or knowledge-base work, start from the enterprise services entry."
+          }
+        />
+        <div className="launch-card-grid">
+          {serviceItems.map((service) => (
+            <article key={service.id} className="launch-card">
+              <h3>{text(service.title, lang)}</h3>
+              <p>{compactText(service.summary, lang)}</p>
+              <Tags tags={service.tags} />
+            </article>
+          ))}
+        </div>
+        <div className="launch-section-actions">
+          <LaunchButton href={localizedHref("/services", lang)} variant="secondary">
+            {isZh ? "了解企业服务" : "Explore services"}
+          </LaunchButton>
+        </div>
+      </LaunchSection>
+
       <LaunchSection className="launch-cta">
-        <h2>{isZh ? "安装桌面端，开始搭建企业 AI 工作流" : "Install the desktop client and start building AI workflows"}</h2>
+        <h2>{isZh ? "安装桌面端，开始把 AI 接入企业真实工作" : "Install the desktop client and bring AI into real work"}</h2>
         <LaunchButton href={localizedHref("/downloads", lang)}>{isZh ? "下载客户端" : "Download client"}</LaunchButton>
         <div className="launch-glow" />
       </LaunchSection>

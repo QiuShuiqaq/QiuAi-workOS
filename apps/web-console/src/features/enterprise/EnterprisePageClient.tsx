@@ -27,10 +27,11 @@ export interface EnterprisePageClientProps {
 
 const featureLabels: Record<string, string> = {
   maxRoleInstances: '数字员工数量',
+  maxDigitalFactories: '数字工厂数量',
   maxDesktopDevices: '桌面端设备数量'
 };
 
-const visiblePlanFeatureKeys = ['maxDesktopDevices', 'maxRoleInstances'];
+const visiblePlanFeatureKeys = ['maxDesktopDevices', 'maxRoleInstances', 'maxDigitalFactories'];
 
 function entitlementValue(value: EnterpriseWorkspaceOverview['plan']['entitlements'][number]) {
   if (!value.enabled) return '未启用';
@@ -94,15 +95,15 @@ export function EnterprisePageClient({
   return (
     <ConsoleShell currentAccount={currentAccount}>
       <QiuPage
-        title="企业控制台"
-        description={`单企业账号，管理套餐、设备授权和数字员工使用 · ${activeWorkspace.name}`}
+        title="企业资料"
+        description={`查看企业基础信息、当前套餐容量和设备使用概况 · ${activeWorkspace.name}`}
         actions={
           <Space>
             <Button type="primary" icon={<CreditCardOutlined />} href={purchaseHref}>
-              购买中心
+              套餐与购买
             </Button>
             <Button icon={<SettingOutlined />} href={settingsHref}>
-              设备设置
+              设备与授权
             </Button>
           </Space>
         }
@@ -141,7 +142,7 @@ export function EnterprisePageClient({
 
           <Row gutter={[16, 16]}>
             <Col xs={24} xl={12}>
-              <Card title="企业信息" bordered={false}>
+              <Card title="企业基础资料" bordered={false}>
                 <Descriptions column={1} size="small">
                   <Descriptions.Item label="工作区">{activeWorkspace.name}</Descriptions.Item>
                   <Descriptions.Item label="工作区类型">{activeWorkspace.workspaceType}</Descriptions.Item>
@@ -178,7 +179,7 @@ export function EnterprisePageClient({
           <Card title="用量记录" bordered={false}>
             <Row gutter={[16, 16]}>
               {overview.usage
-                .filter((item) => ['desktopDevices.count', 'roleInstances.count'].includes(item.metricKey))
+                .filter((item) => ['desktopDevices.count', 'roleInstances.count', 'digitalFactories.count'].includes(item.metricKey))
                 .map((item) => (
                   <Col key={item.metricKey} xs={24} md={12} xl={8}>
                     <QiuMetricCard
@@ -192,7 +193,7 @@ export function EnterprisePageClient({
           </Card>
 
           <Typography.Text type="secondary">
-            当前版本按一个企业一个账号设计。员工协作通过企业内部管理设备授权码完成，不再在系统内维护多成员邀请。
+            当前企业端按一个企业一个账号设计。员工协作通过企业内部管理设备授权码完成，不再在系统内维护多成员邀请。
           </Typography.Text>
         </Space>
       </QiuPage>

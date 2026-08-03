@@ -74,7 +74,7 @@ export function ConsoleShell({ currentAccount, children }: ConsoleShellProps) {
           <Typography.Title level={4} style={{ margin: 0 }}>
             QiuAI WorkOS
           </Typography.Title>
-          <Typography.Text type="secondary">企业管理端</Typography.Text>
+          <Typography.Text type="secondary">企业管理控制台</Typography.Text>
         </div>
         <div style={{ padding: '0 16px 16px' }}>
           <QiuWorkspaceSwitcher
@@ -119,24 +119,14 @@ export function ConsoleShell({ currentAccount, children }: ConsoleShellProps) {
               label: <Link href={withWorkspaceId('/')}>工作台</Link>
             },
             {
-              key: 'roles',
-              icon: <RobotOutlined />,
-              label: <Link href={withWorkspaceId('/roles')}>数字员工</Link>
-            },
-            {
-              key: 'approvals',
-              icon: <AuditOutlined />,
-              label: <Link href={withWorkspaceId('/approvals')}>审批中心</Link>
-            },
-            {
-              key: 'costs',
-              icon: <DollarOutlined />,
-              label: <Link href={withWorkspaceId('/costs')}>成本中心</Link>
-            },
-            {
               key: 'purchase',
               icon: <CreditCardOutlined />,
-              label: <Link href={withWorkspaceId('/purchase')}>购买中心</Link>
+              label: <Link href={withWorkspaceId('/purchase')}>套餐与购买</Link>
+            },
+            {
+              key: 'settings',
+              icon: <SettingOutlined />,
+              label: <Link href={withWorkspaceId('/settings')}>设备与授权</Link>
             },
             {
               key: 'knowledge',
@@ -144,14 +134,24 @@ export function ConsoleShell({ currentAccount, children }: ConsoleShellProps) {
               label: <Link href={withWorkspaceId('/knowledge')}>企业知识库</Link>
             },
             {
-              key: 'enterprise',
-              icon: <TeamOutlined />,
-              label: <Link href={withWorkspaceId('/enterprise')}>企业</Link>
+              key: 'roles',
+              icon: <RobotOutlined />,
+              label: <Link href={withWorkspaceId('/roles')}>数字员工</Link>
             },
             {
-              key: 'settings',
-              icon: <SettingOutlined />,
-              label: <Link href={withWorkspaceId('/settings')}>企业设置</Link>
+              key: 'approvals',
+              icon: <AuditOutlined />,
+              label: <Link href={withWorkspaceId('/approvals')}>待处理</Link>
+            },
+            {
+              key: 'costs',
+              icon: <DollarOutlined />,
+              label: <Link href={withWorkspaceId('/costs')}>调用统计</Link>
+            },
+            {
+              key: 'enterprise',
+              icon: <TeamOutlined />,
+              label: <Link href={withWorkspaceId('/enterprise')}>企业资料</Link>
             }
           ]}
         />
