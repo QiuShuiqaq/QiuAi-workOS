@@ -1,10 +1,10 @@
-import { StudioHomePage } from "@/components/studio/studio-pages";
+import { StudioServicesPage } from "@/components/studio/studio-pages";
 import { resolveSiteLanguage } from "@/modules/site/i18n";
 import { readStudioContent } from "@/modules/studio/store";
 
 export const dynamic = "force-dynamic";
 
-export default async function Home({
+export default async function ServicesPage({
   searchParams,
 }: {
   searchParams: Promise<{ lang?: string }>;
@@ -13,5 +13,5 @@ export default async function Home({
   const lang = resolveSiteLanguage(params.lang);
   const content = await readStudioContent();
 
-  return <StudioHomePage content={content} lang={lang} />;
+  return <StudioServicesPage services={content.services} lang={lang} />;
 }
