@@ -7390,33 +7390,47 @@ export default function App() {
                 installedRoleApplicationUsage,
                 authorizedRoleTemplateCatalog.deviceCapacity
               );
+              const installStatusColor = active ? 'green' : installed ? 'blue' : installAvailability.canInstall ? 'default' : 'orange';
+              const installStatusLabel = active
+                ? '当前'
+                : installed
+                  ? '已安装'
+                  : installAvailability.canInstall
+                    ? '可安装'
+                    : installAvailability.label;
+              const installStatusTooltip = !installAvailability.canInstall && !installed
+                ? installAvailability.reason
+                : readiness && !readiness.ready
+                  ? readiness.issueText
+                  : undefined;
 
               return (
                 <Card key={template.roleCode} bordered={false} className="catalog-card role-catalog-card">
                   <Space direction="vertical" size={10} style={{ width: '100%' }} className="role-card-content">
-                    <Flex align="flex-start" justify="space-between" gap={12}>
+                    <Flex align="center" justify="space-between" gap={12} className="role-card-top-row">
                       <Flex align="center" gap={8}>
                         <span className="catalog-card-icon">
                           {isFactory ? <BankOutlined /> : <RobotOutlined />}
                         </span>
-                        {freeTemplate ? <Tag color="green">免费</Tag> : null}
+                        {freeTemplate ? <Tag color="green" className="role-card-fixed-tag">免费</Tag> : null}
                       </Flex>
-                      <Space size={6} wrap>
-                        <Tag color={active ? 'green' : installed ? 'blue' : installAvailability.canInstall ? 'default' : 'orange'}>
-                          {active ? '当前' : installed ? '已安装' : installAvailability.canInstall ? '可安装' : installAvailability.label}
-                        </Tag>
-                        {readiness ? (
-                          <Tooltip title={readiness.issueText}>
-                            <Tag color={readiness.color}>{readiness.label}</Tag>
+                      <span className="role-card-status-tags">
+                        <Tooltip title={installStatusTooltip}>
+                          <Tag color={installStatusColor} className="role-card-fixed-tag">
+                            {installStatusLabel}
+                          </Tag>
+                        </Tooltip>
+                        <Tooltip title={roleExecutionProfileTooltip(template.executionProfile)}>
+                          <Tag color={executionModeMeta.color} className="role-card-fixed-tag">
+                            {executionModeMeta.label}
+                          </Tag>
+                        </Tooltip>
+                        {hasTemplateUpdate ? (
+                          <Tooltip title="该应用模板有新版，可以安装后更新。">
+                            <Tag color="orange" className="role-card-fixed-tag">新版</Tag>
                           </Tooltip>
                         ) : null}
-                        {hasTemplateUpdate ? <Tag color="orange">有新版</Tag> : null}
-                        {isFactory ? <Tag color="purple">工厂</Tag> : null}
-                        <Tooltip title={roleExecutionProfileTooltip(template.executionProfile)}>
-                          <Tag color={executionModeMeta.color}>{executionModeMeta.label}</Tag>
-                        </Tooltip>
-                        <Tag>{roleTemplateCategory(template)}</Tag>
-                      </Space>
+                      </span>
                     </Flex>
 
                     <Flex align="center" gap={6} className="role-card-title-row">
@@ -7436,19 +7450,15 @@ export default function App() {
                       ) : null}
                     </Flex>
 
-                    <Space size={6} wrap>
-                      {template.skills.slice(0, 3).map((skill) => (
-                        <Tag key={skill.code}>{skill.name}</Tag>
-                      ))}
-                    </Space>
+                    {renderRoleSkillTags(template.skills)}
 
                     <div className="role-card-io-grid">
                       {renderRoleIoRow('可上传', fileContract.uploadLabels, fileContract.uploadDetail)}
                       {renderRoleIoRow('可输出', fileContract.outputLabels, fileContract.outputDetail)}
                     </div>
 
-                    <Typography.Text type="secondary" className="catalog-card-meta">
-                      {template.industry} · 任务 {summary?.taskCount ?? 0}
+                    <Typography.Text type="secondary" ellipsis className="catalog-card-meta">
+                      {roleTemplateCategory(template)} / {template.industry} · 任务 {summary?.taskCount ?? 0}
                     </Typography.Text>
 
                     <Space size={6} className="role-card-actions">
@@ -7688,6 +7698,27 @@ export default function App() {
           )}
         </Modal>
       </>
+    );
+  }
+
+  function renderRoleSkillTags(skills: DesktopRoleTemplate['skills']) {
+    const visibleSkills = skills.slice(0, 2);
+    const hiddenSkills = skills.slice(visibleSkills.length);
+    const detail = skills.map((skill) => `${skill.name}：${skill.summary}`).join('\n');
+
+    return (
+      <div className="role-card-skill-row">
+        {visibleSkills.map((skill) => (
+          <Tooltip key={skill.code} title={skill.summary}>
+            <Tag className="role-card-skill-tag">{skill.name}</Tag>
+          </Tooltip>
+        ))}
+        {hiddenSkills.length > 0 ? (
+          <Tooltip title={<span className="role-card-tooltip-lines">{detail}</span>}>
+            <Tag className="role-card-skill-tag">+{hiddenSkills.length}</Tag>
+          </Tooltip>
+        ) : null}
+      </div>
     );
   }
 

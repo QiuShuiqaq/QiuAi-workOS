@@ -2456,6 +2456,7 @@ body,
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: 14px;
+  align-items: stretch;
 }
 
 .catalog-empty-state {
@@ -2474,6 +2475,10 @@ body,
     border-color 0.2s ease,
     box-shadow 0.2s ease,
     transform 0.2s ease;
+}
+
+.role-catalog-card {
+  height: 286px;
 }
 
 .catalog-card:hover {
@@ -2653,11 +2658,40 @@ body,
 }
 
 .role-card-content {
+  display: flex !important;
+  flex-direction: column;
   height: 100%;
   min-height: 0;
 }
 
+.role-card-content > .ant-space-item:last-child {
+  margin-top: auto;
+}
+
+.role-card-top-row {
+  min-height: 32px;
+  overflow: hidden;
+}
+
+.role-card-status-tags {
+  display: flex;
+  flex: 0 1 auto;
+  justify-content: flex-end;
+  min-width: 0;
+  gap: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.role-card-fixed-tag {
+  flex: 0 0 auto;
+  margin-inline-end: 0;
+  font-size: 11px;
+  line-height: 18px;
+}
+
 .role-card-title-row {
+  min-height: 24px;
   min-width: 0;
 }
 
@@ -2684,9 +2718,33 @@ body,
   color: #1677ff;
 }
 
+.role-card-skill-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.role-card-skill-tag {
+  max-width: 88px;
+  margin-inline-end: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.role-card-tooltip-lines {
+  white-space: pre-line;
+}
+
 .role-card-io-grid {
   display: grid;
   gap: 6px;
+  min-height: 64px;
   padding: 8px 0;
   border-top: 1px solid #f0f3f7;
   border-bottom: 1px solid #f0f3f7;
@@ -2708,16 +2766,30 @@ body,
 
 .role-card-io-tags {
   display: flex;
+  align-items: center;
   min-width: 0;
   gap: 4px;
   overflow: hidden;
+  white-space: nowrap;
 }
 
 .role-card-io-tag {
+  max-width: 58px;
   flex: 0 0 auto;
   margin-inline-end: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 11px;
   line-height: 18px;
+}
+
+.catalog-card-meta {
+  max-width: 100%;
+  min-height: 22px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .role-card-actions {
