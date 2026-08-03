@@ -61,6 +61,16 @@ export interface DesktopUpdateCheckResult {
   latestRelease?: DesktopUpdateReleaseSummary;
 }
 
+export interface DesktopUpdateInstallResult {
+  releaseVersion: string;
+  installerPath: string;
+  downloadUrl: string;
+  fileSizeBytes: number;
+  checksumSha256: string;
+  launchedAt: string;
+  willQuit: boolean;
+}
+
 export interface DesktopAgreementDocumentSummary {
   agreementKey: string;
   agreementVersion: string;
@@ -415,6 +425,7 @@ export interface QiuDesktopBridge {
   unbindDesktopDevice(): Promise<DesktopRuntimeState>;
   checkServerConnection(): Promise<DesktopServerConnectionStatus>;
   checkForUpdates(): Promise<DesktopUpdateCheckResult>;
+  downloadAndInstallUpdate(): Promise<DesktopUpdateInstallResult>;
   listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRoleTemplateCatalog>;
   syncRuntimeState(state: DesktopRuntimeState): Promise<DesktopRuntimeSyncResponse>;
   saveRuntimeState(state: DesktopRuntimeState): Promise<void>;

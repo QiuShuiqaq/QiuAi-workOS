@@ -26,8 +26,17 @@ Supported variables:
 - `NEXT_PUBLIC_ICP_BEIAN`
 - `NEXT_PUBLIC_ICP_BEIAN_URL`
 - `NEXT_PUBLIC_WORKOS_CONSOLE_URL`
+- `SERVER_INTERNAL_BASE_URL` for server-side public-site access to the WorkOS API
+- `WORKOS_PUBLIC_BASE_URL` for public desktop installer redirects
 - `NEXT_PUBLIC_ADMIN_CONSOLE_URL`
-- `GITHUB_TOKEN` for GitHub Release download lookup
+- `GITHUB_TOKEN` only for legacy non-WorkOS download items that still point at GitHub Releases
+
+## Downloads
+
+The QiuAI WorkOS Windows client download is maintained from `admin-console` -> `desktop releases`.
+The public site reads the latest published Windows stable desktop release from the WorkOS server and redirects downloads to the server-hosted installer.
+
+Do not maintain a second Windows client package entry from the public-site download admin unless it is a non-WorkOS legacy resource.
 
 ## Production
 

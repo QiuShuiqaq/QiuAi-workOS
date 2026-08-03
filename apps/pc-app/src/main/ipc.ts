@@ -11,6 +11,7 @@ import {
   syncDesktopRuntimeState,
   unbindDesktopDevice
 } from './runtime-state.js';
+import { downloadAndInstallDesktopUpdate } from './update-installer.js';
 import {
   acceptUserAgreement,
   getUserAgreementStatus
@@ -49,6 +50,7 @@ const channels = {
   unbindDesktopDevice: 'qiuai:desktop:unbind-desktop-device',
   checkServerConnection: 'qiuai:desktop:check-server-connection',
   checkForUpdates: 'qiuai:desktop:check-for-updates',
+  downloadAndInstallUpdate: 'qiuai:desktop:download-and-install-update',
   listAuthorizedRoleTemplates: 'qiuai:desktop:list-authorized-role-templates',
   syncRuntimeState: 'qiuai:desktop:sync-runtime-state',
   saveRuntimeState: 'qiuai:desktop:save-runtime-state',
@@ -85,6 +87,7 @@ export function registerDesktopIpc() {
   ipcMain.handle(channels.unbindDesktopDevice, () => unbindDesktopDevice());
   ipcMain.handle(channels.checkServerConnection, () => checkServerConnection());
   ipcMain.handle(channels.checkForUpdates, () => checkForDesktopUpdates());
+  ipcMain.handle(channels.downloadAndInstallUpdate, () => downloadAndInstallDesktopUpdate());
   ipcMain.handle(channels.listAuthorizedRoleTemplates, () => listAuthorizedRoleTemplates());
   ipcMain.handle(channels.syncRuntimeState, async (_, state) => {
     return syncDesktopRuntimeState(state);

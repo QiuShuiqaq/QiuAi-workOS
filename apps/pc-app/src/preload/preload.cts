@@ -27,6 +27,7 @@ import type {
   DesktopToolInvocationRequest,
   DesktopToolInvocationResult,
   DesktopUpdateCheckResult,
+  DesktopUpdateInstallResult,
   DesktopWindowControlAction,
   QiuDesktopBridge
 } from '../shared/desktop-api.js';
@@ -44,6 +45,7 @@ const channels = {
   unbindDesktopDevice: 'qiuai:desktop:unbind-desktop-device',
   checkServerConnection: 'qiuai:desktop:check-server-connection',
   checkForUpdates: 'qiuai:desktop:check-for-updates',
+  downloadAndInstallUpdate: 'qiuai:desktop:download-and-install-update',
   listAuthorizedRoleTemplates: 'qiuai:desktop:list-authorized-role-templates',
   syncRuntimeState: 'qiuai:desktop:sync-runtime-state',
   saveRuntimeState: 'qiuai:desktop:save-runtime-state',
@@ -81,6 +83,8 @@ const bridge: QiuDesktopBridge = {
     ipcRenderer.invoke(channels.checkServerConnection) as Promise<DesktopServerConnectionStatus>,
   checkForUpdates: () =>
     ipcRenderer.invoke(channels.checkForUpdates) as Promise<DesktopUpdateCheckResult>,
+  downloadAndInstallUpdate: () =>
+    ipcRenderer.invoke(channels.downloadAndInstallUpdate) as Promise<DesktopUpdateInstallResult>,
   listAuthorizedRoleTemplates: () =>
     ipcRenderer.invoke(channels.listAuthorizedRoleTemplates) as Promise<DesktopAuthorizedRoleTemplateCatalog>,
   syncRuntimeState: (state: DesktopRuntimeState) =>

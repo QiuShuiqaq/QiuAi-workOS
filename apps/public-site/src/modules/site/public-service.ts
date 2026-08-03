@@ -16,6 +16,7 @@ import {
   DEVELOPER_REPOSITORY_GROUPS,
   HOME_PAGE_COPY,
 } from "@/modules/site/site-curated-data";
+import { buildWorkosWindowsDownloadItem } from "@/modules/site/workos-desktop-release";
 import type {
   DeveloperPageData,
   DocsPageData,
@@ -1855,6 +1856,10 @@ export async function getHomePageData(lang: SiteLanguage): Promise<HomePageData>
 
 export async function getDownloadsPageData(lang: SiteLanguage): Promise<DownloadsPageData> {
   const items = await getManagedDownloadItems();
+  const workosWindowsItem = await buildWorkosWindowsDownloadItem(lang);
+  const otherItems = (items.length ? items : defaultResourceItems)
+    .map((item) => ("projectName" in item ? localizeManagedDownloadItem(item, lang) : localizeResource(item, lang)))
+    .filter((item) => item.slug !== workosWindowsItem.slug);
 
   return {
     title: lang === "zh" ? "QiuAI WorkOS Windows 客户端下载" : "QiuAI WorkOS Windows Client Download",
@@ -1871,9 +1876,7 @@ export async function getDownloadsPageData(lang: SiteLanguage): Promise<Download
             "Bind the enterprise account after installation.",
             "Then configure models and knowledge.",
           ],
-    items: (items.length ? items : defaultResourceItems).map((item) =>
-      "projectName" in item ? localizeManagedDownloadItem(item, lang) : localizeResource(item, lang),
-    ),
+    items: [workosWindowsItem, ...otherItems],
   };
 }
 

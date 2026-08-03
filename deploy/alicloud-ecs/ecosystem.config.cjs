@@ -12,7 +12,8 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         SERVER_HOST: '127.0.0.1',
-        SERVER_PORT: '4100'
+        SERVER_PORT: '4100',
+        WORKOS_PUBLIC_BASE_URL: 'https://workos.qiuaihub.com'
       }
     },
     {
@@ -61,6 +62,9 @@ module.exports = {
       max_memory_restart: '512M',
       env: {
         NODE_ENV: 'production',
+        SERVER_API_BASE_URL: 'http://127.0.0.1:4100',
+        SERVER_INTERNAL_BASE_URL: 'http://127.0.0.1:4100',
+        WORKOS_PUBLIC_BASE_URL: 'https://workos.qiuaihub.com',
         NEXT_PUBLIC_APP_NAME: 'QiuAI WorkOS',
         NEXT_PUBLIC_WORKOS_CONSOLE_URL: 'https://workos.qiuaihub.com',
         NEXT_PUBLIC_ADMIN_CONSOLE_URL: 'https://admin-workos.qiuaihub.com'

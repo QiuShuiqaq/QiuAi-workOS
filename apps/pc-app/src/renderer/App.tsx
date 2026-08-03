@@ -2196,6 +2196,7 @@ export default function App() {
   const [isBindingDevice, setIsBindingDevice] = useState(false);
   const [isBackupBusy, setIsBackupBusy] = useState(false);
   const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false);
+  const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
   const [syncNotice, setSyncNotice] = useState('');
   const [onboardingNotice, setOnboardingNotice] = useState('');
   const [backupNotice, setBackupNotice] = useState('');
@@ -2899,17 +2900,20 @@ export default function App() {
     }
   }
 
-  async function openUpdateDownload() {
-    const downloadUrl = updateCheckResult?.latestRelease?.downloadUrl;
-    if (!downloadUrl || !window.qiuDesktop) {
+  async function downloadAndInstallUpdate() {
+    if (!updateCheckResult?.latestRelease || !window.qiuDesktop) {
       return;
     }
 
+    setIsInstallingUpdate(true);
     setUpdateNotice('');
     try {
-      await window.qiuDesktop.openExternalUrl(downloadUrl);
+      const result = await window.qiuDesktop.downloadAndInstallUpdate();
+      setUpdateNotice(`已下载 ${result.releaseVersion}，正在启动安装程序。客户端会自动退出。`);
     } catch (error) {
-      setUpdateNotice(`打开下载地址失败：${error instanceof Error ? error.message : 'unknown error'}`);
+      setUpdateNotice(`自动更新失败：${error instanceof Error ? error.message : 'unknown error'}`);
+    } finally {
+      setIsInstallingUpdate(false);
     }
   }
 
@@ -4110,8 +4114,9 @@ export default function App() {
               </Button>
               <Button
                 type="primary"
-                disabled={!updateCheckResult?.updateAvailable || !latestRelease}
-                onClick={() => void openUpdateDownload()}
+                loading={isInstallingUpdate}
+                disabled={!updateCheckResult?.updateAvailable || !latestRelease || isCheckingForUpdates}
+                onClick={() => void downloadAndInstallUpdate()}
               >
                 下载并安装新版
               </Button>

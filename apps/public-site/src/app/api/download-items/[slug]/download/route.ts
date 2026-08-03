@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getManagedDownloadItemBySlug } from "@/modules/site/download-items-store";
 import { resolveGithubReleaseAssets } from "@/modules/site/github-release";
 import { incrementDownloadCount } from "@/modules/site/stats-store";
+import { getWorkosWindowsReleaseDownloadUrl } from "@/modules/site/workos-desktop-release";
 
 export const runtime = "nodejs";
 
@@ -13,14 +14,29 @@ export async function GET(
   },
 ) {
   const { slug } = await context.params;
+  const url = new URL(request.url);
+  const kind = url.searchParams.get("kind") === "pdf" ? "pdf" : "app";
+
+  if (slug === "qiuai-workos-windows") {
+    if (kind === "pdf") {
+      return NextResponse.json({ error: "File is not available" }, { status: 404 });
+    }
+
+    const target = await getWorkosWindowsReleaseDownloadUrl();
+    if (!target) {
+      return NextResponse.json({ error: "Desktop installer is not published" }, { status: 404 });
+    }
+
+    await incrementDownloadCount(slug);
+    return NextResponse.redirect(target, { status: 307 });
+  }
+
   const item = await getManagedDownloadItemBySlug(slug);
 
   if (!item || !item.isVisible) {
     return NextResponse.json({ error: "Download item not found" }, { status: 404 });
   }
 
-  const url = new URL(request.url);
-  const kind = url.searchParams.get("kind") === "pdf" ? "pdf" : "app";
   let target = kind === "pdf" ? item.pdfDownloadUrl : item.appDownloadUrl;
 
   if (!target) {
