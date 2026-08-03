@@ -16,12 +16,12 @@ export function readText(text: LocalizedText, lang: SiteLanguage) {
 
 export const siteShellCopy = {
   title: {
-    zh: "秋水code花园",
-    en: "Qiushui Code Garden",
+    zh: "QiuAI WorkOS",
+    en: "QiuAI WorkOS",
   },
   subtitle: {
-    zh: "AI、技术、信息、资源",
-    en: "AI, technology, information, resources",
+    zh: "企业 AI 工作系统",
+    en: "Enterprise AI Work System",
   },
   nav: {
     home: { zh: "首页", en: "Home" },
@@ -69,22 +69,22 @@ export const defaultDeveloperProfile = {
 };
 
 export const defaultHomeEditableContent = {
-  eyebrowZh: "秋水code花园",
-  eyebrowEn: "Qiushui Code Garden",
-  titleZh: "AI 工具、文档和下载",
-  titleEn: "AI tools, docs, and downloads",
+  eyebrowZh: "QiuAI WorkOS",
+  eyebrowEn: "QiuAI WorkOS",
+  titleZh: "企业 AI 数字员工与数字工厂工作系统",
+  titleEn: "Enterprise AI work system for digital workers and digital factories",
   summaryZh:
-    "这里放我自己在用的 AI 工具、开发笔记、安装文件和一些顺手整理的资料。页面不多，按需要进去就行。",
+    "这里提供 QiuAI WorkOS 的产品介绍、Windows 客户端下载、使用文档和企业部署入口。",
   summaryEn:
-    "A curated public site for AI tools, programming topics, learning notes, and software resources, kept simple and practical.",
-  primaryActionLabelZh: "查看下载",
-  primaryActionLabelEn: "Open Downloads",
-  secondaryActionLabelZh: "进入文档",
-  secondaryActionLabelEn: "Open Docs",
-  contactTitleZh: "页脚信息",
-  contactTitleEn: "Site Notes",
-  contactDescriptionZh: "页脚放备案和邮箱。",
-  contactDescriptionEn: "The footer keeps filing information and contact emails visible for long-term access and updates.",
+    "Product information, Windows client downloads, documentation, and enterprise deployment entry points for QiuAI WorkOS.",
+  primaryActionLabelZh: "下载客户端",
+  primaryActionLabelEn: "Download client",
+  secondaryActionLabelZh: "查看文档",
+  secondaryActionLabelEn: "Read docs",
+  contactTitleZh: "联系与备案",
+  contactTitleEn: "Contact and filing",
+  contactDescriptionZh: "企业试用、部署和问题反馈可以通过页脚邮箱联系。",
+  contactDescriptionEn: "Use the footer emails for enterprise trials, deployment, and feedback.",
   icpText: "浙ICP备2026043969号-1",
 };
 
@@ -98,21 +98,21 @@ export const defaultDemoEditableContent = {
 };
 
 export const defaultResourcesEditableContent = {
-  eyebrowZh: "下载中心",
-  eyebrowEn: "Download Center",
-  titleZh: "软件与资料下载",
-  titleEn: "Software and Resource Downloads",
-  summaryZh: "安装包、PDF 教程和补充文件都放这里。",
-  summaryEn: "Software packages, PDF tutorials, and supporting files are maintained from the downloads page.",
+  eyebrowZh: "客户端下载",
+  eyebrowEn: "Client Download",
+  titleZh: "QiuAI WorkOS Windows 客户端下载",
+  titleEn: "QiuAI WorkOS Windows Client Download",
+  summaryZh: "这里维护 WorkOS 客户端安装包、版本信息和必要的安装说明。",
+  summaryEn: "WorkOS client installers, version information, and setup notes are maintained here.",
 };
 
 export const defaultDocsEditableContent = {
-  eyebrowZh: "AI 编程文档",
-  eyebrowEn: "AI Programming Docs",
-  titleZh: "技术文档",
-  titleEn: "Documentation",
-  summaryZh: "这里写 AI 编程、工具使用、部署和开发里常用的东西。",
-  summaryEn: "Topic-based notes on AI programming, model tooling, workflow automation, and practical engineering techniques.",
+  eyebrowZh: "使用文档",
+  eyebrowEn: "Docs",
+  titleZh: "QiuAI WorkOS 使用文档",
+  titleEn: "QiuAI WorkOS Documentation",
+  summaryZh: "这里会逐步沉淀客户端安装、模型配置、知识库、数字员工和数字工厂使用说明，并保留必要的 AI 基础概念资料。",
+  summaryEn: "Client setup, model configuration, knowledge bases, digital workers, and digital factories will be documented here, alongside essential AI concept notes.",
 };
 
 export const defaultHomeFeedSettings: HomeFeedSettings = {
@@ -485,24 +485,24 @@ export const defaultShowcaseItems: EditableShowcaseItem[] = [
 
 export const defaultResourceItems: EditableResourceItem[] = [
   {
-    slug: "qiuai-windows-client",
-    titleZh: "QIUAI Windows 客户端",
-    titleEn: "QIUAI Windows Client",
-    summaryZh: "桌面端安装包，适合需要本地工作流和授权连接能力的用户。",
-    summaryEn: "Desktop installer for users who need local workflows and license connectivity.",
-    formatZh: "安装包",
-    formatEn: "Installer",
+    slug: "qiuai-workos-windows",
+    titleZh: "QiuAI WorkOS Windows 客户端",
+    titleEn: "QiuAI WorkOS Windows Client",
+    summaryZh: "面向企业数字员工与数字工厂的 Windows 桌面端，支持本地文件、Office 文档、模型配置、知识库和批量产物处理。",
+    summaryEn: "Windows desktop client for enterprise digital workers and digital factories, with local files, Office documents, model configuration, knowledge bases, and batch artifact workflows.",
+    formatZh: "EXE",
+    formatEn: "EXE",
     platformZh: "Windows",
     platformEn: "Windows",
     version: "v1.0.0",
-    fileSize: "待补充",
-    updatedAt: "2026-06-23",
-    fileName: "qiuai-windows-client.exe",
+    fileSize: "以 GitHub Release 为准",
+    updatedAt: "2026-08-03",
+    fileName: "QiuAI WorkOS Setup 1.0.0.exe",
     downloadPath: null,
-    tutorialPdfName: "qiuai-windows-guide.pdf",
+    tutorialPdfName: null,
     tutorialPdfPath: null,
-    notesZh: ["适合正式安装使用。", "建议同时下载对应 PDF 教程。"],
-    notesEn: ["Suitable for production installation.", "Download the matching PDF guide as well."],
+    notesZh: ["适用于 Windows 10/11 x64。", "安装后请先绑定企业账号，再配置模型供应商。"],
+    notesEn: ["For Windows 10/11 x64.", "Bind your enterprise account and configure model providers after installation."],
   },
 ];
 

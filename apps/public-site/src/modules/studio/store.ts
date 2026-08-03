@@ -22,9 +22,17 @@ function mergeWithDefaultContent(candidate: unknown): unknown {
     return candidate;
   }
 
+  const defaultContent = cloneDefaultContent();
+  const candidateRecord = candidate as Record<string, unknown>;
+  const candidateVersion = Number(candidateRecord.version);
+
+  if (!Number.isFinite(candidateVersion) || candidateVersion < defaultContent.version) {
+    return defaultContent;
+  }
+
   return {
-    ...cloneDefaultContent(),
-    ...(candidate as Record<string, unknown>),
+    ...defaultContent,
+    ...candidateRecord,
   };
 }
 

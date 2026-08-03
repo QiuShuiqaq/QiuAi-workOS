@@ -1814,9 +1814,12 @@ export function getSiteFooterData(lang: SiteLanguage): SiteFooterData {
   const beian = resolvePublicBeian("浙 ICP 备 2026043969 号-1");
 
   return {
-    siteName: resolvePublicAppName(HOME_PAGE_COPY.titleZh),
-    title: lang === "zh" ? "联系与备案" : "Contact & Filing",
-    description: lang === "zh" ? "联系邮箱和备案信息统一放在页脚。" : "Contact emails and filing information.",
+    siteName: resolvePublicAppName("QiuAI WorkOS"),
+    title: lang === "zh" ? "产品入口与联系" : "Product access and contact",
+    description:
+      lang === "zh"
+        ? "QiuAI WorkOS 面向企业提供 Windows 桌面端、数字员工、数字工厂、模型配置、知识库和稳定产物交付。"
+        : "QiuAI WorkOS provides Windows desktop execution, digital workers, digital factories, model configuration, knowledge bases, and artifact delivery for enterprise teams.",
     contacts: resolvePublicContactEmails(),
     beianText: beian.text,
     beianUrl: beian.url,
@@ -1854,19 +1857,19 @@ export async function getDownloadsPageData(lang: SiteLanguage): Promise<Download
   const items = await getManagedDownloadItems();
 
   return {
-    title: lang === "zh" ? "下载" : "Downloads",
-    eyebrow: lang === "zh" ? "下载中心" : "Download Center",
+    title: lang === "zh" ? "QiuAI WorkOS Windows 客户端下载" : "QiuAI WorkOS Windows Client Download",
+    eyebrow: lang === "zh" ? "客户端下载" : "Client Download",
     summary:
       lang === "zh"
-        ? "安装包、教程 PDF 和补充文件统一放在这里，按平台和用途直接获取。"
-        : "Packages, tutorial PDFs, and supporting files are maintained in one place.",
+        ? "这里维护 WorkOS 客户端安装包、版本信息和必要的安装说明。"
+        : "WorkOS client installers, version information, and setup notes are maintained here.",
     notes:
       lang === "zh"
-        ? ["先看版本说明。", "安装前先看 PDF。", "文件信息都列在下面。"]
+        ? ["适用于 Windows 10/11 x64。", "安装后先绑定企业账号。", "再配置模型和知识库。"]
         : [
-            "Check the version notes first.",
-            "Read the PDF before installing.",
-            "File details are listed below.",
+            "For Windows 10/11 x64.",
+            "Bind the enterprise account after installation.",
+            "Then configure models and knowledge.",
           ],
     items: (items.length ? items : defaultResourceItems).map((item) =>
       "projectName" in item ? localizeManagedDownloadItem(item, lang) : localizeResource(item, lang),
@@ -1883,16 +1886,16 @@ export async function getDocsPageData(lang: SiteLanguage, docSlug?: string): Pro
     tree[0];
 
   return {
-    title: lang === "zh" ? "AI 编程文档" : "AI Programming Docs",
-    eyebrow: lang === "zh" ? "AI 编程文档" : "AI Programming Docs",
+    title: lang === "zh" ? "QiuAI WorkOS 使用文档" : "QiuAI WorkOS Documentation",
+    eyebrow: lang === "zh" ? "使用文档" : "Docs",
     summary:
       lang === "zh"
-        ? "这里整理 AI 编程、工具使用、自动化和开发流程里的高频实战说明，按主题持续沉淀。"
-        : "Topic-based notes on AI programming, tooling, automation, and practical development workflows.",
+        ? "这里会逐步沉淀客户端安装、模型配置、知识库、数字员工和数字工厂使用说明，并保留必要的 AI 基础概念资料。"
+        : "Client setup, model configuration, knowledge bases, digital workers, and digital factories will be documented here, alongside essential AI concept notes.",
     notes:
       lang === "zh"
-        ? ["左侧选择目录。", "中间查看正文。", "右侧使用本页导航。"]
-        : ["Choose a topic on the left.", "Read the article in the center.", "Use page anchors on the right."],
+        ? ["先看安装和配置。", "再按产品选择专题。", "右侧查看本页章节。"]
+        : ["Start with setup and configuration.", "Choose a product topic next.", "Use page anchors on the right."],
     tree,
     activeDoc,
   };

@@ -112,8 +112,8 @@ function LaunchItemIcon({ item }: { item: StudioSolution }) {
 function HeroMockup({ lang }: { lang: SiteLanguage }) {
   const labels =
     lang === "zh"
-      ? ["知识库", "Agent", "工作流", "视觉 AI"]
-      : ["Knowledge", "Agent", "Workflow", "Vision AI"];
+      ? ["数字市场", "数字员工", "数字工厂", "模型配置", "知识库", "输出队列"]
+      : ["Marketplace", "Workers", "Factories", "Models", "Knowledge", "Outputs"];
 
   return (
     <div className="launch-mockup-frame" aria-hidden="true">
@@ -214,7 +214,7 @@ function ListPageLayout({
 export function StudioHomePage({ content, lang }: { content: StudioContent; lang: SiteLanguage }) {
   const isZh = lang === "zh";
   const featureItems = content.solutions.slice(0, 8);
-  const logos = content.trustedLogos.slice(0, 5);
+  const logos = content.trustedLogos.slice(0, 6);
 
   return (
     <main className="launch-page launch-page--home">
@@ -240,7 +240,7 @@ export function StudioHomePage({ content, lang }: { content: StudioContent; lang
         <div className="launch-badge launch-badge--quiet">
           {isZh ? "适用场景" : "Scenario fit"}
         </div>
-        <h2>{isZh ? "面向企业、教育、科研与设计团队" : "For business, education, research and design teams"}</h2>
+        <h2>{isZh ? "给有本地文件、批量任务和企业知识库的团队" : "For teams with local files, batch work, and enterprise knowledge"}</h2>
         <div className="launch-logo-row">
           {logos.map((item) => (
             <span key={item.id}>{text(item.name, lang)}</span>
@@ -250,7 +250,7 @@ export function StudioHomePage({ content, lang }: { content: StudioContent; lang
 
       <LaunchSection>
         <LaunchHeading
-          title={isZh ? "需要的能力，保持简单" : "Everything needed. Nothing extra."}
+          title={isZh ? "从模型配置到稳定产物，能力收在一套系统里" : "From model setup to reliable artifacts in one system"}
         />
         <div className="launch-item-grid">
           {featureItems.map((item) => (
@@ -276,7 +276,7 @@ export function StudioHomePage({ content, lang }: { content: StudioContent; lang
       </LaunchSection>
 
       <LaunchSection className="launch-cta">
-        <h2>{isZh ? "开始部署 QiuAI WorkOS" : "Start with QiuAI WorkOS"}</h2>
+        <h2>{isZh ? "安装桌面端，开始搭建企业 AI 工作流" : "Install the desktop client and start building AI workflows"}</h2>
         <LaunchButton href={localizedHref("/downloads", lang)}>{isZh ? "下载客户端" : "Download client"}</LaunchButton>
         <div className="launch-glow" />
       </LaunchSection>
@@ -289,9 +289,9 @@ export function StudioProjectsPage({ projects, lang }: { projects: StudioProject
 
   return (
     <ListPageLayout
-      eyebrow="Projects"
-      title={isZh ? "项目" : "Projects"}
-      summary={isZh ? "用产品视角展示可复用能力。" : "Reusable product capabilities."}
+      eyebrow="Product"
+      title={isZh ? "产品能力" : "Product capabilities"}
+      summary={isZh ? "围绕桌面端、数字员工、数字工厂、模型配置和知识库组织能力。" : "Capabilities around the desktop client, digital workers, digital factories, model setup, and knowledge bases."}
     >
       <LaunchSection>
         <div className="launch-card-grid">
@@ -332,8 +332,8 @@ export function StudioCaseStudiesPage({ caseStudies, lang }: { caseStudies: Stud
   return (
     <ListPageLayout
       eyebrow="Case Studies"
-      title={isZh ? "案例库" : "Case studies"}
-      summary={isZh ? "用短案例说明 AI 如何进入业务。" : "Short cases showing AI in real workflows."}
+      title={isZh ? "行业案例" : "Industry cases"}
+      summary={isZh ? "优先展示已经适合企业使用的数字员工和数字工厂场景。" : "Practical digital worker and digital factory scenarios for enterprise teams."}
     >
       <LaunchSection>
         <div className="launch-card-grid">
@@ -379,9 +379,9 @@ export function StudioOpenSourcePage({
 
   return (
     <ListPageLayout
-      eyebrow="Open Source"
-      title={isZh ? "开源项目" : "Open source"}
-      summary={isZh ? "展示公开工程作品。" : "Public engineering work."}
+      eyebrow="Engineering"
+      title={isZh ? "工程底座" : "Engineering foundation"}
+      summary={isZh ? "记录 WorkOS 相关的产品化平台、桌面端和模型接入工程。" : "Engineering notes around the WorkOS platform, desktop client, and model integration."}
     >
       <LaunchSection>
         <div className="launch-card-grid">
@@ -408,8 +408,8 @@ export function StudioServicesPage({ services, lang }: { services: StudioService
   return (
     <ListPageLayout
       eyebrow="Services"
-      title={isZh ? "服务" : "Services"}
-      summary={isZh ? "可以独立交付，也可以长期合作。" : "Standalone delivery or long-term collaboration."}
+      title={isZh ? "企业服务" : "Enterprise services"}
+      summary={isZh ? "围绕 WorkOS 的部署、数字员工搭建、数字工厂落地和企业知识库整理提供支持。" : "Support for WorkOS deployment, digital worker setup, digital factory rollout, and enterprise knowledge bases."}
     >
       <LaunchSection>
         <div className="launch-card-grid">

@@ -12,19 +12,21 @@ import type { SiteFooterData, SiteLanguage } from "@/types/site";
 
 const SITE_SHELL_COPY = {
   title: {
-    zh: "秋水code花园",
-    en: "Qiushui Code Garden",
+    zh: "QiuAI WorkOS",
+    en: "QiuAI WorkOS",
   },
   subtitle: {
-    zh: "AI 企业解决方案工作室",
-    en: "AI Solution Studio",
+    zh: "企业 AI 工作系统",
+    en: "Enterprise AI Work System",
   },
   nav: {
     home: { zh: "首页", en: "Home" },
-    projects: { zh: "项目", en: "Projects" },
-    caseStudies: { zh: "案例", en: "Cases" },
+    projects: { zh: "产品", en: "Product" },
+    caseStudies: { zh: "行业案例", en: "Cases" },
     openSource: { zh: "开源", en: "Open" },
-    services: { zh: "服务", en: "Services" },
+    services: { zh: "企业服务", en: "Services" },
+    downloads: { zh: "下载", en: "Download" },
+    docs: { zh: "文档", en: "Docs" },
     team: { zh: "团队", en: "Team" },
     about: { zh: "关于", en: "About" },
     contact: { zh: "联系", en: "Contact" },
@@ -42,6 +44,8 @@ type PublicNavKey =
   | "caseStudies"
   | "openSource"
   | "services"
+  | "downloads"
+  | "docs"
   | "team"
   | "about"
   | "contact";
@@ -69,6 +73,8 @@ function getSiteShellText(lang: SiteLanguage) {
       caseStudies: readText(SITE_SHELL_COPY.nav.caseStudies, lang),
       openSource: readText(SITE_SHELL_COPY.nav.openSource, lang),
       services: readText(SITE_SHELL_COPY.nav.services, lang),
+      downloads: readText(SITE_SHELL_COPY.nav.downloads, lang),
+      docs: readText(SITE_SHELL_COPY.nav.docs, lang),
       team: readText(SITE_SHELL_COPY.nav.team, lang),
       about: readText(SITE_SHELL_COPY.nav.about, lang),
       contact: readText(SITE_SHELL_COPY.nav.contact, lang),
@@ -81,12 +87,12 @@ function getSiteFooterData(lang: SiteLanguage): SiteFooterData {
   const beianUrl = process.env.NEXT_PUBLIC_ICP_BEIAN_URL?.trim() || "https://beian.miit.gov.cn/";
 
   return {
-    siteName: process.env.NEXT_PUBLIC_APP_NAME?.trim() || "qiuaihub",
-    title: lang === "zh" ? "联系与资源" : "Contact and resources",
+    siteName: process.env.NEXT_PUBLIC_APP_NAME?.trim() || "QiuAI WorkOS",
+    title: lang === "zh" ? "产品入口与联系" : "Product access and contact",
     description:
       lang === "zh"
-        ? "面向企业 AI 落地、AI SaaS、Agent、RAG、智能视觉与工作流自动化的长期工程实践。"
-        : "Long-term engineering practice around business AI systems, AI SaaS, agents, RAG, vision AI, and workflow automation.",
+        ? "QiuAI WorkOS 面向企业提供 Windows 桌面端、数字员工、数字工厂、模型配置、知识库和稳定产物交付。"
+        : "QiuAI WorkOS provides Windows desktop execution, digital workers, digital factories, model configuration, knowledge bases, and artifact delivery for enterprise teams.",
     contacts: [
       { label: "QQ", value: "3431752914@qq.com", href: "mailto:3431752914@qq.com" },
       { label: "163", value: "15005828899@163.com", href: "mailto:15005828899@163.com" },
@@ -136,6 +142,14 @@ function resolveCurrentKey(pathname: string): PublicNavKey {
 
   if (pathname.startsWith("/services")) {
     return "services";
+  }
+
+  if (pathname.startsWith("/downloads")) {
+    return "downloads";
+  }
+
+  if (pathname.startsWith("/docs")) {
+    return "docs";
   }
 
   if (pathname.startsWith("/team")) {
@@ -189,10 +203,9 @@ function PublicSiteFrameInner({
     { key: "home", href: buildLocalizedHref("/", lang), label: shellText.nav.home },
     { key: "projects", href: buildLocalizedHref("/projects", lang), label: shellText.nav.projects },
     { key: "caseStudies", href: buildLocalizedHref("/case-studies", lang), label: shellText.nav.caseStudies },
-    { key: "openSource", href: buildLocalizedHref("/open-source", lang), label: shellText.nav.openSource },
     { key: "services", href: buildLocalizedHref("/services", lang), label: shellText.nav.services },
-    { key: "team", href: buildLocalizedHref("/team", lang), label: shellText.nav.team },
-    { key: "about", href: buildLocalizedHref("/about", lang), label: shellText.nav.about },
+    { key: "downloads", href: buildLocalizedHref("/downloads", lang), label: shellText.nav.downloads },
+    { key: "docs", href: buildLocalizedHref("/docs", lang), label: shellText.nav.docs },
     { key: "contact", href: buildLocalizedHref("/contact", lang), label: shellText.nav.contact },
   ];
 
