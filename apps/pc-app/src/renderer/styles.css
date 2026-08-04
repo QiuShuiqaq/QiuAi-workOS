@@ -56,6 +56,52 @@ body,
   margin-bottom: 16px;
 }
 
+.inline-help-title {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+}
+
+.inline-help-title > span:first-child {
+  min-width: 0;
+}
+
+.page-title .inline-help-title {
+  vertical-align: middle;
+}
+
+.help-tip-trigger {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #d9e2ec;
+  border-radius: 50%;
+  background: #fff;
+  color: #8c959f;
+  cursor: help;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.help-tip-trigger:hover {
+  border-color: #91caff;
+  color: #1677ff;
+}
+
+.help-tip-trigger.warning {
+  border-color: #ffd591;
+  color: #ad6800;
+}
+
+.compact-path-text {
+  display: block;
+  max-width: min(640px, 54vw);
+}
+
 .settings-page {
   height: 100%;
   min-height: 0;
@@ -1432,6 +1478,16 @@ body,
   overflow-y: auto;
 }
 
+.factory-parameter-action-row {
+  position: sticky;
+  bottom: -14px;
+  z-index: 2;
+  margin: 4px -14px -14px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid #eef2f7;
+  background: #fff;
+}
+
 .factory-inline-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2466,6 +2522,16 @@ body,
   background: #fafcff;
 }
 
+.catalog-capacity-row {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+}
+
+.catalog-capacity-row .ant-tag {
+  margin-inline-end: 0;
+}
+
 .catalog-card {
   min-height: 220px;
   border: 1px solid #e5e7eb;
@@ -2929,14 +2995,16 @@ body,
 
 .factory-screening-rule-row {
   display: grid;
-  grid-template-columns: minmax(130px, 1.2fr) minmax(100px, 0.8fr) minmax(120px, 0.9fr) minmax(160px, 1.4fr) auto;
+  grid-template-columns: minmax(130px, 1.2fr) minmax(100px, 0.8fr) minmax(120px, 0.9fr) minmax(160px, 1.4fr) auto auto;
   gap: 8px;
   align-items: start;
 }
 
 .factory-screening-rule-hint {
-  grid-column: 1 / -1;
-  margin-top: -4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
 }
 
 .factory-upload-panel {
@@ -3143,6 +3211,14 @@ body,
 
 .simple-panel h5.ant-typography {
   margin-top: 0;
+}
+
+.compact-info-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
 }
 
 .settings-list-page {

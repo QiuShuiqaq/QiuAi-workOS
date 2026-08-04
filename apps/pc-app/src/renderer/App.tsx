@@ -191,6 +191,51 @@ interface DesktopClientPreferences {
   startupSection: SectionKey;
 }
 
+interface HelpTipProps {
+  content: ReactNode;
+  label?: string;
+  tone?: 'info' | 'warning';
+}
+
+function HelpTip({ content, label = '说明', tone = 'info' }: HelpTipProps) {
+  const tooltipContent =
+    typeof content === 'string' && content.includes('\n')
+      ? <span className="role-card-tooltip-lines">{content}</span>
+      : content;
+
+  return (
+    <Tooltip title={tooltipContent} placement="top">
+      <button type="button" className={`help-tip-trigger ${tone}`} aria-label={label}>
+        {tone === 'warning' ? <ExclamationCircleOutlined /> : <InfoCircleOutlined />}
+      </button>
+    </Tooltip>
+  );
+}
+
+function InlineHelpTitle({ children, help, label = '说明' }: { children: ReactNode; help?: ReactNode; label?: string }) {
+  return (
+    <span className="inline-help-title">
+      <span>{children}</span>
+      {help ? <HelpTip content={help} label={label} /> : null}
+    </span>
+  );
+}
+
+function CompactPathText({ value, placeholder = '未提供' }: { value?: string; placeholder?: string }) {
+  const displayValue = value?.trim() || placeholder;
+
+  return (
+    <Typography.Text
+      type="secondary"
+      ellipsis={{ tooltip: displayValue }}
+      copyable={Boolean(value?.trim())}
+      className="compact-path-text"
+    >
+      {displayValue}
+    </Typography.Text>
+  );
+}
+
 type DesktopRoleTemplate = RoleTemplateCatalogEntry & {
   dependencyManifest?: RoleTemplateDependencyManifest;
   executionProfile?: RoleTemplateDependencyManifest['executionProfile'];
@@ -4261,9 +4306,15 @@ export default function App() {
 
         {accountModal === 'download' ? (
           <Space direction="vertical" size={16} className="account-modal-body">
-            <Typography.Paragraph type="secondary">
-              客户端会从服务端读取管理后台“桌面版本”中已发布的 Windows stable 安装包。管理员上传并发布新版后，这里即可检查并下载。
-            </Typography.Paragraph>
+            <Flex align="center" justify="space-between" gap={12}>
+              <InlineHelpTitle help="客户端会从服务端读取管理后台“桌面版本”中已发布的 Windows stable 安装包。管理员上传并发布新版后，这里即可检查并下载。">
+                更新状态
+              </InlineHelpTitle>
+              <HelpTip
+                label="管理员维护方式"
+                content="管理员在 admin-console 打开“桌面版本”，上传新版安装包，填写版本号、更新说明、最低支持版本和强制更新策略，确认无误后发布。"
+              />
+            </Flex>
             <Descriptions column={1} size="small" bordered>
               <Descriptions.Item label="当前版本">{runtimeState.app.appVersion}</Descriptions.Item>
               <Descriptions.Item label="最新版本">
@@ -4313,12 +4364,6 @@ export default function App() {
                 下载并安装新版
               </Button>
             </Space>
-            <div className="account-update-note">
-              <Typography.Text strong>管理员维护方式</Typography.Text>
-              <Typography.Text type="secondary">
-                在 admin-console 打开“桌面版本”，上传新版安装包，填写版本号、更新说明、最低支持版本和强制更新策略，确认无误后发布。
-              </Typography.Text>
-            </div>
           </Space>
         ) : null}
 
@@ -4706,9 +4751,9 @@ export default function App() {
                                 icon={<DeleteOutlined />}
                                 onClick={() => removeFactoryScreeningRuleDraft(gateIndex, ruleIndex)}
                               />
-                              <Typography.Text type="secondary" className="factory-screening-rule-hint">
-                                {metric.description}
-                              </Typography.Text>
+                              <span className="factory-screening-rule-hint">
+                                <HelpTip label={`${metric.label}说明`} content={metric.description} />
+                              </span>
                             </div>
                           );
                         })}
@@ -5268,10 +5313,9 @@ export default function App() {
       <div className="workbench-page">
         <aside className="agent-session-panel">
           <Flex align="center" justify="space-between" className="agent-panel-header">
-            <Space direction="vertical" size={0}>
+            <InlineHelpTitle help="选择已安装的数字员工后，可以在右侧对话区发起任务、上传文件并查看产物。">
               <Typography.Text strong>对话</Typography.Text>
-              <Typography.Text type="secondary">选择数字员工</Typography.Text>
-            </Space>
+            </InlineHelpTitle>
             <Button size="small" shape="circle" icon={<PlusOutlined />} onClick={() => navigateToSection('roles')} />
           </Flex>
 
@@ -5345,9 +5389,11 @@ export default function App() {
               </span>
               <Space direction="vertical" size={2} className="chat-header-main">
                 <span className="chat-header-title-row">
-                  <Typography.Text strong>
-                    {conversationRole?.name ?? '选择一个数字员工'}
-                  </Typography.Text>
+                  <InlineHelpTitle help={conversationRole?.summary}>
+                    <Typography.Text strong>
+                      {conversationRole?.name ?? '选择一个数字员工'}
+                    </Typography.Text>
+                  </InlineHelpTitle>
                   <Popover
                     trigger="click"
                     placement="bottomLeft"
@@ -5363,9 +5409,6 @@ export default function App() {
                     </Button>
                   </Popover>
                 </span>
-                <Typography.Text type="secondary">
-                  {conversationRole?.summary ?? '选择左侧员工后，直接用自然语言下达任务。'}
-                </Typography.Text>
                 {renderRuntimeModelSummaryStrip({
                   rolePackage: conversationRole,
                   compact: true,
@@ -5751,6 +5794,7 @@ export default function App() {
                   className="composer-file-input"
                   type="file"
                   multiple
+                  hidden
                   onChange={handleComposerFileInputChange}
                 />
               </Space>
@@ -6007,10 +6051,9 @@ export default function App() {
       <div className="workbench-page factory-page">
         <aside className="agent-session-panel">
           <Flex align="center" justify="space-between" className="agent-panel-header">
-            <Space direction="vertical" size={0}>
+            <InlineHelpTitle help="选择已安装的数字工厂后，可以在右侧批量上传素材、设置参数并查看输出队列。">
               <Typography.Text strong>批量工厂</Typography.Text>
-              <Typography.Text type="secondary">选择数字工厂</Typography.Text>
-            </Space>
+            </InlineHelpTitle>
             <Button size="small" shape="circle" icon={<PlusOutlined />} onClick={() => navigateToSection('roles')} />
           </Flex>
 
@@ -6092,7 +6135,9 @@ export default function App() {
                   </span>
                   <Space direction="vertical" size={4} className="chat-header-main">
                     <Space size={8} wrap>
-                      <Typography.Text strong>{selectedFactoryPackage.name}</Typography.Text>
+                      <InlineHelpTitle help={selectedFactoryPackage.summary}>
+                        <Typography.Text strong>{selectedFactoryPackage.name}</Typography.Text>
+                      </InlineHelpTitle>
                       <Tag color={selectedFactoryReadiness?.ready ? 'green' : 'orange'}>
                         {selectedFactoryReadiness?.label ?? '待检查'}
                       </Tag>
@@ -6104,11 +6149,8 @@ export default function App() {
                             : isOperationFactory
                               ? '运营内容批处理'
                               : '图片批处理'}
-                      </Tag>
+                        </Tag>
                     </Space>
-                    <Typography.Text type="secondary">
-                      {selectedFactoryPackage.summary ?? '批量上传素材，按工作流生成结构化产物。'}
-                    </Typography.Text>
                     {renderRuntimeModelSummaryStrip({
                       rolePackage: selectedFactoryPackage,
                       compact: true,
@@ -6126,17 +6168,6 @@ export default function App() {
                     }}
                   >
                     模型与工具
-                  </Button>
-                  <Button
-                    type="primary"
-                    icon={<PlayCircleOutlined />}
-                    disabled={selectedFactoryDeleted}
-                    onClick={() => {
-                      factoryRunForm.setFieldsValue({ roleCode: selectedFactoryCode });
-                      factoryRunForm.submit();
-                    }}
-                  >
-                    开始任务
                   </Button>
                 </Space>
               </header>
@@ -6380,9 +6411,10 @@ export default function App() {
                                     <Tag color={selectedProfile.custom ? 'blue' : 'default'}>
                                       {selectedProfile.custom ? '自定义标准' : '系统模板'}
                                     </Tag>
-                                    <Typography.Text type="secondary">
-                                      {selectedProfile.description ?? '按当前筛选标准逐级判断视频是否进入后续流程。'}
-                                    </Typography.Text>
+                                    <HelpTip
+                                      label="筛选标准说明"
+                                      content={selectedProfile.description ?? '按当前筛选标准逐级判断视频是否进入后续流程。'}
+                                    />
                                   </div>
                                 ) : null;
                               }}
@@ -6487,8 +6519,9 @@ export default function App() {
                             </Form.Item>
                             <div className="factory-prompt-control-block">
                               <Flex align="center" justify="space-between" gap={8}>
-                                <Typography.Text strong>提示词控制</Typography.Text>
-                                <Typography.Text type="secondary">控制生视频模型的画面、风格和文字</Typography.Text>
+                                <InlineHelpTitle help="控制生视频模型的画面、风格、镜头语言和画面文字，最终会参与生成视频提示词。">
+                                  <Typography.Text strong>提示词控制</Typography.Text>
+                                </InlineHelpTitle>
                               </Flex>
                               <div className="factory-prompt-control-grid">
                                 {promptControlFields.map((field) => (
@@ -6659,16 +6692,20 @@ export default function App() {
                             </Form.Item>
                             <Form.Item
                               name="enableImageUnderstanding"
-                              label="图片理解增强"
+                              label={
+                                <InlineHelpTitle help="默认关闭以提升批量生成速度；开启后会先调用图片理解模型分析商品图并生成更细的提示词。">
+                                  图片理解增强
+                                </InlineHelpTitle>
+                              }
                               valuePropName="checked"
-                              extra="默认关闭以提升批量生成速度；开启后会先调用图片理解模型分析商品图并生成更细的提示词。"
                             >
                               <Switch checkedChildren="开启" unCheckedChildren="关闭" />
                             </Form.Item>
                             <div className="factory-prompt-control-block">
                               <Flex align="center" justify="space-between" gap={8}>
-                                <Typography.Text strong>提示词控制</Typography.Text>
-                                <Typography.Text type="secondary">控制提示词模型怎么写生图指令</Typography.Text>
+                                <InlineHelpTitle help="控制提示词模型如何编写生图指令，包括风格、禁止内容、文字语言和平台要求。">
+                                  <Typography.Text strong>提示词控制</Typography.Text>
+                                </InlineHelpTitle>
                               </Flex>
                               <div className="factory-prompt-control-grid">
                                 {promptControlFields.map((field) => (
@@ -6690,6 +6727,18 @@ export default function App() {
                             </Form.Item>
                           </>
                         )}
+                        <div className="factory-parameter-action-row">
+                          <Button
+                            block
+                            type="primary"
+                            htmlType="submit"
+                            icon={<PlayCircleOutlined />}
+                            disabled={selectedFactoryDeleted}
+                            onClick={() => factoryRunForm.setFieldsValue({ roleCode: selectedFactoryCode })}
+                          >
+                            开始任务
+                          </Button>
+                        </div>
                       </section>
                     </Form>
                   </section>
@@ -6697,10 +6746,9 @@ export default function App() {
                   <section className="factory-console-column factory-console-main">
                     <section className="factory-panel factory-queue-panel">
                       <Flex align="center" justify="space-between" gap={12}>
-                        <Space direction="vertical" size={2}>
+                        <InlineHelpTitle help="展示当前数字工厂的批次进度、状态和关键阶段。">
                           <Typography.Text strong>任务队列</Typography.Text>
-                          <Typography.Text type="secondary">批量任务的进度和状态。</Typography.Text>
-                        </Space>
+                        </InlineHelpTitle>
                         <Tag>{selectedFactoryTasks.length} 个批次</Tag>
                       </Flex>
 
@@ -6757,10 +6805,9 @@ export default function App() {
 
                     <section className="factory-panel factory-output-panel">
                       <Flex align="center" justify="space-between" gap={12}>
-                        <Space direction="vertical" size={2}>
+                        <InlineHelpTitle help="集中查看产物和每一条输出物，支持预览、导出、状态修改和删除。">
                           <Typography.Text strong>输出队列</Typography.Text>
-                          <Typography.Text type="secondary">结果文件和本地位置。</Typography.Text>
-                        </Space>
+                        </InlineHelpTitle>
                         <Tag color={focusedFactoryArtifacts.length + focusedFactoryOutputs.length > 0 ? 'green' : 'default'}>
                           产物 {focusedFactoryArtifacts.length} / 输出物 {focusedFactoryOutputs.length}
                         </Tag>
@@ -7206,11 +7253,10 @@ export default function App() {
         <Flex align="center" justify="space-between" gap={16} wrap="wrap" className="catalog-page-header">
           <div>
             <Typography.Title level={2} className="page-title">
-              日志
+              <InlineHelpTitle help="查看所有任务的执行细节、节点输入输出、工具调用和失败原因。">
+                日志
+              </InlineHelpTitle>
             </Typography.Title>
-            <Typography.Text type="secondary">
-              查看所有任务的执行细节、节点输入输出、工具调用和失败原因。
-            </Typography.Text>
           </div>
           <Space size={8} wrap>
             <Tag color="default">全部 {taskDetails.length}</Tag>
@@ -7427,7 +7473,9 @@ export default function App() {
             <Card size="small" bordered className="role-model-requirements-card">
               <Space direction="vertical" size={8} style={{ width: '100%' }}>
                 <Flex align="center" justify="space-between" gap={12}>
-                  <Typography.Text strong>模型连接</Typography.Text>
+                  <InlineHelpTitle help="这里检查当前应用需要的模型槽位是否已经能调用。具体供应商和模型可在下方切换。">
+                    <Typography.Text strong>模型连接</Typography.Text>
+                  </InlineHelpTitle>
                   <Tag color={roleConfigHasUnreadyModel ? 'orange' : 'green'}>
                     {roleConfigHasUnreadyModel ? '待配置' : '已就绪'}
                   </Tag>
@@ -7467,20 +7515,25 @@ export default function App() {
                           </Space>
                         }
                         description={
-                          <Space direction="vertical" size={2}>
+                          <Space size={6} wrap>
                             <Typography.Text type="secondary">
-                              Profile ID：{requirement.profile.id}
+                              Key {requirement.configured ? '已填写' : '待填写'}
                             </Typography.Text>
                             <Typography.Text type="secondary">
-                              Base URL：{displayProfile.apiBaseUrl || '待填写'}
+                              {requirement.enabled ? '已启用' : '未启用'}
                             </Typography.Text>
-                            <Typography.Text type="secondary">
-                              API Key：{requirement.configured ? '已填写' : '待填写'} · 启用：
-                              {requirement.enabled ? '已启用' : '未启用'} · 节点：
-                              {requirement.requiredByNodeIds.length > 0
-                                ? requirement.requiredByNodeIds.join('、')
-                                : '通用绑定'}
-                            </Typography.Text>
+                            <HelpTip
+                              label="模型连接详情"
+                              content={[
+                                `Profile ID：${requirement.profile.id}`,
+                                `Base URL：${displayProfile.apiBaseUrl || '待填写'}`,
+                                `节点：${
+                                  requirement.requiredByNodeIds.length > 0
+                                    ? requirement.requiredByNodeIds.join('、')
+                                    : '通用绑定'
+                                }`
+                              ].join('\n')}
+                            />
                           </Space>
                         }
                       />
@@ -7488,9 +7541,9 @@ export default function App() {
                     );
                   }}
                 />
-                <Typography.Text type="secondary">
-                  API Key 只保存在当前电脑；这里可为每个模型槽位选择实际调用模型。
-                </Typography.Text>
+                <InlineHelpTitle help="API Key 只保存在当前电脑；这里可为每个模型槽位选择实际调用模型。">
+                  <Typography.Text type="secondary">调用配置</Typography.Text>
+                </InlineHelpTitle>
               </Space>
             </Card>
 
@@ -7507,7 +7560,9 @@ export default function App() {
               onFinish={submitRoleConfig}
             >
               <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                <Typography.Text strong>模型调用设置</Typography.Text>
+                <InlineHelpTitle help="可以为每个模型槽位选择实际调用模型，并选择使用默认 Key、已有 Key 或当前应用专用 Key。">
+                  <Typography.Text strong>模型调用设置</Typography.Text>
+                </InlineHelpTitle>
                 {roleConfigModelRequirements.length === 0 ? (
                   <Empty description={`当前${roleConfigApplicationLabel}没有声明模型需求`} />
                 ) : (
@@ -7631,11 +7686,10 @@ export default function App() {
           <Flex align="center" justify="space-between" gap={16} wrap="wrap" className="catalog-page-header">
             <div>
               <Typography.Title level={2} className="page-title">
-                数字市场
+                <InlineHelpTitle help="选择、安装和配置数字员工与数字工厂；安装后到对应侧边栏开始使用。">
+                  数字市场
+                </InlineHelpTitle>
               </Typography.Title>
-              <Typography.Text type="secondary">
-                选择、安装和配置数字员工与数字工厂；安装后到对应侧边栏开始使用。
-              </Typography.Text>
             </div>
             <Button icon={<ReloadOutlined />} loading={isLoadingRoleTemplates} onClick={loadAuthorizedRoleTemplates}>
               刷新
@@ -7672,9 +7726,9 @@ export default function App() {
             ))}
           </div>
 
-          <Typography.Paragraph type="secondary" className="catalog-capacity-hint">
-            {selectedApplicationCapacityText}
-          </Typography.Paragraph>
+          <div className="catalog-capacity-row">
+            <Tag>{selectedApplicationCapacityText}</Tag>
+          </div>
 
           {roleTemplateNotice ? (
             <Typography.Paragraph type="secondary">
@@ -8262,11 +8316,10 @@ export default function App() {
           <Flex align="center" justify="space-between" gap={16} wrap="wrap" className="catalog-page-header">
             <div>
               <Typography.Title level={2} className="page-title">
-                模型配置
+                <InlineHelpTitle help="配置供应商默认 API Key；数字员工和数字工厂也可以在安装后选择实际调用模型或单独覆盖 Key。">
+                  模型配置
+                </InlineHelpTitle>
               </Typography.Title>
-              <Typography.Text type="secondary">
-                配置供应商默认 API Key；数字员工也可以单独覆盖自己的 Key。
-              </Typography.Text>
             </div>
 
             <Space wrap>
@@ -8302,12 +8355,11 @@ export default function App() {
           {filteredCustomModelProfiles.length > 0 ? (
             <div className="custom-model-profile-section">
               <Flex align="center" justify="space-between" gap={12} wrap="wrap" className="custom-model-profile-header">
-                <Space direction="vertical" size={2}>
-                  <Typography.Title level={4}>已创建模型配置</Typography.Title>
-                  <Typography.Text type="secondary">
-                    自定义兼容接口会按你填写的模型供应商和模型名称展示，可创建多个独立配置。
-                  </Typography.Text>
-                </Space>
+                <Typography.Title level={4}>
+                  <InlineHelpTitle help="自定义兼容接口会按你填写的模型供应商和模型名称展示，可创建多个独立配置。">
+                    已创建模型配置
+                  </InlineHelpTitle>
+                </Typography.Title>
                 <Tag color="blue">{filteredCustomModelProfiles.length} 个配置</Tag>
               </Flex>
               <div className="catalog-grid model-provider-grid custom-model-profile-grid">
@@ -8351,11 +8403,19 @@ export default function App() {
                         </Flex>
 
                         <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                          <Typography.Title level={5}>{providerName} / {modelName}</Typography.Title>
-                          <Typography.Paragraph type="secondary" ellipsis={{ rows: 2 }}>
-                            {modelCapabilitySummary(profile.capabilities, profile.purpose)}
-                            {profile.apiBaseUrl ? ` · ${profile.apiBaseUrl}` : ''}
-                          </Typography.Paragraph>
+                          <Typography.Title level={5}>
+                            <InlineHelpTitle
+                              help={[
+                                modelCapabilitySummary(profile.capabilities, profile.purpose),
+                                profile.apiBaseUrl ? `API Base URL：${profile.apiBaseUrl}` : ''
+                              ].filter(Boolean).join('\n')}
+                            >
+                              {providerName} / {modelName}
+                            </InlineHelpTitle>
+                          </Typography.Title>
+                          <Space size={6} wrap>
+                            <Tag>{modelCapabilitySummary(profile.capabilities, profile.purpose)}</Tag>
+                          </Space>
                         </Space>
 
                         <div className="catalog-card-action-row">
@@ -8416,14 +8476,16 @@ export default function App() {
                   </Flex>
 
                   <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                    <Typography.Title level={5}>{preset.name}</Typography.Title>
-                    <Typography.Paragraph type="secondary" ellipsis={{ rows: 2 }}>
-                      {preset.summary}
-                    </Typography.Paragraph>
+                    <Typography.Title level={5}>
+                      <InlineHelpTitle help={preset.summary}>{preset.name}</InlineHelpTitle>
+                    </Typography.Title>
+                    <Space size={6} wrap>
+                      <Tag>{preset.models.length} 个模型</Tag>
+                    </Space>
                   </Space>
 
                   <Space size={6} wrap>
-                    {preset.models.slice(0, 5).map((model) => (
+                    {preset.models.slice(0, 3).map((model) => (
                       <Tag
                         key={`${preset.id}-${model.modelName}-${model.purpose}`}
                         className="model-preset-tag"
@@ -8435,7 +8497,13 @@ export default function App() {
                         {model.label}
                       </Tag>
                     ))}
-                    {preset.models.length > 5 ? <Tag>+{preset.models.length - 5}</Tag> : null}
+                    {preset.models.length > 3 ? (
+                      <Tooltip
+                        title={<span className="role-card-tooltip-lines">{preset.models.map((model) => model.label).join('\n')}</span>}
+                      >
+                        <Tag>+{preset.models.length - 3}</Tag>
+                      </Tooltip>
+                    ) : null}
                   </Space>
 
                   <div className="catalog-card-action-row">
@@ -8485,7 +8553,15 @@ export default function App() {
                   <Input />
                 </Form.Item>
               </div>
-              <Form.Item name="capabilities" label="模型能力" rules={[{ required: true, message: '请选择模型能力' }]}>
+              <Form.Item
+                name="capabilities"
+                label={
+                  <InlineHelpTitle help="按模型真实输入和输出选择能力。系统会用这些能力判断数字员工和数字工厂的模型槽位是否可选，避免把生图、生视频、语音等模型选错。">
+                    模型能力
+                  </InlineHelpTitle>
+                }
+                rules={[{ required: true, message: '请选择模型能力' }]}
+              >
                 <Select
                   mode="multiple"
                   placeholder="按模型真实输入输出选择"
@@ -8500,20 +8576,18 @@ export default function App() {
                   <Tag color={modelProfileCapabilityStatusColor(selectedModelProfile)}>
                     {modelProfileCapabilityStatusLabel(selectedModelProfile)}
                   </Tag>
-                  <Typography.Text type="secondary">
-                    来源：{modelCapabilityMetadataSourceLabel(selectedModelProfile.capabilityMetadata?.source)}
-                    {' · '}
-                    可信度：{modelCapabilityConfidenceLabel(selectedModelProfile.capabilityMetadata?.confidence)}
-                    {selectedModelProfile.capabilityMetadata?.verifiedAt
-                      ? ` · 验证时间：${formatDateTime(selectedModelProfile.capabilityMetadata.verifiedAt)}`
-                      : ''}
-                  </Typography.Text>
+                  <HelpTip
+                    label="模型能力来源"
+                    content={[
+                      `来源：${modelCapabilityMetadataSourceLabel(selectedModelProfile.capabilityMetadata?.source)}`,
+                      `可信度：${modelCapabilityConfidenceLabel(selectedModelProfile.capabilityMetadata?.confidence)}`,
+                      selectedModelProfile.capabilityMetadata?.verifiedAt
+                        ? `验证时间：${formatDateTime(selectedModelProfile.capabilityMetadata.verifiedAt)}`
+                        : '',
+                      selectedModelProfile.capabilityMetadata?.note ?? ''
+                    ].filter(Boolean).join('\n')}
+                  />
                 </Space>
-                {selectedModelProfile.capabilityMetadata?.note ? (
-                  <Typography.Text type="secondary">
-                    {selectedModelProfile.capabilityMetadata.note}
-                  </Typography.Text>
-                ) : null}
               </div>
               {activeSelectedModelCatalog
                 ? renderProviderModelCatalogPanel({
@@ -8684,10 +8758,17 @@ export default function App() {
                   <Typography.Text strong>
                     {runtimeProfile.providerName} / {runtimeProfile.modelName}
                   </Typography.Text>
-                  <Typography.Text type="secondary">
-                    {modelCapabilitySummary(profile.capabilities, profile.purpose)} · Profile ID：{profile.id}
-                    {isRuntimeOverride ? ` · 实际模型：${runtimeProfile.id}` : ''}
-                  </Typography.Text>
+                  <Space size={6} wrap>
+                    <Tag>{modelCapabilitySummary(profile.capabilities, profile.purpose)}</Tag>
+                    {isRuntimeOverride ? <Tag color="blue">已切换模型</Tag> : null}
+                    <HelpTip
+                      label="模型槽位详情"
+                      content={[
+                        `模型槽位：${profile.id}`,
+                        isRuntimeOverride ? `实际模型：${runtimeProfile.id}` : ''
+                      ].filter(Boolean).join('\n')}
+                    />
+                  </Space>
                 </Space>
                 <Tag color={runtimeConfigured ? 'green' : 'orange'}>
                   {runtimeConfigured ? '已就绪' : '待配置'}
@@ -8807,11 +8888,10 @@ export default function App() {
         <Flex align="center" justify="space-between" gap={16} wrap="wrap" className="catalog-page-header">
           <div>
             <Typography.Title level={2} className="page-title">
-              工具
+              <InlineHelpTitle help="管理数字员工可调用的文档、网页、本地文件和扩展工具。">
+                工具
+              </InlineHelpTitle>
             </Typography.Title>
-            <Typography.Text type="secondary">
-              管理数字员工可调用的文档、网页和本地工具。
-            </Typography.Text>
           </div>
 
           <Input.Search
@@ -8868,9 +8948,14 @@ export default function App() {
                   </Space>
 
                   <Space size={6} wrap>
-                    {tool.capabilities.slice(0, 4).map((capability) => (
+                    {tool.capabilities.slice(0, 2).map((capability) => (
                       <Tag key={capability}>{capability}</Tag>
                     ))}
+                    {tool.capabilities.length > 2 ? (
+                      <Tooltip title={<span className="role-card-tooltip-lines">{tool.capabilities.join('\n')}</span>}>
+                        <Tag>+{tool.capabilities.length - 2}</Tag>
+                      </Tooltip>
+                    ) : null}
                   </Space>
 
                   <div className="catalog-card-action-row">
@@ -8930,9 +9015,9 @@ export default function App() {
                 }
               }}
             >
-              <Typography.Paragraph type="secondary">
-                默认使用内置网页搜索；只有需要接入企业自有搜索服务时，才填写下面的地址和密钥。
-              </Typography.Paragraph>
+              <InlineHelpTitle help="默认使用内置网页搜索；只有需要接入企业自有搜索服务时，才填写下面的地址和密钥。">
+                <Typography.Text strong>网页搜索配置</Typography.Text>
+              </InlineHelpTitle>
               <Form.Item name="webSearchEndpoint" label="搜索服务地址">
                 <Input placeholder="https://search.example.com/api/search" />
               </Form.Item>
@@ -8941,9 +9026,12 @@ export default function App() {
               </Form.Item>
               <Form.Item
                 name="allowPrivateNetwork"
-                label="允许私网访问"
+                label={
+                  <InlineHelpTitle help="默认会拦截 127.0.0.1、10.x、192.168.x、172.16-31.x，避免网页搜索工具访问本机或内网地址。">
+                    允许私网访问
+                  </InlineHelpTitle>
+                }
                 valuePropName="checked"
-                extra="默认会拦截 127.0.0.1、10.x、192.168.x、172.16-31.x。"
               >
                 <Switch />
               </Form.Item>
@@ -8966,9 +9054,9 @@ export default function App() {
                   {toolConfigTool?.scope ?? '-'}
                 </Descriptions.Item>
               </Descriptions>
-              <Typography.Text type="secondary">
-                该工具使用默认配置或本地桥接能力，无额外配置项。
-              </Typography.Text>
+              <InlineHelpTitle help="该工具使用默认配置或本地桥接能力，无额外配置项。">
+                <Typography.Text strong>无需额外配置</Typography.Text>
+              </InlineHelpTitle>
             </Space>
           )}
         </Modal>
@@ -9005,11 +9093,10 @@ export default function App() {
         <Flex align="center" justify="space-between" gap={16} wrap="wrap" className="catalog-page-header">
           <div>
             <Typography.Title level={2} className="page-title">
-              知识库
+              <InlineHelpTitle help="企业知识库和本地 PDF 会在任务运行时自动合并。数字员工和数字工厂只需要在任务里选择是否启用“知识库”。">
+                知识库
+              </InlineHelpTitle>
             </Typography.Title>
-            <Typography.Text type="secondary">
-              企业知识库和本地 PDF 会在任务运行时自动合并，数字员工和数字工厂只需要调用“知识库”。
-            </Typography.Text>
           </div>
 
           <Space wrap>
@@ -9031,10 +9118,11 @@ export default function App() {
                     <CloudSyncOutlined />
                   </span>
                   <div>
-                    <Typography.Title level={5}>企业知识库</Typography.Title>
-                    <Typography.Text type="secondary">
-                      {enterpriseOption?.description ?? '同步 web-console 中启用的企业知识。'}
-                    </Typography.Text>
+                    <Typography.Title level={5}>
+                      <InlineHelpTitle help={enterpriseOption?.description ?? '同步 web-console 中启用的企业知识。'}>
+                        企业知识库
+                      </InlineHelpTitle>
+                    </Typography.Title>
                   </div>
                 </Space>
                 <Tag color={enterpriseEnabled ? 'green' : 'default'}>
@@ -9076,10 +9164,11 @@ export default function App() {
                     <FilePdfOutlined />
                   </span>
                   <div>
-                    <Typography.Title level={5}>本地 PDF 知识库</Typography.Title>
-                    <Typography.Text type="secondary">
-                      {localPdfOption?.description ?? '选择一份本机 PDF 作为本地知识库。'}
-                    </Typography.Text>
+                    <Typography.Title level={5}>
+                      <InlineHelpTitle help={localPdfOption?.description ?? '选择一份本机 PDF 作为本地知识库。'}>
+                        本地 PDF 知识库
+                      </InlineHelpTitle>
+                    </Typography.Title>
                   </div>
                 </Space>
                 <Tag color={localPdfEnabled ? 'green' : 'default'}>{localPdfEnabled ? '已启用' : '未配置'}</Tag>
@@ -9117,20 +9206,16 @@ export default function App() {
           </Card>
         </div>
 
-        <section className="simple-panel">
-          <Typography.Title level={5}>运行规则</Typography.Title>
-          <List
-            dataSource={[
+        <section className="simple-panel compact-info-panel">
+          <InlineHelpTitle
+            help={[
               '企业知识库由 web-console 维护，PC 端只负责同步当前启用版本。',
               '本地知识库只选择一份完整 PDF，替换 PDF 后会覆盖旧的本地知识来源。',
               '任务运行时会合并企业知识库和本地 PDF；本地 PDF 可以为空，企业知识库建议保持启用。'
-            ]}
-            renderItem={(item) => (
-              <List.Item>
-                <List.Item.Meta avatar={<DatabaseOutlined className="list-icon" />} description={item} />
-              </List.Item>
-            )}
-          />
+            ].join('\n')}
+          >
+            <Typography.Text strong>运行规则</Typography.Text>
+          </InlineHelpTitle>
           {syncNotice ? <Typography.Text type="secondary">{syncNotice}</Typography.Text> : null}
         </section>
       </div>
@@ -9150,8 +9235,9 @@ export default function App() {
           <Typography.Text strong className="settings-list-title">外观</Typography.Text>
           <div className="settings-list-row">
             <div className="client-setting-copy">
-              <Typography.Text strong>主题</Typography.Text>
-              <Typography.Text type="secondary">桌面端显示风格</Typography.Text>
+              <InlineHelpTitle help="控制 PC 客户端的整体显示风格。">
+                <Typography.Text strong>主题</Typography.Text>
+              </InlineHelpTitle>
             </div>
             <Select<DesktopThemePreference>
               value={clientPreferences.theme}
@@ -9163,8 +9249,9 @@ export default function App() {
 
           <div className="settings-list-row">
             <div className="client-setting-copy">
-              <Typography.Text strong>界面密度</Typography.Text>
-              <Typography.Text type="secondary">列表和面板间距</Typography.Text>
+              <InlineHelpTitle help="控制列表、卡片和面板的间距密度。">
+                <Typography.Text strong>界面密度</Typography.Text>
+              </InlineHelpTitle>
             </div>
             <Select<DesktopDensityPreference>
               value={clientPreferences.density}
@@ -9179,8 +9266,9 @@ export default function App() {
           <Typography.Text strong className="settings-list-title">启动</Typography.Text>
           <div className="settings-list-row">
             <div className="client-setting-copy">
-              <Typography.Text strong>启动页</Typography.Text>
-              <Typography.Text type="secondary">打开客户端后的默认页面</Typography.Text>
+              <InlineHelpTitle help="设置打开客户端后默认进入的页面。">
+                <Typography.Text strong>启动页</Typography.Text>
+              </InlineHelpTitle>
             </div>
             <Select<SectionKey>
               value={clientPreferences.startupSection}
@@ -9195,8 +9283,10 @@ export default function App() {
           <Typography.Text strong className="settings-list-title">连接</Typography.Text>
           <div className="settings-list-row">
             <div className="client-setting-copy">
-              <Typography.Text strong>控制端</Typography.Text>
-              <Typography.Text type="secondary">{runtimeState.app.serverBaseUrl}</Typography.Text>
+              <InlineHelpTitle help="PC 客户端会连接该控制端同步企业授权、模板、知识库和版本信息。">
+                <Typography.Text strong>控制端</Typography.Text>
+              </InlineHelpTitle>
+              <CompactPathText value={runtimeState.app.serverBaseUrl} />
             </div>
             <Space wrap>
               <Tag color={connectionTone}>{connectionLabel(runtimeState.serverConnection.state)}</Tag>
@@ -9208,7 +9298,9 @@ export default function App() {
 
           <div className="settings-list-row">
             <div className="client-setting-copy">
-              <Typography.Text strong>同步摘要</Typography.Text>
+              <InlineHelpTitle help="手动同步企业授权、数字员工模板、数字工厂模板和知识库摘要。">
+                <Typography.Text strong>同步摘要</Typography.Text>
+              </InlineHelpTitle>
               <Typography.Text type="secondary">
                 {syncNotice || `当前策略：${syncPolicyLabel(runtimeState.localRuntime.syncPolicy)}`}
               </Typography.Text>
@@ -9223,10 +9315,10 @@ export default function App() {
           <Typography.Text strong className="settings-list-title">本地数据</Typography.Text>
           <div className="settings-list-row">
             <div className="client-setting-copy">
-              <Typography.Text strong>安装目录</Typography.Text>
-              <Typography.Text type="secondary" ellipsis copyable>
-                {runtimeState.app.installPath ?? '未提供'}
-              </Typography.Text>
+              <InlineHelpTitle help="优先跟随安装目录保存本地数据；如果安装目录不可写，会自动回退到系统用户目录。">
+                <Typography.Text strong>安装目录</Typography.Text>
+              </InlineHelpTitle>
+              <CompactPathText value={runtimeState.app.installPath} />
             </div>
             {runtimeState.app.installPath ? (
               <Button size="small" icon={<FolderOpenOutlined />} onClick={() => void openLocalPath(runtimeState.app.installPath!)}>
@@ -9237,13 +9329,10 @@ export default function App() {
 
           <div className="settings-list-row">
             <div className="client-setting-copy">
-              <Typography.Text strong>数据目录</Typography.Text>
-              <Typography.Text type="secondary" ellipsis copyable>
-                {runtimeState.app.userDataPath}
-              </Typography.Text>
-              <Typography.Text type="secondary">
-                当前模式：{storageModeLabel(runtimeState.app.storageMode)}
-              </Typography.Text>
+              <InlineHelpTitle help={`当前模式：${storageModeLabel(runtimeState.app.storageMode)}`}>
+                <Typography.Text strong>数据目录</Typography.Text>
+              </InlineHelpTitle>
+              <CompactPathText value={runtimeState.app.userDataPath} />
             </div>
             <Button size="small" icon={<FolderOpenOutlined />} onClick={() => void openLocalPath(runtimeState.app.userDataPath)}>
               打开
@@ -9252,10 +9341,10 @@ export default function App() {
 
           <div className="settings-list-row">
             <div className="client-setting-copy">
-              <Typography.Text strong>备份</Typography.Text>
-              <Typography.Text type="secondary">
-                {backupNotice || '创建本机备份，用于迁移和恢复。'}
-              </Typography.Text>
+              <InlineHelpTitle help="创建本机备份，用于迁移和恢复。">
+                <Typography.Text strong>备份</Typography.Text>
+              </InlineHelpTitle>
+              {backupNotice ? <Typography.Text type="secondary">{backupNotice}</Typography.Text> : null}
             </div>
             <Button size="small" icon={<DownloadOutlined />} loading={isBackupBusy} onClick={() => void createWorkspaceBackup()}>
               创建
@@ -9264,7 +9353,9 @@ export default function App() {
 
           <div className="settings-list-row">
             <div className="client-setting-copy">
-              <Typography.Text strong>恢复</Typography.Text>
+              <InlineHelpTitle help="从最近一次本机备份恢复客户端数据。">
+                <Typography.Text strong>恢复</Typography.Text>
+              </InlineHelpTitle>
               <Typography.Text type="secondary">
                 {latestBackup ? `最近备份：${formatDate(latestBackup.createdAt)}` : '暂无可恢复备份'}
               </Typography.Text>
