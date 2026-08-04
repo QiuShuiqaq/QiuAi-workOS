@@ -6612,6 +6612,17 @@ export default function App() {
                                   style={{ width: '100%' }}
                                 />
                               </Form.Item>
+                              <Form.Item name="videoDurationSeconds" label="视频时长" rules={[{ required: true }]}>
+                                <Select
+                                  size="large"
+                                  options={ecommerceVideoDurationOptions.map((seconds) => ({
+                                    value: seconds,
+                                    label: `${seconds} 秒`
+                                  }))}
+                                />
+                              </Form.Item>
+                            </div>
+                            <div className="factory-inline-form-grid compact">
                               <Form.Item name="videoRatio" label="画幅" rules={[{ required: true }]}>
                                 <Select
                                   size="large"
@@ -9624,6 +9635,7 @@ export default function App() {
       const operationGoals = readFactoryOperationGoals(factory);
       const operationStyles = readFactoryOperationStyles(factory);
       const operationRatios = readFactoryOperationRatios(factory);
+      const durationOptions = readFactoryVideoDurationOptions(factory);
 
       return {
         roleCode,
@@ -9634,6 +9646,7 @@ export default function App() {
         contentGoal: operationGoals[0]?.key ?? 'lead_generation',
         contentStyle: operationStyles[0]?.key ?? 'pain_point',
         videoCount: factory.contentControls?.defaultVideoCount ?? 3,
+        videoDurationSeconds: durationOptions[1] ?? durationOptions[0] ?? 10,
         videoRatio: operationRatios[0]?.key ?? '9:16',
         targetAudience: '',
         sourceUrls: '',
@@ -14285,6 +14298,7 @@ function buildOperationVideoFactoryTaskInput({
       label: style?.label ?? values.contentStyle ?? '痛点切入'
     },
     videoCount,
+    videoDurationSeconds: Number(values.videoDurationSeconds) || 10,
     videoRatio: {
       key: ratio?.key ?? values.videoRatio ?? '9:16',
       label: ratio?.label ?? values.videoRatio ?? '竖屏 9:16'
@@ -14292,6 +14306,10 @@ function buildOperationVideoFactoryTaskInput({
     targetAudience: values.targetAudience?.trim() || undefined,
     sourceUrls,
     brandTone: values.brandTone?.trim() || undefined,
+    videoGeneration: {
+      durationSeconds: Number(values.videoDurationSeconds) || 10,
+      ratio: ratio?.key ?? values.videoRatio ?? '9:16'
+    },
     output: {
       folder: factory.output?.folder ?? 'operation-videos',
       reportFormat: factory.output?.reportFormat ?? 'xlsx',
@@ -14321,8 +14339,9 @@ function buildOperationVideoFactoryTaskInput({
       platform: factoryRequest.platform,
       selectedPackages: factoryRequest.packages,
       videoCount,
+      videoGeneration: factoryRequest.videoGeneration,
       instructions: [
-        '只生成内容方案、脚本分镜、发布文案和制作包，不自动发布到任何平台。',
+        '先生成内容方案、脚本分镜、发布文案和制作包；如果勾选“生成视频成片”，再调用生视频模型生成视频 URL。',
         '每条视频都必须包含钩子、口播脚本、镜头分段、素材建议、标题、简介、话题标签和人工复核项。',
         '必须结合 factory_request.contentGoal、contentStyle、targetAudience、brandTone 和 sourceUrls；不要编造具体数据。',
         '对外发布前必须人工确认事实、版权、平台规则和品牌口径。'

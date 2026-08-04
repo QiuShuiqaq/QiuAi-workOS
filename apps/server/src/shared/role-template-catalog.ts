@@ -1993,6 +1993,13 @@ function buildOperationVideoFactoryManifest() {
         description: '把选题、脚本、发布文案和制作说明打包为本地 ZIP，供人工或剪辑工具制作。',
         outputType: 'zip',
         defaultSelected: true
+      },
+      {
+        key: 'generated_video',
+        label: '生成视频成片',
+        description: '按脚本分镜调用生视频模型，输出可预览的视频 URL 和结果清单。',
+        outputType: 'video',
+        defaultSelected: true
       }
     ],
     contentControls: {
@@ -2015,7 +2022,8 @@ function buildOperationVideoFactoryManifest() {
         { key: '9:16', label: '竖屏 9:16' },
         { key: '16:9', label: '横屏 16:9' },
         { key: '1:1', label: '方形 1:1' }
-      ]
+      ],
+      durationSecondOptions: [5, 10, 15]
     },
     output: {
       cacheDays: 30,
@@ -2023,9 +2031,9 @@ function buildOperationVideoFactoryManifest() {
       reportFormat: 'xlsx',
       packageFormat: 'zip'
     },
-    requiredCapabilities: ['text'],
+    requiredCapabilities: ['text', 'video_generation', 'text_to_video', 'image_to_video'],
     ui: {
-      primaryActionLabel: '生成内容包',
+      primaryActionLabel: '生成运营视频',
       uploadHint: '上传产品资料、案例素材、截图或表格，也可以只填写产品与目标客户；单批最多生成 20 条视频方案。',
       packageSelection: 'checkbox'
     }
@@ -2133,11 +2141,45 @@ function buildOperationVideoFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
       }
     },
     {
+      id: 'generate_operation_videos',
+      type: 'llm',
+      name: '批量生成运营视频',
+      instruction:
+        '当用户勾选“生成视频成片”时，按 operation_video_results 的脚本分镜调用生视频模型。每条视频只返回视频 URL 元数据，不返回二进制或 base64；大视频不经过服务端。',
+      modelProfileId: 'qiu-video-generation-default',
+      inputVariables: ['factory_request', 'operation_video_results', 'selected_packages', 'target_platform', 'knowledge_context'],
+      outputVariables: ['operation_generated_videos', 'operation_video_generation_summary'],
+      config: {
+        llmTaskType: 'video_generation',
+        outputMode: 'json',
+        packageKey: 'generated_video',
+        concurrency: 3,
+        maxRetries: 2,
+        timeoutMs: 240_000,
+        output: {
+          folder: 'operation-videos',
+          videoFormat: 'mp4'
+        },
+        schema: {
+          items: [
+            {
+              order: 1,
+              title: 'string',
+              remoteUrl: 'https://...',
+              thumbnailPath: 'https://...',
+              providerJobId: 'string',
+              providerStatus: 'string'
+            }
+          ]
+        }
+      }
+    },
+    {
       id: 'factory_output',
       type: 'output',
       name: '返回结果',
-      instruction: '返回选题表、脚本分镜、发布文案、视频制作包 ZIP 和每条视频方案的复核状态。',
-      inputVariables: ['operation_video_results', 'operation_summary', 'operation_package_folder'],
+      instruction: '返回选题表、脚本分镜、发布文案、视频制作包 ZIP、生成视频 URL 和每条视频方案的复核状态。',
+      inputVariables: ['operation_video_results', 'operation_generated_videos', 'operation_summary', 'operation_video_generation_summary', 'operation_package_folder'],
       outputVariables: ['final_answer']
     }
   ];
@@ -2151,7 +2193,8 @@ function buildOperationVideoFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
       { id: 'factory_input__gather_operation_context', sourceNodeId: 'factory_input', targetNodeId: 'gather_operation_context', condition: { type: 'always' } },
       { id: 'gather_operation_context__prepare_operation_batch', sourceNodeId: 'gather_operation_context', targetNodeId: 'prepare_operation_batch', condition: { type: 'always' } },
       { id: 'prepare_operation_batch__generate_operation_video_package', sourceNodeId: 'prepare_operation_batch', targetNodeId: 'generate_operation_video_package', condition: { type: 'always' } },
-      { id: 'generate_operation_video_package__factory_output', sourceNodeId: 'generate_operation_video_package', targetNodeId: 'factory_output', condition: { type: 'always' } }
+      { id: 'generate_operation_video_package__generate_operation_videos', sourceNodeId: 'generate_operation_video_package', targetNodeId: 'generate_operation_videos', condition: { type: 'always' } },
+      { id: 'generate_operation_videos__factory_output', sourceNodeId: 'generate_operation_videos', targetNodeId: 'factory_output', condition: { type: 'always' } }
     ],
     variables: [
       { name: 'factory_request', type: 'json', description: '工厂面板提交的运营视频参数。', required: true },
@@ -2159,7 +2202,9 @@ function buildOperationVideoFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
       { name: 'selected_packages', type: 'json', description: '用户勾选的产物包。', required: true },
       { name: 'target_platform', type: 'text', description: '目标内容平台。', required: true },
       { name: 'operation_video_results', type: 'json', description: '每条视频方案、脚本、分镜、发布文案和复核项。', required: true },
+      { name: 'operation_generated_videos', type: 'json', description: '生视频模型返回的视频 URL、状态和元数据。' },
       { name: 'operation_summary', type: 'text', description: '工厂产出摘要。' },
+      { name: 'operation_video_generation_summary', type: 'text', description: '运营视频生成摘要。' },
       { name: 'operation_package_folder', type: 'artifact', description: '本地视频制作包 ZIP 或文件夹。' }
     ],
     runtimePolicy: {
@@ -3971,7 +4016,8 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     skills: [
       skill('operation_topic_planning', '运营选题规划', '根据产品、客户和平台生成可拍摄的短视频选题和优先级。'),
       skill('short_video_scriptwriting', '短视频脚本分镜', '把选题拆成钩子、口播、镜头、素材和剪辑说明。'),
-      skill('publishing_copy_package', '发布文案打包', '生成标题、简介、话题标签、评论引导和人工复核清单。')
+      skill('publishing_copy_package', '发布文案打包', '生成标题、简介、话题标签、评论引导和人工复核清单。'),
+      skill('operation_video_generation', '运营视频生成', '按脚本分镜调用生视频模型，输出可预览的视频 URL 和生成状态。')
     ],
     workflowSteps: [
       {
@@ -4003,11 +4049,18 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
         instruction: '批量生成短视频选题、脚本分镜、发布文案、素材清单、风险提示和人工复核项。'
       },
       {
-        id: 'factory_output',
+        id: 'generate_operation_videos',
         order: 5,
+        type: 'llm',
+        name: '批量生成运营视频',
+        instruction: '当用户勾选“生成视频成片”时，按脚本分镜调用生视频模型，输出视频 URL 和状态清单。'
+      },
+      {
+        id: 'factory_output',
+        order: 6,
         type: 'output',
         name: '返回结果',
-        instruction: '返回选题表、脚本分镜、发布文案、视频制作包 ZIP 和每条视频方案的复核状态。'
+        instruction: '返回选题表、脚本分镜、发布文案、视频制作包 ZIP、生成视频 URL 和每条视频方案的复核状态。'
       }
     ],
     workflowGraph: buildOperationVideoFactoryWorkflowGraph(),
@@ -4016,7 +4069,7 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
       '请根据我们的产品资料和目标客户，面向抖音生成 5 条短视频选题、脚本分镜和发布文案。',
       '请把这批参考素材整理成视频号可发布的运营视频内容包，风格稳重、少夸张表达。'
     ],
-    outputFormat: '选题计划表 + 脚本分镜 Markdown + 发布文案表 + 本地视频制作包 ZIP + 每条视频方案复核状态。',
+    outputFormat: '选题计划表 + 脚本分镜 Markdown + 发布文案表 + 本地视频制作包 ZIP + 生成视频 URL + 每条视频方案复核状态。',
     allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_PRO_MONTHLY'),
     approvalPolicy: '本工厂只生成内容方案和制作包，不自动发布；对外发布前必须由企业运营负责人确认事实、版权、平台规则和品牌口径。'
   }

@@ -171,7 +171,7 @@ interface FactoryVideoGenerationTask {
   order: number;
   sku: string;
   sourceName?: string;
-  sourceImage: WorkflowFileValue;
+  sourceImage?: WorkflowFileValue;
   packageKey: string;
   packageLabel: string;
   packageDescription?: string;
@@ -3086,6 +3086,14 @@ async function invokeWorkflowRuntimeModelNode(input: {
   }
 
   if (readWorkflowRuntimeString(input.node.config?.llmTaskType) === 'video_generation') {
+    const operationVideoFactoryResult = await invokeWorkflowRuntimeOperationVideoGenerationNode({
+      ...input,
+      profile
+    });
+    if (operationVideoFactoryResult) {
+      return operationVideoFactoryResult;
+    }
+
     const ecommerceVideoFactoryResult = await invokeWorkflowRuntimeEcommerceProductVideoFactoryNode({
       ...input,
       profile
@@ -3792,6 +3800,278 @@ async function invokeWorkflowRuntimeOperationVideoFactoryNode(input: {
   };
 }
 
+async function invokeWorkflowRuntimeOperationVideoGenerationNode(input: {
+  task: DesktopTaskDetail;
+  node: WorkflowGraphNode;
+  pool: WorkflowVariablePool;
+  binding: ResolvedRuntimeBinding;
+  rolePackage?: RolePackageManifest;
+  profiles: ModelProfile[];
+  modelInvoker: DesktopModelInvoker;
+  desktopToolInvoker?: DesktopToolInvoker;
+  workspaceId?: string;
+  createdAt: string;
+  currentResponse: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  profile: ModelProfile;
+}): Promise<{
+  response: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  logs: DesktopExecutionLogEntry[];
+  usedToolIds: string[];
+  generatedArtifacts: DesktopArtifactSummary[];
+  factoryOutputs?: FactoryOutputItem[];
+  inputVariables: string[];
+  outputVariables: string[];
+  message: string;
+} | undefined> {
+  const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
+  if (readWorkflowRuntimeString(factoryRequest?.factoryKind) !== 'operation_video_factory') {
+    return undefined;
+  }
+
+  const packageKey = readWorkflowRuntimeString(input.node.config?.packageKey) ?? 'generated_video';
+  const selectedPackageKeys = new Set(
+    readFactoryRuntimePackages(input.pool.get('selected_packages')).map((item) => item.key)
+  );
+  const shouldGenerateVideos = selectedPackageKeys.has(packageKey);
+  const planItems = readFactoryOperationVideoResults(input.pool.get('operation_video_results'), factoryRequest);
+  const outputVariablesBase = input.node.outputVariables ?? ['operation_generated_videos', 'operation_video_generation_summary'];
+
+  if (!shouldGenerateVideos || planItems.length === 0) {
+    const summaryContent = !shouldGenerateVideos
+      ? '运营视频生成已跳过：未勾选“生成视频成片”产物包。'
+      : '运营视频生成已跳过：内容包没有可用于生视频的脚本分镜。';
+    const outputVariables = writeWorkflowNodeOutputs({
+      pool: input.pool,
+      node: input.node,
+      text: summaryContent,
+      json: [],
+      result: [],
+      outputValue: []
+    });
+    input.pool.set('operation_generated_videos', [] as unknown as WorkflowRuntimeValue);
+    input.pool.set('operation_video_generation_summary', summaryContent);
+
+    return {
+      response: mergeWorkflowRuntimeResponses(input.currentResponse, {
+        provider: input.primaryProfile.providerName,
+        modelName: input.primaryProfile.modelName,
+        content: summaryContent
+      }),
+      primaryProfile: input.primaryProfile,
+      logs: [
+        createLog(
+          input.task.taskId,
+          'info',
+          'WORKFLOW_RUNTIME_OPERATION_VIDEO_GENERATION_SKIPPED',
+          summaryContent,
+          input.createdAt,
+          sanitizeLogSuffix(input.node.id)
+        )
+      ],
+      usedToolIds: [],
+      generatedArtifacts: [],
+      factoryOutputs: [],
+      inputVariables: input.node.inputVariables ?? ['factory_request', 'operation_video_results', 'selected_packages'],
+      outputVariables: [...new Set([...outputVariables, ...outputVariablesBase])],
+      message: summaryContent
+    };
+  }
+
+  const targetPlatform = readFactoryRuntimePlatform(input.pool.get('target_platform'));
+  const videoConfig = readFactoryRuntimeVideoGenerationConfig(factoryRequest);
+  const referenceImages = readFactoryOperationReferenceImages(factoryRequest);
+  const concurrency = clampWorkflowRuntimeLimit(
+    readFactoryRuntimeNumber(input.node.config?.concurrency ?? factoryRequest?.concurrency),
+    3,
+    1,
+    8
+  );
+  const maxRetries = clampWorkflowRuntimeLimit(
+    readFactoryRuntimeNumber(input.node.config?.maxRetries ?? factoryRequest?.maxRetries),
+    2,
+    0,
+    5
+  );
+  const batchTasks = createFactoryOperationVideoGenerationTasks({
+    items: planItems,
+    factoryRequest,
+    targetPlatform,
+    videoConfig,
+    referenceImages,
+    createdAt: input.createdAt
+  });
+  const startedLog = createLog(
+    input.task.taskId,
+    'info',
+    'WORKFLOW_RUNTIME_OPERATION_VIDEO_GENERATION_STARTED',
+    `Operation video generation started: ${batchTasks.length} video task(s), concurrency=${concurrency}.`,
+    input.createdAt,
+    sanitizeLogSuffix(input.node.id)
+  );
+  const batchRun = await runFactoryVideoGenerationTasksAdaptive({
+    tasks: batchTasks,
+    maxConcurrency: concurrency,
+    worker: (task) => runFactoryVideoGenerationTask({
+      task,
+      node: input.node,
+      profile: input.profile,
+      modelInvoker: input.modelInvoker,
+      maxRetries
+    })
+  });
+  const results = batchRun.results;
+  const completed = results.filter((item) => item.status === 'completed').length;
+  const failed = results.filter((item) => item.status === 'failed').length;
+  const generatedVideos = results.map((item) => ({
+    id: item.id,
+    name: item.packageLabel,
+    kind: 'video',
+    uri: item.localPath ? `local://${item.localPath}` : item.remoteUrl,
+    mimeType: 'video/mp4',
+    remoteUrl: item.remoteUrl,
+    localPath: item.localPath,
+    thumbnailPath: item.thumbnailPath,
+    sourceImagePath: item.sourceImagePath,
+    sku: item.sku,
+    packageKey: item.packageKey,
+    packageLabel: item.packageLabel,
+    status: item.status,
+    error: item.error,
+    errorType: item.errorType,
+    attempts: item.attempts,
+    providerJobId: item.providerJobId,
+    providerStatus: item.providerStatus,
+    durationSeconds: item.durationSeconds,
+    videoRatio: item.videoRatio
+  }));
+  const outputVariables = writeWorkflowNodeOutputs({
+    pool: input.pool,
+    node: input.node,
+    text: JSON.stringify(results, null, 2),
+    json: results,
+    result: results,
+    outputValue: generatedVideos
+  });
+  const factoryOutputs = buildFactoryOperationGeneratedVideoOutputItems({
+    taskId: input.task.taskId,
+    results,
+    createdAt: input.createdAt
+  });
+  const usedToolIds = new Set<string>();
+  const generatedArtifacts: DesktopArtifactSummary[] = [];
+  const extraLogs: DesktopExecutionLogEntry[] = [];
+  const summaryContent = [
+    `运营视频生成完成：共 ${batchTasks.length} 条视频`,
+    `成功：${completed}`,
+    `失败：${failed}`,
+    `并发数：${batchRun.minConcurrency === batchRun.maxObservedConcurrency
+      ? batchRun.maxObservedConcurrency
+      : `${batchRun.minConcurrency}-${batchRun.maxObservedConcurrency}`}（上限 ${concurrency}）`,
+    targetPlatform.label ? `平台：${targetPlatform.label}` : undefined,
+    `时长：${videoConfig.durationSeconds} 秒`,
+    `画幅：${videoConfig.ratio}`
+  ].filter(Boolean).join('\n');
+
+  if (
+    input.desktopToolInvoker &&
+    input.workspaceId &&
+    hasFactoryToolAction(input.binding, 'local-filesystem', 'filesystem.write_text_file')
+  ) {
+    const manifestResult = await input.desktopToolInvoker({
+      workspaceId: input.workspaceId,
+      toolId: 'local-filesystem',
+      action: 'filesystem.write_text_file',
+      input: {
+        folder: 'operation-videos',
+        fileName: buildWorkflowArtifactFileName(input.task.title, '运营视频生成结果清单'),
+        content: buildFactoryEcommerceVideoManifestContent({
+          taskTitle: input.task.title,
+          summary: summaryContent,
+          results,
+          createdAt: input.createdAt
+        })
+      },
+      allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+    });
+    usedToolIds.add('local-filesystem');
+    if (manifestResult.ok) {
+      const artifact = buildGeneratedArtifactFromToolResult({
+        taskId: input.task.taskId,
+        toolId: 'local-filesystem',
+        action: 'filesystem.write_text_file',
+        output: manifestResult.output,
+        createdAt: input.createdAt,
+        sequence: 1
+      });
+      if (artifact) {
+        generatedArtifacts.push({
+          ...artifact,
+          title: '运营视频生成结果清单.md'
+        });
+      }
+    } else {
+      extraLogs.push(createLog(
+        input.task.taskId,
+        'warning',
+        'WORKFLOW_RUNTIME_OPERATION_VIDEO_GENERATION_MANIFEST_FAILED',
+        `Operation video generation manifest could not be written: ${manifestResult.message ?? 'unknown error'}.`,
+        input.createdAt,
+        sanitizeLogSuffix(`${input.node.id}-manifest`)
+      ));
+    }
+  }
+
+  input.pool.set('runtime.previous_text', summaryContent);
+  input.pool.set('runtime.last_model_node', input.node.id);
+  input.pool.set('operation_generated_videos', generatedVideos as unknown as WorkflowRuntimeValue);
+  input.pool.set('operation_video_generation_summary', summaryContent);
+
+  return {
+    response: mergeWorkflowRuntimeResponses(input.currentResponse, {
+      provider: input.profile.providerName,
+      modelName: input.profile.modelName,
+      content: summaryContent
+    }),
+    primaryProfile: input.profile,
+    logs: [
+      startedLog,
+      ...extraLogs,
+      createLog(
+        input.task.taskId,
+        failed > 0 ? 'warning' : 'info',
+        'WORKFLOW_RUNTIME_OPERATION_VIDEO_GENERATION_COMPLETED',
+        `Operation video generation completed: completed=${completed}, failed=${failed}, total=${batchTasks.length}.`,
+        input.createdAt,
+        sanitizeLogSuffix(`${input.node.id}-operation-video-generation`),
+        {
+          concurrency,
+          minConcurrency: batchRun.minConcurrency,
+          maxObservedConcurrency: batchRun.maxObservedConcurrency,
+          concurrencyAdjustments: batchRun.concurrencyAdjustments,
+          completed,
+          failed,
+          total: batchTasks.length,
+          failedItems: results.filter((item) => item.status === 'failed').map((item) => ({
+            sku: item.sku,
+            title: item.packageLabel,
+            error: item.error,
+            errorType: item.errorType,
+            attempts: item.attempts
+          }))
+        }
+      )
+    ],
+    usedToolIds: [...usedToolIds],
+    generatedArtifacts,
+    factoryOutputs,
+    inputVariables: ['factory_request', 'operation_video_results', 'selected_packages', 'target_platform'],
+    outputVariables: [...new Set([...outputVariables, 'operation_generated_videos', 'operation_video_generation_summary'])],
+    message: `Operation video generation finished: ${completed}/${batchTasks.length}, concurrency=${concurrency}.`
+  };
+}
+
 async function invokeWorkflowRuntimeEcommerceProductVideoFactoryNode(input: {
   task: DesktopTaskDetail;
   node: WorkflowGraphNode;
@@ -4041,9 +4321,12 @@ function completeWorkflowRuntimeFactoryOutputNode(input: {
   const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
   const factoryKind = readWorkflowRuntimeString(factoryRequest?.factoryKind);
   if (factoryKind === 'operation_video_factory') {
-    const summary = readWorkflowRuntimeString(input.pool.get('operation_summary'));
-    const results = input.pool.get('operation_video_results');
-    if (!summary || results === undefined) {
+    const operationSummary = readWorkflowRuntimeString(input.pool.get('operation_summary'));
+    const videoGenerationSummary = readWorkflowRuntimeString(input.pool.get('operation_video_generation_summary'));
+    const summary = [operationSummary, videoGenerationSummary].filter(Boolean).join('\n\n');
+    const contentResults = input.pool.get('operation_video_results');
+    const generatedVideos = input.pool.get('operation_generated_videos');
+    if (!summary || contentResults === undefined) {
       return undefined;
     }
 
@@ -4051,7 +4334,10 @@ function completeWorkflowRuntimeFactoryOutputNode(input: {
       pool: input.pool,
       node: input.node,
       text: summary,
-      result: results,
+      result: {
+        operationVideoResults: contentResults,
+        generatedVideos: generatedVideos ?? []
+      },
       outputValue: summary
     });
     input.pool.set('runtime.previous_text', summary);
@@ -4075,7 +4361,7 @@ function completeWorkflowRuntimeFactoryOutputNode(input: {
       ],
       usedToolIds: [],
       generatedArtifacts: [],
-      inputVariables: input.node.inputVariables ?? ['operation_summary', 'operation_video_results'],
+      inputVariables: input.node.inputVariables ?? ['operation_summary', 'operation_video_results', 'operation_generated_videos'],
       outputVariables,
       message: 'Operation video factory output returned without an extra model call.'
     };
@@ -5582,10 +5868,60 @@ function readFactoryOperationRuntimeAttachments(
   });
 }
 
+function readFactoryOperationReferenceImages(
+  factoryRequest: Record<string, unknown> | undefined
+): WorkflowFileValue[] {
+  const rawAttachments = Array.isArray(factoryRequest?.attachments) ? factoryRequest.attachments : [];
+  return rawAttachments.flatMap((item, index) => {
+    if (!isWorkflowRuntimeRecord(item)) {
+      return [];
+    }
+
+    const localPath = readWorkflowRuntimeString(item.localPath)
+      ?? readWorkflowRuntimeString(item.path)
+      ?? readWorkflowRuntimeString(item.filePath);
+    if (!localPath) {
+      return [];
+    }
+
+    const name = readWorkflowRuntimeString(item.name) ?? getPathFileName(localPath) ?? `reference-image-${index + 1}`;
+    const kind = readWorkflowRuntimeString(item.kind);
+    const extension = name.split('.').at(-1)?.trim().toLowerCase();
+    const isImage = kind === 'reference_image' || ['png', 'jpg', 'jpeg', 'webp'].includes(extension ?? '');
+    if (!isImage) {
+      return [];
+    }
+
+    return [{
+      id: readWorkflowRuntimeString(item.id) ?? `operation-reference-image-${index + 1}`,
+      name,
+      kind: 'image',
+      uri: localPath.startsWith('http://') || localPath.startsWith('https://') ? localPath : `local://${localPath}`,
+      localPath,
+      mimeType: readWorkflowRuntimeString(item.mimeType) ?? inferFactoryImageMimeType(name),
+      sizeBytes: readFactoryRuntimeNumber(item.size ?? item.sizeBytes)
+    }];
+  });
+}
+
 function isFactoryOperationExtractableDocumentPath(localPath: string, name?: string): boolean {
   const target = name || localPath;
   const extension = target.split('.').at(-1)?.trim().toLowerCase();
   return ['pdf', 'docx', 'pptx', 'xlsx', 'csv', 'txt', 'md', 'html', 'htm'].includes(extension ?? '');
+}
+
+function readFactoryOperationVideoResults(
+  value: WorkflowRuntimeValue | undefined,
+  factoryRequest: Record<string, unknown> | undefined
+): FactoryOperationVideoResult[] {
+  const normalizedValue = readFactoryRuntimeJsonValue(value);
+  const rawItems = Array.isArray(normalizedValue)
+    ? normalizedValue
+    : isWorkflowRuntimeRecord(normalizedValue) && Array.isArray(normalizedValue.items)
+      ? normalizedValue.items
+      : [];
+
+  return rawItems.map((item, index) => normalizeFactoryOperationVideoItem(item, index, factoryRequest));
 }
 
 function normalizeFactoryOperationVideoPlan(input: {
@@ -5904,6 +6240,49 @@ function buildFactoryOperationVideoOutputItems(input: {
   }));
 }
 
+function buildFactoryOperationGeneratedVideoOutputItems(input: {
+  taskId: string;
+  results: FactoryVideoGenerationResult[];
+  createdAt: string;
+}): FactoryOutputItem[] {
+  return input.results.map((result) => {
+    const status: FactoryOutputItemStatus = result.status === 'completed' ? 'qualified' : 'processing_error';
+    return {
+      id: `${input.taskId}-operation-generated-video-${result.order}`,
+      factoryKind: 'operation_video_factory',
+      kind: 'video',
+      title: `${result.order}. ${result.packageLabel}`,
+      status,
+      originalStatus: status,
+      sourcePath: result.sourceImagePath,
+      outputPath: result.localPath,
+      outputUrl: result.remoteUrl,
+      thumbnailPath: result.thumbnailPath,
+      summary: result.status === 'completed'
+        ? `运营视频已生成${result.videoRatio ? `，${result.videoRatio}` : ''}${result.durationSeconds ? `，${result.durationSeconds} 秒` : ''}`
+        : undefined,
+      reason: result.error,
+      risks: result.error ? [result.error] : [],
+      metadata: {
+        order: result.order,
+        sku: result.sku,
+        packageKey: result.packageKey,
+        title: result.packageLabel,
+        providerJobId: result.providerJobId,
+        providerStatus: result.providerStatus,
+        attempts: result.attempts,
+        errorType: result.errorType,
+        durationSeconds: result.durationSeconds,
+        videoRatio: result.videoRatio,
+        prompt: result.prompt
+      },
+      auditTrail: [],
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt
+    };
+  });
+}
+
 function buildFactoryEcommerceVideoManifestContent(input: {
   taskTitle: string;
   summary: string;
@@ -6217,6 +6596,103 @@ function createFactoryVideoGenerationTasks(input: {
   }
 
   return tasks;
+}
+
+function createFactoryOperationVideoGenerationTasks(input: {
+  items: FactoryOperationVideoResult[];
+  factoryRequest: Record<string, unknown> | undefined;
+  targetPlatform: FactoryRuntimePlatform;
+  videoConfig: { durationSeconds: number; ratio: string };
+  referenceImages: WorkflowFileValue[];
+  createdAt: string;
+}): FactoryVideoGenerationTask[] {
+  return input.items.map((item, index) => {
+    const referenceImage = input.referenceImages.length > 0
+      ? input.referenceImages[index % input.referenceImages.length]
+      : undefined;
+    const order = index + 1;
+    return {
+      id: `operation-video-${order}-${sanitizeLogSuffix(item.id || item.title)}`,
+      order,
+      sku: `OP-${order}`,
+      sourceName: referenceImage?.name ?? item.title,
+      sourceImage: referenceImage,
+      packageKey: 'generated_video',
+      packageLabel: item.title,
+      packageDescription: item.topic,
+      prompt: buildFactoryOperationVideoGenerationPrompt({
+        item,
+        factoryRequest: input.factoryRequest,
+        targetPlatform: input.targetPlatform,
+        videoConfig: input.videoConfig
+      }),
+      negativePrompt: buildFactoryOperationVideoNegativePrompt(item),
+      targetPlatform: input.targetPlatform,
+      durationSeconds: input.videoConfig.durationSeconds,
+      videoRatio: input.videoConfig.ratio,
+      createdAt: input.createdAt
+    };
+  });
+}
+
+function buildFactoryOperationVideoGenerationPrompt(input: {
+  item: FactoryOperationVideoResult;
+  factoryRequest: Record<string, unknown> | undefined;
+  targetPlatform: FactoryRuntimePlatform;
+  videoConfig: { durationSeconds: number; ratio: string };
+}): string {
+  const contentGoalValue = input.factoryRequest?.contentGoal;
+  const contentStyleValue = input.factoryRequest?.contentStyle;
+  const contentGoal = isWorkflowRuntimeRecord(contentGoalValue)
+    ? readWorkflowRuntimeString(contentGoalValue.label)
+    : readWorkflowRuntimeString(contentGoalValue);
+  const contentStyle = isWorkflowRuntimeRecord(contentStyleValue)
+    ? readWorkflowRuntimeString(contentStyleValue.label)
+    : readWorkflowRuntimeString(contentStyleValue);
+  const brandTone = readWorkflowRuntimeString(input.factoryRequest?.brandTone);
+  const instruction = readWorkflowRuntimeString(input.factoryRequest?.instruction);
+  const sourceUrls = Array.isArray(input.factoryRequest?.sourceUrls)
+    ? input.factoryRequest.sourceUrls.map((item) => readWorkflowRuntimeString(item)).filter(Boolean)
+    : [];
+  const storyboard = input.item.storyboard.map((shot, index) =>
+    `${index + 1}. ${shot.shot}${shot.durationSeconds ? `（${shot.durationSeconds}秒）` : ''}：${[
+      shot.visual ? `画面=${shot.visual}` : undefined,
+      shot.voiceover ? `旁白=${shot.voiceover}` : undefined
+    ].filter(Boolean).join('；')}`
+  );
+
+  return [
+    `生成一条适合 ${input.targetPlatform.label || '短视频平台'} 发布的运营短视频。`,
+    `标题：${input.item.title}`,
+    `主题：${input.item.topic}`,
+    input.item.audience ? `目标客户：${input.item.audience}` : undefined,
+    input.item.hook ? `前三秒钩子：${input.item.hook}` : undefined,
+    input.item.sellingPoints.length ? `核心卖点：${input.item.sellingPoints.join('；')}` : undefined,
+    contentGoal ? `内容目标：${contentGoal}` : undefined,
+    contentStyle ? `视频风格：${contentStyle}` : undefined,
+    brandTone ? `品牌语气：${brandTone}` : undefined,
+    input.targetPlatform.notes ? `平台规则：${input.targetPlatform.notes}` : undefined,
+    `视频时长：${input.videoConfig.durationSeconds} 秒`,
+    `画幅：${input.videoConfig.ratio}`,
+    '',
+    '口播脚本：',
+    input.item.script,
+    '',
+    '分镜要求：',
+    storyboard.join('\n'),
+    '',
+    '画面要求：真实、清晰、商业质感，节奏紧凑，避免过度夸张。画面文字如需出现，必须简短且与脚本一致。',
+    sourceUrls.length ? `参考来源：${sourceUrls.join('；')}` : undefined,
+    instruction ? `补充要求：${instruction}` : undefined
+  ].filter(Boolean).join('\n');
+}
+
+function buildFactoryOperationVideoNegativePrompt(item: FactoryOperationVideoResult): string {
+  return [
+    '不要生成虚假数据、绝对化承诺、夸大效果、违规医疗金融表述。',
+    '不要生成低清晰度、严重畸变、乱码字幕、错别字、大段不可读文字。',
+    item.risks.length ? `额外避免：${item.risks.join('；')}` : undefined
+  ].filter(Boolean).join('\n');
 }
 
 async function runWorkflowRuntimeConcurrent<T, R>(
@@ -6553,7 +7029,7 @@ async function runFactoryVideoGenerationTask(input: {
         videoGeneration: {
           prompt: input.task.prompt,
           negativePrompt: input.task.negativePrompt,
-          sourceImagePath: input.task.sourceImage.localPath,
+          sourceImagePath: input.task.sourceImage?.localPath,
           durationSeconds: input.task.durationSeconds,
           aspectRatio: input.task.videoRatio,
           responseFormat: 'url'
@@ -6576,7 +7052,7 @@ async function runFactoryVideoGenerationTask(input: {
         remoteUrl: videoResult.remoteUrl,
         localPath: videoResult.localPath,
         thumbnailPath: videoResult.thumbnailPath,
-        sourceImagePath: input.task.sourceImage.localPath,
+        sourceImagePath: input.task.sourceImage?.localPath,
         prompt: input.task.prompt,
         attempts,
         providerJobId: videoResult.providerJobId,
@@ -6605,7 +7081,7 @@ async function runFactoryVideoGenerationTask(input: {
     packageKey: input.task.packageKey,
     packageLabel: input.task.packageLabel,
     status: 'failed',
-    sourceImagePath: input.task.sourceImage.localPath,
+    sourceImagePath: input.task.sourceImage?.localPath,
     prompt: input.task.prompt,
     error: lastError || 'Video generation failed.',
     errorType: lastErrorType,
@@ -6653,7 +7129,7 @@ function buildFactoryVideoGenerationMessages(task: FactoryVideoGenerationTask): 
       role: 'system',
       content: [
         'You are a QiuAI WorkOS digital factory video generation executor.',
-        'Generate exactly one ecommerce product video for the requested SKU and package.',
+        'Generate exactly one short video for the requested item and package.',
         'Return JSON only: {"remoteUrl":"https://...","thumbnailPath":"https://..."} or {"localPath":"C:\\\\...\\\\video.mp4"}.',
         'Do not return video binary data, base64, or markdown.'
       ].join('\n')
@@ -6663,8 +7139,8 @@ function buildFactoryVideoGenerationMessages(task: FactoryVideoGenerationTask): 
       content: [
         `SKU: ${task.sku}`,
         task.sourceName ? `Source name: ${task.sourceName}` : undefined,
-        `Source image local path: ${task.sourceImage.localPath}`,
-        task.sourceImage.uri ? `Source image URI: ${task.sourceImage.uri}` : undefined,
+        task.sourceImage?.localPath ? `Source image local path: ${task.sourceImage.localPath}` : undefined,
+        task.sourceImage?.uri ? `Source image URI: ${task.sourceImage.uri}` : undefined,
         `Package: ${task.packageLabel} (${task.packageKey})`,
         task.packageDescription ? `Package description: ${task.packageDescription}` : undefined,
         task.targetPlatform.label ? `Target platform: ${task.targetPlatform.label}` : undefined,

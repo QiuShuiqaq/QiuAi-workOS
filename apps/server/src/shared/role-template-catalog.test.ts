@@ -212,6 +212,24 @@ test('server role template catalog is focused and production-oriented', () => {
     'video factory must reject vertical 9:16 videos and allow landscape videos'
   );
 
+  const operationVideoFactoryTemplate = templateById.get('factory_operation_video_v1');
+  assert.ok(operationVideoFactoryTemplate, 'operation video factory template must exist');
+  const operationVideoFactoryDependencyManifest = buildRoleTemplateDependencyManifest({
+    workflowGraph: operationVideoFactoryTemplate.workflowGraph,
+    generatedAt: '2026-07-30T00:00:00.000Z'
+  });
+  const operationVideoFactoryModelProfiles = new Set(
+    operationVideoFactoryDependencyManifest.modelAssets.map((asset) => asset.modelProfileId)
+  );
+  assert.ok(operationVideoFactoryModelProfiles.has('qiu-general-default'));
+  assert.ok(operationVideoFactoryModelProfiles.has('qiu-video-generation-default'));
+  assert.ok(
+    operationVideoFactoryTemplate.workflowGraph.nodes.some(
+      (node) => node.id === 'generate_operation_videos' && node.config?.llmTaskType === 'video_generation'
+    ),
+    'operation video factory must expose a real video generation node'
+  );
+
   for (const template of serverRoleTemplateCatalog) {
     const isDigitalFactory = template.applicationType === 'DIGITAL_FACTORY';
 
