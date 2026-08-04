@@ -4,6 +4,8 @@ import type {
   DesktopKnowledgeSourceSummary,
   KnowledgeBindingSource,
   LocalRuntimeContract,
+  ModelCapability,
+  ModelCapabilityMetadata,
   ModelCatalogEntry,
   ModelCredential,
   ModelProfile,
@@ -284,6 +286,10 @@ export interface DesktopModelChatRequest {
   messages: DesktopModelChatMessage[];
   timeoutMs?: number;
   taskKind?: 'chat' | 'image_generation' | 'audio_transcription';
+  visionInputs?: Array<{
+    imagePath: string;
+    mimeType?: string;
+  }>;
   imageGeneration?: {
     prompt: string;
     negativePrompt?: string;
@@ -311,6 +317,7 @@ export interface DesktopModelTestCheck {
   label: string;
   status: 'passed' | 'failed' | 'skipped';
   message: string;
+  capabilities?: ModelCapability[];
   endpoint?: string;
   elapsedMs?: number;
   costWarning?: boolean;
@@ -324,6 +331,8 @@ export interface DesktopModelTestResponse {
   message: string;
   checkedAt: string;
   mode: 'openai_compatible' | 'aliyun_bailian' | 'tencent_cloud';
+  verifiedCapabilities?: ModelCapability[];
+  capabilityMetadata?: ModelCapabilityMetadata;
   checks?: DesktopModelTestCheck[];
 }
 

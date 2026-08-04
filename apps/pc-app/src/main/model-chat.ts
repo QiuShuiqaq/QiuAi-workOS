@@ -11,7 +11,9 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ModelCapability, ModelCatalogEntry } from '../shared/desktop-contract.js';
 import {
-  inferModelCapabilitiesFromName,
+  classifyModelCapabilitiesFromName,
+  createModelCapabilityMetadata,
+  normalizeExplicitModelCapabilities,
   readModelProfileCapabilities
 } from '../shared/desktop-model-capabilities.js';
 import {
@@ -48,6 +50,7 @@ interface OpenAiCompatibleModelListResponse {
   data?: Array<{
     id?: unknown;
     owned_by?: unknown;
+    capabilities?: unknown;
   }>;
   error?: {
     message?: unknown;
@@ -128,6 +131,7 @@ export async function invokeOpenAiCompatibleModelChat(
 
   const apiBaseUrl = requireOpenAiCompatibleApiBaseUrl(request.profile.apiBaseUrl);
   const chatEndpoint = `${apiBaseUrl}/chat/completions`;
+  const messages = buildOpenAiCompatibleChatMessagesWithVisionInputs(request);
   const response = await fetchModelApi(chatEndpoint, {
     method: 'POST',
     headers: {
@@ -136,7 +140,7 @@ export async function invokeOpenAiCompatibleModelChat(
     },
     body: JSON.stringify({
       model: modelName,
-      messages: request.messages,
+      messages,
       temperature: request.profile.temperature,
       max_tokens: request.profile.maxTokens
     }),
@@ -335,18 +339,29 @@ export async function testDesktopModelConnection(
   const failedChecks = checks.filter((check) => check.status === 'failed');
   const passedChecks = checks.filter((check) => check.status === 'passed');
   const ok = failedChecks.length === 0 && passedChecks.length > 0;
+  const checkedAt = new Date().toISOString();
+  const verifiedCapabilities = readVerifiedCapabilitiesFromChecks(checks);
   return {
     providerId: request.profile.providerId,
     providerName: request.profile.providerName,
     modelName: request.profile.modelName,
     ok,
-    checkedAt: new Date().toISOString(),
+    checkedAt,
     mode: detectModelProviderMode({
       providerId: request.profile.providerId,
       providerName: request.profile.providerName,
       modelName: request.profile.modelName,
       capabilities: request.profile.capabilities
     }),
+    verifiedCapabilities,
+    capabilityMetadata: ok && verifiedCapabilities.length > 0
+      ? createModelCapabilityMetadata({
+          source: 'verified',
+          confidence: 'verified',
+          verifiedAt: checkedAt,
+          note: '模型连接测试已验证这些能力。'
+        })
+      : undefined,
     message: ok
       ? `Model checks passed: ${passedChecks.length} passed${checks.length > passedChecks.length ? `, ${checks.length - passedChecks.length} skipped` : ''}.`
       : `Model checks did not fully pass: ${failedChecks.length} failed, ${passedChecks.length} passed.`,
@@ -385,6 +400,17 @@ async function fetchOpenAiCompatibleProviderModels(input: {
     if (!id) {
       return [];
     }
+    const declaredCapabilities = readDeclaredModelCapabilities(item.capabilities);
+    const classification = declaredCapabilities.length > 0
+      ? {
+          capabilities: declaredCapabilities,
+          metadata: createModelCapabilityMetadata({
+            source: 'provider',
+            confidence: 'high',
+            note: '供应商模型列表声明了能力。'
+          })
+        }
+      : classifyModelCapabilitiesFromName(id, 'general');
 
     return [
       {
@@ -392,7 +418,8 @@ async function fetchOpenAiCompatibleProviderModels(input: {
         label: id,
         ownedBy: typeof item.owned_by === 'string' ? item.owned_by : undefined,
         source: 'provider' as const,
-        capabilities: inferModelCapabilitiesFromName(id)
+        capabilities: classification.capabilities,
+        capabilityMetadata: classification.metadata
       }
     ];
   });
@@ -433,6 +460,7 @@ async function runOpenAiCompatibleModelTestChecks(
     checks.push(await runModelTestCheck({
       id: 'audio_probe',
       label: '语音转文字探测',
+      capabilities: ['audio_to_text'],
       endpoint: `${normalizeApiBaseUrl(request.profile.apiBaseUrl) ?? ''}/models`,
       action: async () => {
         const catalog = await listOpenAiCompatibleModels({
@@ -481,6 +509,7 @@ async function runOpenAiCompatibleModelTestChecks(
       label: '视频生成',
       status: 'skipped',
       message: '视频生成通常是异步供应商协议，需要专门适配器；当前测试不会产生视频费用。',
+      capabilities: ['video_generation', 'text_to_video', 'image_to_video'],
       costWarning: true
     });
   }
@@ -490,7 +519,8 @@ async function runOpenAiCompatibleModelTestChecks(
       id: 'video_understanding',
       label: '视频理解',
       status: 'skipped',
-      message: '视频理解需要真实视频样本和供应商专用输入协议，当前仅在工作流运行中测试。'
+      message: '视频理解需要真实视频样本和供应商专用输入协议，当前仅在工作流运行中测试。',
+      capabilities: ['video_understanding', 'video_text']
     });
   }
 
@@ -506,6 +536,7 @@ async function runTextChatTestCheck(request: DesktopModelTestRequest): Promise<M
   return runModelTestCheck({
     id: 'text_chat',
     label: '文本对话',
+    capabilities: ['text'],
     endpoint: `${apiBaseUrl}/chat/completions`,
     action: async () => {
       const profile = {
@@ -527,6 +558,7 @@ async function runImageGenerationTestCheck(request: DesktopModelTestRequest): Pr
   return runModelTestCheck({
     id: 'image_generation',
     label: '文生图',
+    capabilities: ['image_generation', 'text_to_image'],
     endpoint: `${apiBaseUrl}/images/generations`,
     costWarning: true,
     action: async () => {
@@ -557,6 +589,7 @@ async function runImageEditingTestCheck(request: DesktopModelTestRequest): Promi
     return await runModelTestCheck({
       id: 'image_editing',
       label: '参考图编辑',
+      capabilities: ['image_generation', 'image_to_image', 'image_editing'],
       endpoint: `${apiBaseUrl}/images/edits`,
       costWarning: true,
       action: async () => {
@@ -586,6 +619,7 @@ async function runVisionUnderstandingTestCheck(request: DesktopModelTestRequest)
   return runModelTestCheck({
     id: 'vision_understanding',
     label: '图片理解',
+    capabilities: ['image_understanding', 'vision_understanding', 'vision_text'],
     endpoint: `${apiBaseUrl}/chat/completions`,
     action: async () => {
       const endpoint = `${apiBaseUrl}/chat/completions`;
@@ -634,6 +668,7 @@ async function runEmbeddingTestCheck(request: DesktopModelTestRequest): Promise<
   return runModelTestCheck({
     id: 'embedding',
     label: '文本向量',
+    capabilities: ['embedding'],
     endpoint: `${apiBaseUrl}/embeddings`,
     action: async () => {
       const endpoint = `${apiBaseUrl}/embeddings`;
@@ -666,6 +701,7 @@ async function runEmbeddingTestCheck(request: DesktopModelTestRequest): Promise<
 async function runModelTestCheck(input: {
   id: string;
   label: string;
+  capabilities?: ModelCapability[];
   endpoint?: string;
   costWarning?: boolean;
   action: () => Promise<string>;
@@ -678,6 +714,7 @@ async function runModelTestCheck(input: {
       label: input.label,
       status: 'passed',
       message,
+      capabilities: input.capabilities,
       endpoint: input.endpoint,
       elapsedMs: Date.now() - startedAt,
       costWarning: input.costWarning
@@ -688,6 +725,7 @@ async function runModelTestCheck(input: {
       label: input.label,
       status: 'failed',
       message: error instanceof Error ? error.message : 'unknown error',
+      capabilities: input.capabilities,
       endpoint: input.endpoint,
       elapsedMs: Date.now() - startedAt,
       costWarning: input.costWarning
@@ -723,7 +761,12 @@ function builtInModelCatalogEntry(
     id,
     label,
     source: 'built_in',
-    capabilities
+    capabilities,
+    capabilityMetadata: createModelCapabilityMetadata({
+      source: 'official_catalog',
+      confidence: 'high',
+      note: '来自 QiuAI 内置供应商模型目录。'
+    })
   };
 }
 
@@ -736,13 +779,63 @@ function mergeModelCatalogEntries(
     merged.set(model.id, model);
   }
   for (const model of providerModels) {
-    merged.set(model.id, model);
+    merged.set(model.id, mergeProviderModelWithBuiltInModel(model, merged.get(model.id)));
   }
   return [...merged.values()].sort((left, right) => left.id.localeCompare(right.id));
 }
 
+function mergeProviderModelWithBuiltInModel(
+  providerModel: ModelCatalogEntry,
+  builtInModel: ModelCatalogEntry | undefined
+): ModelCatalogEntry {
+  if (!builtInModel) {
+    return providerModel;
+  }
+
+  const providerCapabilities = normalizeExplicitModelCapabilities(providerModel.capabilities);
+  const providerHasReliableCapabilities =
+    providerCapabilities.length > 0 &&
+    providerModel.capabilityMetadata?.confidence !== 'unknown' &&
+    providerModel.capabilityMetadata?.source !== 'name_inferred';
+
+  if (providerHasReliableCapabilities) {
+    return {
+      ...builtInModel,
+      ...providerModel,
+      capabilities: providerCapabilities
+    };
+  }
+
+  return {
+    ...builtInModel,
+    ...providerModel,
+    label: providerModel.label ?? builtInModel.label,
+    source: providerModel.source,
+    capabilities: normalizeExplicitModelCapabilities(builtInModel.capabilities),
+    capabilityMetadata: builtInModel.capabilityMetadata
+  };
+}
+
+function readDeclaredModelCapabilities(value: unknown): ModelCapability[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return normalizeExplicitModelCapabilities(
+    value.filter((item): item is ModelCapability => typeof item === 'string') as ModelCapability[]
+  );
+}
+
 function hasAnyCapability(capabilities: ModelCapability[], candidates: ModelCapability[]): boolean {
   return candidates.some((capability) => capabilities.includes(capability));
+}
+
+function readVerifiedCapabilitiesFromChecks(checks: ModelTestCheck[]): ModelCapability[] {
+  return normalizeExplicitModelCapabilities(
+    checks
+      .filter((check) => check.status === 'passed')
+      .flatMap((check) => check.capabilities ?? [])
+  );
 }
 
 function requireModelApiKey(value: string | undefined): string {
@@ -831,6 +924,73 @@ function buildImageGenerationPrompt(request: DesktopModelChatRequest): string {
   return negativePrompt
     ? `${prompt}\n\nNegative prompt:\n${negativePrompt}`
     : prompt;
+}
+
+type OpenAiCompatibleChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
+type OpenAiCompatibleChatMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content: string | OpenAiCompatibleChatContentPart[];
+};
+
+function buildOpenAiCompatibleChatMessagesWithVisionInputs(
+  request: DesktopModelChatRequest
+): OpenAiCompatibleChatMessage[] {
+  const messages: OpenAiCompatibleChatMessage[] = request.messages.map((message) => ({
+    role: message.role,
+    content: message.content
+  }));
+  const imageParts = (request.visionInputs ?? [])
+    .slice(0, 8)
+    .flatMap((input) => {
+      const imagePath = input.imagePath.trim();
+      if (!imagePath || !existsSync(imagePath)) {
+        return [];
+      }
+
+      const mimeType = input.mimeType?.trim() || inferImageMimeType(imagePath);
+      const base64 = readFileSync(imagePath).toString('base64');
+      return [
+        {
+          type: 'image_url' as const,
+          image_url: {
+            url: `data:${mimeType};base64,${base64}`
+          }
+        }
+      ];
+    });
+  if (imageParts.length === 0) {
+    return messages;
+  }
+
+  let lastUserIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === 'user') {
+      lastUserIndex = index;
+      break;
+    }
+  }
+  if (lastUserIndex < 0) {
+    return messages;
+  }
+
+  const currentMessage = messages[lastUserIndex]!;
+  const text = typeof currentMessage.content === 'string'
+    ? currentMessage.content
+    : currentMessage.content
+        .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+        .join('\n');
+  messages[lastUserIndex] = {
+    ...currentMessage,
+    content: [
+      { type: 'text', text },
+      ...imageParts
+    ]
+  };
+
+  return messages;
 }
 
 function buildImageEditFormData(

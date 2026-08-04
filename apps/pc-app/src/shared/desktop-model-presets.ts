@@ -1,6 +1,8 @@
-import type { ModelCapability, ModelProfile } from './desktop-contract.js';
+import type { ModelCapability, ModelCapabilityMetadata, ModelProfile } from './desktop-contract.js';
 import {
+  createModelCapabilityMetadata,
   defaultCapabilitiesForPurpose,
+  normalizeExplicitModelCapabilities,
   normalizeModelCapabilities,
   purposeForModelCapabilities
 } from './desktop-model-capabilities.js';
@@ -15,6 +17,8 @@ export interface ModelProviderPreset {
     modelName: string;
     purpose: ModelProfile['purpose'];
     capabilities?: ModelCapability[];
+    capabilityMetadata?: ModelCapabilityMetadata;
+    verifiedCapabilities?: ModelCapability[];
     temperature?: number;
     maxTokens?: number;
   }>;
@@ -145,6 +149,11 @@ export function createCustomCompatibleModelProfile(
     modelName,
     purpose,
     capabilities,
+    capabilityMetadata: createModelCapabilityMetadata({
+      source: 'manual',
+      confidence: 'high',
+      note: '用户新建模型配置时确认能力。'
+    }),
     apiBaseUrl: options.apiBaseUrl?.trim() || undefined,
     temperature: options.temperature ?? (purpose === 'reasoning' ? 0.2 : 0.4),
     maxTokens: options.maxTokens ?? (purpose === 'reasoning' ? 8192 : 4096),
@@ -201,6 +210,12 @@ function applyPresetToProfile(
     modelName: model.modelName,
     purpose: model.purpose,
     capabilities: normalizeModelCapabilities(model.capabilities, model.purpose),
+    capabilityMetadata: model.capabilityMetadata ?? createModelCapabilityMetadata({
+      source: 'official_catalog',
+      confidence: 'high',
+      note: '来自内置模型供应商目录。'
+    }),
+    verifiedCapabilities: normalizeExplicitModelCapabilities(model.verifiedCapabilities),
     apiBaseUrl: preset.apiBaseUrl,
     apiKey: undefined,
     temperature: model.temperature,
@@ -223,6 +238,12 @@ function createModelProfileFromPreset(
       model.capabilities ?? defaultCapabilitiesForPurpose(model.purpose),
       model.purpose
     ),
+    capabilityMetadata: model.capabilityMetadata ?? createModelCapabilityMetadata({
+      source: 'official_catalog',
+      confidence: 'high',
+      note: '来自内置模型供应商目录。'
+    }),
+    verifiedCapabilities: normalizeExplicitModelCapabilities(model.verifiedCapabilities),
     apiBaseUrl: preset.apiBaseUrl,
     temperature: model.temperature,
     maxTokens: model.maxTokens,

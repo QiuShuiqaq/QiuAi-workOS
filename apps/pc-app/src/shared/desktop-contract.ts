@@ -27,6 +27,28 @@ export type ModelCapability =
   | 'audio_to_text'
   | 'text_to_audio';
 
+export type ModelCapabilitySource =
+  | 'official_catalog'
+  | 'provider'
+  | 'name_inferred'
+  | 'manual'
+  | 'verified'
+  | 'unknown';
+
+export type ModelCapabilityConfidence =
+  | 'verified'
+  | 'high'
+  | 'medium'
+  | 'low'
+  | 'unknown';
+
+export interface ModelCapabilityMetadata {
+  source: ModelCapabilitySource;
+  confidence: ModelCapabilityConfidence;
+  verifiedAt?: string;
+  note?: string;
+}
+
 export type ToolScope = 'desktop' | 'server' | 'hybrid';
 
 export type ToolEntryPoint = 'native' | 'bridge' | 'api' | 'mcp';
@@ -184,6 +206,8 @@ export interface ModelProfile {
   modelName: string;
   purpose: ModelPurpose;
   capabilities?: ModelCapability[];
+  capabilityMetadata?: ModelCapabilityMetadata;
+  verifiedCapabilities?: ModelCapability[];
   /**
    * @deprecated API keys are moving to local model credentials. This field is
    * kept for older local data and will be used only as a compatibility fallback.
@@ -202,6 +226,8 @@ export interface ModelCatalogEntry {
   ownedBy?: string;
   source?: 'provider' | 'built_in' | 'manual';
   capabilities: ModelCapability[];
+  capabilityMetadata?: ModelCapabilityMetadata;
+  verifiedCapabilities?: ModelCapability[];
 }
 
 export interface ModelProviderCatalog {

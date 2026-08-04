@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -23,7 +23,8 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       data: [
         { id: 'deepseek-v4-flash', owned_by: 'deepseek' },
         { id: 'deepseek-v4-pro', owned_by: 'deepseek' },
-        { id: 'text-embedding-3-large', owned_by: 'openai' }
+        { id: 'text-embedding-3-large', owned_by: 'openai' },
+        { id: 'mystery-2026', owned_by: 'unknown-provider' }
       ]
     }),
     { status: 200, headers: { 'content-type': 'application/json' } }
@@ -41,7 +42,7 @@ try {
   assert.equal(capturedUrl, 'https://api.deepseek.com/models');
   assert.equal(capturedAuthorization, 'Bearer test-key');
   assert.equal(catalog.providerId, 'deepseek');
-  assert.equal(catalog.models.length, 3);
+  assert.equal(catalog.models.length, 4);
   assert.deepEqual(
     catalog.models.find((model) => model.id === 'deepseek-v4-pro')?.capabilities,
     ['reasoning_text', 'text']
@@ -49,6 +50,11 @@ try {
   assert.deepEqual(
     catalog.models.find((model) => model.id === 'text-embedding-3-large')?.capabilities,
     ['embedding']
+  );
+  assert.deepEqual(catalog.models.find((model) => model.id === 'mystery-2026')?.capabilities, []);
+  assert.equal(
+    catalog.models.find((model) => model.id === 'mystery-2026')?.capabilityMetadata?.source,
+    'unknown'
   );
 } finally {
   globalThis.fetch = originalFetch;
@@ -125,6 +131,51 @@ try {
   assert.equal(response.content, 'Array content response.');
 } finally {
   globalThis.fetch = originalFetch;
+}
+
+let capturedVisionBody: Record<string, unknown> | undefined;
+const visionTempDir = mkdtempSync(path.join(os.tmpdir(), 'qiuai-vision-chat-'));
+const visionImagePath = path.join(visionTempDir, 'source.png');
+writeFileSync(visionImagePath, Buffer.from([1, 2, 3]));
+globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+  capturedVisionBody = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
+
+  return new Response(
+    JSON.stringify({
+      choices: [{ message: { content: 'Vision input accepted.' } }]
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+}) as typeof fetch;
+
+try {
+  const response = await invokeOpenAiCompatibleModelChat({
+    profile: {
+      id: 'vision-profile',
+      providerId: 'openai-compatible',
+      providerName: 'OpenAI Compatible',
+      modelName: 'qwen-vl-max',
+      purpose: 'vision',
+      capabilities: ['image_understanding', 'vision_text'],
+      apiBaseUrl: 'https://api.example.test/v1',
+      apiKey: 'vision-key'
+    },
+    messages: [{ role: 'user', content: 'Describe this image.' }],
+    visionInputs: [{ imagePath: visionImagePath, mimeType: 'image/png' }]
+  });
+
+  const messages = capturedVisionBody?.messages as Array<{ content: unknown }> | undefined;
+  const content = messages?.[0]?.content;
+  assert.equal(response.content, 'Vision input accepted.');
+  assert.ok(Array.isArray(content));
+  assert.deepEqual(content[0], { type: 'text', text: 'Describe this image.' });
+  assert.deepEqual(content[1], {
+    type: 'image_url',
+    image_url: { url: 'data:image/png;base64,AQID' }
+  });
+} finally {
+  globalThis.fetch = originalFetch;
+  rmSync(visionTempDir, { recursive: true, force: true });
 }
 
 let capturedImageUrl = '';
@@ -207,6 +258,8 @@ try {
   assert.equal(response.ok, true);
   assert.equal(response.checks?.[0]?.id, 'image_generation');
   assert.equal(response.checks?.[0]?.status, 'passed');
+  assert.ok(response.verifiedCapabilities?.includes('image_generation'));
+  assert.equal(response.capabilityMetadata?.source, 'verified');
 } finally {
   globalThis.fetch = originalFetch;
 }
@@ -361,6 +414,10 @@ try {
   assert.ok(catalog.models.some((model) => model.id === 'fun-asr'));
   assert.deepEqual(catalog.models.find((model) => model.id === 'qwen-plus')?.capabilities, ['text']);
   assert.equal(catalog.models.find((model) => model.id === 'qwen-plus')?.source, 'provider');
+  assert.equal(
+    catalog.models.find((model) => model.id === 'qwen-plus')?.capabilityMetadata?.source,
+    'official_catalog'
+  );
   assert.ok(catalog.models.find((model) => model.id === 'fun-asr')?.capabilities.includes('audio_to_text'));
   assert.equal(catalog.models.find((model) => model.id === 'fun-asr')?.source, 'built_in');
 } finally {

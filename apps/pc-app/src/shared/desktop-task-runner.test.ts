@@ -3171,6 +3171,172 @@ assert.ok(
   factoryTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_RUNTIME_FACTORY_BATCH_COMPLETED')
 );
 
+let fallbackFactoryImageCalls = 0;
+const fallbackFactoryTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-factory-image-optional-vision-fallback-001',
+    roleCode: 'cross-border-image-factory',
+    roleName: 'Cross Border Image Factory',
+    title: 'Generate product images without vision model',
+    input: JSON.stringify({
+      factory_request: {
+        platform: { key: 'amazon', label: 'Amazon', imageRatio: '1:1' },
+        packages: [
+          { key: 'main_image', label: 'Main image', description: 'Marketplace main product image.' }
+        ],
+        promptControls: {
+          language: 'English',
+          style: 'clean ecommerce',
+          avoid: 'watermark'
+        }
+      }
+    }),
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0,
+    executionContext: {
+      modelProfileIds: ['qiu-vision-default', 'qiu-image-editing-default'],
+      toolIds: [],
+      knowledgeBindingIds: [],
+      attachmentPaths: ['C:\\QiuAI\\factory\\fallback-sku.png']
+    }
+  }),
+  rolePackage: {
+    roleCode: 'cross-border-image-factory',
+    applicationType: 'digital_factory',
+    name: 'Cross Border Image Factory',
+    version: '1.0.0',
+    templateId: 'factory_cross_border_product_images_v1',
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      runtimePolicy: {
+        maxNodeExecutions: 8,
+        maxLoopIterations: 4,
+        requireApprovalBeforeTools: false
+      },
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'prepare_batch',
+          type: 'data',
+          name: 'Prepare batch',
+          inputVariables: ['start.files', 'factory_request'],
+          outputVariables: ['factory_items', 'selected_packages', 'target_platform'],
+          config: {
+            dataMode: 'code',
+            outputVariable: 'factory_items',
+            code:
+              'const files = Array.isArray(input["start.files"]) ? input["start.files"] : [];\n' +
+              'const request = input.factory_request && typeof input.factory_request === "object" ? input.factory_request : {};\n' +
+              'const packages = Array.isArray(request.packages) ? request.packages : [];\n' +
+              'return {\n' +
+              '  factory_items: files.map((file, index) => ({ sku: `SKU-${index + 1}`, image: file, sourceName: file.name })),\n' +
+              '  selected_packages: packages,\n' +
+              '  target_platform: request.platform\n' +
+              '};'
+          }
+        },
+        {
+          id: 'generate_package_prompts',
+          type: 'llm',
+          name: 'Understand image and generate prompts',
+          modelProfileId: 'qiu-vision-default',
+          inputVariables: ['factory_items', 'selected_packages', 'target_platform'],
+          outputVariables: ['package_instructions'],
+          config: {
+            llmTaskType: 'vision',
+            outputMode: 'json'
+          }
+        },
+        {
+          id: 'generate_images',
+          type: 'llm',
+          name: 'Generate images',
+          modelProfileId: 'qiu-image-editing-default',
+          inputVariables: ['factory_items', 'selected_packages', 'target_platform', 'package_instructions'],
+          outputVariables: ['factory_generated_images'],
+          config: {
+            llmTaskType: 'image_editing',
+            concurrency: 1,
+            maxRetries: 0,
+            timeoutMs: 20_000
+          }
+        }
+      ],
+      edges: [
+        { id: 'start-prepare', sourceNodeId: 'start', targetNodeId: 'prepare_batch' },
+        { id: 'prepare-prompts', sourceNodeId: 'prepare_batch', targetNodeId: 'generate_package_prompts' },
+        { id: 'prompts-generate', sourceNodeId: 'generate_package_prompts', targetNodeId: 'generate_images' }
+      ]
+    },
+    modelProfileIds: ['qiu-vision-default', 'qiu-image-editing-default'],
+    toolIds: [],
+    requiredKnowledgeSources: [],
+    defaultTaskTypes: ['factory_image_batch'],
+    syncPolicy: 'summary_only'
+  },
+  modelProfiles: modelProfiles.concat([
+    {
+      id: 'qiu-vision-default',
+      providerId: 'aliyun-bailian',
+      providerName: 'Aliyun Bailian',
+      modelName: 'qwen3-asr-flash',
+      purpose: 'vision',
+      capabilities: ['image_understanding', 'vision_text'],
+      apiBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      apiKey: 'aliyun-key'
+    },
+    {
+      id: 'qiu-image-editing-default',
+      providerId: 'openai-compatible',
+      providerName: 'OpenAI Compatible',
+      modelName: 'gpt-image-2',
+      purpose: 'vision',
+      capabilities: ['image_generation', 'image_to_image', 'image_editing'],
+      apiBaseUrl: 'https://image.example/v1',
+      apiKey: 'image-api-key'
+    }
+  ]),
+  tools,
+  enabledModelProfileIds: ['qiu-vision-default', 'qiu-image-editing-default'],
+  enabledToolIds: [],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    fallbackFactoryImageCalls += 1;
+    assert.equal(request.profile.id, 'qiu-image-editing-default');
+    assert.equal(request.taskKind, 'image_generation');
+    assert.match(request.imageGeneration?.prompt ?? '', /Image style: clean ecommerce/);
+    assert.match(request.imageGeneration?.prompt ?? '', /Text language: English/);
+    assert.equal(request.imageGeneration?.negativePrompt, 'watermark');
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: JSON.stringify({
+        remoteUrl: 'https://cdn.example.test/factory/fallback-image.png',
+        thumbnailPath: 'https://cdn.example.test/factory/fallback-thumb.png'
+      }),
+      artifacts: [
+        {
+          type: 'image',
+          remoteUrl: 'https://cdn.example.test/factory/fallback-image.png',
+          thumbnailPath: 'https://cdn.example.test/factory/fallback-thumb.png'
+        }
+      ]
+    };
+  },
+  completedAt: '2026-07-20T10:00:14.250Z'
+});
+const fallbackFactoryPreviewArtifact = fallbackFactoryTask.task.artifacts.find((artifact) => artifact.factoryPreview);
+assert.equal(fallbackFactoryTask.task.state, 'completed');
+assert.equal(fallbackFactoryImageCalls, 1);
+assert.equal(fallbackFactoryPreviewArtifact?.factoryPreview?.completed, 1);
+assert.ok(
+  fallbackFactoryTask.task.executionLogs.some(
+    (log) => log.eventType === 'WORKFLOW_RUNTIME_OPTIONAL_VISION_SKIPPED'
+  )
+);
+
 let legacyImageFactoryModelUsed = false;
 const legacyImageFactoryTask = await runDesktopTask({
   task: createMockTaskDetail({

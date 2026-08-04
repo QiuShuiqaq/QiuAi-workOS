@@ -4,7 +4,11 @@ import {
   createCustomCompatibleModelProfile,
   selectModelProfileForPreset
 } from './desktop-model-presets.js';
-import { modelProfileSupportsRequiredCapabilities } from './desktop-model-capabilities.js';
+import {
+  inferModelCapabilitiesFromName,
+  readModelCatalogEntryEffectiveCapabilities,
+  modelProfileSupportsRequiredCapabilities
+} from './desktop-model-capabilities.js';
 import type { ModelProfile } from './desktop-contract.js';
 import type { ModelProviderPreset } from './desktop-model-presets.js';
 
@@ -274,5 +278,16 @@ assert.equal(
   modelProfileSupportsRequiredCapabilities(firstCustomProfile, ['image_editing', 'image_to_image']),
   true
 );
+
+assert.deepEqual(
+  readModelCatalogEntryEffectiveCapabilities({
+    id: 'mystery-2026',
+    source: 'provider',
+    capabilities: [],
+    capabilityMetadata: { source: 'unknown', confidence: 'unknown' }
+  }),
+  []
+);
+assert.deepEqual(inferModelCapabilitiesFromName('mystery-2026', 'general'), ['text']);
 
 console.log('Desktop model preset selection passed.');

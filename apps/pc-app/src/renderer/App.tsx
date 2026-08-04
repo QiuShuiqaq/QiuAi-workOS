@@ -104,13 +104,18 @@ import type {
   ToolManifest
 } from '../shared/desktop-contract';
 import {
-  inferModelCapabilitiesFromName,
+  createModelCapabilityMetadata,
+  explicitModelCapabilitySummary,
   modelCapabilityOptions,
+  modelCapabilityConfidenceLabel,
   modelCapabilityLabel,
+  modelCapabilityMetadataSourceLabel,
   modelCapabilitySummary,
   modelProfileSupportsRequiredCapabilities,
   normalizeModelCapabilities,
+  normalizeExplicitModelCapabilities,
   purposeForModelCapabilities,
+  readModelCatalogEntryEffectiveCapabilities,
   readModelProfileCapabilities
 } from '../shared/desktop-model-capabilities';
 import type { RoleTemplateCatalogEntry } from '@qiuai/domain';
@@ -131,6 +136,7 @@ import { runDesktopTask } from '../shared/desktop-task-runner';
 import {
   ensureModelProfilesForRolePackage,
   findFirstUnreadyRequiredModelProfileId,
+  getRequiredCapabilitiesForSemanticProfileId,
   getRoleModelRuntimeRequirementStatuses,
   readRequiredModelProfileIdsForRolePackage,
   readWorkflowRequiredModelProfileIds,
@@ -7869,6 +7875,7 @@ export default function App() {
           {visibleModels.map((model) => {
             const compatible = modelCatalogEntrySupportsCapabilities(model, requiredCapabilities);
             const inferredCapabilities = readModelCatalogEntryEffectiveCapabilities(model);
+            const status = modelCatalogCapabilityStatus(model);
 
             return (
             <button
@@ -7897,9 +7904,12 @@ export default function App() {
                     {modelCatalogSourceLabel(model.source)}
                   </Tag>
                 ) : null}
+                <Tag color={modelCatalogCapabilityStatusColor(status)} className="model-source-tag">
+                  {modelCatalogCapabilityStatusLabel(model)}
+                </Tag>
               </span>
               <small>{model.id}</small>
-              <small>{modelCapabilitySummary(inferredCapabilities, 'general')}</small>
+              <small>{explicitModelCapabilitySummary(inferredCapabilities)}</small>
             </button>
           );
           })}
@@ -8201,6 +8211,26 @@ export default function App() {
                   }))}
                 />
               </Form.Item>
+              <div className="model-capability-classification">
+                <Space size={6} wrap>
+                  <Tag color={modelProfileCapabilityStatusColor(selectedModelProfile)}>
+                    {modelProfileCapabilityStatusLabel(selectedModelProfile)}
+                  </Tag>
+                  <Typography.Text type="secondary">
+                    来源：{modelCapabilityMetadataSourceLabel(selectedModelProfile.capabilityMetadata?.source)}
+                    {' · '}
+                    可信度：{modelCapabilityConfidenceLabel(selectedModelProfile.capabilityMetadata?.confidence)}
+                    {selectedModelProfile.capabilityMetadata?.verifiedAt
+                      ? ` · 验证时间：${formatDateTime(selectedModelProfile.capabilityMetadata.verifiedAt)}`
+                      : ''}
+                  </Typography.Text>
+                </Space>
+                {selectedModelProfile.capabilityMetadata?.note ? (
+                  <Typography.Text type="secondary">
+                    {selectedModelProfile.capabilityMetadata.note}
+                  </Typography.Text>
+                ) : null}
+              </div>
               {activeSelectedModelCatalog
                 ? renderProviderModelCatalogPanel({
                     catalog: activeSelectedModelCatalog,
@@ -8288,6 +8318,13 @@ export default function App() {
                               {modelTestCheckLabel(check.status)}
                             </Tag>
                             <Typography.Text strong>{check.label}</Typography.Text>
+                            {check.capabilities?.length
+                              ? check.capabilities.map((capability) => (
+                                  <Tag key={`${check.id}-${capability}`}>
+                                    {modelCapabilityLabel(capability)}
+                                  </Tag>
+                                ))
+                              : null}
                             {check.costWarning ? <Tag color="gold">可能计费</Tag> : null}
                           </Space>
                           {typeof check.elapsedMs === 'number' ? (
@@ -9840,6 +9877,27 @@ export default function App() {
       values.purpose ?? selectedModelProfile.purpose
     );
     const purpose = purposeForModelCapabilities(capabilities, selectedModelProfile.purpose);
+    const verifiedCapabilities = readVerifiedCapabilitiesForSavedModel(
+      modelTestResult,
+      values.providerName,
+      values.modelName,
+      capabilities,
+      selectedModelProfile
+    );
+    const capabilityMetadata = verifiedCapabilities.length > 0 && modelTestResult
+      ? createModelCapabilityMetadata({
+          source: 'verified',
+          confidence: 'verified',
+          verifiedAt: modelTestResult.checkedAt,
+          note: '模型连接测试通过后保存。'
+        })
+      : selectedModelProfile.capabilityMetadata?.source === 'official_catalog'
+        ? selectedModelProfile.capabilityMetadata
+        : createModelCapabilityMetadata({
+            source: 'manual',
+            confidence: 'high',
+            note: '用户在模型配置中确认能力。'
+          });
     const updatedProfile: ModelProfile = {
       ...selectedModelProfile,
       providerId: selectedModelProfile.providerId,
@@ -9847,6 +9905,8 @@ export default function App() {
       modelName: values.modelName.trim(),
       purpose,
       capabilities,
+      capabilityMetadata,
+      verifiedCapabilities,
       apiBaseUrl: values.apiBaseUrl?.trim() || undefined,
       apiKey: undefined,
       temperature: values.temperature,
@@ -10049,14 +10109,25 @@ export default function App() {
         apiBaseUrl: formApiBaseUrl || currentProfile.apiBaseUrl,
         models: []
       };
-    const presetModel = createPresetModelFromCatalogEntry(model, currentProfile.purpose);
+    const formCapabilities = normalizeExplicitModelCapabilities(
+      modelForm.getFieldValue('capabilities') as ModelCapability[] | undefined
+    );
+    const presetModel = createPresetModelFromCatalogEntry(
+      model,
+      currentProfile.purpose,
+      formCapabilities.length > 0 ? formCapabilities : readModelProfileCapabilities(currentProfile)
+    );
 
     applyModelProviderPreset(preset, presetModel, {
       apiBaseUrl: formApiBaseUrl,
       apiKey: formApiKey,
       replaceProfileId: currentProfile.id
     });
-    setModelTestNotice(`已选择 ${preset.name} / ${model.id}，保存后会更新当前模型配置。`);
+    setModelTestNotice(
+      readModelCatalogEntryEffectiveCapabilities(model).length > 0
+        ? `已选择 ${preset.name} / ${model.id}，保存后会更新当前模型配置。`
+        : `已选择 ${preset.name} / ${model.id}。该模型能力待确认，当前会按表单里的能力保存，建议保存后执行模型测试。`
+    );
   }
 
   function toggleTool(toolId: string, enabled: boolean) {
@@ -13707,6 +13778,42 @@ function formatModelTestNotice(response: DesktopModelTestResponse): string {
   return `${prefix}：${response.providerName}/${response.modelName}，通过 ${passed}，失败 ${failed}，跳过 ${skipped}。`;
 }
 
+function readVerifiedCapabilitiesForSavedModel(
+  response: DesktopModelTestResponse | null,
+  providerName: string,
+  modelName: string,
+  capabilities: ModelCapability[],
+  currentProfile: ModelProfile
+): ModelCapability[] {
+  const normalizedCapabilities = normalizeExplicitModelCapabilities(capabilities);
+  if (
+    response?.ok &&
+    normalizeComparableText(response.providerName) === normalizeComparableText(providerName) &&
+    normalizeComparableText(response.modelName) === normalizeComparableText(modelName)
+  ) {
+    const verifiedCapabilities = normalizeExplicitModelCapabilities(response.verifiedCapabilities);
+    if (verifiedCapabilities.length > 0) {
+      return verifiedCapabilities.filter((capability) => normalizedCapabilities.includes(capability));
+    }
+  }
+
+  const currentVerifiedCapabilities = normalizeExplicitModelCapabilities(currentProfile.verifiedCapabilities);
+  if (
+    currentProfile.capabilityMetadata?.source === 'verified' &&
+    normalizeComparableText(currentProfile.providerName) === normalizeComparableText(providerName) &&
+    normalizeComparableText(currentProfile.modelName) === normalizeComparableText(modelName) &&
+    currentVerifiedCapabilities.every((capability) => normalizedCapabilities.includes(capability))
+  ) {
+    return currentVerifiedCapabilities;
+  }
+
+  return [];
+}
+
+function normalizeComparableText(value: string | undefined): string {
+  return value?.trim().toLowerCase() ?? '';
+}
+
 function isModelNoticeSuccess(value: string): boolean {
   return value.startsWith('模型测试通过') || value.startsWith('模型连接正常') || value.startsWith('已拉取');
 }
@@ -13756,35 +13863,51 @@ function confirmPaidModelTest(): Promise<boolean> {
   });
 }
 
-function readModelCatalogEntryEffectiveCapabilities(model: ProviderModelCatalogEntry): ModelCapability[] {
-  return normalizeModelCapabilities(
-    [
-      ...inferModelCapabilitiesFromName(model.id, 'general'),
-      ...(model.label ? inferModelCapabilitiesFromName(model.label, 'general') : []),
-      ...(model.capabilities ?? [])
-    ],
-    'general'
-  );
-}
-
 function modelCatalogEntrySupportsCapabilities(
   model: ProviderModelCatalogEntry,
   requiredCapabilities: ModelCapability[]
 ): boolean {
-  if (requiredCapabilities.length === 0) {
+  return explicitCapabilitiesSupportRequiredCapabilities(
+    readModelCatalogEntryEffectiveCapabilities(model),
+    requiredCapabilities
+  );
+}
+
+function explicitCapabilitiesSupportRequiredCapabilities(
+  capabilities: ModelCapability[],
+  requiredCapabilities: ModelCapability[]
+): boolean {
+  const required = [...new Set(requiredCapabilities.filter(Boolean))];
+  if (required.length === 0) {
     return true;
   }
 
-  const inferredProfile: ModelProfile = {
-    id: model.id,
-    providerId: 'catalog',
-    providerName: 'Catalog',
-    modelName: model.id,
-    purpose: purposeForModelCapabilities(model.capabilities, 'general'),
-    capabilities: readModelCatalogEntryEffectiveCapabilities(model)
-  };
+  if (capabilities.length === 0) {
+    return false;
+  }
 
-  return modelProfileSupportsRequiredCapabilities(inferredProfile, requiredCapabilities);
+  const available = new Set(capabilities);
+  const strictGroups: ModelCapability[][] = [
+    ['image_editing', 'image_to_image'],
+    ['text_to_image', 'image_generation'],
+    ['image_understanding', 'vision_understanding', 'vision_text'],
+    ['video_generation', 'text_to_video', 'image_to_video'],
+    ['video_understanding', 'video_text'],
+    ['audio_to_text'],
+    ['embedding'],
+    ['rerank']
+  ];
+  const matchedStrictGroups = strictGroups.filter((group) =>
+    group.some((capability) => required.includes(capability))
+  );
+
+  if (matchedStrictGroups.length > 0) {
+    return matchedStrictGroups.some((group) =>
+      group.some((capability) => available.has(capability))
+    );
+  }
+
+  return required.some((capability) => available.has(capability));
 }
 
 function modelCatalogEntrySearchText(model: ProviderModelCatalogEntry): string {
@@ -13793,6 +13916,7 @@ function modelCatalogEntrySearchText(model: ProviderModelCatalogEntry): string {
     model.label,
     model.ownedBy,
     model.source,
+    modelCatalogCapabilityStatusLabel(model),
     ...readModelCatalogEntryEffectiveCapabilities(model).map(modelCapabilityLabel)
   ]
     .filter((value): value is string => Boolean(value))
@@ -13838,6 +13962,63 @@ function modelCatalogEntryNamePriority(model: ProviderModelCatalogEntry): number
   if (/\b(qwen|deepseek|gpt|claude|gemini|kimi|glm|minimax)\b/.test(name)) return 0;
   if (name.includes('asr') || name.includes('vl') || name.includes('image') || name.includes('wanx')) return 1;
   return 2;
+}
+
+function modelCatalogCapabilityStatus(
+  model: ProviderModelCatalogEntry
+): 'verified' | 'declared' | 'inferred' | 'manual' | 'unknown' {
+  const metadata = model.capabilityMetadata;
+  if (metadata?.source === 'verified' || metadata?.confidence === 'verified') {
+    return 'verified';
+  }
+  if (metadata?.source === 'official_catalog' || metadata?.source === 'provider') {
+    return metadata.confidence === 'unknown' ? 'unknown' : 'declared';
+  }
+  if (metadata?.source === 'manual') {
+    return 'manual';
+  }
+  if (metadata?.source === 'name_inferred') {
+    return readModelCatalogEntryEffectiveCapabilities(model).length > 0 ? 'inferred' : 'unknown';
+  }
+  return readModelCatalogEntryEffectiveCapabilities(model).length > 0 ? 'inferred' : 'unknown';
+}
+
+function modelCatalogCapabilityStatusLabel(model: ProviderModelCatalogEntry): string {
+  const status = modelCatalogCapabilityStatus(model);
+  if (status === 'verified') return '已验证';
+  if (status === 'declared') return modelCapabilityMetadataSourceLabel(model.capabilityMetadata?.source);
+  if (status === 'manual') return '人工确认';
+  if (status === 'inferred') return '名称推断';
+  return '待确认';
+}
+
+function modelCatalogCapabilityStatusColor(
+  status: ReturnType<typeof modelCatalogCapabilityStatus>
+): string {
+  if (status === 'verified') return 'green';
+  if (status === 'declared') return 'blue';
+  if (status === 'manual') return 'purple';
+  if (status === 'inferred') return 'gold';
+  return 'orange';
+}
+
+function modelProfileCapabilityStatusLabel(profile: ModelProfile): string {
+  const metadata = profile.capabilityMetadata;
+  if (metadata?.source === 'verified' || metadata?.confidence === 'verified') return '已验证';
+  if (metadata?.source === 'official_catalog') return '内置目录';
+  if (metadata?.source === 'provider') return '供应商声明';
+  if (metadata?.source === 'manual') return '人工确认';
+  if (metadata?.source === 'name_inferred') return '名称推断';
+  return '人工确认';
+}
+
+function modelProfileCapabilityStatusColor(profile: ModelProfile): string {
+  const metadata = profile.capabilityMetadata;
+  if (metadata?.source === 'verified' || metadata?.confidence === 'verified') return 'green';
+  if (metadata?.source === 'official_catalog' || metadata?.source === 'provider') return 'blue';
+  if (metadata?.source === 'manual') return 'purple';
+  if (metadata?.source === 'name_inferred') return 'gold';
+  return 'default';
 }
 
 function modelCatalogSourceLabel(source: NonNullable<ModelProviderCatalog['models'][number]['source']>): string {
@@ -13920,9 +14101,14 @@ function isAliyunBailianProviderId(providerId: string) {
 
 function createPresetModelFromCatalogEntry(
   model: ModelProviderCatalog['models'][number],
-  fallbackPurpose: ModelProfile['purpose'] = 'general'
+  fallbackPurpose: ModelProfile['purpose'] = 'general',
+  fallbackCapabilities: ModelCapability[] = []
 ): ModelProviderPresetModel {
-  const capabilities = normalizeModelCapabilities(model.capabilities, fallbackPurpose);
+  const catalogCapabilities = readModelCatalogEntryEffectiveCapabilities(model);
+  const usesManualFallback = catalogCapabilities.length === 0;
+  const capabilities = usesManualFallback
+    ? normalizeModelCapabilities(fallbackCapabilities, fallbackPurpose)
+    : catalogCapabilities;
   const purpose = purposeForModelCapabilities(capabilities, fallbackPurpose);
 
   return {
@@ -13930,6 +14116,14 @@ function createPresetModelFromCatalogEntry(
     modelName: model.id,
     purpose,
     capabilities,
+    capabilityMetadata: usesManualFallback
+      ? createModelCapabilityMetadata({
+          source: 'manual',
+          confidence: 'high',
+          note: '供应商未声明能力，用户按当前模型槽位人工确认。'
+        })
+      : model.capabilityMetadata,
+    verifiedCapabilities: normalizeExplicitModelCapabilities(model.verifiedCapabilities),
     temperature: purpose === 'reasoning' ? 0.2 : 0.4,
     maxTokens: purpose === 'reasoning' ? 8192 : 4096
   };
@@ -14439,7 +14633,9 @@ function buildCompatibleRuntimeModelOptions(
   requirementProfile: ModelProfile,
   roleCode?: string
 ): Array<{ label: string; value: string }> {
-  const requiredCapabilities = readModelProfileCapabilities(requirementProfile);
+  const requiredCapabilities = getRequiredCapabilitiesForSemanticProfileId(requirementProfile.id);
+  const effectiveRequiredCapabilities =
+    requiredCapabilities.length > 0 ? requiredCapabilities : readModelProfileCapabilities(requirementProfile);
   const enabledModelIds = new Set(state.localRuntime.enabledModelProfileIds);
   const compatibleProfiles = state.modelProfiles.filter((profile) => {
     const isCurrentRequirement = profile.id === requirementProfile.id;
@@ -14455,13 +14651,19 @@ function buildCompatibleRuntimeModelOptions(
 
     return (
       (isCurrentRequirement || ((isEnabled || isSelectableConfiguredProvider) && isConfigured)) &&
-      modelProfileSupportsAnyRequiredCapability(profile, requiredCapabilities)
+      modelProfileSupportsAnyRequiredCapability(profile, effectiveRequiredCapabilities)
     );
   });
+  const requirementProfileIsCompatible = modelProfileSupportsAnyRequiredCapability(
+    requirementProfile,
+    effectiveRequiredCapabilities
+  );
 
   const profiles = compatibleProfiles.some((profile) => profile.id === requirementProfile.id)
     ? compatibleProfiles
-    : [requirementProfile, ...compatibleProfiles];
+    : requirementProfileIsCompatible
+      ? [requirementProfile, ...compatibleProfiles]
+      : compatibleProfiles;
 
   return profiles.map((profile) => ({
     value: profile.id,
@@ -14469,7 +14671,7 @@ function buildCompatibleRuntimeModelOptions(
   }));
 }
 
-function modelProfileSupportsAnyRequiredCapability(profile: ModelProfile, requiredCapabilities: ModelCapability[]): boolean {
+function modelProfileSupportsAnyRequiredCapability(profile: ModelProfile, requiredCapabilities: string[]): boolean {
   return modelProfileSupportsRequiredCapabilities(profile, requiredCapabilities);
 }
 

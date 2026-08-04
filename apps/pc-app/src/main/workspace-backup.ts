@@ -24,6 +24,7 @@ import type {
   DesktopToolSummary,
   LocalRuntimeContract,
   ModelCapability,
+  ModelCapabilityMetadata,
   ModelCredential,
   ModelProviderCatalog,
   ModelProfile,
@@ -44,6 +45,45 @@ import {
   normalizePathSegment,
   type DesktopStorageLayout
 } from './storage-layout.js';
+
+const modelCapabilityValues = [
+  'text',
+  'reasoning_text',
+  'vision_text',
+  'video_text',
+  'embedding',
+  'rerank',
+  'long_context',
+  'image_understanding',
+  'vision_understanding',
+  'video_understanding',
+  'text_to_image',
+  'image_to_image',
+  'image_editing',
+  'image_generation',
+  'video_generation',
+  'text_to_video',
+  'image_to_video',
+  'audio_to_text',
+  'text_to_audio'
+] as const;
+
+const modelCapabilitySourceValues = [
+  'official_catalog',
+  'provider',
+  'name_inferred',
+  'manual',
+  'verified',
+  'unknown'
+] as const;
+
+const modelCapabilityConfidenceValues = [
+  'verified',
+  'high',
+  'medium',
+  'low',
+  'unknown'
+] as const;
 
 const backupSchemaVersion = 1;
 const backupBundleType = 'desktop-runtime-state-backup';
@@ -847,26 +887,17 @@ function validateModelProfile(value: unknown): ModelProfile {
       'audio'
     ]),
     capabilities: requireStringEnumArray(record.capabilities, 'modelProfile.capabilities', [
-      'text',
-      'reasoning_text',
-      'vision_text',
-      'video_text',
-      'embedding',
-      'rerank',
-      'long_context',
-      'image_understanding',
-      'vision_understanding',
-      'video_understanding',
-      'text_to_image',
-      'image_to_image',
-      'image_editing',
-      'image_generation',
-      'video_generation',
-      'text_to_video',
-      'image_to_video',
-      'audio_to_text',
-      'text_to_audio'
+      ...modelCapabilityValues
     ]) as ModelCapability[],
+    capabilityMetadata: optionalModelCapabilityMetadata(
+      record.capabilityMetadata,
+      'modelProfile.capabilityMetadata'
+    ),
+    verifiedCapabilities: requireStringEnumArray(
+      record.verifiedCapabilities,
+      'modelProfile.verifiedCapabilities',
+      [...modelCapabilityValues]
+    ) as ModelCapability[],
     apiBaseUrl: optionalString(record.apiBaseUrl, 'modelProfile.apiBaseUrl'),
     apiKey: optionalString(record.apiKey, 'modelProfile.apiKey'),
     temperature: optionalNumber(record.temperature, 'modelProfile.temperature'),
@@ -900,30 +931,40 @@ function validateModelProviderCatalog(value: unknown): ModelProviderCatalog {
         capabilities: requireStringEnumArray(
           modelRecord.capabilities,
           `modelProviderCatalog.models[${index}].capabilities`,
-          [
-            'text',
-            'reasoning_text',
-            'vision_text',
-            'video_text',
-            'embedding',
-            'rerank',
-            'long_context',
-            'image_understanding',
-            'vision_understanding',
-            'video_understanding',
-            'text_to_image',
-            'image_to_image',
-            'image_editing',
-            'image_generation',
-            'video_generation',
-            'text_to_video',
-            'image_to_video',
-            'audio_to_text',
-            'text_to_audio'
-          ]
+          [...modelCapabilityValues]
+        ) as ModelCapability[],
+        capabilityMetadata: optionalModelCapabilityMetadata(
+          modelRecord.capabilityMetadata,
+          `modelProviderCatalog.models[${index}].capabilityMetadata`
+        ),
+        verifiedCapabilities: requireStringEnumArray(
+          modelRecord.verifiedCapabilities,
+          `modelProviderCatalog.models[${index}].verifiedCapabilities`,
+          [...modelCapabilityValues]
         ) as ModelCapability[]
       };
     })
+  };
+}
+
+function optionalModelCapabilityMetadata(
+  value: unknown,
+  fieldName: string
+): ModelCapabilityMetadata | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const record = requireRecord(value, fieldName);
+  return {
+    source: requireEnum(record.source, `${fieldName}.source`, [...modelCapabilitySourceValues]),
+    confidence: requireEnum(
+      record.confidence,
+      `${fieldName}.confidence`,
+      [...modelCapabilityConfidenceValues]
+    ),
+    verifiedAt: optionalString(record.verifiedAt, `${fieldName}.verifiedAt`),
+    note: optionalString(record.note, `${fieldName}.note`)
   };
 }
 

@@ -1,4 +1,41 @@
-import type { ModelCapability, ModelProfile, ModelPurpose } from './desktop-contract.js';
+import type {
+  ModelCapability,
+  ModelCapabilityConfidence,
+  ModelCapabilityMetadata,
+  ModelCapabilitySource,
+  ModelCatalogEntry,
+  ModelProfile,
+  ModelPurpose
+} from './desktop-contract.js';
+
+export interface ModelCapabilityClassification {
+  capabilities: ModelCapability[];
+  purpose: ModelPurpose;
+  metadata: ModelCapabilityMetadata;
+}
+
+export const modelCapabilityMetadataSourceOptions: Array<{
+  value: ModelCapabilitySource;
+  label: string;
+}> = [
+  { value: 'verified', label: '测试验证' },
+  { value: 'official_catalog', label: '内置目录' },
+  { value: 'provider', label: '供应商声明' },
+  { value: 'manual', label: '人工配置' },
+  { value: 'name_inferred', label: '名称推断' },
+  { value: 'unknown', label: '待确认' }
+];
+
+export const modelCapabilityConfidenceOptions: Array<{
+  value: ModelCapabilityConfidence;
+  label: string;
+}> = [
+  { value: 'verified', label: '已验证' },
+  { value: 'high', label: '高' },
+  { value: 'medium', label: '中' },
+  { value: 'low', label: '低' },
+  { value: 'unknown', label: '待确认' }
+];
 
 export const modelCapabilityOptions: Array<{
   value: ModelCapability;
@@ -48,27 +85,40 @@ export function defaultCapabilitiesForPurpose(purpose: ModelPurpose): ModelCapab
   return ['text'];
 }
 
+const allowedModelCapabilities = new Set<ModelCapability>([
+  ...modelCapabilityOptions.map((option) => option.value),
+  'image_understanding',
+  'image_editing'
+]);
+
+export function normalizeExplicitModelCapabilities(
+  capabilities: ModelCapability[] | undefined
+): ModelCapability[] {
+  return [...new Set((capabilities ?? []).filter((item) => allowedModelCapabilities.has(item)))];
+}
+
 export function normalizeModelCapabilities(
   capabilities: ModelCapability[] | undefined,
   purpose: ModelPurpose
 ): ModelCapability[] {
-  const allowed = new Set<ModelCapability>([
-    ...modelCapabilityOptions.map((option) => option.value),
-    'image_understanding',
-    'image_editing'
-  ]);
-  const normalized = [...new Set((capabilities ?? []).filter((item) => allowed.has(item)))];
+  const normalized = normalizeExplicitModelCapabilities(capabilities);
   return normalized.length > 0 ? normalized : defaultCapabilitiesForPurpose(purpose);
 }
 
 export function readModelProfileCapabilities(profile: ModelProfile): ModelCapability[] {
-  return normalizeModelCapabilities(profile.capabilities, profile.purpose);
+  return normalizeModelCapabilities(
+    [
+      ...(profile.verifiedCapabilities ?? []),
+      ...(profile.capabilities ?? [])
+    ],
+    profile.purpose
+  );
 }
 
 export function readEffectiveModelProfileCapabilities(profile: ModelProfile): string[] {
   return [
     ...new Set([
-      ...inferModelCapabilitiesFromName(profile.modelName, profile.purpose),
+      ...inferKnownModelCapabilitiesFromName(profile.modelName),
       ...readModelProfileCapabilities(profile)
     ].map(normalizeCapabilityToken))
   ];
@@ -78,12 +128,21 @@ export function modelProfileSupportsRequiredCapabilities(
   profile: ModelProfile,
   requiredCapabilities: string[]
 ): boolean {
+  const inferredCapabilities = inferKnownModelCapabilitiesFromName(profile.modelName).map(normalizeCapabilityToken);
   const capabilities = new Set(readEffectiveModelProfileCapabilities(profile));
   const required = [
     ...new Set(requiredCapabilities.map(normalizeCapabilityToken).filter(Boolean))
   ];
   if (required.length === 0) {
     return true;
+  }
+
+  if (
+    isDedicatedAudioTranscriptionModelName(profile.modelName) &&
+    inferredCapabilities.includes('audio_to_text') &&
+    !required.includes('audio_to_text')
+  ) {
+    return false;
   }
 
   const strictGroups = [
@@ -164,14 +223,102 @@ export function modelCapabilitySummary(capabilities: ModelCapability[] | undefin
   return normalizeModelCapabilities(capabilities, purpose).map(modelCapabilityLabel).join(' / ');
 }
 
+export function explicitModelCapabilitySummary(capabilities: ModelCapability[] | undefined): string {
+  const normalized = normalizeExplicitModelCapabilities(capabilities);
+  return normalized.length > 0 ? normalized.map(modelCapabilityLabel).join(' / ') : '待确认';
+}
+
+export function modelCapabilityMetadataSourceLabel(source: ModelCapabilitySource | undefined): string {
+  return modelCapabilityMetadataSourceOptions.find((option) => option.value === source)?.label ?? '待确认';
+}
+
+export function modelCapabilityConfidenceLabel(confidence: ModelCapabilityConfidence | undefined): string {
+  return modelCapabilityConfidenceOptions.find((option) => option.value === confidence)?.label ?? '待确认';
+}
+
+export function createModelCapabilityMetadata(input: {
+  source: ModelCapabilitySource;
+  confidence: ModelCapabilityConfidence;
+  verifiedAt?: string;
+  note?: string;
+}): ModelCapabilityMetadata {
+  return {
+    source: input.source,
+    confidence: input.confidence,
+    verifiedAt: input.verifiedAt,
+    note: input.note
+  };
+}
+
+export function classifyModelCapabilitiesFromName(
+  modelName: string,
+  fallbackPurpose: ModelPurpose = 'general',
+  options: {
+    allowFallback?: boolean;
+    source?: ModelCapabilitySource;
+    note?: string;
+  } = {}
+): ModelCapabilityClassification {
+  const capabilities = inferKnownModelCapabilitiesFromName(modelName);
+  if (capabilities.length > 0) {
+    const metadataSource = options.source ?? 'name_inferred';
+    return {
+      capabilities,
+      purpose: purposeForModelCapabilities(capabilities, fallbackPurpose),
+      metadata: createModelCapabilityMetadata({
+        source: metadataSource,
+        confidence: metadataSource === 'official_catalog' || metadataSource === 'provider' ? 'high' : 'medium',
+        note: options.note
+      })
+    };
+  }
+
+  if (options.allowFallback) {
+    const fallbackCapabilities = defaultCapabilitiesForPurpose(fallbackPurpose);
+    return {
+      capabilities: fallbackCapabilities,
+      purpose: fallbackPurpose,
+      metadata: createModelCapabilityMetadata({
+        source: options.source ?? 'name_inferred',
+        confidence: 'low',
+        note: options.note ?? '未命中明确模型能力规则，按槽位用途兜底。'
+      })
+    };
+  }
+
+  return {
+    capabilities: [],
+    purpose: fallbackPurpose,
+    metadata: createModelCapabilityMetadata({
+      source: 'unknown',
+      confidence: 'unknown',
+      note: options.note ?? '供应商未声明能力，模型名称也未命中可靠规则，请人工确认。'
+    })
+  };
+}
+
+export function readModelCatalogEntryEffectiveCapabilities(model: ModelCatalogEntry): ModelCapability[] {
+  return normalizeExplicitModelCapabilities([
+    ...(model.verifiedCapabilities ?? []),
+    ...(model.capabilities ?? []),
+    ...inferKnownModelCapabilitiesFromName(model.id),
+    ...(model.label ? inferKnownModelCapabilitiesFromName(model.label) : [])
+  ]);
+}
+
 export function inferModelCapabilitiesFromName(
   modelName: string,
   fallbackPurpose: ModelPurpose = 'general'
 ): ModelCapability[] {
+  const knownCapabilities = inferKnownModelCapabilitiesFromName(modelName);
+  return knownCapabilities.length > 0 ? knownCapabilities : defaultCapabilitiesForPurpose(fallbackPurpose);
+}
+
+export function inferKnownModelCapabilitiesFromName(modelName: string): ModelCapability[] {
   const normalizedName = modelName.trim().toLowerCase();
 
   if (!normalizedName) {
-    return defaultCapabilitiesForPurpose(fallbackPurpose);
+    return [];
   }
 
   if (matchesAny(normalizedName, ['embedding', 'embeddings', 'bge-m3', 'text-embedding'])) {
@@ -229,11 +376,44 @@ export function inferModelCapabilitiesFromName(
     return ['reasoning_text', 'text'];
   }
 
-  return defaultCapabilitiesForPurpose(fallbackPurpose);
+  if (
+    matchesAny(normalizedName, [
+      'deepseek-chat',
+      'deepseek-v3',
+      'deepseek-v4',
+      'qwen-plus',
+      'qwen-max',
+      'qwen-turbo',
+      'qwen2.5',
+      'gpt-3.5',
+      'gpt-4',
+      'gpt-5',
+      'claude',
+      'gemini-pro',
+      'glm',
+      'kimi',
+      'moonshot',
+      'hunyuan',
+      'ernie',
+      'yi-',
+      'abab',
+      'minimax',
+      'doubao'
+    ])
+  ) {
+    return ['text'];
+  }
+
+  return [];
 }
 
 function matchesAny(value: string, tokens: string[]): boolean {
   return tokens.some((token) => value.includes(token));
+}
+
+function isDedicatedAudioTranscriptionModelName(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return matchesAny(normalized, ['whisper', 'asr', 'speech-to-text', 'audio-transcription', 'paraformer']);
 }
 
 function normalizeCapabilityToken(value: string): string {

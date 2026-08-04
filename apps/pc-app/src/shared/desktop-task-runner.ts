@@ -253,6 +253,7 @@ interface AttachmentContextPreparation {
 const toolCallMarker = 'QIUAI_DESKTOP_TOOL_CALL:';
 const maxDesktopToolTurns = 3;
 const maxAttachmentContextFiles = 5;
+const maxVisionInputImages = 8;
 const maxAttachmentContextChars = 40_000;
 const maxKnowledgeRetrievalSources = 4;
 const maxKnowledgeRetrievalFiles = 4;
@@ -2942,13 +2943,30 @@ async function invokeWorkflowRuntimeModelNode(input: {
   outputVariables: string[];
   message: string;
 }> {
-  const profile = selectWorkflowRuntimeModelProfile(
-    input.node,
-    input.profiles,
-    input.rolePackage,
-    input.task.roleCode,
-    input.roleModelCredentialBindings
-  );
+  let profile: ModelProfile;
+  try {
+    profile = selectWorkflowRuntimeModelProfile(
+      input.node,
+      input.profiles,
+      input.rolePackage,
+      input.task.roleCode,
+      input.roleModelCredentialBindings
+    );
+  } catch (error) {
+    if (isOptionalCrossBorderFactoryPromptNode(input.node, input.rolePackage)) {
+      return completeOptionalCrossBorderFactoryPromptNodeWithoutVisionModel({
+        task: input.task,
+        node: input.node,
+        pool: input.pool,
+        createdAt: input.createdAt,
+        currentResponse: input.currentResponse,
+        primaryProfile: input.primaryProfile,
+        reason: readErrorMessage(error)
+      });
+    }
+
+    throw error;
+  }
   if (input.node.type === 'output') {
     const factoryOutputResult = completeWorkflowRuntimeFactoryVideoOutputNode(input);
     if (factoryOutputResult) {
@@ -2993,6 +3011,7 @@ async function invokeWorkflowRuntimeModelNode(input: {
   const response = await input.modelInvoker({
     profile,
     messages,
+    visionInputs: collectWorkflowRuntimeVisionInputs(input.node, input.pool, variables),
     timeoutMs: readWorkflowRuntimeModelTimeoutMs(input.node.config?.timeoutMs)
   });
   const parsedJson = parseWorkflowRuntimeJson(response.content);
@@ -5992,6 +6011,38 @@ function buildWorkflowRuntimeModelMessages(input: {
   ];
 }
 
+function collectWorkflowRuntimeVisionInputs(
+  node: WorkflowGraphNode,
+  pool: WorkflowVariablePool,
+  variables: Array<{ ref: string; value: WorkflowRuntimeValue }>
+): NonNullable<DesktopModelChatRequest['visionInputs']> | undefined {
+  if (getWorkflowEffectiveModelTaskType(node) !== 'vision') {
+    return undefined;
+  }
+
+  const imageFiles = [
+    ...variables.flatMap((variable) => readWorkflowRuntimeFiles(variable.value)),
+    ...readWorkflowRuntimeFiles(pool.get('start.images') ?? []),
+    ...readFactoryRuntimeItems(pool.get('factory_items')).map((item) => item.image)
+  ].filter((file) => file.kind === 'image' || Boolean(inferFactoryImageMimeType(file.name)));
+  const seen = new Set<string>();
+  const inputs = imageFiles.flatMap((file) => {
+    const imagePath = file.localPath.trim();
+    if (!imagePath || seen.has(imagePath)) {
+      return [];
+    }
+    seen.add(imagePath);
+    return [
+      {
+        imagePath,
+        mimeType: file.mimeType ?? inferFactoryImageMimeType(file.name)
+      }
+    ];
+  });
+
+  return inputs.length > 0 ? inputs.slice(0, maxVisionInputImages) : undefined;
+}
+
 function readWorkflowRuntimeModelOutputMode(node: WorkflowGraphNode): WorkflowRuntimeModelOutputMode {
   if (readWorkflowRuntimeString(node.config?.llmTaskType) === 'structured_extraction') return 'json';
   return node.config?.outputMode === 'json' || node.config?.responseFormat === 'json' ? 'json' : 'text';
@@ -6160,6 +6211,86 @@ function buildWorkflowRuntimeToolRequest(
 function extractFirstUrl(text: string): string | undefined {
   const match = text.match(/https?:\/\/[^\s"'<>，。；、）)]+/i);
   return match?.[0];
+}
+
+function isOptionalCrossBorderFactoryPromptNode(
+  node: WorkflowGraphNode,
+  rolePackage?: RolePackageManifest
+): boolean {
+  const isCrossBorderFactory =
+    rolePackage?.templateId === 'factory_cross_border_product_images_v1' ||
+    rolePackage?.roleCode === 'cross-border-image-factory' ||
+    rolePackage?.roleCode.includes('cross-border') === true;
+
+  return (
+    isCrossBorderFactory &&
+    node.id === 'generate_package_prompts' &&
+    getWorkflowEffectiveModelTaskType(node) === 'vision'
+  );
+}
+
+function completeOptionalCrossBorderFactoryPromptNodeWithoutVisionModel(input: {
+  task: DesktopTaskDetail;
+  node: WorkflowGraphNode;
+  pool: WorkflowVariablePool;
+  createdAt: string;
+  currentResponse: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  reason: string;
+}): {
+  response: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  logs: DesktopExecutionLogEntry[];
+  usedToolIds: string[];
+  generatedArtifacts: DesktopArtifactSummary[];
+  inputVariables: string[];
+  outputVariables: string[];
+  message: string;
+} {
+  const message = [
+    '未配置兼容的图片理解模型，已跳过提示词增强节点。',
+    '后续生图将使用平台、产物包和用户提示词控制生成兜底提示词。',
+    `原因：${input.reason}`
+  ].join('\n');
+  const outputVariables = writeWorkflowNodeOutputs({
+    pool: input.pool,
+    node: input.node,
+    text: '[]',
+    json: [],
+    result: [],
+    outputValue: []
+  });
+
+  input.pool.set('runtime.previous_text', message);
+  input.pool.set('runtime.last_model_node', input.node.id);
+
+  return {
+    response: mergeWorkflowRuntimeResponses(input.currentResponse, {
+      provider: input.primaryProfile.providerName,
+      modelName: input.primaryProfile.modelName,
+      content: message
+    }),
+    primaryProfile: input.primaryProfile,
+    logs: [
+      createLog(
+        input.task.taskId,
+        'warning',
+        'WORKFLOW_RUNTIME_OPTIONAL_VISION_SKIPPED',
+        message,
+        input.createdAt,
+        sanitizeLogSuffix(input.node.id),
+        {
+          reason: input.reason,
+          fallback: 'factory_image_generation_fallback_prompt'
+        }
+      )
+    ],
+    usedToolIds: [],
+    generatedArtifacts: [],
+    inputVariables: input.node.inputVariables ?? [],
+    outputVariables,
+    message
+  };
 }
 
 function selectWorkflowRuntimeModelProfile(

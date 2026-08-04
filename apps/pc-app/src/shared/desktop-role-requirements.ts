@@ -145,11 +145,11 @@ export function getRoleModelRuntimeRequirementStatuses(
       runtimeProfileId !== requirement.profile.id
     );
     const requiredCapabilities = getRequiredCapabilitiesForSemanticProfileId(requirement.profile.id);
+    const selectedRuntimeProfile = runtimeOverrideSelected ? runtimeProfile : requirement.profile;
     const runtimeCompatible =
-      !runtimeOverrideSelected ||
-      !runtimeProfile ||
+      !selectedRuntimeProfile ||
       requiredCapabilities.length === 0 ||
-      modelProfileSupportsAnyCapability(runtimeProfile, requiredCapabilities);
+      modelProfileSupportsAnyCapability(selectedRuntimeProfile, requiredCapabilities);
     const known = runtimeOverrideSelected ? Boolean(runtimeProfile) : requirement.known;
     const configured = runtimeOverrideSelected && runtimeProfile
       ? hasConfiguredModelApi(runtimeProfile, credentialContext)
@@ -238,7 +238,7 @@ function findConfiguredCompatibleModelProfile(
   );
 }
 
-function getRequiredCapabilitiesForSemanticProfileId(profileId: string): string[] {
+export function getRequiredCapabilitiesForSemanticProfileId(profileId: string): string[] {
   if (profileId === 'qiu-vision-default') return ['image_understanding', 'vision_understanding', 'vision_text'];
   if (profileId === 'qiu-image-generation-default') return ['text_to_image', 'image_generation'];
   if (profileId === 'qiu-image-editing-default') return ['image_editing', 'image_to_image'];

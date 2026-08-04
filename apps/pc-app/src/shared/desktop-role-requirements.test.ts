@@ -419,4 +419,30 @@ const incompatibleImageEditingStatus = incompatibleRuntimeStatuses.find(
 assert.equal(incompatibleImageEditingStatus?.ready, false);
 assert.equal(incompatibleImageEditingStatus?.issue, 'incompatible');
 
+const misconfiguredVisionSlotProfile: ModelProfile = {
+  ...createPlaceholderModelProfile('qiu-vision-default'),
+  providerId: 'aliyun-bailian',
+  providerName: '阿里云百炼',
+  modelName: 'qwen3-asr-flash',
+  capabilities: ['image_understanding', 'vision_text'],
+  apiBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+};
+const misconfiguredVisionStatuses = getRoleModelRuntimeRequirementStatuses(
+  [misconfiguredVisionSlotProfile],
+  ['qiu-vision-default'],
+  {
+    ...visionManifestDrivenRolePackage,
+    roleCode: 'vision-slot-misconfigured',
+    modelProfileIds: ['qiu-vision-default']
+  },
+  {
+    roleCode: 'vision-slot-misconfigured'
+  }
+);
+const misconfiguredVisionStatus = misconfiguredVisionStatuses.find(
+  (status) => status.profile.id === 'qiu-vision-default'
+);
+assert.equal(misconfiguredVisionStatus?.ready, false);
+assert.equal(misconfiguredVisionStatus?.issue, 'incompatible');
+
 console.log('Desktop role requirements passed.');

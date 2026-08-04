@@ -10,7 +10,12 @@ import type {
   DesktopModelTestResponse
 } from '../shared/desktop-api.js';
 import type { ModelCapability, ModelCatalogEntry, ModelPurpose } from '../shared/desktop-contract.js';
-import { inferModelCapabilitiesFromName } from '../shared/desktop-model-capabilities.js';
+import {
+  classifyModelCapabilitiesFromName,
+  createModelCapabilityMetadata,
+  inferModelCapabilitiesFromName,
+  normalizeExplicitModelCapabilities
+} from '../shared/desktop-model-capabilities.js';
 
 export type NativeProviderMode = 'openai_compatible' | 'aliyun_bailian' | 'tencent_cloud';
 
@@ -200,13 +205,21 @@ export async function testNativeModelConnection(
       apiKey: request.profile.apiKey,
       timeoutMs: request.timeoutMs
     });
+    const checkedAt = new Date().toISOString();
     return {
       providerId: request.profile.providerId,
       providerName: request.profile.providerName,
       modelName: request.profile.modelName,
       ok: true,
-      checkedAt: new Date().toISOString(),
+      checkedAt,
       mode,
+      verifiedCapabilities: ['audio_to_text'],
+      capabilityMetadata: createModelCapabilityMetadata({
+        source: 'provider',
+        confidence: 'high',
+        verifiedAt: checkedAt,
+        note: '已验证阿里云百炼鉴权和任务查询端点；真实转写在运行任务时使用音视频文件验证。'
+      }),
       message: '阿里云百炼 API Key 和任务查询端点可访问；Fun-ASR 异步转写将在运行时提交真实文件 URL。'
     };
   }
@@ -217,13 +230,21 @@ export async function testNativeModelConnection(
       apiKey: request.profile.apiKey,
       timeoutMs: request.timeoutMs
     });
+    const checkedAt = new Date().toISOString();
     return {
       providerId: request.profile.providerId,
       providerName: request.profile.providerName,
       modelName: request.profile.modelName,
       ok: true,
-      checkedAt: new Date().toISOString(),
+      checkedAt,
       mode,
+      verifiedCapabilities: ['audio_to_text'],
+      capabilityMetadata: createModelCapabilityMetadata({
+        source: 'provider',
+        confidence: 'high',
+        verifiedAt: checkedAt,
+        note: '已验证腾讯云鉴权签名；真实转写在运行任务时使用音视频文件验证。'
+      }),
       message: '腾讯云 SecretId/SecretKey 签名和鉴权可用；运行时会按原生录音文件识别接口提交任务。'
     };
   }
@@ -457,12 +478,14 @@ async function listAliyunCompatibleProviderModels(
       return [];
     }
 
+    const classification = classifyModelCapabilitiesFromName(id, 'general');
     return [{
       id,
       label: id,
       ownedBy: readString(item.owned_by),
       source: 'provider' as const,
-      capabilities: inferModelCapabilitiesFromName(id)
+      capabilities: classification.capabilities,
+      capabilityMetadata: classification.metadata
     }];
   });
 }
@@ -1048,7 +1071,12 @@ function modelCatalogEntry(id: string, label: string, fallbackPurpose: ModelPurp
     id,
     label,
     source: 'built_in',
-    capabilities: inferModelCapabilitiesFromName(id, fallbackPurpose) as ModelCapability[]
+    capabilities: inferModelCapabilitiesFromName(id, fallbackPurpose) as ModelCapability[],
+    capabilityMetadata: createModelCapabilityMetadata({
+      source: 'official_catalog',
+      confidence: 'high',
+      note: '来自 QiuAI 内置供应商模型目录。'
+    })
   };
 }
 
@@ -1061,9 +1089,41 @@ function mergeModelCatalogEntries(
     merged.set(model.id, model);
   }
   for (const model of providerModels) {
-    merged.set(model.id, model);
+    merged.set(model.id, mergeProviderModelWithBuiltInModel(model, merged.get(model.id)));
   }
   return [...merged.values()].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function mergeProviderModelWithBuiltInModel(
+  providerModel: ModelCatalogEntry,
+  builtInModel: ModelCatalogEntry | undefined
+): ModelCatalogEntry {
+  if (!builtInModel) {
+    return providerModel;
+  }
+
+  const providerCapabilities = normalizeExplicitModelCapabilities(providerModel.capabilities);
+  const providerHasReliableCapabilities =
+    providerCapabilities.length > 0 &&
+    providerModel.capabilityMetadata?.confidence !== 'unknown' &&
+    providerModel.capabilityMetadata?.source !== 'name_inferred';
+
+  if (providerHasReliableCapabilities) {
+    return {
+      ...builtInModel,
+      ...providerModel,
+      capabilities: providerCapabilities
+    };
+  }
+
+  return {
+    ...builtInModel,
+    ...providerModel,
+    label: providerModel.label ?? builtInModel.label,
+    source: providerModel.source,
+    capabilities: normalizeExplicitModelCapabilities(builtInModel.capabilities),
+    capabilityMetadata: builtInModel.capabilityMetadata
+  };
 }
 
 function isTencentPlatformProvider(providerId?: string, providerName?: string): boolean {

@@ -2999,6 +2999,16 @@ body,
   gap: 8px;
 }
 
+.model-capability-classification {
+  display: grid;
+  gap: 4px;
+  margin: -8px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafbfc;
+}
+
 .provider-model-catalog {
   display: grid;
   gap: 10px;
