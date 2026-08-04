@@ -224,6 +224,13 @@ interface FactoryRunFormValues {
   promptGoal?: string;
   promptMustKeep?: string;
   promptAvoid?: string;
+  contentGoal?: string;
+  contentStyle?: string;
+  videoCount?: number;
+  videoRatio?: string;
+  targetAudience?: string;
+  sourceUrls?: string;
+  brandTone?: string;
   instruction?: string;
 }
 
@@ -3231,6 +3238,9 @@ export default function App() {
       `客户端版本：${runtimeState.app.appVersion}`,
       `系统平台：${runtimeState.app.platform} ${runtimeState.app.arch}`,
       `设备名称：${runtimeState.app.deviceName}`,
+      `安装目录：${runtimeState.app.installPath ?? '未提供'}`,
+      `数据目录：${runtimeState.app.userDataPath}`,
+      `存储模式：${storageModeLabel(runtimeState.app.storageMode)}`,
       `设备 ID：${runtimeState.localRuntime.deviceId}`,
       `运行时 ID：${runtimeState.localRuntime.runtimeId}`,
       `授权状态：${isEnterpriseUnbound ? '免费版（未绑定企业）' : '已绑定企业'}`,
@@ -3243,7 +3253,6 @@ export default function App() {
       `已启用模型：${enabledModelCount}`,
       `已启用工具：${enabledToolCount}`,
       `知识来源：${knowledgeBindingCount}`,
-      `本地数据目录：${runtimeState.app.userDataPath}`
     ].join('\n');
 
     try {
@@ -4102,10 +4111,20 @@ export default function App() {
               <Descriptions.Item label="最近同步">
                 {formatDate(runtimeState.localRuntime.lastSyncedAt)}
               </Descriptions.Item>
-              <Descriptions.Item label="本地数据目录">
+              <Descriptions.Item label="安装目录">
+                <Typography.Text copyable ellipsis>
+                  {runtimeState.app.installPath ?? '未提供'}
+                </Typography.Text>
+              </Descriptions.Item>
+              <Descriptions.Item label="数据目录">
                 <Typography.Text copyable ellipsis>
                   {runtimeState.app.userDataPath}
                 </Typography.Text>
+              </Descriptions.Item>
+              <Descriptions.Item label="存储模式">
+                <Tag color={runtimeState.app.storageMode === 'follow_install_dir' ? 'green' : 'gold'}>
+                  {storageModeLabel(runtimeState.app.storageMode)}
+                </Tag>
               </Descriptions.Item>
             </Descriptions>
 
@@ -4132,6 +4151,11 @@ export default function App() {
               <Button icon={<CloudSyncOutlined />} loading={isRefreshing} onClick={refreshConnection}>
                 检查连接
               </Button>
+              {runtimeState.app.installPath ? (
+                <Button icon={<FolderOpenOutlined />} onClick={() => void openLocalPath(runtimeState.app.installPath!)}>
+                  打开安装目录
+                </Button>
+              ) : null}
               <Button icon={<FolderOpenOutlined />} onClick={() => void openLocalPath(runtimeState.app.userDataPath)}>
                 打开数据目录
               </Button>
@@ -5768,11 +5792,15 @@ export default function App() {
       : undefined;
     const maxItems = readFactoryMaxItems(selectedFactoryManifest);
     const isVideoFactory = isMedicalCaseVideoFactory(selectedFactoryManifest);
+    const isOperationFactory = isOperationVideoFactory(selectedFactoryManifest);
     const packageOptions = readFactoryPackageOptions(selectedFactoryManifest);
     const platformOptions = readFactoryPlatformOptions(selectedFactoryManifest);
     const qualityModes = readFactoryQualityModes(selectedFactoryManifest);
     const promptControlFields = readFactoryPromptControlFields(selectedFactoryManifest);
     const screeningProfiles = readFactoryScreeningProfiles(selectedFactoryManifest, selectedFactoryCode);
+    const operationGoals = readFactoryOperationGoals(selectedFactoryManifest);
+    const operationStyles = readFactoryOperationStyles(selectedFactoryManifest);
+    const operationRatios = readFactoryOperationRatios(selectedFactoryManifest);
     const selectedFactoryPreparedPackage = selectedFactoryPackage
       ? {
           ...selectedFactoryPackage,
@@ -5819,9 +5847,13 @@ export default function App() {
     );
     const acceptedFactoryFileTypes = isVideoFactory
       ? '.mp4,.mov,.mkv,.avi,.webm,.m4v'
-      : '.png,.jpg,.jpeg,.webp,.xlsx,.csv';
+      : isOperationFactory
+        ? '.png,.jpg,.jpeg,.webp,.xlsx,.csv,.pdf,.doc,.docx,.ppt,.pptx,.txt,.md'
+        : '.png,.jpg,.jpeg,.webp,.xlsx,.csv';
     const validFactoryAttachments = isVideoFactory
       ? factoryAttachments.filter((attachment) => isFactoryVideoAttachment(attachment))
+      : isOperationFactory
+        ? factoryAttachments.filter((attachment) => isFactoryOperationAttachment(attachment))
       : factoryAttachments.filter((attachment) => isFactoryImageInputAttachment(attachment));
     const invalidFactoryAttachmentCount = factoryAttachments.length - validFactoryAttachments.length;
     const latestFactoryLogs = focusedFactoryTask ? selectFactoryVisibleLogs(focusedFactoryTask) : [];
@@ -6047,7 +6079,7 @@ export default function App() {
                       <Tag color={selectedFactoryReadiness?.ready ? 'green' : 'orange'}>
                         {selectedFactoryReadiness?.label ?? '待检查'}
                       </Tag>
-                      <Tag>{isVideoFactory ? '视频批处理' : '图片批处理'}</Tag>
+                      <Tag>{isVideoFactory ? '视频质检' : isOperationFactory ? '运营内容批处理' : '图片批处理'}</Tag>
                     </Space>
                     <Typography.Text type="secondary">
                       {selectedFactoryPackage.summary ?? '批量上传素材，按工作流生成结构化产物。'}
@@ -6117,6 +6149,8 @@ export default function App() {
                           <Typography.Text type="secondary">
                             {isVideoFactory
                               ? `上传待质检视频，单批最多 ${maxItems} 个。`
+                              : isOperationFactory
+                                ? '上传产品资料、案例素材或参考文件，也可以只填写参数。'
                               : `上传商品图或表格，单批最多 ${maxItems} 个。`}
                           </Typography.Text>
                         </Space>
@@ -6129,8 +6163,20 @@ export default function App() {
                         onClick={() => factoryFileInputRef.current?.click()}
                       >
                         <FileAddOutlined />
-                        <span>{isVideoFactory ? '添加视频或拖拽到这里' : '添加图片/表格或拖拽到这里'}</span>
-                        <small>{isVideoFactory ? 'mp4、mov、mkv、avi、webm、m4v' : 'png、jpg、webp、xlsx、csv'}</small>
+                        <span>
+                          {isVideoFactory
+                            ? '添加视频或拖拽到这里'
+                            : isOperationFactory
+                              ? '添加资料/图片/表格或拖拽到这里'
+                              : '添加图片/表格或拖拽到这里'}
+                        </span>
+                        <small>
+                          {isVideoFactory
+                            ? 'mp4、mov、mkv、avi、webm、m4v'
+                            : isOperationFactory
+                              ? 'pdf、docx、pptx、图片、xlsx、csv、txt'
+                              : 'png、jpg、webp、xlsx、csv'}
+                        </small>
                       </button>
                       <input
                         ref={factoryFileInputRef}
@@ -6152,11 +6198,13 @@ export default function App() {
                           {factoryAttachments.map((attachment) => {
                             const valid = isVideoFactory
                               ? isFactoryVideoAttachment(attachment)
+                              : isOperationFactory
+                                ? isFactoryOperationAttachment(attachment)
                               : isFactoryImageInputAttachment(attachment);
                             return (
                               <div key={attachment.id} className={valid ? 'factory-attachment-item' : 'factory-attachment-item invalid'}>
                                 <Space size={8}>
-                                  {isVideoFactory ? <VideoCameraOutlined /> : isFactoryImageAttachment(attachment) ? <FileImageOutlined /> : <FileExcelOutlined />}
+                                  {isVideoFactory ? <VideoCameraOutlined /> : isFactoryImageAttachment(attachment) ? <FileImageOutlined /> : isFactoryTableAttachment(attachment) ? <FileExcelOutlined /> : <FileTextOutlined />}
                                   <span>{attachment.name}</span>
                                   <Typography.Text type="secondary">{formatFileSize(attachment.size)}</Typography.Text>
                                   {!valid ? <Tag color="red">不适用</Tag> : null}
@@ -6169,7 +6217,16 @@ export default function App() {
                           })}
                         </div>
                       ) : (
-                        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={isVideoFactory ? '请添加案例视频' : '请添加商品素材'} />
+                        <Empty
+                          image={Empty.PRESENTED_IMAGE_SIMPLE}
+                          description={
+                            isVideoFactory
+                              ? '请添加案例视频'
+                              : isOperationFactory
+                                ? '可添加资料，也可以直接填写参数'
+                                : '请添加商品素材'
+                          }
+                        />
                       )}
 
                       {focusedFactoryInputFiles.length > 0 ? (
@@ -6181,7 +6238,7 @@ export default function App() {
                           <div className="factory-input-file-list">
                             {focusedFactoryInputFiles.slice(0, 6).map((filePath) => (
                               <div key={filePath} className="factory-input-file-item">
-                                {isVideoFactory ? <VideoCameraOutlined /> : <PaperClipOutlined />}
+                                {isVideoFactory ? <VideoCameraOutlined /> : isOperationFactory ? <FileTextOutlined /> : <PaperClipOutlined />}
                                 <Typography.Text ellipsis title={filePath}>
                                   {getPathFileName(filePath)}
                                 </Typography.Text>
@@ -6327,6 +6384,99 @@ export default function App() {
                               />
                             </Form.Item>
                           </>
+                        ) : isOperationFactory ? (
+                          <>
+                            <Form.Item name="platform" label="目标平台" rules={[{ required: true, message: '请选择目标平台' }]}>
+                              <Select
+                                size="large"
+                                options={platformOptions.map((item) => ({
+                                  value: item.key,
+                                  label: `${item.label}${item.imageRatio ? ` / ${item.imageRatio}` : ''}`
+                                }))}
+                              />
+                            </Form.Item>
+                            <Form.Item shouldUpdate noStyle>
+                              {({ getFieldValue }) => {
+                                const currentPackages = normalizeFactoryPackageDefinitions(
+                                  getFieldValue('packageDefinitions'),
+                                  packageOptions
+                                );
+
+                                return (
+                                  <Form.Item
+                                    name="packageKeys"
+                                    label={
+                                      <Flex align="center" justify="space-between" gap={8} className="factory-form-label-row">
+                                        <span>选择产物包</span>
+                                        <Button
+                                          size="small"
+                                          icon={<SettingOutlined />}
+                                          onClick={() => openFactoryPackageEditor(selectedFactoryCode)}
+                                        >
+                                          编辑
+                                        </Button>
+                                      </Flex>
+                                    }
+                                    rules={[{ required: true, message: '请至少选择一个产物包' }]}
+                                  >
+                                    <Checkbox.Group className="factory-package-checks">
+                                      {currentPackages.map((item) => (
+                                        <Tooltip key={item.key} title={item.description}>
+                                          <Checkbox value={item.key}>{item.label}</Checkbox>
+                                        </Tooltip>
+                                      ))}
+                                    </Checkbox.Group>
+                                  </Form.Item>
+                                );
+                              }}
+                            </Form.Item>
+                            <div className="factory-inline-form-grid">
+                              <Form.Item name="contentGoal" label="内容目标" rules={[{ required: true }]}>
+                                <Select
+                                  size="large"
+                                  options={operationGoals.map((item) => ({ value: item.key, label: item.label }))}
+                                />
+                              </Form.Item>
+                              <Form.Item name="contentStyle" label="视频风格" rules={[{ required: true }]}>
+                                <Select
+                                  size="large"
+                                  options={operationStyles.map((item) => ({ value: item.key, label: item.label }))}
+                                />
+                              </Form.Item>
+                            </div>
+                            <div className="factory-inline-form-grid compact">
+                              <Form.Item name="videoCount" label="生成条数" rules={[{ required: true }]}>
+                                <InputNumber
+                                  size="large"
+                                  min={1}
+                                  max={Math.min(selectedFactoryManifest.contentControls?.maxVideoCount ?? 20, 20)}
+                                  precision={0}
+                                  style={{ width: '100%' }}
+                                />
+                              </Form.Item>
+                              <Form.Item name="videoRatio" label="画幅" rules={[{ required: true }]}>
+                                <Select
+                                  size="large"
+                                  options={operationRatios.map((item) => ({ value: item.key, label: item.label }))}
+                                />
+                              </Form.Item>
+                            </div>
+                            <Form.Item name="targetAudience" label="目标客户">
+                              <Input placeholder="例如：中小制造企业老板、跨境电商运营负责人、门店老板" />
+                            </Form.Item>
+                            <Form.Item name="sourceUrls" label="来源链接">
+                              <Input.TextArea rows={2} placeholder="每行一个参考链接或目标地址；第一版会作为参考信息写入内容策划，不自动登录平台。" />
+                            </Form.Item>
+                            <Form.Item name="brandTone" label="品牌语气">
+                              <Input placeholder="例如：专业、克制、可信，不夸大效果；适合企业老板阅读。" />
+                            </Form.Item>
+                            <Form.Item name="instruction" label="补充要求">
+                              <Input.TextArea
+                                rows={3}
+                                placeholder="例如：围绕 QiuAI-workOS 做企业 AI 升级宣传，避免承诺自动涨粉；输出适合人工复核和发布的内容包。"
+                              />
+                            </Form.Item>
+                          </>
                         ) : (
                           <>
                             <Form.Item name="platform" label="目标平台" rules={[{ required: true, message: '请选择目标平台' }]}>
@@ -6465,7 +6615,7 @@ export default function App() {
                                   <span style={{ width: `${progress}%` }} />
                                 </span>
                                 <span className="factory-stage-strip">
-                                  {buildFactoryTaskStages(task, isVideoFactory).map((stage) => (
+                                  {buildFactoryTaskStages(task, isVideoFactory, isOperationFactory).map((stage) => (
                                     <span key={stage.key} className={`factory-stage-pill ${stage.status}`}>
                                       {stage.label}
                                     </span>
@@ -8948,9 +9098,26 @@ export default function App() {
           <Typography.Text strong className="settings-list-title">本地数据</Typography.Text>
           <div className="settings-list-row">
             <div className="client-setting-copy">
+              <Typography.Text strong>安装目录</Typography.Text>
+              <Typography.Text type="secondary" ellipsis copyable>
+                {runtimeState.app.installPath ?? '未提供'}
+              </Typography.Text>
+            </div>
+            {runtimeState.app.installPath ? (
+              <Button size="small" icon={<FolderOpenOutlined />} onClick={() => void openLocalPath(runtimeState.app.installPath!)}>
+                打开
+              </Button>
+            ) : null}
+          </div>
+
+          <div className="settings-list-row">
+            <div className="client-setting-copy">
               <Typography.Text strong>数据目录</Typography.Text>
               <Typography.Text type="secondary" ellipsis copyable>
                 {runtimeState.app.userDataPath}
+              </Typography.Text>
+              <Typography.Text type="secondary">
+                当前模式：{storageModeLabel(runtimeState.app.storageMode)}
               </Typography.Text>
             </div>
             <Button size="small" icon={<FolderOpenOutlined />} onClick={() => void openLocalPath(runtimeState.app.userDataPath)}>
@@ -9198,6 +9365,34 @@ export default function App() {
         screeningProfileKey: defaultProfile?.key ?? 'default_medical_case',
         editEnabled: factory.editing?.defaultEnabled ?? false,
         editTargetSeconds: factory.editing?.targetSeconds ?? 30,
+        instruction: ''
+      };
+    }
+
+    if (isOperationVideoFactory(factory)) {
+      const packageOptions = readFactoryPackageOptions(factory);
+      const packageDefinitions = readFactoryPackagePreset(roleCode, packageOptions);
+      const defaultPackages = packageDefinitions
+        .filter((item) => item.defaultSelected !== false)
+        .map((item) => item.key);
+      const platformOptions = readFactoryPlatformOptions(factory);
+      const operationGoals = readFactoryOperationGoals(factory);
+      const operationStyles = readFactoryOperationStyles(factory);
+      const operationRatios = readFactoryOperationRatios(factory);
+
+      return {
+        roleCode,
+        useKnowledge: true,
+        platform: platformOptions[0]?.key ?? 'douyin',
+        packageDefinitions,
+        packageKeys: defaultPackages.length ? defaultPackages : packageDefinitions.map((item) => item.key),
+        contentGoal: operationGoals[0]?.key ?? 'lead_generation',
+        contentStyle: operationStyles[0]?.key ?? 'pain_point',
+        videoCount: factory.contentControls?.defaultVideoCount ?? 3,
+        videoRatio: operationRatios[0]?.key ?? '9:16',
+        targetAudience: '',
+        sourceUrls: '',
+        brandTone: '',
         instruction: ''
       };
     }
@@ -9634,6 +9829,75 @@ export default function App() {
         attachments: videoAttachments,
         extraModelProfileIds: [values.asrModelProfileId],
         useKnowledge: values.useKnowledge === true
+      });
+      if (created) {
+        resetFactoryRunFormForRole(values.roleCode);
+        setSelectedFactoryRoleCode(values.roleCode);
+        navigateToSection('factories');
+      }
+      return;
+    }
+
+    if (isOperationVideoFactory(factory)) {
+      const operationAttachments = factoryAttachments.filter((attachment) => isFactoryOperationAttachment(attachment));
+      const invalidOperationAttachments = factoryAttachments.filter(
+        (attachment) => !isFactoryOperationAttachment(attachment)
+      );
+      if (invalidOperationAttachments.length > 0) {
+        message.warning('当前工厂支持图片、PDF、Office、表格和文本资料，请移除不适用文件后再运行。');
+        return;
+      }
+      if (operationAttachments.length > maxItems) {
+        message.warning(`单批最多处理 ${maxItems} 个参考文件，请拆分批次。`);
+        return;
+      }
+
+      const operationFactoryValues: FactoryRunFormValues = {
+        ...values,
+        packageDefinitions: normalizeFactoryPackageDefinitions(
+          factoryRunForm.getFieldValue('packageDefinitions'),
+          readFactoryPackageOptions(factory)
+        )
+      };
+      if (!operationFactoryValues.packageKeys?.length) {
+        message.warning('请至少选择一个产物包。');
+        return;
+      }
+      const hasUserContext = [
+        operationFactoryValues.targetAudience,
+        operationFactoryValues.sourceUrls,
+        operationFactoryValues.brandTone,
+        operationFactoryValues.instruction
+      ].some((item) => item?.trim()) || operationAttachments.length > 0 || operationFactoryValues.useKnowledge === true;
+      if (!hasUserContext) {
+        message.warning('请至少填写产品/客户/来源链接/补充要求，或开启知识库后再运行。');
+        return;
+      }
+
+      const platform = readFactoryPlatformOptions(factory).find((item) => item.key === operationFactoryValues.platform);
+      const videoCount = Math.max(
+        1,
+        Math.min(
+          Number(operationFactoryValues.videoCount) || factory.contentControls?.defaultVideoCount || 3,
+          Math.min(factory.contentControls?.maxVideoCount ?? 20, 20)
+        )
+      );
+      const title = `${template.name} - ${platform?.label ?? operationFactoryValues.platform ?? '内容平台'} - ${videoCount} 条`;
+      const input = buildOperationVideoFactoryTaskInput({
+        template,
+        factory,
+        values: {
+          ...operationFactoryValues,
+          videoCount
+        },
+        attachments: operationAttachments
+      });
+      const created = createTask({
+        roleCode: values.roleCode,
+        title,
+        input,
+        attachments: operationAttachments,
+        useKnowledge: operationFactoryValues.useKnowledge === true
       });
       if (created) {
         resetFactoryRunFormForRole(values.roleCode);
@@ -11656,6 +11920,11 @@ function connectionLabel(state: DesktopRuntimeState['serverConnection']['state']
   return '未检查';
 }
 
+function storageModeLabel(mode?: DesktopRuntimeState['app']['storageMode']) {
+  if (mode === 'follow_install_dir') return '跟随安装目录';
+  return '回退系统用户目录';
+}
+
 function taskStateLabel(state: DesktopTaskState) {
   const labels: Record<DesktopTaskState, string> = {
     queued: '排队中',
@@ -11707,7 +11976,11 @@ function factoryTaskProgressPercent(task: DesktopTaskDetail): number {
   return Math.max(24, progressFromLogs);
 }
 
-function buildFactoryTaskStages(task: DesktopTaskDetail, isVideoFactory: boolean): FactoryTaskStageView[] {
+function buildFactoryTaskStages(
+  task: DesktopTaskDetail,
+  isVideoFactory: boolean,
+  isOperationFactory = false
+): FactoryTaskStageView[] {
   const stages = isVideoFactory
     ? [
         { key: 'probe', label: '规格' },
@@ -11716,6 +11989,14 @@ function buildFactoryTaskStages(task: DesktopTaskDetail, isVideoFactory: boolean
         { key: 'edit', label: '初剪', optional: true },
         { key: 'artifact', label: '产物' }
       ]
+    : isOperationFactory
+      ? [
+          { key: 'plan', label: '选题' },
+          { key: 'script', label: '脚本' },
+          { key: 'publish', label: '文案' },
+          { key: 'package', label: '打包' },
+          { key: 'artifact', label: '产物' }
+        ]
     : [
         { key: 'prompt', label: '提示词' },
         { key: 'generate', label: '生图' },
@@ -11759,6 +12040,10 @@ function stageWasObserved(stageKey: string, text: string): boolean {
   if (stageKey === 'prompt') return text.includes('prompt') || text.includes('提示词');
   if (stageKey === 'generate') return text.includes('image_generation') || text.includes('生图') || text.includes('图片');
   if (stageKey === 'quality') return text.includes('quality') || text.includes('质检');
+  if (stageKey === 'plan') return text.includes('topic') || text.includes('选题') || text.includes('operation video');
+  if (stageKey === 'script') return text.includes('script') || text.includes('脚本') || text.includes('分镜');
+  if (stageKey === 'publish') return text.includes('publish') || text.includes('发布文案');
+  if (stageKey === 'package') return text.includes('package_zip') || text.includes('打包') || text.includes('zip');
   return false;
 }
 
@@ -11773,6 +12058,10 @@ function hasFactoryArtifactForStage(task: DesktopTaskDetail, stageKey: string): 
 
   if (stageKey === 'generate') {
     return task.artifacts.some((artifact) => artifact.factoryPreview?.kind === 'digital_factory_image_batch');
+  }
+
+  if (stageKey === 'package') {
+    return task.artifacts.some((artifact) => getArtifactExtension(artifact) === 'zip');
   }
 
   return false;
@@ -11844,7 +12133,7 @@ interface FactoryBatchStatItem {
 }
 
 function buildFactoryTaskBatchStats(task: DesktopTaskDetail, isVideoFactory: boolean): FactoryTaskBatchStats {
-  if (isVideoFactory && task.factoryOutputs?.length) {
+  if (task.factoryOutputs?.length) {
     const visibleOutputs = task.factoryOutputs.filter((item) => item.status !== 'excluded');
     return {
       total: task.factoryOutputs.length,
@@ -12870,6 +13159,13 @@ interface DigitalFactoryManifest {
     targetSecondOptions?: number[];
     requiresFfmpeg?: boolean;
   };
+  contentControls?: {
+    defaultVideoCount?: number;
+    maxVideoCount?: number;
+    goals?: Array<{ key: string; label: string }>;
+    styles?: Array<{ key: string; label: string }>;
+    ratios?: Array<{ key: string; label: string }>;
+  };
   output?: {
     defaultImageFormat?: string;
     packageFormat?: string;
@@ -12950,6 +13246,27 @@ const defaultFactoryQualityModes: DigitalFactoryQualityModeOption[] = [
   { key: 'smart', label: '智能质检', description: '调用多模态模型检查主体一致性、平台合规和卖点可读性。' }
 ];
 
+const defaultFactoryOperationGoals = [
+  { key: 'lead_generation', label: '获客转化' },
+  { key: 'brand_trust', label: '信任建设' },
+  { key: 'product_education', label: '产品科普' },
+  { key: 'case_story', label: '案例种草' }
+];
+
+const defaultFactoryOperationStyles = [
+  { key: 'pain_point', label: '痛点切入' },
+  { key: 'boss_talk', label: '老板口播' },
+  { key: 'case_story', label: '案例故事' },
+  { key: 'product_demo', label: '产品演示' },
+  { key: 'knowledge', label: '知识科普' }
+];
+
+const defaultFactoryOperationRatios = [
+  { key: '9:16', label: '竖屏 9:16' },
+  { key: '16:9', label: '横屏 16:9' },
+  { key: '1:1', label: '方形 1:1' }
+];
+
 const defaultFactoryPromptControlFields: DigitalFactoryPromptControlField[] = [
   {
     key: 'promptLanguage',
@@ -12986,6 +13303,21 @@ const defaultFactoryPromptControlFields: DigitalFactoryPromptControlField[] = [
 const factoryImageExtensions = new Set(['png', 'jpg', 'jpeg', 'webp']);
 const factoryTableExtensions = new Set(['xlsx', 'csv']);
 const factoryVideoExtensions = new Set(['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v']);
+const factoryOperationAttachmentExtensions = new Set([
+  'png',
+  'jpg',
+  'jpeg',
+  'webp',
+  'xlsx',
+  'csv',
+  'pdf',
+  'doc',
+  'docx',
+  'ppt',
+  'pptx',
+  'txt',
+  'md'
+]);
 
 const defaultFactoryAsrDialects: DigitalFactoryAsrDialectOption[] = [
   { key: 'auto', label: '自动识别' },
@@ -13074,6 +13406,7 @@ function readFactoryManifest(manifest: RoleTemplateDependencyManifest | undefine
   const qualityCheck = isPlainObject(factory.qualityCheck) ? factory.qualityCheck : undefined;
   const promptControls = isPlainObject(factory.promptControls) ? factory.promptControls : undefined;
   const output = isPlainObject(factory.output) ? factory.output : undefined;
+  const contentControls = isPlainObject(factory.contentControls) ? factory.contentControls : undefined;
 
   return {
     kind: readString(factory.kind),
@@ -13109,6 +13442,13 @@ function readFactoryManifest(manifest: RoleTemplateDependencyManifest | undefine
         ? factory.editing.requiresFfmpeg
         : undefined
     },
+    contentControls: {
+      defaultVideoCount: readNumber(contentControls?.defaultVideoCount),
+      maxVideoCount: readNumber(contentControls?.maxVideoCount),
+      goals: readFactoryKeyLabelOptionsFromValue(contentControls?.goals),
+      styles: readFactoryKeyLabelOptionsFromValue(contentControls?.styles),
+      ratios: readFactoryKeyLabelOptionsFromValue(contentControls?.ratios)
+    },
     output: {
       defaultImageFormat: readString(output?.defaultImageFormat),
       packageFormat: readString(output?.packageFormat),
@@ -13129,6 +13469,34 @@ function readFactoryPackageOptions(factory: DigitalFactoryManifest): DigitalFact
 
 function readFactoryQualityModes(factory: DigitalFactoryManifest): DigitalFactoryQualityModeOption[] {
   return factory.qualityCheck?.modes?.length ? factory.qualityCheck.modes : defaultFactoryQualityModes;
+}
+
+function readFactoryKeyLabelOptionsFromValue(value: unknown): Array<{ key: string; label: string }> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!isPlainObject(item)) {
+      return [];
+    }
+
+    const key = readString(item.key);
+    const label = readString(item.label);
+    return key && label ? [{ key, label }] : [];
+  });
+}
+
+function readFactoryOperationGoals(factory: DigitalFactoryManifest) {
+  return factory.contentControls?.goals?.length ? factory.contentControls.goals : defaultFactoryOperationGoals;
+}
+
+function readFactoryOperationStyles(factory: DigitalFactoryManifest) {
+  return factory.contentControls?.styles?.length ? factory.contentControls.styles : defaultFactoryOperationStyles;
+}
+
+function readFactoryOperationRatios(factory: DigitalFactoryManifest) {
+  return factory.contentControls?.ratios?.length ? factory.contentControls.ratios : defaultFactoryOperationRatios;
 }
 
 function readFactoryPromptControlFields(factory: DigitalFactoryManifest): DigitalFactoryPromptControlField[] {
@@ -13194,12 +13562,25 @@ function isFactoryImageInputAttachment(attachment: ComposerAttachment) {
   return isFactoryImageAttachment(attachment) || isFactoryTableAttachment(attachment);
 }
 
+function isFactoryOperationAttachment(attachment: ComposerAttachment) {
+  if (isFactoryImageAttachment(attachment) || isFactoryTableAttachment(attachment)) {
+    return true;
+  }
+
+  const extension = attachment.name.split('.').pop()?.trim().toLowerCase() ?? '';
+  return factoryOperationAttachmentExtensions.has(extension);
+}
+
 function readFactoryKind(factory: DigitalFactoryManifest) {
   return factory.kind ?? 'cross_border_product_image_factory';
 }
 
 function isMedicalCaseVideoFactory(factory: DigitalFactoryManifest) {
   return readFactoryKind(factory) === 'medical_case_video_screening_factory';
+}
+
+function isOperationVideoFactory(factory: DigitalFactoryManifest) {
+  return readFactoryKind(factory) === 'operation_video_factory';
 }
 
 function buildFactoryPromptControls(values: FactoryRunFormValues) {
@@ -13370,6 +13751,111 @@ function buildMedicalCaseVideoFactoryTaskInput({
         '先做筛选，未通过视频直接标记失败原因，不进入评分和初剪。',
         '通过筛选后再根据语音转写内容评分，重点看使用前、使用过程、使用后改善表达是否完整具体。',
         '只有用户开启初剪时才生成视频片段；大视频和生成视频都只保存在本机。'
+      ]
+    },
+    null,
+    2
+  );
+}
+
+function buildOperationVideoFactoryTaskInput({
+  template,
+  factory,
+  values,
+  attachments
+}: {
+  template: DesktopRoleTemplate;
+  factory: DigitalFactoryManifest;
+  values: FactoryRunFormValues;
+  attachments: ComposerAttachment[];
+}) {
+  const platform = readFactoryPlatformOptions(factory).find((item) => item.key === values.platform);
+  const packageOptions = normalizeFactoryPackageDefinitions(
+    values.packageDefinitions,
+    readFactoryPackageOptions(factory)
+  );
+  const selectedPackageKeys = values.packageKeys ?? [];
+  const selectedPackages = packageOptions.filter((item) => selectedPackageKeys.includes(item.key));
+  const goal = readFactoryOperationGoals(factory).find((item) => item.key === values.contentGoal);
+  const style = readFactoryOperationStyles(factory).find((item) => item.key === values.contentStyle);
+  const ratio = readFactoryOperationRatios(factory).find((item) => item.key === values.videoRatio);
+  const videoCount = Math.max(
+    1,
+    Math.min(
+      Number(values.videoCount) || factory.contentControls?.defaultVideoCount || 3,
+      Math.min(factory.contentControls?.maxVideoCount ?? 20, 20)
+    )
+  );
+  const sourceUrls = values.sourceUrls
+    ?.split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter(Boolean) ?? [];
+  const factoryRequest = {
+    applicationType: 'digital_factory',
+    factoryKind: 'operation_video_factory',
+    factoryName: template.name,
+    platform: {
+      key: platform?.key ?? values.platform ?? 'douyin',
+      label: platform?.label ?? values.platform ?? '抖音',
+      imageRatio: platform?.imageRatio,
+      notes: platform?.notes
+    },
+    packages: selectedPackages.map((item) => ({
+      key: item.key,
+      label: item.label,
+      description: item.description,
+      outputType: item.outputType ?? 'markdown'
+    })),
+    contentGoal: {
+      key: goal?.key ?? values.contentGoal ?? 'lead_generation',
+      label: goal?.label ?? values.contentGoal ?? '获客转化'
+    },
+    contentStyle: {
+      key: style?.key ?? values.contentStyle ?? 'pain_point',
+      label: style?.label ?? values.contentStyle ?? '痛点切入'
+    },
+    videoCount,
+    videoRatio: {
+      key: ratio?.key ?? values.videoRatio ?? '9:16',
+      label: ratio?.label ?? values.videoRatio ?? '竖屏 9:16'
+    },
+    targetAudience: values.targetAudience?.trim() || undefined,
+    sourceUrls,
+    brandTone: values.brandTone?.trim() || undefined,
+    output: {
+      folder: factory.output?.folder ?? 'operation-videos',
+      reportFormat: factory.output?.reportFormat ?? 'xlsx',
+      packageFormat: factory.output?.packageFormat ?? 'zip'
+    },
+    attachments: attachments.map((attachment, index) => ({
+      id: attachment.id,
+      name: attachment.name,
+      size: attachment.size,
+      type: attachment.type,
+      localPath: attachment.localPath,
+      order: index + 1,
+      kind: isFactoryImageAttachment(attachment)
+        ? 'reference_image'
+        : isFactoryTableAttachment(attachment)
+          ? 'reference_table'
+          : 'reference_document'
+    })),
+    instruction: values.instruction?.trim() || undefined
+  };
+  const taskBrief = `请运行「${template.name}」，面向 ${factoryRequest.platform.label} 生成 ${videoCount} 条短视频运营内容包。`;
+
+  return JSON.stringify(
+    {
+      taskBrief,
+      factory_request: factoryRequest,
+      platform: factoryRequest.platform,
+      selectedPackages: factoryRequest.packages,
+      videoCount,
+      instructions: [
+        '只生成内容方案、脚本分镜、发布文案和制作包，不自动发布到任何平台。',
+        '每条视频都必须包含钩子、口播脚本、镜头分段、素材建议、标题、简介、话题标签和人工复核项。',
+        '必须结合 factory_request.contentGoal、contentStyle、targetAudience、brandTone 和 sourceUrls；不要编造具体数据。',
+        '对外发布前必须人工确认事实、版权、平台规则和品牌口径。'
       ]
     },
     null,

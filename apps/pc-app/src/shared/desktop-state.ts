@@ -177,7 +177,8 @@ export function createDesktopRuntimePreviewState(): DesktopRuntimeState {
     deviceName: 'preview-device',
     userDataPath: 'apps/pc-app/.local/user-data',
     serverBaseUrl: 'https://workos.qiuaihub.com',
-    isPackaged: false
+    isPackaged: false,
+    storageMode: 'fallback_user_dir'
   };
 
   return createInitialDesktopRuntimeState({

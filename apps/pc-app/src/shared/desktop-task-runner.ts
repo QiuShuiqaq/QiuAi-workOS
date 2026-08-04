@@ -206,6 +206,22 @@ interface FactoryVideoScreeningResult {
   editedVideoPath?: string;
 }
 
+interface FactoryOperationVideoResult {
+  id: string;
+  order: number;
+  topic: string;
+  title: string;
+  audience?: string;
+  hook?: string;
+  sellingPoints: string[];
+  script: string;
+  storyboard: Array<{ shot: string; visual?: string; voiceover?: string; durationSeconds?: number }>;
+  publishCopy?: string;
+  hashtags: string[];
+  risks: string[];
+  reviewChecklist: string[];
+}
+
 interface FactoryVideoAsrAttemptResult {
   transcript: string;
   audioPath: string;
@@ -3003,7 +3019,7 @@ async function invokeWorkflowRuntimeModelNode(input: {
     throw error;
   }
   if (input.node.type === 'output') {
-    const factoryOutputResult = completeWorkflowRuntimeFactoryVideoOutputNode(input);
+    const factoryOutputResult = completeWorkflowRuntimeFactoryOutputNode(input);
     if (factoryOutputResult) {
       return factoryOutputResult;
     }
@@ -3016,6 +3032,16 @@ async function invokeWorkflowRuntimeModelNode(input: {
     });
     if (videoFactoryResult) {
       return videoFactoryResult;
+    }
+  }
+
+  if (readWorkflowRuntimeString(input.node.config?.llmTaskType) === 'operation_video_batch') {
+    const operationFactoryResult = await invokeWorkflowRuntimeOperationVideoFactoryNode({
+      ...input,
+      profile
+    });
+    if (operationFactoryResult) {
+      return operationFactoryResult;
     }
   }
 
@@ -3389,7 +3415,334 @@ async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
   };
 }
 
-function completeWorkflowRuntimeFactoryVideoOutputNode(input: {
+async function invokeWorkflowRuntimeOperationVideoFactoryNode(input: {
+  task: DesktopTaskDetail;
+  node: WorkflowGraphNode;
+  pool: WorkflowVariablePool;
+  binding: ResolvedRuntimeBinding;
+  rolePackage?: RolePackageManifest;
+  profiles: ModelProfile[];
+  modelInvoker: DesktopModelInvoker;
+  desktopToolInvoker?: DesktopToolInvoker;
+  workspaceId?: string;
+  createdAt: string;
+  currentResponse: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  profile: ModelProfile;
+}): Promise<{
+  response: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  logs: DesktopExecutionLogEntry[];
+  usedToolIds: string[];
+  generatedArtifacts: DesktopArtifactSummary[];
+  factoryOutputs?: FactoryOutputItem[];
+  inputVariables: string[];
+  outputVariables: string[];
+  message: string;
+} | undefined> {
+  const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
+  if (readWorkflowRuntimeString(factoryRequest?.factoryKind) !== 'operation_video_factory') {
+    return undefined;
+  }
+
+  const usedToolIds = new Set<string>();
+  const extraLogs: DesktopExecutionLogEntry[] = [];
+  const attachmentExtraction = await extractFactoryOperationAttachmentContext({
+    task: input.task,
+    factoryRequest,
+    binding: input.binding,
+    desktopToolInvoker: input.desktopToolInvoker,
+    workspaceId: input.workspaceId,
+    createdAt: input.createdAt,
+    nodeId: input.node.id
+  });
+  if (attachmentExtraction.usedToolId) {
+    usedToolIds.add(attachmentExtraction.usedToolId);
+  }
+  extraLogs.push(...attachmentExtraction.logs);
+  if (attachmentExtraction.text) {
+    input.pool.set('operation_attachment_context', attachmentExtraction.text);
+  }
+
+  const variables = appendWorkflowOutputAssistantMessageVariable(
+    input.node,
+    input.pool,
+    [
+      ...resolveWorkflowVariableRefs(input.pool, input.node.inputVariables, getWorkflowRuntimeFallbackInputRefs(input.pool)),
+      ...(attachmentExtraction.text
+        ? [{ ref: 'operation_attachment_context', value: attachmentExtraction.text as WorkflowRuntimeValue }]
+        : [])
+    ]
+  );
+  const messages = buildWorkflowRuntimeModelMessages({
+    task: input.task,
+    node: input.node,
+    variables,
+    knowledgeSources: input.binding.availableKnowledgeSources,
+    outputMode: 'json',
+    schema: readWorkflowRuntimeModelSchema(input.node)
+  });
+  const startedLog = createLog(
+    input.task.taskId,
+    'info',
+    'WORKFLOW_RUNTIME_OPERATION_VIDEO_FACTORY_STARTED',
+    'Operation video factory started.',
+    input.createdAt,
+    sanitizeLogSuffix(input.node.id)
+  );
+  const modelResponse = await input.modelInvoker({
+    profile: input.profile,
+    messages,
+    timeoutMs: readWorkflowRuntimeModelTimeoutMs(input.node.config?.timeoutMs)
+  });
+  const plan = normalizeFactoryOperationVideoPlan({
+    parsed: parseWorkflowRuntimeJson(modelResponse.content),
+    rawContent: modelResponse.content,
+    factoryRequest
+  });
+  const selectedPackageKeys = new Set(
+    readFactoryRuntimePackages(factoryRequest?.packages as WorkflowRuntimeValue).map((item) => item.key)
+  );
+  const shouldWritePackage = (key: string) => selectedPackageKeys.size === 0 || selectedPackageKeys.has(key);
+  const generatedArtifacts: DesktopArtifactSummary[] = [];
+  const packageFiles: Array<{ localPath: string; archivePath?: string }> = [];
+  let sequence = 1;
+
+  const pushToolArtifact = (toolId: string, action: DesktopToolInvocationAction, output: Record<string, unknown> | undefined, title?: string) => {
+    const artifact = buildGeneratedArtifactFromToolResult({
+      taskId: input.task.taskId,
+      toolId,
+      action,
+      output,
+      createdAt: input.createdAt,
+      sequence
+    });
+    sequence += 1;
+    if (!artifact) {
+      return undefined;
+    }
+    const titledArtifact = title ? { ...artifact, title } : artifact;
+    generatedArtifacts.push(titledArtifact);
+    if (artifact.localPath) {
+      packageFiles.push({ localPath: artifact.localPath, archivePath: titledArtifact.title });
+    }
+    return titledArtifact;
+  };
+
+  if (
+    input.desktopToolInvoker &&
+    input.workspaceId &&
+    hasFactoryToolAction(input.binding, 'office-document', 'spreadsheet.write_xlsx') &&
+    shouldWritePackage('topic_plan')
+  ) {
+    const topicResult = await input.desktopToolInvoker({
+      workspaceId: input.workspaceId,
+      toolId: 'office-document',
+      action: 'spreadsheet.write_xlsx',
+      input: {
+        title: '运营视频选题计划',
+        folder: 'spreadsheets',
+        fileName: buildWorkflowArtifactFileName(input.task.title, '选题计划表'),
+        sheets: [
+          {
+            name: '选题计划',
+            rows: buildFactoryOperationTopicRows(plan.items)
+          }
+        ]
+      },
+      allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+    });
+    usedToolIds.add('office-document');
+    if (topicResult.ok) {
+      pushToolArtifact('office-document', 'spreadsheet.write_xlsx', topicResult.output, '选题计划表.xlsx');
+    } else {
+      extraLogs.push(createLog(
+        input.task.taskId,
+        'warning',
+        'WORKFLOW_RUNTIME_OPERATION_VIDEO_TOPIC_XLSX_FAILED',
+        `Topic spreadsheet could not be written: ${topicResult.message ?? 'unknown error'}.`,
+        input.createdAt,
+        sanitizeLogSuffix(`${input.node.id}-topic-xlsx`)
+      ));
+    }
+  }
+
+  if (
+    input.desktopToolInvoker &&
+    input.workspaceId &&
+    hasFactoryToolAction(input.binding, 'office-document', 'spreadsheet.write_xlsx') &&
+    shouldWritePackage('publish_copy')
+  ) {
+    const publishResult = await input.desktopToolInvoker({
+      workspaceId: input.workspaceId,
+      toolId: 'office-document',
+      action: 'spreadsheet.write_xlsx',
+      input: {
+        title: '运营视频发布文案',
+        folder: 'spreadsheets',
+        fileName: buildWorkflowArtifactFileName(input.task.title, '发布文案表'),
+        sheets: [
+          {
+            name: '发布文案',
+            rows: buildFactoryOperationPublishRows(plan.items)
+          }
+        ]
+      },
+      allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+    });
+    usedToolIds.add('office-document');
+    if (publishResult.ok) {
+      pushToolArtifact('office-document', 'spreadsheet.write_xlsx', publishResult.output, '发布文案表.xlsx');
+    } else {
+      extraLogs.push(createLog(
+        input.task.taskId,
+        'warning',
+        'WORKFLOW_RUNTIME_OPERATION_VIDEO_PUBLISH_XLSX_FAILED',
+        `Publishing spreadsheet could not be written: ${publishResult.message ?? 'unknown error'}.`,
+        input.createdAt,
+        sanitizeLogSuffix(`${input.node.id}-publish-xlsx`)
+      ));
+    }
+  }
+
+  if (
+    input.desktopToolInvoker &&
+    input.workspaceId &&
+    hasFactoryToolAction(input.binding, 'local-filesystem', 'filesystem.write_text_file') &&
+    shouldWritePackage('script_storyboard')
+  ) {
+    const scriptResult = await input.desktopToolInvoker({
+      workspaceId: input.workspaceId,
+      toolId: 'local-filesystem',
+      action: 'filesystem.write_text_file',
+      input: {
+        folder: 'operation-videos',
+        fileName: buildWorkflowArtifactFileName(input.task.title, '脚本分镜包'),
+        content: buildFactoryOperationScriptMarkdown({
+          taskTitle: input.task.title,
+          summary: plan.summary,
+          items: plan.items,
+          createdAt: input.createdAt
+        })
+      },
+      allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+    });
+    usedToolIds.add('local-filesystem');
+    if (scriptResult.ok) {
+      pushToolArtifact('local-filesystem', 'filesystem.write_text_file', scriptResult.output, '脚本分镜包.md');
+    } else {
+      extraLogs.push(createLog(
+        input.task.taskId,
+        'warning',
+        'WORKFLOW_RUNTIME_OPERATION_VIDEO_SCRIPT_MD_FAILED',
+        `Script markdown could not be written: ${scriptResult.message ?? 'unknown error'}.`,
+        input.createdAt,
+        sanitizeLogSuffix(`${input.node.id}-script-md`)
+      ));
+    }
+  }
+
+  if (
+    input.desktopToolInvoker &&
+    input.workspaceId &&
+    hasFactoryToolAction(input.binding, 'local-filesystem', 'filesystem.package_zip') &&
+    shouldWritePackage('video_package')
+  ) {
+    const zipResult = await input.desktopToolInvoker({
+      workspaceId: input.workspaceId,
+      toolId: 'local-filesystem',
+      action: 'filesystem.package_zip',
+      input: {
+        folder: 'operation-videos',
+        fileName: buildWorkflowArtifactFileName(input.task.title, '视频制作包'),
+        files: packageFiles,
+        manifest: {
+          title: input.task.title,
+          summary: plan.summary,
+          factoryKind: 'operation_video_factory',
+          itemCount: plan.items.length,
+          createdAt: input.createdAt,
+          items: plan.items
+        }
+      },
+      allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+    });
+    usedToolIds.add('local-filesystem');
+    if (zipResult.ok) {
+      pushToolArtifact('local-filesystem', 'filesystem.package_zip', zipResult.output, '视频制作包.zip');
+    } else {
+      extraLogs.push(createLog(
+        input.task.taskId,
+        'warning',
+        'WORKFLOW_RUNTIME_OPERATION_VIDEO_ZIP_FAILED',
+        `Operation video package could not be written: ${zipResult.message ?? 'unknown error'}.`,
+        input.createdAt,
+        sanitizeLogSuffix(`${input.node.id}-zip`)
+      ));
+    }
+  }
+
+  const scriptArtifactPath = generatedArtifacts.find((artifact) => artifact.title.includes('脚本'))?.localPath;
+  const packageArtifactPath = generatedArtifacts.find((artifact) => artifact.title.endsWith('.zip'))?.localPath;
+  const factoryOutputs = buildFactoryOperationVideoOutputItems({
+    taskId: input.task.taskId,
+    results: plan.items,
+    scriptArtifactPath,
+    packageArtifactPath,
+    createdAt: input.createdAt
+  });
+  const summaryContent = [
+    `AI 运营视频工厂完成：生成 ${plan.items.length} 条视频方案`,
+    plan.summary,
+    generatedArtifacts.length > 0 ? `产物文件：${generatedArtifacts.length} 个` : '产物文件：未写入，请检查本地工具配置',
+    '状态：等待人工复核后拍摄、剪辑和发布'
+  ].filter(Boolean).join('\n');
+  const outputVariables = writeWorkflowNodeOutputs({
+    pool: input.pool,
+    node: input.node,
+    text: summaryContent,
+    json: plan.items,
+    result: plan.items,
+    outputValue: plan.items as unknown as WorkflowRuntimeValue
+  });
+  input.pool.set('runtime.previous_text', summaryContent);
+  input.pool.set('runtime.last_model_node', input.node.id);
+  input.pool.set('operation_video_results', plan.items as unknown as WorkflowRuntimeValue);
+  input.pool.set('operation_summary', summaryContent);
+  if (packageArtifactPath) {
+    input.pool.set('operation_package_folder', packageArtifactPath);
+  }
+
+  return {
+    response: mergeWorkflowRuntimeResponses(input.currentResponse, {
+      provider: input.profile.providerName,
+      modelName: input.profile.modelName,
+      content: summaryContent
+    }),
+    primaryProfile: input.profile,
+    logs: [
+      startedLog,
+      ...extraLogs,
+      createLog(
+        input.task.taskId,
+        'info',
+        'WORKFLOW_RUNTIME_OPERATION_VIDEO_FACTORY_COMPLETED',
+        `Operation video factory completed: items=${plan.items.length}, artifacts=${generatedArtifacts.length}.`,
+        input.createdAt,
+        sanitizeLogSuffix(`${input.node.id}-operation-video-factory`),
+        { items: plan.items.length, artifacts: generatedArtifacts.length }
+      )
+    ],
+    usedToolIds: [...usedToolIds],
+    generatedArtifacts,
+    factoryOutputs,
+    inputVariables: variables.map((variable) => variable.ref),
+    outputVariables: [...new Set([...outputVariables, 'operation_video_results', 'operation_summary'])],
+    message: `Operation video factory finished: items=${plan.items.length}, artifacts=${generatedArtifacts.length}.`
+  };
+}
+
+function completeWorkflowRuntimeFactoryOutputNode(input: {
   task: DesktopTaskDetail;
   node: WorkflowGraphNode;
   pool: WorkflowVariablePool;
@@ -3407,7 +3760,49 @@ function completeWorkflowRuntimeFactoryVideoOutputNode(input: {
   message: string;
 } | undefined {
   const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
-  if (readWorkflowRuntimeString(factoryRequest?.factoryKind) !== 'medical_case_video_screening_factory') {
+  const factoryKind = readWorkflowRuntimeString(factoryRequest?.factoryKind);
+  if (factoryKind === 'operation_video_factory') {
+    const summary = readWorkflowRuntimeString(input.pool.get('operation_summary'));
+    const results = input.pool.get('operation_video_results');
+    if (!summary || results === undefined) {
+      return undefined;
+    }
+
+    const outputVariables = writeWorkflowNodeOutputs({
+      pool: input.pool,
+      node: input.node,
+      text: summary,
+      result: results,
+      outputValue: summary
+    });
+    input.pool.set('runtime.previous_text', summary);
+
+    return {
+      response: mergeWorkflowRuntimeResponses(input.currentResponse, {
+        provider: input.primaryProfile.providerName,
+        modelName: input.primaryProfile.modelName,
+        content: summary
+      }),
+      primaryProfile: input.primaryProfile,
+      logs: [
+        createLog(
+          input.task.taskId,
+          'info',
+          'WORKFLOW_RUNTIME_FACTORY_OUTPUT_COMPLETED',
+          'Operation video factory output returned without an extra model call.',
+          input.createdAt,
+          sanitizeLogSuffix(input.node.id)
+        )
+      ],
+      usedToolIds: [],
+      generatedArtifacts: [],
+      inputVariables: input.node.inputVariables ?? ['operation_summary', 'operation_video_results'],
+      outputVariables,
+      message: 'Operation video factory output returned without an extra model call.'
+    };
+  }
+
+  if (factoryKind !== 'medical_case_video_screening_factory') {
     return undefined;
   }
 
@@ -4722,6 +5117,428 @@ function buildFactoryVideoScreeningRows(results: FactoryVideoScreeningResult[]):
 
 function isQualifiedFactoryVideoResult(item: FactoryVideoScreeningResult): boolean {
   return item.status === 'scored' || item.status === 'edited';
+}
+
+async function extractFactoryOperationAttachmentContext(input: {
+  task: DesktopTaskDetail;
+  factoryRequest: Record<string, unknown> | undefined;
+  binding: ResolvedRuntimeBinding;
+  desktopToolInvoker?: DesktopToolInvoker;
+  workspaceId?: string;
+  createdAt: string;
+  nodeId: string;
+}): Promise<{ text?: string; logs: DesktopExecutionLogEntry[]; usedToolId?: string }> {
+  const attachments = readFactoryOperationRuntimeAttachments(input.factoryRequest)
+    .filter((attachment) => isFactoryOperationExtractableDocumentPath(attachment.localPath, attachment.name))
+    .slice(0, 8);
+  if (attachments.length === 0) {
+    return { logs: [] };
+  }
+
+  if (
+    !input.desktopToolInvoker ||
+    !input.workspaceId ||
+    !hasFactoryToolAction(input.binding, 'office-document', 'document.extract_text')
+  ) {
+    return {
+      logs: [
+        createLog(
+          input.task.taskId,
+          'warning',
+          'WORKFLOW_RUNTIME_OPERATION_ATTACHMENT_EXTRACT_SKIPPED',
+          'Operation video factory skipped attachment text extraction because office-document/document.extract_text is unavailable.',
+          input.createdAt,
+          sanitizeLogSuffix(`${input.nodeId}-attachment-extract-skipped`)
+        )
+      ]
+    };
+  }
+
+  const logs: DesktopExecutionLogEntry[] = [];
+  const parts: string[] = [];
+  for (const attachment of attachments) {
+    const result = await input.desktopToolInvoker({
+      workspaceId: input.workspaceId,
+      toolId: 'office-document',
+      action: 'document.extract_text',
+      input: {
+        path: attachment.localPath,
+        maxChars: 8_000
+      },
+      allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+    });
+    if (result.ok) {
+      const text = readWorkflowRuntimeString(result.output?.text);
+      if (text) {
+        parts.push([`文件：${attachment.name}`, text].join('\n'));
+      }
+      continue;
+    }
+
+    logs.push(
+      createLog(
+        input.task.taskId,
+        'warning',
+        'WORKFLOW_RUNTIME_OPERATION_ATTACHMENT_EXTRACT_FAILED',
+        `Attachment text extraction failed for ${attachment.name}: ${result.message ?? 'unknown error'}.`,
+        input.createdAt,
+        sanitizeLogSuffix(`${input.nodeId}-attachment-${attachment.order}`)
+      )
+    );
+  }
+
+  const text = parts.join('\n\n---\n\n').slice(0, 30_000);
+  return {
+    text: text || undefined,
+    logs,
+    usedToolId: 'office-document'
+  };
+}
+
+function readFactoryOperationRuntimeAttachments(
+  factoryRequest: Record<string, unknown> | undefined
+): Array<{ order: number; name: string; localPath: string }> {
+  const rawAttachments = Array.isArray(factoryRequest?.attachments) ? factoryRequest.attachments : [];
+  return rawAttachments.flatMap((item, index) => {
+    if (!isWorkflowRuntimeRecord(item)) {
+      return [];
+    }
+
+    const localPath = readWorkflowRuntimeString(item.localPath)
+      ?? readWorkflowRuntimeString(item.path)
+      ?? readWorkflowRuntimeString(item.filePath);
+    if (!localPath) {
+      return [];
+    }
+
+    return [{
+      order: readFactoryRuntimeNumber(item.order) ?? index + 1,
+      name: readWorkflowRuntimeString(item.name) ?? getPathFileName(localPath) ?? `attachment-${index + 1}`,
+      localPath
+    }];
+  });
+}
+
+function isFactoryOperationExtractableDocumentPath(localPath: string, name?: string): boolean {
+  const target = name || localPath;
+  const extension = target.split('.').at(-1)?.trim().toLowerCase();
+  return ['pdf', 'docx', 'pptx', 'xlsx', 'csv', 'txt', 'md', 'html', 'htm'].includes(extension ?? '');
+}
+
+function normalizeFactoryOperationVideoPlan(input: {
+  parsed: unknown;
+  rawContent: string;
+  factoryRequest: Record<string, unknown> | undefined;
+}): { summary: string; items: FactoryOperationVideoResult[] } {
+  const record = isWorkflowRuntimeRecord(input.parsed) ? input.parsed : {};
+  const rawItems = Array.isArray(record.items)
+    ? record.items
+    : Array.isArray(record.videos)
+      ? record.videos
+      : Array.isArray(record.topics)
+        ? record.topics
+        : [];
+  const requestedCount = clampWorkflowRuntimeLimit(
+    readFactoryRuntimeNumber(input.factoryRequest?.videoCount),
+    3,
+    1,
+    20
+  );
+  const fallbackItems = rawItems.length > 0
+    ? rawItems
+    : buildFallbackFactoryOperationVideoItems(input.rawContent, input.factoryRequest, requestedCount);
+  const items = fallbackItems
+    .slice(0, requestedCount)
+    .map((item, index) => normalizeFactoryOperationVideoItem(item, index, input.factoryRequest));
+  const summary = readWorkflowRuntimeString(record.summary)
+    ?? readWorkflowRuntimeString(record.overview)
+    ?? buildFactoryOperationFallbackSummary(input.factoryRequest, items.length);
+
+  return {
+    summary,
+    items
+  };
+}
+
+function normalizeFactoryOperationVideoItem(
+  value: unknown,
+  index: number,
+  factoryRequest: Record<string, unknown> | undefined
+): FactoryOperationVideoResult {
+  const record = isWorkflowRuntimeRecord(value) ? value : {};
+  const topic = readWorkflowRuntimeString(record.topic)
+    ?? readWorkflowRuntimeString(record.name)
+    ?? readWorkflowRuntimeString(record.title)
+    ?? `运营视频选题 ${index + 1}`;
+  const title = readWorkflowRuntimeString(record.title)
+    ?? readWorkflowRuntimeString(record.publishTitle)
+    ?? topic;
+  const script = readWorkflowRuntimeString(record.script)
+    ?? readWorkflowRuntimeString(record.voiceover)
+    ?? readWorkflowRuntimeString(record.content)
+    ?? buildFactoryOperationFallbackScript(topic, factoryRequest);
+
+  return {
+    id: readWorkflowRuntimeString(record.id) ?? `operation-video-${index + 1}`,
+    order: readFactoryRuntimeNumber(record.order) ?? index + 1,
+    topic,
+    title,
+    audience: readWorkflowRuntimeString(record.audience)
+      ?? readWorkflowRuntimeString(factoryRequest?.targetAudience),
+    hook: readWorkflowRuntimeString(record.hook)
+      ?? readWorkflowRuntimeString(record.opening)
+      ?? `用一个真实业务痛点切入：${topic}`,
+    sellingPoints: readFactoryOperationStringList(record.sellingPoints ?? record.points, ['产品价值清晰', '场景贴近客户', '便于人工复核']),
+    script,
+    storyboard: readFactoryOperationStoryboard(record.storyboard ?? record.shots, script),
+    publishCopy: readWorkflowRuntimeString(record.publishCopy)
+      ?? readWorkflowRuntimeString(record.description)
+      ?? `围绕「${topic}」说明问题、解决方式和下一步咨询入口。`,
+    hashtags: readFactoryOperationStringList(record.hashtags ?? record.tags, ['企业AI', '数字员工', '业务自动化']),
+    risks: readFactoryOperationStringList(record.risks, ['发布前核对事实、版权、平台规则和品牌口径']),
+    reviewChecklist: readFactoryOperationStringList(record.reviewChecklist ?? record.checklist, [
+      '确认产品描述真实准确',
+      '确认案例和数据有依据',
+      '确认不包含夸大承诺或违规表达'
+    ])
+  };
+}
+
+function buildFallbackFactoryOperationVideoItems(
+  rawContent: string,
+  factoryRequest: Record<string, unknown> | undefined,
+  count: number
+): unknown[] {
+  const platformLabel = readFactoryOperationLabel(factoryRequest?.platform, '目标平台');
+  const goalLabel = readFactoryOperationLabel(factoryRequest?.contentGoal, '内容增长');
+  const styleLabel = readFactoryOperationLabel(factoryRequest?.contentStyle, '痛点切入');
+  const audience = readWorkflowRuntimeString(factoryRequest?.targetAudience) ?? '目标客户';
+  const baseTopic = rawContent.trim().slice(0, 80) || `${platformLabel}${goalLabel}`;
+
+  return Array.from({ length: count }, (_, index) => ({
+    order: index + 1,
+    topic: `${baseTopic} - 选题 ${index + 1}`,
+    title: `${audience}为什么需要关注这件事 ${index + 1}`,
+    audience,
+    hook: `用${audience}最常见的业务痛点开场。`,
+    sellingPoints: [goalLabel, styleLabel, '降低重复运营成本'],
+    script: buildFactoryOperationFallbackScript(`${baseTopic} - 选题 ${index + 1}`, factoryRequest),
+    publishCopy: `这条内容面向${audience}，用${styleLabel}方式说明${goalLabel}。`,
+    hashtags: ['企业AI', '数字员工', '短视频运营'],
+    risks: ['模型未返回完整结构，已生成兜底方案；发布前需要人工补充细节。'],
+    reviewChecklist: ['补充真实案例或产品细节', '核对平台合规', '确认品牌口径']
+  }));
+}
+
+function buildFactoryOperationFallbackSummary(
+  factoryRequest: Record<string, unknown> | undefined,
+  itemCount: number
+) {
+  const platformLabel = readFactoryOperationLabel(factoryRequest?.platform, '目标平台');
+  const goalLabel = readFactoryOperationLabel(factoryRequest?.contentGoal, '内容增长');
+  return `面向 ${platformLabel} 生成 ${itemCount} 条${goalLabel}短视频方案，需人工复核后发布。`;
+}
+
+function buildFactoryOperationFallbackScript(
+  topic: string,
+  factoryRequest: Record<string, unknown> | undefined
+) {
+  const audience = readWorkflowRuntimeString(factoryRequest?.targetAudience) ?? '目标客户';
+  const tone = readWorkflowRuntimeString(factoryRequest?.brandTone) ?? '专业、克制、可信';
+  return [
+    `开场：${audience}在日常业务里，经常会遇到一个问题：${topic}。`,
+    '展开：先说明问题为什么会消耗时间和成本，再说明产品或方案能帮助用户减少哪些重复动作。',
+    `收束：用${tone}的语气提醒用户先做一次小范围验证，再决定是否深入使用。`
+  ].join('\n');
+}
+
+function readFactoryOperationLabel(value: unknown, fallback: string) {
+  if (isWorkflowRuntimeRecord(value)) {
+    return readWorkflowRuntimeString(value.label)
+      ?? readWorkflowRuntimeString(value.name)
+      ?? readWorkflowRuntimeString(value.key)
+      ?? fallback;
+  }
+
+  return readWorkflowRuntimeString(value) ?? fallback;
+}
+
+function readFactoryOperationStringList(value: unknown, fallback: string[]): string[] {
+  if (Array.isArray(value)) {
+    const list = value
+      .map((item) => readWorkflowRuntimeString(item))
+      .filter((item): item is string => Boolean(item));
+    return list.length ? list.slice(0, 12) : fallback;
+  }
+
+  const text = readWorkflowRuntimeString(value);
+  if (!text) {
+    return fallback;
+  }
+
+  const list = text
+    .split(/[；;\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return list.length ? list.slice(0, 12) : fallback;
+}
+
+function readFactoryOperationStoryboard(
+  value: unknown,
+  script: string
+): FactoryOperationVideoResult['storyboard'] {
+  if (Array.isArray(value)) {
+    const storyboard: FactoryOperationVideoResult['storyboard'] = value.flatMap((item, index): FactoryOperationVideoResult['storyboard'] => {
+      if (!isWorkflowRuntimeRecord(item)) {
+        const text = readWorkflowRuntimeString(item);
+        return text ? [{ shot: `镜头 ${index + 1}`, visual: text, voiceover: text }] : [];
+      }
+
+      return [{
+        shot: readWorkflowRuntimeString(item.shot) ?? readWorkflowRuntimeString(item.name) ?? `镜头 ${index + 1}`,
+        visual: readWorkflowRuntimeString(item.visual) ?? readWorkflowRuntimeString(item.picture),
+        voiceover: readWorkflowRuntimeString(item.voiceover) ?? readWorkflowRuntimeString(item.script),
+        durationSeconds: readFactoryRuntimeNumber(item.durationSeconds)
+      }];
+    });
+    if (storyboard.length > 0) {
+      return storyboard.slice(0, 12);
+    }
+  }
+
+  const parts = script.split(/\n+/).map((item) => item.trim()).filter(Boolean);
+  return parts.slice(0, 4).map((item, index) => ({
+    shot: `镜头 ${index + 1}`,
+    visual: index === 0 ? '人物或产品开场画面' : '产品、案例或业务场景画面',
+    voiceover: item,
+    durationSeconds: 6
+  }));
+}
+
+function buildFactoryOperationTopicRows(results: FactoryOperationVideoResult[]): string[][] {
+  return [
+    ['序号', '选题', '标题', '目标人群', '开场钩子', '核心卖点', '风险提示', '复核项'],
+    ...results.map((item) => [
+      String(item.order),
+      item.topic,
+      item.title,
+      item.audience ?? '',
+      item.hook ?? '',
+      item.sellingPoints.join('；'),
+      item.risks.join('；'),
+      item.reviewChecklist.join('；')
+    ])
+  ];
+}
+
+function buildFactoryOperationPublishRows(results: FactoryOperationVideoResult[]): string[][] {
+  return [
+    ['序号', '标题', '发布简介', '话题标签', '评论区引导', '人工复核状态'],
+    ...results.map((item) => [
+      String(item.order),
+      item.title,
+      item.publishCopy ?? '',
+      item.hashtags.join(' '),
+      '引导用户留言业务场景或咨询具体方案',
+      '待复核'
+    ])
+  ];
+}
+
+function buildFactoryOperationScriptMarkdown(input: {
+  taskTitle: string;
+  summary: string;
+  items: FactoryOperationVideoResult[];
+  createdAt: string;
+}): string {
+  return [
+    `# ${input.taskTitle}`,
+    '',
+    `生成时间：${input.createdAt}`,
+    '',
+    '## 摘要',
+    '',
+    input.summary,
+    '',
+    ...input.items.flatMap((item) => [
+      `## ${item.order}. ${item.topic}`,
+      '',
+      `标题：${item.title}`,
+      '',
+      item.audience ? `目标人群：${item.audience}` : '',
+      item.hook ? `开场钩子：${item.hook}` : '',
+      '',
+      '### 核心卖点',
+      '',
+      ...item.sellingPoints.map((point) => `- ${point}`),
+      '',
+      '### 口播脚本',
+      '',
+      item.script,
+      '',
+      '### 分镜',
+      '',
+      '| 镜头 | 画面 | 口播 | 时长 |',
+      '| --- | --- | --- | --- |',
+      ...item.storyboard.map((shot) =>
+        [
+          escapeMarkdownTableCell(shot.shot),
+          escapeMarkdownTableCell(shot.visual ?? ''),
+          escapeMarkdownTableCell(shot.voiceover ?? ''),
+          shot.durationSeconds === undefined ? '' : `${shot.durationSeconds}s`
+        ].join(' | ')
+      ).map((row) => `| ${row} |`),
+      '',
+      '### 发布文案',
+      '',
+      item.publishCopy ?? '',
+      '',
+      `话题标签：${item.hashtags.join(' ')}`,
+      '',
+      '### 人工复核',
+      '',
+      ...item.reviewChecklist.map((check) => `- ${check}`),
+      '',
+      item.risks.length ? `风险提示：${item.risks.join('；')}` : ''
+    ])
+  ].filter((line) => line !== '').join('\n');
+}
+
+function buildFactoryOperationVideoOutputItems(input: {
+  taskId: string;
+  results: FactoryOperationVideoResult[];
+  scriptArtifactPath?: string;
+  packageArtifactPath?: string;
+  createdAt: string;
+}): FactoryOutputItem[] {
+  return input.results.map((result) => ({
+    id: `${input.taskId}-operation-video-output-${result.order}`,
+    factoryKind: 'operation_video_factory',
+    kind: 'document',
+    title: `${result.order}. ${result.title}`,
+    status: 'review_required',
+    originalStatus: 'review_required',
+    outputPath: input.scriptArtifactPath ?? input.packageArtifactPath,
+    score: undefined,
+    grade: '待复核',
+    summary: result.hook ?? result.topic,
+    risks: result.risks,
+    metadata: {
+      order: result.order,
+      topic: result.topic,
+      audience: result.audience,
+      sellingPoints: result.sellingPoints,
+      script: result.script,
+      storyboard: result.storyboard,
+      publishCopy: result.publishCopy,
+      hashtags: result.hashtags,
+      reviewChecklist: result.reviewChecklist,
+      packagePath: input.packageArtifactPath
+    },
+    auditTrail: [],
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt
+  }));
 }
 
 function buildFactoryQualifiedVideoAddressListContent(input: {

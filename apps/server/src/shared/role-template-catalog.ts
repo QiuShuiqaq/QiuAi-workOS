@@ -1647,6 +1647,228 @@ function buildMedicalCaseVideoScreeningFactoryWorkflowGraph(): ServerRoleWorkflo
   };
 }
 
+function buildOperationVideoFactoryManifest() {
+  return {
+    kind: 'operation_video_factory',
+    version: '1.0.0',
+    title: 'AI 运营视频工厂',
+    batch: {
+      maxItems: 50,
+      itemUnit: 'video_idea',
+      inputFileKinds: ['document', 'image', 'spreadsheet', 'text'],
+      imageExtensions: ['png', 'jpg', 'jpeg', 'webp'],
+      tableExtensions: ['xlsx', 'csv']
+    },
+    platforms: [
+      { key: 'douyin', label: '抖音', imageRatio: '9:16', notes: '节奏快，前三秒必须直给痛点或结果。' },
+      { key: 'wechat_channels', label: '视频号', imageRatio: '9:16', notes: '表达更稳重，适合企业案例、老板口播和信任建设。' },
+      { key: 'bilibili', label: 'B站', imageRatio: '16:9', notes: '适合知识讲解、产品拆解和稍长内容。' }
+    ],
+    packages: [
+      {
+        key: 'topic_plan',
+        label: '选题计划表',
+        description: '输出短视频选题、目标人群、核心钩子、卖点和优先级。',
+        outputType: 'xlsx',
+        defaultSelected: true
+      },
+      {
+        key: 'script_storyboard',
+        label: '脚本分镜包',
+        description: '输出每条视频的口播脚本、镜头分段、画面建议和素材清单。',
+        outputType: 'markdown',
+        defaultSelected: true
+      },
+      {
+        key: 'publish_copy',
+        label: '发布文案表',
+        description: '输出标题、简介、话题标签、评论区引导和人工发布检查项。',
+        outputType: 'xlsx',
+        defaultSelected: true
+      },
+      {
+        key: 'video_package',
+        label: '视频制作包',
+        description: '把选题、脚本、发布文案和制作说明打包为本地 ZIP，供人工或剪辑工具制作。',
+        outputType: 'zip',
+        defaultSelected: true
+      }
+    ],
+    contentControls: {
+      defaultVideoCount: 3,
+      maxVideoCount: 20,
+      goals: [
+        { key: 'lead_generation', label: '获客转化' },
+        { key: 'brand_trust', label: '信任建设' },
+        { key: 'product_education', label: '产品科普' },
+        { key: 'case_story', label: '案例种草' }
+      ],
+      styles: [
+        { key: 'pain_point', label: '痛点切入' },
+        { key: 'boss_talk', label: '老板口播' },
+        { key: 'case_story', label: '案例故事' },
+        { key: 'product_demo', label: '产品演示' },
+        { key: 'knowledge', label: '知识科普' }
+      ],
+      ratios: [
+        { key: '9:16', label: '竖屏 9:16' },
+        { key: '16:9', label: '横屏 16:9' },
+        { key: '1:1', label: '方形 1:1' }
+      ]
+    },
+    output: {
+      cacheDays: 30,
+      folder: 'operation-videos',
+      reportFormat: 'xlsx',
+      packageFormat: 'zip'
+    },
+    requiredCapabilities: ['text'],
+    ui: {
+      primaryActionLabel: '生成内容包',
+      uploadHint: '上传产品资料、案例素材、截图或表格，也可以只填写产品与目标客户；单批最多生成 20 条视频方案。',
+      packageSelection: 'checkbox'
+    }
+  };
+}
+
+function buildOperationVideoFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
+  const nodes: ServerRoleWorkflowGraphNode[] = [
+    {
+      id: 'start',
+      type: 'start',
+      name: '开始',
+      description: '工作流入口。'
+    },
+    {
+      id: 'factory_input',
+      type: 'input',
+      name: '接收运营目标',
+      instruction: '接收产品资料、目标客户、来源链接、参考素材、目标平台、内容目标、视频条数和勾选产物包。',
+      inputVariables: ['start.text', 'start.files'],
+      outputVariables: ['task_brief'],
+      config: {
+        acceptedFileKinds: ['document', 'image', 'spreadsheet', 'text'],
+        maxItems: 50,
+        source: 'digital_factory'
+      }
+    },
+    {
+      id: 'gather_operation_context',
+      type: 'knowledge',
+      name: '读取企业知识',
+      instruction: '读取企业知识库中的产品定位、客户画像、销售话术、禁用表达、历史案例和品牌口径。',
+      inputVariables: ['task_brief', 'factory_request'],
+      outputVariables: ['knowledge_context']
+    },
+    {
+      id: 'prepare_operation_batch',
+      type: 'data',
+      name: '整理运营参数',
+      instruction: '把工厂面板参数、上传素材和知识库上下文整理为稳定 JSON，供内容生成节点读取。',
+      inputVariables: ['factory_request', 'start.files', 'knowledge_context'],
+      outputVariables: ['factory_request', 'operation_batch', 'selected_packages', 'target_platform'],
+      config: {
+        dataMode: 'code',
+        outputVariable: 'operation_batch',
+        timeoutMs: 2_000,
+        code:
+          'const request = input.factory_request && typeof input.factory_request === "object" ? input.factory_request : {};\n' +
+          'const files = Array.isArray(input["start.files"]) ? input["start.files"] : [];\n' +
+          'const selectedPackages = Array.isArray(request.packages) ? request.packages : [];\n' +
+          'const platform = request.platform && typeof request.platform === "object" ? request.platform : { key: "douyin", label: "抖音" };\n' +
+          'return {\n' +
+          '  factory_request: request,\n' +
+          '  operation_batch: { ...request, attachments: files.slice(0, 50) },\n' +
+          '  selected_packages: selectedPackages,\n' +
+          '  target_platform: platform\n' +
+          '};'
+      }
+    },
+    {
+      id: 'generate_operation_video_package',
+      type: 'llm',
+      name: '生成运营视频内容包',
+      instruction:
+        '根据 factory_request、企业知识和上传素材，生成可执行的短视频运营内容包。只输出 JSON，不要自动发布，不要承诺平台效果。每条视频必须包含选题、目标人群、痛点钩子、核心卖点、口播脚本、分镜、素材清单、标题、发布简介、话题标签、风险提示和人工复核项。内容要简洁、可执行，方便运营人员直接拍摄或交给剪辑。',
+      modelProfileId: 'qiu-general-default',
+      inputVariables: ['factory_request', 'operation_batch', 'selected_packages', 'target_platform', 'knowledge_context'],
+      outputVariables: [
+        'operation_video_results',
+        'topic_plan',
+        'script_storyboard',
+        'publish_copy',
+        'operation_package_folder',
+        'operation_summary'
+      ],
+      config: {
+        llmTaskType: 'operation_video_batch',
+        outputMode: 'json',
+        timeoutMs: 120_000,
+        requiredToolActions: [
+          { toolId: 'office-document', action: 'document.extract_text' },
+          { toolId: 'local-filesystem', action: 'filesystem.write_text_file' },
+          { toolId: 'local-filesystem', action: 'filesystem.package_zip' },
+          { toolId: 'office-document', action: 'spreadsheet.write_xlsx' }
+        ],
+        schema: {
+          summary: 'string',
+          items: [
+            {
+              order: 1,
+              topic: 'string',
+              title: 'string',
+              audience: 'string',
+              hook: 'string',
+              sellingPoints: ['string'],
+              script: 'string',
+              storyboard: [{ shot: 'string', visual: 'string', voiceover: 'string', durationSeconds: 5 }],
+              publishCopy: 'string',
+              hashtags: ['string'],
+              risks: ['string'],
+              reviewChecklist: ['string']
+            }
+          ]
+        }
+      }
+    },
+    {
+      id: 'factory_output',
+      type: 'output',
+      name: '返回结果',
+      instruction: '返回选题表、脚本分镜、发布文案、视频制作包 ZIP 和每条视频方案的复核状态。',
+      inputVariables: ['operation_video_results', 'operation_summary', 'operation_package_folder'],
+      outputVariables: ['final_answer']
+    }
+  ];
+
+  return {
+    version: '1.0.0',
+    entryNodeId: 'start',
+    nodes,
+    edges: [
+      { id: 'start__factory_input', sourceNodeId: 'start', targetNodeId: 'factory_input', condition: { type: 'always' } },
+      { id: 'factory_input__gather_operation_context', sourceNodeId: 'factory_input', targetNodeId: 'gather_operation_context', condition: { type: 'always' } },
+      { id: 'gather_operation_context__prepare_operation_batch', sourceNodeId: 'gather_operation_context', targetNodeId: 'prepare_operation_batch', condition: { type: 'always' } },
+      { id: 'prepare_operation_batch__generate_operation_video_package', sourceNodeId: 'prepare_operation_batch', targetNodeId: 'generate_operation_video_package', condition: { type: 'always' } },
+      { id: 'generate_operation_video_package__factory_output', sourceNodeId: 'generate_operation_video_package', targetNodeId: 'factory_output', condition: { type: 'always' } }
+    ],
+    variables: [
+      { name: 'factory_request', type: 'json', description: '工厂面板提交的运营视频参数。', required: true },
+      { name: 'operation_batch', type: 'json', description: '整理后的运营输入、素材和内容控制参数。', required: true },
+      { name: 'selected_packages', type: 'json', description: '用户勾选的产物包。', required: true },
+      { name: 'target_platform', type: 'text', description: '目标内容平台。', required: true },
+      { name: 'operation_video_results', type: 'json', description: '每条视频方案、脚本、分镜、发布文案和复核项。', required: true },
+      { name: 'operation_summary', type: 'text', description: '工厂产出摘要。' },
+      { name: 'operation_package_folder', type: 'artifact', description: '本地视频制作包 ZIP 或文件夹。' }
+    ],
+    runtimePolicy: {
+      maxNodeExecutions: 120,
+      maxLoopIterations: 20,
+      requireApprovalBeforeTools: false
+    }
+  };
+}
+
 function defaultWorkflowSteps(template: BaseServerRoleTemplateCatalogEntry): ServerRoleTemplateWorkflowStep[] {
   const toolIds = inferWorkflowToolIds(template);
 
@@ -3361,6 +3583,70 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     outputFormat: '合格视频地址清单 + 可选初剪视频合集文件夹 + Excel 筛选评分明细表。',
     allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_PRO_MONTHLY'),
     approvalPolicy: '只评价素材质量和表达质量，不做医疗诊断或疗效真实性判断；医疗相关内容发布前必须人工复核。'
+  },
+  {
+    templateId: 'factory_operation_video_v1',
+    applicationType: 'DIGITAL_FACTORY',
+    version: DESIGNED_ROLE_TEMPLATE_VERSION,
+    name: 'AI 运营视频工厂',
+    industry: '企业运营 / 短视频内容增长',
+    scenario: '根据产品资料、企业知识、目标客户和参考素材，批量生成短视频选题、脚本分镜、发布文案和视频制作包',
+    description: '面向企业运营团队，把产品资料和业务目标整理为可执行的短视频内容生产批次，输出运营人员能直接复核、拍摄和交给剪辑的内容包。',
+    recommendedPlanCode: 'ENTERPRISE_PRO_MONTHLY',
+    businessGoal: '降低企业日常短视频选题、脚本和发布文案生产成本，让运营内容从临时写稿升级为可复用的批量工厂流程。',
+    knowledgeSources: ['企业知识库', '产品资料', '客户画像', '销售话术', '品牌口径', '历史优质内容'],
+    tools: ['office-document', 'local-filesystem'],
+    skills: [
+      skill('operation_topic_planning', '运营选题规划', '根据产品、客户和平台生成可拍摄的短视频选题和优先级。'),
+      skill('short_video_scriptwriting', '短视频脚本分镜', '把选题拆成钩子、口播、镜头、素材和剪辑说明。'),
+      skill('publishing_copy_package', '发布文案打包', '生成标题、简介、话题标签、评论引导和人工复核清单。')
+    ],
+    workflowSteps: [
+      {
+        id: 'factory_input',
+        order: 1,
+        type: 'input',
+        name: '接收运营目标',
+        instruction: '接收产品资料、目标客户、参考素材、来源链接、目标平台、内容目标、视频条数和勾选产物包。'
+      },
+      {
+        id: 'gather_operation_context',
+        order: 2,
+        type: 'knowledge',
+        name: '读取企业知识',
+        instruction: '读取企业知识库中的产品定位、客户画像、销售话术、禁用表达、历史案例和品牌口径。'
+      },
+      {
+        id: 'prepare_operation_batch',
+        order: 3,
+        type: 'llm',
+        name: '整理运营参数',
+        instruction: '整理本次内容目标、平台规则、附件素材和用户控制参数，形成稳定可执行的批量内容 JSON。'
+      },
+      {
+        id: 'generate_operation_video_package',
+        order: 4,
+        type: 'llm',
+        name: '生成运营视频内容包',
+        instruction: '批量生成短视频选题、脚本分镜、发布文案、素材清单、风险提示和人工复核项。'
+      },
+      {
+        id: 'factory_output',
+        order: 5,
+        type: 'output',
+        name: '返回结果',
+        instruction: '返回选题表、脚本分镜、发布文案、视频制作包 ZIP 和每条视频方案的复核状态。'
+      }
+    ],
+    workflowGraph: buildOperationVideoFactoryWorkflowGraph(),
+    dependencyManifestFactory: buildOperationVideoFactoryManifest(),
+    sampleInputs: [
+      '请根据我们的产品资料和目标客户，面向抖音生成 5 条短视频选题、脚本分镜和发布文案。',
+      '请把这批参考素材整理成视频号可发布的运营视频内容包，风格稳重、少夸张表达。'
+    ],
+    outputFormat: '选题计划表 + 脚本分镜 Markdown + 发布文案表 + 本地视频制作包 ZIP + 每条视频方案复核状态。',
+    allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_PRO_MONTHLY'),
+    approvalPolicy: '本工厂只生成内容方案和制作包，不自动发布；对外发布前必须由企业运营负责人确认事实、版权、平台规则和品牌口径。'
   }
 ];
 

@@ -40,18 +40,21 @@ import {
   knowledgeBindingSourceFromId,
   normalizeKnowledgeBindingId
 } from '../shared/knowledge-bindings.js';
+import { resolveDesktopStoragePathInfo } from './storage-paths.js';
 
 const electronApi = (electron as typeof electron & { default?: typeof electron }).default ?? electron;
 const { app } = electronApi;
 
 const defaultServerBaseUrl = 'https://workos.qiuaihub.com';
+const storagePathInfo = resolveDesktopStoragePathInfo({
+  isPackaged: app.isPackaged,
+  processExecPath: process.execPath,
+  homeDir: os.homedir(),
+  appDataPath: process.env.APPDATA
+});
 
 export function configureUserDataPath() {
-  if (app.isPackaged) {
-    return;
-  }
-
-  app.setPath('userData', path.resolve(process.cwd(), '.local', 'user-data'));
+  app.setPath('userData', storagePathInfo.dataPath);
 }
 
 export function getServerBaseUrl(): string {
@@ -69,9 +72,11 @@ export function getDesktopAppInfo(): DesktopAppInfo {
     platform: process.platform,
     arch: process.arch,
     deviceName: os.hostname(),
+    installPath: storagePathInfo.installPath,
     userDataPath: app.getPath('userData'),
     serverBaseUrl: getServerBaseUrl(),
-    isPackaged: app.isPackaged
+    isPackaged: app.isPackaged,
+    storageMode: storagePathInfo.storageMode
   };
 }
 

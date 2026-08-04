@@ -102,11 +102,13 @@ test('server role template catalog is focused and production-oriented', () => {
 
   const factoryTemplateIds = [
     'factory_cross_border_product_images_v1',
-    'factory_medical_case_video_screening_v1'
+    'factory_medical_case_video_screening_v1',
+    'factory_operation_video_v1'
   ];
   const factoryManifestKinds = new Set([
     'cross_border_product_image_factory',
-    'medical_case_video_screening_factory'
+    'medical_case_video_screening_factory',
+    'operation_video_factory'
   ]);
 
   for (const templateId of factoryTemplateIds) {

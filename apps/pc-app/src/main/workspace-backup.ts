@@ -440,9 +440,14 @@ function validateDesktopAppInfo(value: unknown): DesktopRuntimeState['app'] {
     ]) as NodeJS.Platform,
     arch: requireString(record.arch, 'desktopAppInfo.arch'),
     deviceName: requireString(record.deviceName, 'desktopAppInfo.deviceName'),
+    installPath: optionalString(record.installPath, 'desktopAppInfo.installPath'),
     userDataPath: requireString(record.userDataPath, 'desktopAppInfo.userDataPath'),
     serverBaseUrl: requireString(record.serverBaseUrl, 'desktopAppInfo.serverBaseUrl'),
-    isPackaged: requireBoolean(record.isPackaged, 'desktopAppInfo.isPackaged')
+    isPackaged: requireBoolean(record.isPackaged, 'desktopAppInfo.isPackaged'),
+    storageMode: optionalStringEnum(record.storageMode, 'desktopAppInfo.storageMode', [
+      'follow_install_dir',
+      'fallback_user_dir'
+    ])
   };
 }
 

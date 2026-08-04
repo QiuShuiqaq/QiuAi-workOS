@@ -19,15 +19,19 @@ import type {
 
 export type DesktopConnectionState = 'unchecked' | 'online' | 'offline';
 
+export type DesktopStorageMode = 'follow_install_dir' | 'fallback_user_dir';
+
 export interface DesktopAppInfo {
   appName: string;
   appVersion: string;
   platform: NodeJS.Platform;
   arch: string;
   deviceName: string;
+  installPath?: string;
   userDataPath: string;
   serverBaseUrl: string;
   isPackaged: boolean;
+  storageMode?: DesktopStorageMode;
 }
 
 export interface DesktopServerConnectionStatus {
