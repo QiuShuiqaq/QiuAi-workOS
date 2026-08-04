@@ -495,7 +495,11 @@ export class RoleTemplateFactoryService {
     this.assertTemplatePublishable(existing);
 
     const publishedAt = new Date();
-    const dependencyManifest = await this.buildDependencyManifestForRecord(existing);
+    const normalizedWorkflowGraph = normalizeWorkflowGraph(existing.workflowGraph, this.toWorkflowSteps(existing.workflowSteps));
+    const dependencyManifest = await this.buildDependencyManifestForRecord({
+      ...existing,
+      workflowGraph: normalizedWorkflowGraph
+    });
     const published = await this.prismaService.$transaction(async (tx) => {
       const template = await tx.roleTemplate.update({
         where: {
@@ -504,6 +508,7 @@ export class RoleTemplateFactoryService {
         data: {
           status: 'PUBLISHED',
           publishedAt,
+          workflowGraph: normalizedWorkflowGraph as unknown as Prisma.InputJsonValue,
           dependencyManifest: dependencyManifest as unknown as Prisma.InputJsonValue
         }
       });

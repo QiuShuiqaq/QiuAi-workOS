@@ -81,6 +81,17 @@ const initialModelProfiles: ModelProfile[] = [
     monthlyBudgetCents: 0
   },
   {
+    id: 'qiu-video-generation-default',
+    providerId: 'provider-pending',
+    providerName: '待配置生视频模型供应商',
+    modelName: 'text-image-to-video',
+    purpose: 'vision',
+    capabilities: ['video_generation', 'text_to_video', 'image_to_video'],
+    temperature: 0.2,
+    maxTokens: 4096,
+    monthlyBudgetCents: 0
+  },
+  {
     id: 'qiu-asr-default',
     providerId: 'provider-pending',
     providerName: '待配置语音模型供应商',

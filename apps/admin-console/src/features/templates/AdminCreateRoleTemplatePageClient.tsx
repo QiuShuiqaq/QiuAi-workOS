@@ -113,7 +113,8 @@ type WorkflowLlmTaskType =
   | 'embedding'
   | 'rerank'
   | 'audio_transcription'
-  | 'video_screening_batch';
+  | 'video_screening_batch'
+  | 'operation_video_batch';
 type WorkflowDataMode = 'assign' | 'template' | 'code';
 type WorkflowCanvasPosition = { x: number; y: number };
 type WorkflowSelection = { type: 'node' | 'edge'; id: string };
@@ -583,6 +584,13 @@ const llmTaskTypeOptions: Array<{
     label: '视频筛选批处理',
     description: '按筛选规则批量处理视频，输出筛选、评分、转写、风险和可选剪辑结果。',
     requiredCapabilities: ['audio_to_text', 'text', 'video_processing', 'spreadsheet_edit'],
+    defaultOutputMode: 'json'
+  },
+  {
+    value: 'operation_video_batch',
+    label: '运营视频批处理',
+    description: '按运营目标批量生成脚本、分镜、发布文案和视频素材清单。',
+    requiredCapabilities: ['text', 'reasoning_text'],
     defaultOutputMode: 'json'
   },
   {
@@ -1220,8 +1228,11 @@ function getDefaultModelProfileIdForLlmTask(taskType: WorkflowLlmTaskType): stri
   if (taskType === 'audio_transcription') return 'qiu-asr-default';
   if (taskType === 'image_generation') return 'qiu-image-generation-default';
   if (taskType === 'image_editing') return 'qiu-image-editing-default';
-  if (taskType === 'video_understanding' || taskType === 'video_generation') return 'qiu-vision-default';
+  if (taskType === 'video_generation') return 'qiu-video-generation-default';
+  if (taskType === 'video_understanding') return 'qiu-vision-default';
   if (taskType === 'reasoning') return 'qiu-reasoning-default';
+  if (taskType === 'embedding') return 'qiu-embedding-default';
+  if (taskType === 'rerank') return 'qiu-rerank-default';
   return 'qiu-general-default';
 }
 
@@ -1249,6 +1260,14 @@ function fallbackModelOptionSupportsLlmTask(option: { value: string }, taskType:
   if (taskType === 'text' || taskType === 'long_document') {
     return !option.value.includes('vision') && !option.value.includes('reasoning');
   }
+  if (taskType === 'operation_video_batch') {
+    return !option.value.includes('vision') &&
+      !option.value.includes('image') &&
+      !option.value.includes('video-generation') &&
+      !option.value.includes('asr') &&
+      !option.value.includes('embedding') &&
+      !option.value.includes('rerank');
+  }
   if (taskType === 'reasoning') return option.value.includes('reasoning') || option.value.includes('deepseek');
   if (taskType === 'vision') return option.value.includes('vision') || option.value.includes('gpt-4o');
   if (taskType === 'image_generation') {
@@ -1265,6 +1284,20 @@ function fallbackModelOptionSupportsLlmTask(option: { value: string }, taskType:
       option.value.includes('seedream') ||
       option.value.includes('nano-banana') ||
       option.value.includes('qwen-image');
+  }
+  if (taskType === 'video_generation') {
+    return option.value.includes('video-generation') ||
+      option.value.includes('video-default') ||
+      option.value.includes('veo') ||
+      option.value.includes('kling') ||
+      option.value.includes('pika') ||
+      option.value.includes('hailuo') ||
+      option.value.includes('runway') ||
+      option.value.includes('sora') ||
+      option.value.includes('seedance') ||
+      option.value.includes('text-to-video') ||
+      option.value.includes('image-to-video') ||
+      option.value.includes('wanx-video');
   }
   if (taskType === 'audio_transcription' || taskType === 'video_screening_batch') {
     return option.value.includes('asr') ||
@@ -1511,6 +1544,22 @@ function mapModelProfileIdToSemanticDefault(profileId: string): string {
     normalized.includes('r1')
   ) {
     return 'qiu-reasoning-default';
+  }
+  if (
+    normalized.includes('veo') ||
+    normalized.includes('kling') ||
+    normalized.includes('pika') ||
+    normalized.includes('hailuo') ||
+    normalized.includes('runway') ||
+    normalized.includes('sora') ||
+    normalized.includes('seedance') ||
+    normalized.includes('text-to-video') ||
+    normalized.includes('image-to-video') ||
+    normalized.includes('t2v') ||
+    normalized.includes('i2v') ||
+    normalized.includes('wanx-video')
+  ) {
+    return 'qiu-video-generation-default';
   }
   if (normalized.includes('gpt-image') || normalized.includes('img2img') || normalized.includes('image-edit')) {
     return 'qiu-image-editing-default';
@@ -2229,14 +2278,22 @@ function normalizeWorkflowNodeForNewSurface(node: RoleWorkflowGraphNode): RoleWo
   }
 
   if (node.type === 'llm') {
+    const taskType = readWorkflowLlmTaskType(node);
+    const outputMode = readWorkflowModelOutputMode(node);
     return {
       ...node,
       name: translatedName,
-      modelProfileId: node.modelProfileId ?? 'qiu-general-default',
+      modelProfileId: getDefaultModelProfileIdForLlmTask(readEffectiveWorkflowLlmTaskType({
+        ...node,
+        config: {
+          ...config,
+          llmTaskType: taskType
+        }
+      })),
       config: {
         ...config,
-        llmTaskType: readWorkflowLlmTaskType(node),
-        outputMode: readWorkflowModelOutputMode(node)
+        llmTaskType: taskType,
+        outputMode
       }
     };
   }
@@ -4153,6 +4210,7 @@ function WorkflowReactFlowEditor({
       }
     };
     updateNode(node.id, {
+      modelProfileId: nextNode.modelProfileId,
       config: nextNode.config,
       outputVariables: getWorkflowNodeDefaultOutputVariables(nextNode)
     });
@@ -4565,6 +4623,7 @@ function WorkflowReactFlowEditor({
                   options={buildWorkflowNodeTypeSelectOptions(selectedNode.type)}
                   onChange={(type) => {
                     const nextArtifactType = type === 'artifact' ? selectedNode.artifactType ?? 'docx' : selectedNode.artifactType;
+                    const nextLlmTaskType = readWorkflowLlmTaskType(selectedNode);
                     const nextToolId =
                       type === 'tool'
                         ? selectedNode.toolId ?? serverToolOptions[0]?.value
@@ -4583,7 +4642,7 @@ function WorkflowReactFlowEditor({
                       type,
                       toolId: nextToolTemplate?.toolId ?? nextToolId,
                       modelProfileId:
-                        type === 'llm' ? selectedNode.modelProfileId ?? 'qiu-general-default' : selectedNode.modelProfileId,
+                        type === 'llm' ? getDefaultModelProfileIdForLlmTask(nextLlmTaskType) : selectedNode.modelProfileId,
                       artifactType: nextArtifactType,
                       requiresApproval: type === 'approval' ? true : selectedNode.requiresApproval,
                       config:
@@ -4608,7 +4667,7 @@ function WorkflowReactFlowEditor({
                             : type === 'llm'
                               ? {
                                   ...(selectedNode.config ?? {}),
-                                  llmTaskType: readWorkflowLlmTaskType(selectedNode),
+                                  llmTaskType: nextLlmTaskType,
                                   outputMode: readWorkflowModelOutputMode(selectedNode)
                                 }
                           : selectedNode.config

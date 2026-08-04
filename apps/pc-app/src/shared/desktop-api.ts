@@ -289,7 +289,7 @@ export interface DesktopModelChatRequest {
   profile: ModelProfile;
   messages: DesktopModelChatMessage[];
   timeoutMs?: number;
-  taskKind?: 'chat' | 'image_generation' | 'audio_transcription';
+  taskKind?: 'chat' | 'image_generation' | 'video_generation' | 'audio_transcription';
   visionInputs?: Array<{
     imagePath: string;
     mimeType?: string;
@@ -299,6 +299,14 @@ export interface DesktopModelChatRequest {
     negativePrompt?: string;
     sourceImagePath?: string;
     size?: string;
+    responseFormat?: 'url';
+  };
+  videoGeneration?: {
+    prompt: string;
+    negativePrompt?: string;
+    sourceImagePath?: string;
+    durationSeconds?: number;
+    aspectRatio?: string;
     responseFormat?: 'url';
   };
   audioTranscription?: {
@@ -347,7 +355,7 @@ export interface DesktopModelChatResponse {
   inputTokens?: number;
   outputTokens?: number;
   artifacts?: Array<{
-    type: 'image' | 'file';
+    type: 'image' | 'video' | 'file';
     title?: string;
     remoteUrl?: string;
     localPath?: string;

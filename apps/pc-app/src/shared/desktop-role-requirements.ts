@@ -242,6 +242,7 @@ export function getRequiredCapabilitiesForSemanticProfileId(profileId: string): 
   if (profileId === 'qiu-vision-default') return ['image_understanding', 'vision_understanding', 'vision_text'];
   if (profileId === 'qiu-image-generation-default') return ['text_to_image', 'image_generation'];
   if (profileId === 'qiu-image-editing-default') return ['image_editing', 'image_to_image'];
+  if (profileId === 'qiu-video-generation-default') return ['video_generation', 'text_to_video', 'image_to_video'];
   if (profileId === 'qiu-asr-default') return ['audio_to_text'];
   if (profileId === 'qiu-embedding-default') return ['embedding'];
   if (profileId === 'qiu-rerank-default') return ['rerank'];
@@ -383,7 +384,8 @@ function getSemanticModelProfileIdForTaskType(taskType: string | undefined): str
   if (taskType === 'audio_transcription') return 'qiu-asr-default';
   if (taskType === 'image_generation') return 'qiu-image-generation-default';
   if (taskType === 'image_editing') return 'qiu-image-editing-default';
-  if (taskType === 'video_understanding' || taskType === 'video_generation') return 'qiu-vision-default';
+  if (taskType === 'video_generation') return 'qiu-video-generation-default';
+  if (taskType === 'video_understanding') return 'qiu-vision-default';
   if (taskType === 'embedding') return 'qiu-embedding-default';
   if (taskType === 'rerank') return 'qiu-rerank-default';
   return 'qiu-general-default';
@@ -436,6 +438,9 @@ function getSemanticModelProfileIdForCapabilities(input: {
   if (capabilities.has('text_to_image') || (outputTypes.has('image') && !inputTypes.has('image'))) {
     return 'qiu-image-generation-default';
   }
+  if (capabilities.has('video_generation') || capabilities.has('text_to_video') || capabilities.has('image_to_video') || outputTypes.has('video')) {
+    return 'qiu-video-generation-default';
+  }
   if (
     capabilities.has('image_understanding') ||
     capabilities.has('vision_understanding') ||
@@ -444,7 +449,6 @@ function getSemanticModelProfileIdForCapabilities(input: {
   ) {
     return 'qiu-vision-default';
   }
-  if (capabilities.has('video_generation') || outputTypes.has('video')) return 'qiu-vision-default';
   if (capabilities.has('video_understanding') || inputTypes.has('video')) return 'qiu-vision-default';
   if (capabilities.has('reasoning') || capabilities.has('reasoning_text')) {
     return 'qiu-reasoning-default';
@@ -470,6 +474,22 @@ function mapModelProfileIdToSemanticDefault(profileId: string): string {
     normalized.includes('r1')
   ) {
     return 'qiu-reasoning-default';
+  }
+  if (
+    normalized.includes('veo') ||
+    normalized.includes('kling') ||
+    normalized.includes('pika') ||
+    normalized.includes('hailuo') ||
+    normalized.includes('runway') ||
+    normalized.includes('sora') ||
+    normalized.includes('seedance') ||
+    normalized.includes('text-to-video') ||
+    normalized.includes('image-to-video') ||
+    normalized.includes('t2v') ||
+    normalized.includes('i2v') ||
+    normalized.includes('wanx-video')
+  ) {
+    return 'qiu-video-generation-default';
   }
   if (normalized.includes('gpt-image') || normalized.includes('img2img') || normalized.includes('image-edit')) {
     return 'qiu-image-editing-default';
@@ -512,6 +532,21 @@ function inferModelProviderFromProfileId(profileId: string): {
       providerId: 'provider-pending',
       providerName: '待配置语音模型供应商',
       modelName: 'speech-to-text',
+      temperature: 0.2,
+      maxTokens: 4096
+    };
+  }
+
+  if (
+    normalized.includes('video-generation') ||
+    normalized.includes('text-to-video') ||
+    normalized.includes('image-to-video') ||
+    normalized.includes('qiu-video')
+  ) {
+    return {
+      providerId: 'provider-pending',
+      providerName: '待配置生视频模型供应商',
+      modelName: 'text-image-to-video',
       temperature: 0.2,
       maxTokens: 4096
     };
@@ -572,6 +607,15 @@ function inferModelProviderFromProfileId(profileId: string): {
 
 function inferModelPurposeFromProfileId(profileId: string): ModelProfile['purpose'] {
   const normalized = profileId.toLowerCase();
+
+  if (
+    normalized.includes('video-generation') ||
+    normalized.includes('text-to-video') ||
+    normalized.includes('image-to-video') ||
+    normalized.includes('qiu-video')
+  ) {
+    return 'vision';
+  }
 
   if (normalized.includes('vision') || normalized.includes('image') || normalized.includes('vl')) {
     return 'vision';

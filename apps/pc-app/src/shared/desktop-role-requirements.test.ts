@@ -217,6 +217,41 @@ assert.deepEqual(readRequiredModelProfileIdsForRolePackage(imageManifestDrivenRo
   'qiu-image-editing-default'
 ]);
 
+const videoGenerationManifestDrivenRolePackage: RolePackageManifest = {
+  ...rolePackage,
+  dependencyManifest: {
+    version: '1.0.0',
+    generatedAt: '2026-07-29T00:00:00.000Z',
+    variables: [],
+    modelAssets: [
+      {
+        key: 'grsai-seedance-2.0',
+        name: 'Seedance 2.0',
+        providerId: 'grsai',
+        providerName: 'GrsAI',
+        modelId: 'seedance-2.0',
+        modelProfileId: 'grsai-seedance-2.0',
+        capabilities: ['video_generation', 'text_to_video', 'image_to_video'],
+        inputTypes: ['text', 'image'],
+        outputTypes: ['video'],
+        credentialFields: ['apiKey', 'apiBaseUrl'],
+        required: true,
+        nodeIds: ['generate_videos']
+      }
+    ],
+    toolActions: [],
+    artifactTemplates: [],
+    nodeTemplates: [],
+    warnings: []
+  }
+};
+assert.deepEqual(readRequiredModelProfileIdsForRolePackage(videoGenerationManifestDrivenRolePackage), [
+  'qiu-video-generation-default'
+]);
+const videoGenerationProfile = createPlaceholderModelProfile('qiu-video-generation-default');
+assert.equal(videoGenerationProfile.purpose, 'vision');
+assert.ok(videoGenerationProfile.capabilities?.includes('video_generation'));
+
 const moonshotProfile = createPlaceholderModelProfile('moonshot-v1-32k');
 assert.equal(moonshotProfile.providerId, 'moonshot');
 assert.equal(moonshotProfile.modelName, 'moonshot-v1-32k');

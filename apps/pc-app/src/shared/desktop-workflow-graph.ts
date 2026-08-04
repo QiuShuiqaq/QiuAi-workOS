@@ -649,7 +649,8 @@ function getSemanticModelProfileIdForTaskType(taskType: string | undefined): str
   if (taskType === 'audio_transcription') return 'qiu-asr-default';
   if (taskType === 'image_generation') return 'qiu-image-generation-default';
   if (taskType === 'image_editing') return 'qiu-image-editing-default';
-  if (taskType === 'video_understanding' || taskType === 'video_generation') return 'qiu-vision-default';
+  if (taskType === 'video_generation') return 'qiu-video-generation-default';
+  if (taskType === 'video_understanding') return 'qiu-vision-default';
   if (taskType === 'embedding') return 'qiu-embedding-default';
   if (taskType === 'rerank') return 'qiu-rerank-default';
   return 'qiu-general-default';
@@ -681,6 +682,9 @@ function getSemanticModelProfileIdForCapabilities(input: {
   if (capabilities.has('text_to_image') || (outputTypes.has('image') && !inputTypes.has('image'))) {
     return 'qiu-image-generation-default';
   }
+  if (capabilities.has('video_generation') || capabilities.has('text_to_video') || capabilities.has('image_to_video') || outputTypes.has('video')) {
+    return 'qiu-video-generation-default';
+  }
   if (
     capabilities.has('image_understanding') ||
     capabilities.has('vision_understanding') ||
@@ -689,7 +693,6 @@ function getSemanticModelProfileIdForCapabilities(input: {
   ) {
     return 'qiu-vision-default';
   }
-  if (capabilities.has('video_generation') || outputTypes.has('video')) return 'qiu-vision-default';
   if (capabilities.has('video_understanding') || inputTypes.has('video')) return 'qiu-vision-default';
   if (capabilities.has('reasoning') || capabilities.has('reasoning_text')) {
     return 'qiu-reasoning-default';
@@ -740,6 +743,22 @@ function mapModelProfileIdToSemanticDefault(profileId: string): string {
     normalized.includes('r1')
   ) {
     return 'qiu-reasoning-default';
+  }
+  if (
+    normalized.includes('veo') ||
+    normalized.includes('kling') ||
+    normalized.includes('pika') ||
+    normalized.includes('hailuo') ||
+    normalized.includes('runway') ||
+    normalized.includes('sora') ||
+    normalized.includes('seedance') ||
+    normalized.includes('text-to-video') ||
+    normalized.includes('image-to-video') ||
+    normalized.includes('t2v') ||
+    normalized.includes('i2v') ||
+    normalized.includes('wanx-video')
+  ) {
+    return 'qiu-video-generation-default';
   }
   if (normalized.includes('gpt-image') || normalized.includes('img2img') || normalized.includes('image-edit')) {
     return 'qiu-image-editing-default';

@@ -60,6 +60,7 @@ interface OpenAiCompatibleModelListResponse {
 interface OpenAiCompatibleImageResponse {
   data?: Array<{
     url?: unknown;
+    video_url?: unknown;
     b64_json?: unknown;
     revised_prompt?: unknown;
   }>;
@@ -79,6 +80,7 @@ interface OpenAiCompatibleTranscriptionResponse {
 
 const defaultTimeoutMs = 45_000;
 const imageGenerationTestTimeoutMs = 180_000;
+const videoGenerationTestTimeoutMs = 240_000;
 const grsaiImageSubmitTimeoutMs = 45_000;
 const grsaiImagePollIntervalMs = 2_000;
 const grsaiImagePollRequestTimeoutMs = 30_000;
@@ -110,6 +112,16 @@ export async function invokeOpenAiCompatibleModelChat(
   if (request.taskKind === 'image_generation' || request.imageGeneration) {
     const apiBaseUrl = requireOpenAiCompatibleApiBaseUrl(request.profile.apiBaseUrl);
     return invokeOpenAiCompatibleImageGeneration({
+      request,
+      apiBaseUrl,
+      apiKey,
+      modelName
+    });
+  }
+
+  if (request.taskKind === 'video_generation' || request.videoGeneration) {
+    const apiBaseUrl = requireOpenAiCompatibleApiBaseUrl(request.profile.apiBaseUrl);
+    return invokeOpenAiCompatibleVideoGeneration({
       request,
       apiBaseUrl,
       apiKey,
@@ -260,6 +272,84 @@ async function invokeOpenAiCompatibleImageGeneration(input: {
   };
 }
 
+async function invokeOpenAiCompatibleVideoGeneration(input: {
+  request: DesktopModelChatRequest;
+  apiBaseUrl: string;
+  apiKey: string;
+  modelName: string;
+}): Promise<DesktopModelChatResponse> {
+  const prompt = buildVideoGenerationPrompt(input.request);
+  const sourceImagePath = input.request.videoGeneration?.sourceImagePath?.trim();
+  const timeoutMs = input.request.timeoutMs ?? videoGenerationTestTimeoutMs;
+  if (sourceImagePath && !existsSync(sourceImagePath)) {
+    throw new Error(`Source image file does not exist: ${sourceImagePath}`);
+  }
+
+  if (isGrsaiProvider({
+    providerId: input.request.profile.providerId,
+    providerName: input.request.profile.providerName,
+    apiBaseUrl: input.apiBaseUrl
+  })) {
+    return invokeGrsaiAsyncVideoGeneration({
+      request: input.request,
+      apiBaseUrl: input.apiBaseUrl,
+      apiKey: input.apiKey,
+      modelName: input.modelName,
+      prompt,
+      sourceImagePath,
+      timeoutMs
+    });
+  }
+
+  const videoEndpoint = `${input.apiBaseUrl}/videos/generations`;
+  const body: Record<string, unknown> = {
+    model: input.modelName,
+    prompt,
+    n: 1,
+    response_format: input.request.videoGeneration?.responseFormat ?? 'url'
+  };
+  if (sourceImagePath) {
+    body.image = buildLocalImageDataUrl(sourceImagePath);
+    body.source_image = body.image;
+  }
+  if (input.request.videoGeneration?.durationSeconds) {
+    body.duration = input.request.videoGeneration.durationSeconds;
+    body.duration_seconds = input.request.videoGeneration.durationSeconds;
+  }
+  if (input.request.videoGeneration?.aspectRatio?.trim()) {
+    body.aspect_ratio = input.request.videoGeneration.aspectRatio.trim();
+    body.aspectRatio = input.request.videoGeneration.aspectRatio.trim();
+  }
+
+  const response = await fetchModelApi(videoEndpoint, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${input.apiKey}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs)
+  }, 'Video generation');
+  const bodyText = await response.text();
+  const parsedBody = parseJsonObject(bodyText);
+
+  if (!response.ok) {
+    const errorMessage = readProviderErrorMessage(parsedBody) ?? bodyText.slice(0, 500);
+    throw new Error(`Video model API returned HTTP ${response.status}: ${errorMessage}`);
+  }
+
+  const remoteUrl = readVideoUrlFromUnknown(parsedBody);
+  if (!remoteUrl) {
+    throw new Error('Video model API response did not include a video URL.');
+  }
+
+  return buildVideoGenerationResponse({
+    provider: input.request.profile.providerName,
+    modelName: input.modelName,
+    remoteUrl
+  });
+}
+
 async function invokeGrsaiAsyncImageGeneration(input: {
   request: DesktopModelChatRequest;
   apiBaseUrl: string;
@@ -384,6 +474,134 @@ async function pollGrsaiImageGenerationResult(input: {
 
   throw new Error(
     `GrsAI image task timed out while polling result. taskId=${input.providerJobId}${lastStatus ? `, status=${lastStatus}` : ''}`
+  );
+}
+
+async function invokeGrsaiAsyncVideoGeneration(input: {
+  request: DesktopModelChatRequest;
+  apiBaseUrl: string;
+  apiKey: string;
+  modelName: string;
+  prompt: string;
+  sourceImagePath?: string;
+  timeoutMs: number;
+}): Promise<DesktopModelChatResponse> {
+  const submitEndpoint = `${input.apiBaseUrl}/api/generate`;
+  const startedAt = Date.now();
+  const response = await fetchModelApi(submitEndpoint, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${input.apiKey}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify(buildGrsaiVideoGenerationPayload(input)),
+    signal: AbortSignal.timeout(Math.min(input.timeoutMs, grsaiImageSubmitTimeoutMs))
+  }, 'GrsAI video task submit');
+
+  const bodyText = await response.text();
+  const body = parseJsonObject(bodyText);
+  if (!response.ok) {
+    const errorMessage = readProviderErrorMessage(body) ?? readGrsaiErrorMessage(body) ?? bodyText.slice(0, 500);
+    throw new Error(`GrsAI video task submit returned HTTP ${response.status}: ${errorMessage}`);
+  }
+
+  const submittedUrl = readVideoUrlFromUnknown(body);
+  const providerJobId = readGrsaiJobId(body);
+  const submittedStatus = readGrsaiJobStatus(body);
+  if (submittedUrl) {
+    return buildVideoGenerationResponse({
+      provider: input.request.profile.providerName,
+      modelName: input.modelName,
+      remoteUrl: submittedUrl,
+      providerJobId,
+      providerStatus: submittedStatus,
+      asyncMode: Boolean(providerJobId)
+    });
+  }
+
+  if (!providerJobId) {
+    throw new Error('GrsAI video task response did not include a video URL or task id.');
+  }
+
+  const pollResult = await pollGrsaiVideoGenerationResult({
+    apiBaseUrl: input.apiBaseUrl,
+    apiKey: input.apiKey,
+    providerJobId,
+    timeoutMs: input.timeoutMs,
+    startedAt
+  });
+
+  return buildVideoGenerationResponse({
+    provider: input.request.profile.providerName,
+    modelName: input.modelName,
+    remoteUrl: pollResult.remoteUrl,
+    providerJobId,
+    providerStatus: pollResult.providerStatus,
+    asyncMode: true
+  });
+}
+
+function buildGrsaiVideoGenerationPayload(input: {
+  request: DesktopModelChatRequest;
+  modelName: string;
+  prompt: string;
+  sourceImagePath?: string;
+}): Record<string, unknown> {
+  const images = input.sourceImagePath
+    ? [buildLocalImageDataUrl(input.sourceImagePath)]
+    : [];
+  return {
+    model: input.modelName,
+    prompt: input.prompt,
+    images,
+    aspectRatio: input.request.videoGeneration?.aspectRatio,
+    duration: input.request.videoGeneration?.durationSeconds,
+    durationSeconds: input.request.videoGeneration?.durationSeconds,
+    replyType: 'url',
+    response_format: 'url'
+  };
+}
+
+async function pollGrsaiVideoGenerationResult(input: {
+  apiBaseUrl: string;
+  apiKey: string;
+  providerJobId: string;
+  timeoutMs: number;
+  startedAt: number;
+}): Promise<{ remoteUrl: string; providerStatus?: string }> {
+  const resultEndpoint = `${input.apiBaseUrl}/api/result?id=${encodeURIComponent(input.providerJobId)}`;
+  let lastStatus: string | undefined;
+  let lastBodyText = '';
+  while (Date.now() - input.startedAt < input.timeoutMs) {
+    await sleep(grsaiImagePollIntervalMs);
+    const response = await fetchModelApi(resultEndpoint, {
+      method: 'GET',
+      headers: {
+        authorization: `Bearer ${input.apiKey}`
+      },
+      signal: AbortSignal.timeout(Math.min(grsaiImagePollRequestTimeoutMs, input.timeoutMs))
+    }, 'GrsAI video task result');
+    lastBodyText = await response.text();
+    const body = parseJsonObject(lastBodyText);
+    if (!response.ok) {
+      const errorMessage = readProviderErrorMessage(body) ?? readGrsaiErrorMessage(body) ?? lastBodyText.slice(0, 500);
+      throw new Error(`GrsAI video task result returned HTTP ${response.status}: ${errorMessage}`);
+    }
+
+    const remoteUrl = readVideoUrlFromUnknown(body);
+    lastStatus = readGrsaiJobStatus(body) ?? lastStatus;
+    if (remoteUrl && (!lastStatus || !isGrsaiPendingStatus(lastStatus))) {
+      return { remoteUrl, providerStatus: lastStatus };
+    }
+
+    if (isGrsaiFailedStatus(lastStatus)) {
+      const errorMessage = readGrsaiErrorMessage(body) ?? lastBodyText.slice(0, 500);
+      throw new Error(`GrsAI video task failed: ${errorMessage || lastStatus}`);
+    }
+  }
+
+  throw new Error(
+    `GrsAI video task timed out while polling result. taskId=${input.providerJobId}${lastStatus ? `, status=${lastStatus}` : ''}`
   );
 }
 
@@ -891,7 +1109,16 @@ function listBuiltInCompatibleProviderModels(request: DesktopModelListRequest): 
       builtInModelCatalogEntry('nano-banana-2-2k-cl', 'nano-banana-2 2K / 生图编辑', ['image_generation', 'text_to_image', 'image_to_image', 'image_editing']),
       builtInModelCatalogEntry('nano-banana-2-4k-cl', 'nano-banana-2 4K / 生图编辑', ['image_generation', 'text_to_image', 'image_to_image', 'image_editing']),
       builtInModelCatalogEntry('nano-banana-pro', 'nano-banana-pro / 高质量生图编辑', ['image_generation', 'text_to_image', 'image_to_image', 'image_editing']),
-      builtInModelCatalogEntry('nano-banana-pro-vip', 'nano-banana-pro-vip / 高优先生图编辑', ['image_generation', 'text_to_image', 'image_to_image', 'image_editing'])
+      builtInModelCatalogEntry('nano-banana-pro-vip', 'nano-banana-pro-vip / 高优先生图编辑', ['image_generation', 'text_to_image', 'image_to_image', 'image_editing']),
+      builtInModelCatalogEntry('veo-3', 'veo-3 / 生视频', ['video_generation', 'text_to_video', 'image_to_video']),
+      builtInModelCatalogEntry('kling-2.1', 'kling-2.1 / 生视频', ['video_generation', 'text_to_video', 'image_to_video']),
+      builtInModelCatalogEntry('hailuo-2.3', 'hailuo-2.3 / 生视频', ['video_generation', 'text_to_video', 'image_to_video']),
+      builtInModelCatalogEntry('runway-gen-4', 'runway-gen-4 / 生视频', ['video_generation', 'text_to_video', 'image_to_video']),
+      builtInModelCatalogEntry('seedance-2.0', 'seedance-2.0 / 生视频', ['video_generation', 'text_to_video', 'image_to_video']),
+      builtInModelCatalogEntry('sora-2', 'sora-2 / 生视频', ['video_generation', 'text_to_video', 'image_to_video']),
+      builtInModelCatalogEntry('pika-2.2', 'pika-2.2 / 生视频', ['video_generation', 'text_to_video', 'image_to_video']),
+      builtInModelCatalogEntry('wanx2.1-i2v-turbo', 'wanx2.1-i2v-turbo / 图生视频', ['video_generation', 'image_to_video']),
+      builtInModelCatalogEntry('wanx2.1-t2v-turbo', 'wanx2.1-t2v-turbo / 文生视频', ['video_generation', 'text_to_video'])
     ];
   }
 
@@ -1065,6 +1292,20 @@ function buildImageGenerationPrompt(request: DesktopModelChatRequest): string {
     ?? request.messages.map((message) => message.content).filter(Boolean).join('\n\n').trim();
   if (!prompt) {
     throw new Error('Image generation prompt is missing.');
+  }
+
+  return negativePrompt
+    ? `${prompt}\n\nNegative prompt:\n${negativePrompt}`
+    : prompt;
+}
+
+function buildVideoGenerationPrompt(request: DesktopModelChatRequest): string {
+  const directPrompt = request.videoGeneration?.prompt?.trim();
+  const negativePrompt = request.videoGeneration?.negativePrompt?.trim();
+  const prompt = directPrompt
+    ?? request.messages.map((message) => message.content).filter(Boolean).join('\n\n').trim();
+  if (!prompt) {
+    throw new Error('Video generation prompt is missing.');
   }
 
   return negativePrompt
@@ -1283,6 +1524,17 @@ function readImageResponseUrl(body: OpenAiCompatibleImageResponse | undefined): 
   return typeof url === 'string' ? url.trim() : undefined;
 }
 
+function readVideoResponseUrl(body: OpenAiCompatibleImageResponse | undefined): string | undefined {
+  const item = body?.data?.find((entry) =>
+    (typeof entry.video_url === 'string' && entry.video_url.trim()) ||
+    (typeof entry.url === 'string' && entry.url.trim())
+  );
+  const url = typeof item?.video_url === 'string' && item.video_url.trim()
+    ? item.video_url
+    : item?.url;
+  return typeof url === 'string' ? url.trim() : undefined;
+}
+
 function readImageResponseBase64(body: OpenAiCompatibleImageResponse | undefined): string | undefined {
   const value = body?.data?.find((item) => typeof item.b64_json === 'string' && item.b64_json.trim())?.b64_json;
   return typeof value === 'string' ? value.trim() : undefined;
@@ -1309,6 +1561,40 @@ function buildImageGenerationResponse(input: {
     artifacts: [
       {
         type: 'image',
+        remoteUrl: input.remoteUrl,
+        thumbnailPath: input.remoteUrl,
+        providerJobId: input.providerJobId,
+        providerStatus: input.providerStatus,
+        metadata: {
+          asyncMode: input.asyncMode === true
+        }
+      }
+    ]
+  };
+}
+
+function buildVideoGenerationResponse(input: {
+  provider: string;
+  modelName: string;
+  remoteUrl: string;
+  providerJobId?: string;
+  providerStatus?: string;
+  asyncMode?: boolean;
+}): DesktopModelChatResponse {
+  const content = JSON.stringify({
+    remoteUrl: input.remoteUrl,
+    videoUrl: input.remoteUrl,
+    providerJobId: input.providerJobId,
+    providerStatus: input.providerStatus,
+    asyncMode: input.asyncMode === true
+  });
+  return {
+    provider: input.provider,
+    modelName: input.modelName,
+    content,
+    artifacts: [
+      {
+        type: 'video',
         remoteUrl: input.remoteUrl,
         thumbnailPath: input.remoteUrl,
         providerJobId: input.providerJobId,
@@ -1380,6 +1666,8 @@ function readImageUrlFromUnknown(value: unknown, depth = 0): string | undefined 
     'url',
     'imageUrl',
     'image_url',
+    'videoUrl',
+    'video_url',
     'outputUrl',
     'output_url',
     'thumbnailPath',
@@ -1393,6 +1681,62 @@ function readImageUrlFromUnknown(value: unknown, depth = 0): string | undefined 
 
   for (const key of ['results', 'images', 'data', 'result', 'output', 'artifacts', 'artifact']) {
     const url = readImageUrlFromUnknown(record[key], depth + 1);
+    if (url) {
+      return url;
+    }
+  }
+
+  return undefined;
+}
+
+function readVideoUrlFromUnknown(value: unknown, depth = 0): string | undefined {
+  if (depth > 6) {
+    return undefined;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return /^https?:\/\//i.test(trimmed) ? trimmed : undefined;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const url = readVideoUrlFromUnknown(item, depth + 1);
+      if (url) {
+        return url;
+      }
+    }
+    return undefined;
+  }
+
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const key of [
+    'remoteUrl',
+    'url',
+    'videoUrl',
+    'video_url',
+    'outputUrl',
+    'output_url',
+    'fileUrl',
+    'file_url'
+  ]) {
+    const url = readVideoUrlFromUnknown(record[key], depth + 1);
+    if (url) {
+      return url;
+    }
+  }
+
+  const openAiUrl = readVideoResponseUrl(record as OpenAiCompatibleImageResponse);
+  if (openAiUrl) {
+    return openAiUrl;
+  }
+
+  for (const key of ['results', 'videos', 'data', 'result', 'output', 'artifacts', 'artifact']) {
+    const url = readVideoUrlFromUnknown(record[key], depth + 1);
     if (url) {
       return url;
     }

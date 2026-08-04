@@ -36,6 +36,22 @@ export type ServerRoleWorkflowGraphVariableType =
   | 'table'
   | 'artifact';
 
+export type ServerRoleWorkflowGraphLlmTaskType =
+  | 'text'
+  | 'reasoning'
+  | 'structured_extraction'
+  | 'long_document'
+  | 'vision'
+  | 'video_understanding'
+  | 'image_generation'
+  | 'image_editing'
+  | 'video_generation'
+  | 'embedding'
+  | 'rerank'
+  | 'audio_transcription'
+  | 'video_screening_batch'
+  | 'operation_video_batch';
+
 export type ServerRoleWorkflowGraphEdgeConditionType =
   | 'always'
   | 'equals'
@@ -153,6 +169,36 @@ const conditionTypes = new Set<string>([
   'exists',
   'expression'
 ]);
+
+const llmTaskTypes = new Set<string>([
+  'text',
+  'reasoning',
+  'structured_extraction',
+  'long_document',
+  'vision',
+  'video_understanding',
+  'image_generation',
+  'image_editing',
+  'video_generation',
+  'embedding',
+  'rerank',
+  'audio_transcription',
+  'video_screening_batch',
+  'operation_video_batch'
+]);
+
+export function getDefaultModelProfileIdForWorkflowLlmTask(taskType: string): string {
+  if (taskType === 'vision') return 'qiu-vision-default';
+  if (taskType === 'reasoning') return 'qiu-reasoning-default';
+  if (taskType === 'audio_transcription') return 'qiu-asr-default';
+  if (taskType === 'image_generation') return 'qiu-image-generation-default';
+  if (taskType === 'image_editing') return 'qiu-image-editing-default';
+  if (taskType === 'video_generation') return 'qiu-video-generation-default';
+  if (taskType === 'video_understanding') return 'qiu-vision-default';
+  if (taskType === 'embedding') return 'qiu-embedding-default';
+  if (taskType === 'rerank') return 'qiu-rerank-default';
+  return 'qiu-general-default';
+}
 
 export function buildWorkflowGraphFromSteps(steps: WorkflowStepLike[]): ServerRoleWorkflowGraph {
   const orderedSteps = [...steps].sort((left, right) => left.order - right.order);
@@ -428,7 +474,9 @@ function normalizeNodes(value: unknown): ServerRoleWorkflowGraphNode[] {
       throw new Error(`Workflow graph artifact type is invalid: ${artifactType}.`);
     }
 
-    return {
+    const inputVariables = normalizeStringArray(item.inputVariables);
+    const outputVariables = normalizeStringArray(item.outputVariables);
+    const normalizedNode = {
       id,
       type: type as ServerRoleWorkflowGraphNodeType,
       name: requireText(item.name, `Workflow graph node name cannot be empty: ${id}.`),
@@ -437,11 +485,21 @@ function normalizeNodes(value: unknown): ServerRoleWorkflowGraphNode[] {
       modelProfileId: optionalText(item.modelProfileId),
       toolId: optionalText(item.toolId),
       artifactType: artifactType as ServerRoleWorkflowGraphArtifactType | undefined,
-      inputVariables: normalizeStringArray(item.inputVariables),
-      outputVariables: normalizeStringArray(item.outputVariables),
+      inputVariables,
+      outputVariables,
       requiresApproval: optionalBoolean(item.requiresApproval),
       config
     };
+    if (normalizedNode.type === 'llm') {
+      return {
+        ...normalizedNode,
+        modelProfileId: getDefaultModelProfileIdForWorkflowLlmTask(
+          getEffectiveWorkflowLlmTaskType(config, inputVariables)
+        )
+      };
+    }
+
+    return normalizedNode;
   });
 }
 
@@ -459,14 +517,50 @@ function normalizeNodeConfig(
   }
 
   if (type === 'llm') {
+    const rawTaskType = readConfigString(nextConfig.llmTaskType);
+    if (rawTaskType && !llmTaskTypes.has(rawTaskType)) {
+      throw new Error(`Workflow graph llmTaskType is invalid: ${rawTaskType}.`);
+    }
+
     return {
       ...nextConfig,
-      llmTaskType: readConfigString(nextConfig.llmTaskType) ?? 'text',
+      llmTaskType: rawTaskType ?? 'text',
       outputMode: readConfigString(nextConfig.outputMode) ?? 'text'
     };
   }
 
   return config;
+}
+
+function getEffectiveWorkflowLlmTaskType(
+  config: Record<string, unknown> | undefined,
+  inputVariables: string[]
+): string {
+  const taskType = readConfigString(config?.llmTaskType) ?? 'text';
+  if (taskType === 'image_generation' && workflowLlmNodeUsesReferenceImage(config, inputVariables)) {
+    return 'image_editing';
+  }
+
+  return taskType;
+}
+
+function workflowLlmNodeUsesReferenceImage(
+  config: Record<string, unknown> | undefined,
+  inputVariables: string[]
+): boolean {
+  return [
+    ...inputVariables,
+    readConfigString(config?.sourceImageVariable) ?? '',
+    readConfigString(config?.referenceImageVariable) ?? ''
+  ].some((value) => {
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'start.images' ||
+      normalized === 'start.files' ||
+      normalized === 'factory_items' ||
+      normalized.includes('referenceimage') ||
+      normalized.includes('sourceimage') ||
+      normalized.includes('source_image');
+  });
 }
 
 function normalizeEdges(

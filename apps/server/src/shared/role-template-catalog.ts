@@ -1146,6 +1146,61 @@ const crossBorderFactoryDefaultPackageKeys: CrossBorderFactoryPackageKey[] = [
   'selling_point_image'
 ];
 
+const ecommerceProductVideoFactoryPlatforms = [
+  { key: 'tiktok_shop', label: 'TikTok Shop', imageRatio: '9:16', notes: '竖屏节奏快，前三秒突出商品外观、核心卖点或使用效果。' },
+  { key: 'temu', label: 'Temu', imageRatio: '1:1', notes: '画面直接，强调价格感、使用场景和清晰主体。' },
+  { key: 'aliexpress', label: '速卖通', imageRatio: '9:16', notes: '适合展示商品细节、使用步骤和跨境买家关心的参数。' },
+  { key: 'amazon', label: 'Amazon', imageRatio: '1:1', notes: '表达克制，突出真实商品展示、功能演示和合规素材。' },
+  { key: 'ozon', label: 'Ozon', imageRatio: '1:1', notes: '主体清晰，画面尽量规范，避免过度促销文字。' },
+  { key: 'shopee', label: 'Shopee', imageRatio: '9:16', notes: '风格可以更轻快，适合生活化演示和促销短片。' },
+  { key: 'lazada', label: 'Lazada', imageRatio: '9:16', notes: '适合卖点演示、使用场景和详情页视频素材。' },
+  { key: 'ebay', label: 'eBay', imageRatio: '1:1', notes: '真实、少修饰，便于买家判断商品状态和细节。' },
+  { key: 'walmart', label: 'Walmart', imageRatio: '16:9', notes: '更偏规范零售展示，画面干净可信。' },
+  { key: 'shein', label: 'SHEIN', imageRatio: '9:16', notes: '服饰、配饰类优先突出模特穿搭、动态展示和风格一致性。' }
+];
+
+const ecommerceProductVideoPackageOptions = [
+  {
+    key: 'product_showcase_video',
+    label: '商品展示短视频',
+    description: '围绕商品外观、材质、结构和核心卖点生成平台可用展示视频。',
+    outputType: 'video',
+    defaultSelected: true
+  },
+  {
+    key: 'usage_scene_video',
+    label: '使用场景视频',
+    description: '把商品放入真实使用场景，展示使用前后或使用过程中的价值。',
+    outputType: 'video',
+    defaultSelected: true
+  },
+  {
+    key: 'feature_demo_video',
+    label: '功能演示视频',
+    description: '突出关键功能、操作步骤、尺寸细节或差异化卖点。',
+    outputType: 'video',
+    defaultSelected: true
+  },
+  {
+    key: 'ad_creative_video',
+    label: '广告创意视频',
+    description: '面向投放或短视频渠道生成更强吸引力的商品广告素材。',
+    outputType: 'video',
+    defaultSelected: false
+  },
+  {
+    key: 'detail_page_motion_video',
+    label: '详情页动效视频',
+    description: '生成适合详情页、店铺装修或商品页嵌入的动效展示视频。',
+    outputType: 'video',
+    defaultSelected: false
+  }
+];
+
+const ecommerceProductVideoDefaultPackageKeys = ecommerceProductVideoPackageOptions
+  .filter((item) => item.defaultSelected)
+  .map((item) => item.key);
+
 const medicalCaseVideoScreeningGates = [
   {
     key: 'video_spec',
@@ -1180,7 +1235,7 @@ function buildCrossBorderImageFactoryManifest() {
   return {
     kind: 'cross_border_product_image_factory',
     version: '1.0.0',
-    title: '跨境商品图工厂',
+    title: 'AI电商图片工厂',
     batch: {
       maxItems: 50,
       itemUnit: 'product',
@@ -1254,11 +1309,93 @@ function buildCrossBorderImageFactoryManifest() {
   };
 }
 
+function buildEcommerceProductVideoFactoryManifest() {
+  return {
+    kind: 'ecommerce_product_video_factory',
+    version: '1.0.0',
+    title: 'AI电商视频工厂',
+    batch: {
+      maxItems: 50,
+      itemUnit: 'product',
+      inputFileKinds: ['image', 'spreadsheet', 'csv'],
+      imageExtensions: ['png', 'jpg', 'jpeg', 'webp'],
+      tableExtensions: ['xlsx', 'csv']
+    },
+    platforms: ecommerceProductVideoFactoryPlatforms,
+    packages: ecommerceProductVideoPackageOptions,
+    promptControls: {
+      fields: [
+        {
+          key: 'promptLanguage',
+          label: '文字语言',
+          placeholder: '例如：English、中文、Deutsch、Español；不需要画面文字可填：不生成文字',
+          inputType: 'text'
+        },
+        {
+          key: 'promptStyle',
+          label: '视频风格',
+          placeholder: '例如：真实摄影、欧美电商、高级极简、TikTok 生活感、干净详情页',
+          inputType: 'text'
+        },
+        {
+          key: 'promptGoal',
+          label: '希望效果',
+          placeholder: '例如：突出材质和容量，前三秒有吸引力，适合商品页直接使用',
+          inputType: 'textarea'
+        },
+        {
+          key: 'promptMustKeep',
+          label: '必须保留',
+          placeholder: '例如：产品主体、颜色、结构、品牌标识、关键配件、原有造型',
+          inputType: 'textarea'
+        },
+        {
+          key: 'promptAvoid',
+          label: '不要出现',
+          placeholder: '例如：水印、乱码文字、夸张变形、虚假功能、多余配件、错误 Logo',
+          inputType: 'textarea'
+        }
+      ]
+    },
+    contentControls: {
+      defaultVideoCount: 1,
+      maxVideoCount: 50,
+      ratios: [
+        { key: '9:16', label: '竖屏 9:16' },
+        { key: '1:1', label: '方形 1:1' },
+        { key: '16:9', label: '横屏 16:9' }
+      ],
+      durationSecondOptions: [5, 8, 10, 15]
+    },
+    qualityCheck: {
+      defaultMode: 'basic',
+      modes: [
+        { key: 'none', label: '不质检', description: '不额外调用模型，只生成视频。' },
+        { key: 'basic', label: '基础质检', description: '检查视频 URL、产物数量、命名和基础元数据。' },
+        { key: 'smart', label: '智能质检', description: '调用视觉模型检查商品主体一致性、平台适配和画面风险。' }
+      ]
+    },
+    output: {
+      cacheDays: 30,
+      folder: 'product-videos',
+      packageFormat: 'url_manifest',
+      videoFormat: 'mp4'
+    },
+    requiredCapabilities: ['video_generation', 'text_to_video', 'image_to_video'],
+    optionalCapabilities: ['vision'],
+    ui: {
+      primaryActionLabel: '开始生成',
+      uploadHint: '上传商品参考图，可选上传 SKU 表格；单批最多 50 个商品，按勾选产物包生成视频 URL。',
+      packageSelection: 'checkbox'
+    }
+  };
+}
+
 function buildMedicalCaseVideoFactoryManifest() {
   return {
     kind: 'medical_case_video_screening_factory',
     version: '1.0.0',
-    title: '视频质检剪辑工厂',
+    title: 'AI质检视频工厂',
     batch: {
       maxItems: 50,
       itemUnit: 'video',
@@ -1490,6 +1627,170 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
       { name: 'quality_check_mode', type: 'text', description: 'none/basic/smart。', required: true },
       { name: 'package_instructions', type: 'json', description: '多模态模型生成的分包生图提示词。', required: true },
       { name: 'factory_generated_images', type: 'asset[]', description: '图片结果元数据，包含 remoteUrl、thumbnailPath、SKU 和产物包信息。', required: true },
+      { name: 'quality_report', type: 'json', description: '质检报告或跳过记录。' }
+    ],
+    runtimePolicy: {
+      maxNodeExecutions: 160,
+      maxLoopIterations: 50,
+      requireApprovalBeforeTools: false
+    }
+  };
+}
+
+function buildEcommerceProductVideoFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
+  const nodes: ServerRoleWorkflowGraphNode[] = [
+    {
+      id: 'start',
+      type: 'start',
+      name: '开始',
+      description: '工作流入口。'
+    },
+    {
+      id: 'factory_input',
+      type: 'input',
+      name: '接收商品视频批次',
+      instruction: '接收商品参考图、SKU 表格、目标平台、勾选产物包、视频时长、画幅、文字语言和质检模式；单批最多 50 个商品。',
+      inputVariables: ['start.text', 'start.files', 'start.images', 'start.spreadsheets'],
+      outputVariables: ['task_brief'],
+      config: {
+        acceptedFileKinds: ['image', 'spreadsheet', 'csv'],
+        maxItems: 50,
+        source: 'digital_factory'
+      }
+    },
+    {
+      id: 'gather_factory_rules',
+      type: 'knowledge',
+      name: '读取平台和品牌规则',
+      instruction: '读取企业知识库里的平台视频规则、品牌素材规范、禁用词、历史优质商品视频案例和投放注意事项。',
+      inputVariables: ['task_brief', 'factory_request'],
+      outputVariables: ['knowledge_context']
+    },
+    {
+      id: 'prepare_batch',
+      type: 'data',
+      name: '整理视频批次参数',
+      instruction: '把用户输入、附件和工厂面板参数整理成稳定 JSON，供视频生成节点读取。',
+      inputVariables: ['start.files', 'factory_request'],
+      outputVariables: [
+        'factory_request',
+        'factory_items',
+        'selected_packages',
+        'target_platform',
+        'quality_check_mode',
+        'video_generation_config'
+      ],
+      config: {
+        dataMode: 'code',
+        outputVariable: 'factory_items',
+        timeoutMs: 2_000,
+        code:
+          'const request = input.factory_request && typeof input.factory_request === "object" ? input.factory_request : {};\n' +
+          'const files = Array.isArray(input["start.files"]) ? input["start.files"] : [];\n' +
+          'const images = files.filter((file) => file && file.kind === "image");\n' +
+          'const selectedPackages = Array.isArray(request.packages) ? request.packages : [];\n' +
+          'const platform = request.platform && typeof request.platform === "object" ? request.platform : { key: "tiktok_shop", label: "TikTok Shop", imageRatio: "9:16" };\n' +
+          'const qualityCheckMode = typeof request.qualityCheckMode === "string" ? request.qualityCheckMode : "basic";\n' +
+          'return {\n' +
+          '  factory_request: request,\n' +
+          '  factory_items: images.slice(0, 50).map((file, index) => ({ sku: `SKU-${index + 1}`, image: file, sourceName: file.name || `image-${index + 1}` })),\n' +
+          '  selected_packages: selectedPackages,\n' +
+          '  target_platform: platform,\n' +
+          '  quality_check_mode: qualityCheckMode,\n' +
+          '  video_generation_config: request.videoGeneration || {}\n' +
+          '};'
+      }
+    },
+    {
+      id: 'generate_videos',
+      type: 'llm',
+      name: '批量生成商品视频',
+      instruction: '按 factory_items 和 selected_packages 调用生视频模型。每个任务只返回视频 URL 元数据，不返回二进制或 base64；大视频不经过服务端。',
+      modelProfileId: 'qiu-video-generation-default',
+      inputVariables: [
+        'factory_request',
+        'factory_items',
+        'selected_packages',
+        'target_platform',
+        'video_generation_config',
+        'knowledge_context'
+      ],
+      outputVariables: ['factory_generated_videos'],
+      config: {
+        llmTaskType: 'video_generation',
+        outputMode: 'json',
+        packageKeys: ecommerceProductVideoDefaultPackageKeys,
+        concurrency: 3,
+        maxRetries: 2,
+        timeoutMs: 240_000,
+        output: {
+          folder: 'product-videos',
+          videoFormat: 'mp4'
+        },
+        schema: {
+          items: [
+            {
+              sku: 'string',
+              packageKey: 'product_showcase_video',
+              remoteUrl: 'https://...',
+              thumbnailPath: 'https://...',
+              providerJobId: 'string',
+              providerStatus: 'string'
+            }
+          ]
+        }
+      }
+    },
+    {
+      id: 'quality_check',
+      type: 'llm',
+      name: '可选质检',
+      instruction: '如果 quality_check_mode 为 none，则输出 skipped。basic 只做产物数量、URL、命名和基础元数据检查；smart 再用视觉模型检查商品主体一致性、画幅和平台适配风险。',
+      modelProfileId: 'qiu-vision-default',
+      inputVariables: ['factory_generated_videos', 'factory_items', 'quality_check_mode', 'target_platform'],
+      outputVariables: ['quality_report'],
+      config: {
+        llmTaskType: 'vision',
+        optionalModel: true,
+        outputMode: 'json',
+        schema: {
+          mode: 'basic',
+          passed: true,
+          issues: [{ sku: 'string', packageKey: 'string', message: 'string' }]
+        }
+      }
+    },
+    {
+      id: 'factory_output',
+      type: 'output',
+      name: '返回结果',
+      instruction: '返回批量完成数量、失败项、视频 URL 结果、可下载清单和质检摘要。',
+      inputVariables: ['factory_generated_videos', 'quality_report', 'video_generation_summary'],
+      outputVariables: ['final_answer']
+    }
+  ];
+
+  return {
+    version: '1.0.0',
+    entryNodeId: 'start',
+    nodes,
+    edges: [
+      { id: 'start__factory_input', sourceNodeId: 'start', targetNodeId: 'factory_input', condition: { type: 'always' } },
+      { id: 'factory_input__gather_factory_rules', sourceNodeId: 'factory_input', targetNodeId: 'gather_factory_rules', condition: { type: 'always' } },
+      { id: 'gather_factory_rules__prepare_batch', sourceNodeId: 'gather_factory_rules', targetNodeId: 'prepare_batch', condition: { type: 'always' } },
+      { id: 'prepare_batch__generate_videos', sourceNodeId: 'prepare_batch', targetNodeId: 'generate_videos', condition: { type: 'always' } },
+      { id: 'generate_videos__quality_check', sourceNodeId: 'generate_videos', targetNodeId: 'quality_check', condition: { type: 'always' } },
+      { id: 'quality_check__factory_output', sourceNodeId: 'quality_check', targetNodeId: 'factory_output', condition: { type: 'always' } }
+    ],
+    variables: [
+      { name: 'factory_request', type: 'json', description: '工厂面板提交的电商视频批量运行参数。', required: true },
+      { name: 'factory_items', type: 'json', description: '待处理商品列表，单批最多 50 个。', required: true },
+      { name: 'selected_packages', type: 'json', description: '用户勾选的视频产物包 key。', required: true },
+      { name: 'target_platform', type: 'text', description: '目标电商或内容平台。', required: true },
+      { name: 'quality_check_mode', type: 'text', description: 'none/basic/smart。', required: true },
+      { name: 'video_generation_config', type: 'json', description: '视频时长、画幅、语言、风格和提示词控制。', required: true },
+      { name: 'factory_generated_videos', type: 'asset[]', description: '视频结果元数据，包含 remoteUrl、thumbnailPath、SKU 和产物包信息。', required: true },
+      { name: 'video_generation_summary', type: 'text', description: '批量生视频摘要。' },
       { name: 'quality_report', type: 'json', description: '质检报告或跳过记录。' }
     ],
     runtimePolicy: {
@@ -3446,13 +3747,13 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     templateId: 'factory_cross_border_product_images_v1',
     applicationType: 'DIGITAL_FACTORY',
     version: DESIGNED_ROLE_TEMPLATE_VERSION,
-    name: '跨境商品图工厂',
-    industry: '跨境电商 / 商品图片',
+    name: 'AI电商图片工厂',
+    industry: '电商 / 商品图片',
     scenario: '批量生成白底图、主图、场景图、换背景、换模特、尺寸图和卖点图',
-    description: '面向跨境电商团队，批量上传商品参考图，选择目标平台和产物包后生成图片结果 URL 与本地缩略图预览。',
+    description: '面向电商运营团队，批量上传商品参考图，选择目标平台和产物包后生成图片结果 URL 与本地缩略图预览。',
     recommendedPlanCode: 'ENTERPRISE_PRO_MONTHLY',
-    businessGoal: '把跨境商品图从单张手工制作提升为批量化工厂流程，减少运营制图和重复提示词调试成本。',
-    knowledgeSources: ['企业知识库', '品牌素材规范', '跨境平台图片规则', '历史优质商品图案例'],
+    businessGoal: '把电商商品图从单张手工制作提升为批量化工厂流程，减少运营制图和重复提示词调试成本。',
+    knowledgeSources: ['企业知识库', '品牌素材规范', '电商平台图片规则', '历史优质商品图案例'],
     tools: ['local-filesystem'],
     skills: [
       skill('product_image_understanding', '可选图片理解增强', '开启后识别商品主体、材质、颜色、使用场景和平台展示约束。'),
@@ -3521,10 +3822,81 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     approvalPolicy: '生成前由用户选择产物包和目标平台；对外发布前需人工复核平台规则、品牌合规和图片真实性。'
   },
   {
+    templateId: 'factory_ecommerce_product_videos_v1',
+    applicationType: 'DIGITAL_FACTORY',
+    version: DESIGNED_ROLE_TEMPLATE_VERSION,
+    name: 'AI电商视频工厂',
+    industry: '电商 / 商品视频',
+    scenario: '批量生成商品展示短视频、使用场景视频、功能演示视频、广告创意视频和详情页动效视频',
+    description: '面向电商运营团队，批量上传商品参考图，选择目标平台、画幅、时长和产物包后生成商品视频 URL，并在输出队列中按商品和产物包展示。',
+    recommendedPlanCode: 'ENTERPRISE_PRO_MONTHLY',
+    businessGoal: '把商品视频从单条人工创作提升为批量化工厂流程，减少短视频素材制作、提示词调试和平台适配成本。',
+    knowledgeSources: ['企业知识库', '品牌素材规范', '电商平台视频规则', '历史优质商品视频案例'],
+    tools: ['local-filesystem'],
+    skills: [
+      skill('product_video_prompting', '商品视频提示词控制', '根据商品参考图、平台、产物包、画幅、时长和用户风格要求生成稳定生视频指令。'),
+      skill('product_video_batch_generation', '批量生视频', '按每张商品图和勾选产物包并发调用生视频模型，输出视频 URL 和状态。'),
+      skill('video_url_manifest', '视频清单整理', '把生成结果整理为输出队列和本地清单，方便预览、下载和人工复核。')
+    ],
+    workflowSteps: [
+      {
+        id: 'factory_input',
+        order: 1,
+        type: 'input',
+        name: '接收商品视频批次',
+        instruction: '接收商品参考图、SKU 表格、目标平台、产物包、时长、画幅、语言、质检方式和补充要求。'
+      },
+      {
+        id: 'gather_factory_rules',
+        order: 2,
+        type: 'knowledge',
+        name: '读取平台和品牌规则',
+        instruction: '读取企业知识库中的平台视频规则、品牌规范、禁用词和历史优质商品视频案例。'
+      },
+      {
+        id: 'prepare_batch',
+        order: 3,
+        type: 'llm',
+        name: '整理视频批次参数',
+        instruction: '把商品图、SKU、目标平台、产物包和视频控制参数整理成可并发执行的批次 JSON。'
+      },
+      {
+        id: 'generate_videos',
+        order: 4,
+        type: 'llm',
+        name: '批量生成商品视频',
+        instruction: '按商品批次和所选产物包调用生视频模型，输出视频远程 URL 元数据。'
+      },
+      {
+        id: 'quality_check',
+        order: 5,
+        type: 'llm',
+        name: '可选质检',
+        instruction: '按用户选择执行基础规则检查或多模态质检。'
+      },
+      {
+        id: 'factory_output',
+        order: 6,
+        type: 'output',
+        name: '返回结果',
+        instruction: '返回批量任务统计、失败项、视频 URL、输出队列和质检摘要。'
+      }
+    ],
+    workflowGraph: buildEcommerceProductVideoFactoryWorkflowGraph(),
+    dependencyManifestFactory: buildEcommerceProductVideoFactoryManifest(),
+    sampleInputs: [
+      '请把这批商品图按 TikTok Shop 生成竖屏商品展示视频和使用场景视频，文字用英文。',
+      '请按 Temu 风格生成 8 秒商品视频，突出价格感和核心卖点，不要夸张变形。'
+    ],
+    outputFormat: '视频批次结果，包含各 SKU 的产物包、远程视频 URL、缩略图、失败原因和质检摘要。',
+    allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_PRO_MONTHLY'),
+    approvalPolicy: '生成前由用户选择产物包、目标平台、时长和画幅；对外发布前需人工复核平台规则、品牌合规、素材版权和视频真实性。'
+  },
+  {
     templateId: 'factory_medical_case_video_screening_v1',
     applicationType: 'DIGITAL_FACTORY',
     version: DESIGNED_ROLE_TEMPLATE_VERSION,
-    name: '视频质检剪辑工厂',
+    name: 'AI质检视频工厂',
     industry: '医疗健康 / 案例视频运营',
     scenario: '批量筛选案例视频、语音转写、素材评分和可选初剪',
     description: '面向医疗健康案例视频运营场景，按硬性规则先筛掉不合格视频，再对通过视频做表达质量评分，并可选生成本地初剪视频。',

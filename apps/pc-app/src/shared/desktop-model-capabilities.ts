@@ -345,12 +345,12 @@ export function inferKnownModelCapabilitiesFromName(modelName: string): ModelCap
     return ['image_generation', 'image_to_image', 'image_editing'];
   }
 
-  if (matchesAny(normalizedName, ['gpt-image', 'image-generation', 'dall-e', 'imagen', 'flux', 'stable-diffusion', 'wanx', 'text-to-image', 'cogview', 'seedream', 'midjourney', 'nano-banana'])) {
-    return ['image_generation', 'text_to_image', 'image_to_image', 'image_editing'];
+  if (matchesAny(normalizedName, ['veo', 'kling', 'pika', 'hailuo', 'runway', 'sora', 'seedance', 'text-to-video', 'image-to-video', 't2v', 'i2v', 'wanx-video'])) {
+    return ['video_generation', 'text_to_video', 'image_to_video'];
   }
 
-  if (matchesAny(normalizedName, ['veo', 'kling', 'pika', 'hailuo', 'runway', 'sora', 'seedance', 'text-to-video', 'image-to-video'])) {
-    return ['video_generation', 'text_to_video', 'image_to_video'];
+  if (matchesAny(normalizedName, ['gpt-image', 'image-generation', 'dall-e', 'imagen', 'flux', 'stable-diffusion', 'wanx', 'text-to-image', 'cogview', 'seedream', 'midjourney', 'nano-banana'])) {
+    return ['image_generation', 'text_to_image', 'image_to_image', 'image_editing'];
   }
 
   if (matchesAny(normalizedName, ['video', 'videounderstanding'])) {

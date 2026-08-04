@@ -227,6 +227,7 @@ interface FactoryRunFormValues {
   contentGoal?: string;
   contentStyle?: string;
   videoCount?: number;
+  videoDurationSeconds?: number;
   videoRatio?: string;
   targetAudience?: string;
   sourceUrls?: string;
@@ -2847,9 +2848,13 @@ export default function App() {
 
     setLocalActionNotice('');
     try {
-      await window.qiuDesktop.openLocalPath(targetPath);
+      if (isHttpUrl(targetPath)) {
+        await window.qiuDesktop.openExternalUrl(targetPath);
+      } else {
+        await window.qiuDesktop.openLocalPath(targetPath);
+      }
     } catch (error) {
-      setLocalActionNotice(`打开本地路径失败：${error instanceof Error ? error.message : 'unknown error'}`);
+      setLocalActionNotice(`打开路径失败：${error instanceof Error ? error.message : 'unknown error'}`);
     }
   }
 
@@ -2920,10 +2925,14 @@ export default function App() {
           : undefined;
       })
       .filter((item): item is { sourcePath: string; suggestedFileName: string } => Boolean(item));
+    const remoteFileCount = items.filter((item) => getFactoryOutputRemoteUrl(item)).length;
 
     if (exportableFiles.length === 0) {
-      message.warning('没有可导出的本地文件。');
+      message.warning(remoteFileCount > 0 ? '当前批次包含远程 URL，请先使用单个导出保存。' : '没有可导出的本地文件。');
       return;
+    }
+    if (remoteFileCount > 0) {
+      message.warning('批量导出暂只支持本地文件；远程视频请使用单个导出保存。');
     }
 
     setLocalActionNotice('');
@@ -2951,23 +2960,29 @@ export default function App() {
     }
 
     const sourcePath = getFactoryOutputLocalPath(item);
-    if (!sourcePath) {
-      message.warning('这个输出物没有可导出的本地文件。');
+    const remoteUrl = getFactoryOutputRemoteUrl(item);
+    if (!sourcePath && !remoteUrl) {
+      message.warning('这个输出物没有可导出的文件或 URL。');
       return;
     }
 
     setLocalActionNotice('');
     setExportingFactoryOutputId(item.id);
     try {
-      const result = await window.qiuDesktop.exportLocalFiles({
-        targetFolderName: `${task.title}-输出物`,
-        files: [
-          {
-            sourcePath,
-            suggestedFileName: getFactoryOutputSuggestedFileName(item, sourcePath)
-          }
-        ]
-      });
+      const result = remoteUrl
+        ? await window.qiuDesktop.saveRemoteFileAs({
+            url: remoteUrl,
+            suggestedFileName: getFactoryOutputSuggestedFileName(item, remoteUrl)
+          })
+        : await window.qiuDesktop.exportLocalFiles({
+            targetFolderName: `${task.title}-输出物`,
+            files: [
+              {
+                sourcePath: sourcePath!,
+                suggestedFileName: getFactoryOutputSuggestedFileName(item, sourcePath!)
+              }
+            ]
+          });
       if (!result.canceled) {
         message.success('输出物已导出。');
       }
@@ -5791,7 +5806,8 @@ export default function App() {
       ? buildRoleRuntimeReadiness(runtimeState, selectedFactoryPackage)
       : undefined;
     const maxItems = readFactoryMaxItems(selectedFactoryManifest);
-    const isVideoFactory = isMedicalCaseVideoFactory(selectedFactoryManifest);
+    const isMedicalVideoFactory = isMedicalCaseVideoFactory(selectedFactoryManifest);
+    const isEcommerceVideoFactory = isEcommerceProductVideoFactory(selectedFactoryManifest);
     const isOperationFactory = isOperationVideoFactory(selectedFactoryManifest);
     const packageOptions = readFactoryPackageOptions(selectedFactoryManifest);
     const platformOptions = readFactoryPlatformOptions(selectedFactoryManifest);
@@ -5801,6 +5817,7 @@ export default function App() {
     const operationGoals = readFactoryOperationGoals(selectedFactoryManifest);
     const operationStyles = readFactoryOperationStyles(selectedFactoryManifest);
     const operationRatios = readFactoryOperationRatios(selectedFactoryManifest);
+    const ecommerceVideoDurationOptions = readFactoryVideoDurationOptions(selectedFactoryManifest);
     const selectedFactoryPreparedPackage = selectedFactoryPackage
       ? {
           ...selectedFactoryPackage,
@@ -5845,16 +5862,16 @@ export default function App() {
       (requirement) =>
         requirement.ready && readModelProfileCapabilities(requirement.profile).includes('audio_to_text')
     );
-    const acceptedFactoryFileTypes = isVideoFactory
+    const acceptedFactoryFileTypes = isMedicalVideoFactory
       ? '.mp4,.mov,.mkv,.avi,.webm,.m4v'
       : isOperationFactory
         ? '.png,.jpg,.jpeg,.webp,.xlsx,.csv,.pdf,.doc,.docx,.ppt,.pptx,.txt,.md'
         : '.png,.jpg,.jpeg,.webp,.xlsx,.csv';
-    const validFactoryAttachments = isVideoFactory
+    const validFactoryAttachments = isMedicalVideoFactory
       ? factoryAttachments.filter((attachment) => isFactoryVideoAttachment(attachment))
       : isOperationFactory
         ? factoryAttachments.filter((attachment) => isFactoryOperationAttachment(attachment))
-      : factoryAttachments.filter((attachment) => isFactoryImageInputAttachment(attachment));
+        : factoryAttachments.filter((attachment) => isFactoryImageInputAttachment(attachment));
     const invalidFactoryAttachmentCount = factoryAttachments.length - validFactoryAttachments.length;
     const latestFactoryLogs = focusedFactoryTask ? selectFactoryVisibleLogs(focusedFactoryTask) : [];
     const focusedFactoryArtifacts = focusedFactoryTask?.artifacts.filter(isUserDeliverableArtifact) ?? [];
@@ -5865,7 +5882,7 @@ export default function App() {
       focusedFactoryTask?.costRecords.reduce((total, record) => total + record.costCents, 0);
     const focusedFactoryInputFiles = readFactoryTaskInputFiles(focusedFactoryTask);
     const focusedFactoryStats = focusedFactoryTask
-      ? buildFactoryTaskBatchStats(focusedFactoryTask, isVideoFactory)
+      ? buildFactoryTaskBatchStats(focusedFactoryTask, isMedicalVideoFactory || isEcommerceVideoFactory)
       : undefined;
     const focusedFactoryFinalAnswer = focusedFactoryTask ? readConversationFinalAnswer(focusedFactoryTask) : '';
     const missingFactoryModel = selectedFactoryModelReadiness.find((requirement) => !requirement.ready);
@@ -6079,7 +6096,15 @@ export default function App() {
                       <Tag color={selectedFactoryReadiness?.ready ? 'green' : 'orange'}>
                         {selectedFactoryReadiness?.label ?? '待检查'}
                       </Tag>
-                      <Tag>{isVideoFactory ? '视频质检' : isOperationFactory ? '运营内容批处理' : '图片批处理'}</Tag>
+                      <Tag>
+                        {isMedicalVideoFactory
+                          ? '视频质检'
+                          : isEcommerceVideoFactory
+                            ? '电商视频批处理'
+                            : isOperationFactory
+                              ? '运营内容批处理'
+                              : '图片批处理'}
+                      </Tag>
                     </Space>
                     <Typography.Text type="secondary">
                       {selectedFactoryPackage.summary ?? '批量上传素材，按工作流生成结构化产物。'}
@@ -6147,11 +6172,13 @@ export default function App() {
                         <Space direction="vertical" size={2}>
                           <Typography.Text strong>输入</Typography.Text>
                           <Typography.Text type="secondary">
-                            {isVideoFactory
+                            {isMedicalVideoFactory
                               ? `上传待质检视频，单批最多 ${maxItems} 个。`
-                              : isOperationFactory
+                              : isEcommerceVideoFactory
+                                ? `上传商品参考图或表格，单批最多 ${maxItems} 个商品。`
+                                : isOperationFactory
                                 ? '上传产品资料、案例素材或参考文件，也可以只填写参数。'
-                              : `上传商品图或表格，单批最多 ${maxItems} 个。`}
+                                  : `上传商品图或表格，单批最多 ${maxItems} 个。`}
                           </Typography.Text>
                         </Space>
                         <Tag color="blue">{validFactoryAttachments.length}/{maxItems}</Tag>
@@ -6164,14 +6191,14 @@ export default function App() {
                       >
                         <FileAddOutlined />
                         <span>
-                          {isVideoFactory
+                          {isMedicalVideoFactory
                             ? '添加视频或拖拽到这里'
                             : isOperationFactory
                               ? '添加资料/图片/表格或拖拽到这里'
                               : '添加图片/表格或拖拽到这里'}
                         </span>
                         <small>
-                          {isVideoFactory
+                          {isMedicalVideoFactory
                             ? 'mp4、mov、mkv、avi、webm、m4v'
                             : isOperationFactory
                               ? 'pdf、docx、pptx、图片、xlsx、csv、txt'
@@ -6196,7 +6223,7 @@ export default function App() {
                       {factoryAttachments.length > 0 ? (
                         <div className="factory-attachment-list compact">
                           {factoryAttachments.map((attachment) => {
-                            const valid = isVideoFactory
+                            const valid = isMedicalVideoFactory
                               ? isFactoryVideoAttachment(attachment)
                               : isOperationFactory
                                 ? isFactoryOperationAttachment(attachment)
@@ -6204,7 +6231,7 @@ export default function App() {
                             return (
                               <div key={attachment.id} className={valid ? 'factory-attachment-item' : 'factory-attachment-item invalid'}>
                                 <Space size={8}>
-                                  {isVideoFactory ? <VideoCameraOutlined /> : isFactoryImageAttachment(attachment) ? <FileImageOutlined /> : isFactoryTableAttachment(attachment) ? <FileExcelOutlined /> : <FileTextOutlined />}
+                                  {isMedicalVideoFactory ? <VideoCameraOutlined /> : isFactoryImageAttachment(attachment) ? <FileImageOutlined /> : isFactoryTableAttachment(attachment) ? <FileExcelOutlined /> : <FileTextOutlined />}
                                   <span>{attachment.name}</span>
                                   <Typography.Text type="secondary">{formatFileSize(attachment.size)}</Typography.Text>
                                   {!valid ? <Tag color="red">不适用</Tag> : null}
@@ -6220,11 +6247,13 @@ export default function App() {
                         <Empty
                           image={Empty.PRESENTED_IMAGE_SIMPLE}
                           description={
-                            isVideoFactory
+                            isMedicalVideoFactory
                               ? '请添加案例视频'
                               : isOperationFactory
                                 ? '可添加资料，也可以直接填写参数'
-                                : '请添加商品素材'
+                                : isEcommerceVideoFactory
+                                  ? '请添加商品参考图'
+                                  : '请添加商品素材'
                           }
                         />
                       )}
@@ -6238,7 +6267,7 @@ export default function App() {
                           <div className="factory-input-file-list">
                             {focusedFactoryInputFiles.slice(0, 6).map((filePath) => (
                               <div key={filePath} className="factory-input-file-item">
-                                {isVideoFactory ? <VideoCameraOutlined /> : isOperationFactory ? <FileTextOutlined /> : <PaperClipOutlined />}
+                                  {isMedicalVideoFactory ? <VideoCameraOutlined /> : isEcommerceVideoFactory ? <FileImageOutlined /> : isOperationFactory ? <FileTextOutlined /> : <PaperClipOutlined />}
                                 <Typography.Text ellipsis title={filePath}>
                                   {getPathFileName(filePath)}
                                 </Typography.Text>
@@ -6282,7 +6311,7 @@ export default function App() {
                           <Switch checkedChildren="开启" unCheckedChildren="关闭" />
                         </Form.Item>
 
-                        {isVideoFactory ? (
+                        {isMedicalVideoFactory ? (
                           <>
                             <Form.Item
                               name="asrModelProfileId"
@@ -6381,6 +6410,102 @@ export default function App() {
                               <Input.TextArea
                                 rows={3}
                                 placeholder="例如：优先保留使用前症状和使用后改善的片段；夸张医疗承诺请标记风险。"
+                              />
+                            </Form.Item>
+                          </>
+                        ) : isEcommerceVideoFactory ? (
+                          <>
+                            <Form.Item name="platform" label="目标平台" rules={[{ required: true, message: '请选择目标平台' }]}>
+                              <Select
+                                size="large"
+                                options={platformOptions.map((item) => ({
+                                  value: item.key,
+                                  label: `${item.label}${item.imageRatio ? ` / ${item.imageRatio}` : ''}`
+                                }))}
+                              />
+                            </Form.Item>
+                            <Form.Item shouldUpdate noStyle>
+                              {({ getFieldValue }) => {
+                                const currentPackages = normalizeFactoryPackageDefinitions(
+                                  getFieldValue('packageDefinitions'),
+                                  packageOptions
+                                );
+
+                                return (
+                                  <Form.Item
+                                    name="packageKeys"
+                                    label={
+                                      <Flex align="center" justify="space-between" gap={8} className="factory-form-label-row">
+                                        <span>选择产物包</span>
+                                        <Button
+                                          size="small"
+                                          icon={<SettingOutlined />}
+                                          onClick={() => openFactoryPackageEditor(selectedFactoryCode)}
+                                        >
+                                          编辑
+                                        </Button>
+                                      </Flex>
+                                    }
+                                    rules={[{ required: true, message: '请至少选择一个产物包' }]}
+                                  >
+                                    <Checkbox.Group className="factory-package-checks">
+                                      {currentPackages.map((item) => (
+                                        <Tooltip key={item.key} title={item.description}>
+                                          <Checkbox value={item.key}>{item.label}</Checkbox>
+                                        </Tooltip>
+                                      ))}
+                                    </Checkbox.Group>
+                                  </Form.Item>
+                                );
+                              }}
+                            </Form.Item>
+                            <div className="factory-inline-form-grid compact">
+                              <Form.Item name="videoDurationSeconds" label="视频时长" rules={[{ required: true }]}>
+                                <Select
+                                  size="large"
+                                  options={ecommerceVideoDurationOptions.map((seconds) => ({
+                                    value: seconds,
+                                    label: `${seconds} 秒`
+                                  }))}
+                                />
+                              </Form.Item>
+                              <Form.Item name="videoRatio" label="画幅" rules={[{ required: true }]}>
+                                <Select
+                                  size="large"
+                                  options={operationRatios.map((item) => ({ value: item.key, label: item.label }))}
+                                />
+                              </Form.Item>
+                            </div>
+                            <Form.Item name="qualityCheckMode" label="质检方式" rules={[{ required: true }]}>
+                              <Select
+                                size="large"
+                                options={qualityModes.map((item) => ({
+                                  value: item.key,
+                                  label: item.label
+                                }))}
+                              />
+                            </Form.Item>
+                            <div className="factory-prompt-control-block">
+                              <Flex align="center" justify="space-between" gap={8}>
+                                <Typography.Text strong>提示词控制</Typography.Text>
+                                <Typography.Text type="secondary">控制生视频模型的画面、风格和文字</Typography.Text>
+                              </Flex>
+                              <div className="factory-prompt-control-grid">
+                                {promptControlFields.map((field) => (
+                                  <Form.Item key={field.key} name={field.key} label={field.label}>
+                                    {field.inputType === 'textarea' ? (
+                                      <Input.TextArea rows={2} placeholder={field.placeholder} />
+                                    ) : (
+                                      <Input placeholder={field.placeholder} />
+                                    )}
+                                  </Form.Item>
+                                ))}
+                              </div>
+                            </div>
+                            <Form.Item name="instruction" label="补充要求">
+                              <Input.TextArea
+                                rows={3}
+                                placeholder="例如：前三秒突出商品卖点，画面真实，不要生成夸张文字和虚假功能。"
                               />
                             </Form.Item>
                           </>
@@ -6583,7 +6708,7 @@ export default function App() {
                         <div className="factory-queue-list">
                           {selectedFactoryTasks.slice(0, 30).map((task) => {
                             const progress = factoryTaskProgressPercent(task);
-                            const batchStats = buildFactoryTaskBatchStats(task, isVideoFactory);
+                            const batchStats = buildFactoryTaskBatchStats(task, isMedicalVideoFactory || isEcommerceVideoFactory);
                             return (
                               <button
                                 key={task.taskId}
@@ -6615,7 +6740,7 @@ export default function App() {
                                   <span style={{ width: `${progress}%` }} />
                                 </span>
                                 <span className="factory-stage-strip">
-                                  {buildFactoryTaskStages(task, isVideoFactory, isOperationFactory).map((stage) => (
+                                  {buildFactoryTaskStages(task, isMedicalVideoFactory, isOperationFactory, isEcommerceVideoFactory).map((stage) => (
                                     <span key={stage.key} className={`factory-stage-pill ${stage.status}`}>
                                       {stage.label}
                                     </span>
@@ -6656,7 +6781,7 @@ export default function App() {
                           </Flex>
                           {focusedFactoryStats ? (
                             <div className="factory-batch-summary-grid">
-                              {buildFactoryBatchStatItems(focusedFactoryStats, isVideoFactory).map((item) => (
+                              {buildFactoryBatchStatItems(focusedFactoryStats, isMedicalVideoFactory, isEcommerceVideoFactory).map((item) => (
                                 <div key={item.key} className={`factory-batch-summary-card ${item.tone ?? ''}`}>
                                   <span>{item.label}</span>
                                   <strong>{item.value}</strong>
@@ -6780,7 +6905,7 @@ export default function App() {
 
         <div className="factory-output-item-list">
           {outputItems.map((item) => {
-            const previewPath = getFactoryOutputLocalPath(item);
+            const previewPath = getFactoryOutputPreviewTarget(item);
             const scoreLabel = item.score === undefined ? undefined : `${item.score} 分${item.grade ? ` / ${item.grade}` : ''}`;
             return (
               <div key={item.id} className={`factory-output-item-card ${item.status}`}>
@@ -9369,6 +9494,35 @@ export default function App() {
       };
     }
 
+    if (isEcommerceProductVideoFactory(factory)) {
+      const packageOptions = readFactoryPackageOptions(factory);
+      const packageDefinitions = readFactoryPackagePreset(roleCode, packageOptions);
+      const defaultPackages = packageDefinitions
+        .filter((item) => item.defaultSelected !== false)
+        .map((item) => item.key);
+      const platformOptions = readFactoryPlatformOptions(factory);
+      const qualityModes = readFactoryQualityModes(factory);
+      const ratios = readFactoryOperationRatios(factory);
+      const durationOptions = readFactoryVideoDurationOptions(factory);
+
+      return {
+        roleCode,
+        useKnowledge: true,
+        platform: platformOptions[0]?.key ?? 'tiktok_shop',
+        packageDefinitions,
+        packageKeys: defaultPackages.length ? defaultPackages : packageDefinitions.map((item) => item.key),
+        qualityCheckMode: qualityModes[0]?.key ?? 'basic',
+        videoDurationSeconds: durationOptions[1] ?? durationOptions[0] ?? 8,
+        videoRatio: platformOptions[0]?.imageRatio ?? ratios[0]?.key ?? '9:16',
+        promptLanguage: '',
+        promptStyle: '',
+        promptGoal: '',
+        promptMustKeep: '',
+        promptAvoid: '',
+        instruction: ''
+      };
+    }
+
     if (isOperationVideoFactory(factory)) {
       const packageOptions = readFactoryPackageOptions(factory);
       const packageDefinitions = readFactoryPackagePreset(roleCode, packageOptions);
@@ -9829,6 +9983,70 @@ export default function App() {
         attachments: videoAttachments,
         extraModelProfileIds: [values.asrModelProfileId],
         useKnowledge: values.useKnowledge === true
+      });
+      if (created) {
+        resetFactoryRunFormForRole(values.roleCode);
+        setSelectedFactoryRoleCode(values.roleCode);
+        navigateToSection('factories');
+      }
+      return;
+    }
+
+    if (isEcommerceProductVideoFactory(factory)) {
+      const ecommerceAttachments = factoryAttachments.filter((attachment) => isFactoryImageAttachment(attachment));
+      const invalidEcommerceAttachments = factoryAttachments.filter(
+        (attachment) => !isFactoryImageInputAttachment(attachment)
+      );
+      if (ecommerceAttachments.length === 0) {
+        message.warning('请至少上传一张商品参考图。');
+        return;
+      }
+      if (invalidEcommerceAttachments.length > 0) {
+        message.warning('当前工厂只支持图片、Excel 或 CSV，请移除不适用文件后再运行。');
+        return;
+      }
+      if (ecommerceAttachments.length > maxItems) {
+        message.warning(`单批最多处理 ${maxItems} 张商品参考图，请拆分批次。`);
+        return;
+      }
+
+      const ecommerceVideoValues: FactoryRunFormValues = {
+        ...values,
+        packageDefinitions: normalizeFactoryPackageDefinitions(
+          factoryRunForm.getFieldValue('packageDefinitions'),
+          readFactoryPackageOptions(factory)
+        )
+      };
+      if (!ecommerceVideoValues.packageKeys?.length) {
+        message.warning('请至少选择一个产物包。');
+        return;
+      }
+      const optionalVisionModelProfileIds =
+        ecommerceVideoValues.qualityCheckMode === 'smart'
+          ? findReadyImageUnderstandingModelProfileIds(runtimeState, values.roleCode)
+          : [];
+      if (ecommerceVideoValues.qualityCheckMode === 'smart' && optionalVisionModelProfileIds.length === 0) {
+        message.warning('智能质检需要先配置并启用图片理解模型；也可以改为基础质检或不质检后运行。');
+        navigateToSection('models');
+        return;
+      }
+
+      const platform = readFactoryPlatformOptions(factory).find((item) => item.key === ecommerceVideoValues.platform);
+      const selectedPackageCount = ecommerceVideoValues.packageKeys.length;
+      const title = `${template.name} - ${platform?.label ?? ecommerceVideoValues.platform} - ${ecommerceAttachments.length * selectedPackageCount} 条视频`;
+      const input = buildEcommerceProductVideoFactoryTaskInput({
+        template,
+        factory,
+        values: ecommerceVideoValues,
+        attachments: factoryAttachments
+      });
+      const created = createTask({
+        roleCode: values.roleCode,
+        title,
+        input,
+        attachments: factoryAttachments,
+        extraModelProfileIds: optionalVisionModelProfileIds,
+        useKnowledge: ecommerceVideoValues.useKnowledge === true
       });
       if (created) {
         resetFactoryRunFormForRole(values.roleCode);
@@ -11979,7 +12197,8 @@ function factoryTaskProgressPercent(task: DesktopTaskDetail): number {
 function buildFactoryTaskStages(
   task: DesktopTaskDetail,
   isVideoFactory: boolean,
-  isOperationFactory = false
+  isOperationFactory = false,
+  isVideoGenerationFactory = false
 ): FactoryTaskStageView[] {
   const stages = isVideoFactory
     ? [
@@ -11997,6 +12216,13 @@ function buildFactoryTaskStages(
           { key: 'package', label: '打包' },
           { key: 'artifact', label: '产物' }
         ]
+      : isVideoGenerationFactory
+        ? [
+            { key: 'prompt', label: '提示词' },
+            { key: 'generate', label: '生视频' },
+            { key: 'quality', label: '质检', optional: true },
+            { key: 'artifact', label: '产物' }
+          ]
     : [
         { key: 'prompt', label: '提示词' },
         { key: 'generate', label: '生图' },
@@ -12038,7 +12264,7 @@ function stageWasObserved(stageKey: string, text: string): boolean {
   if (stageKey === 'edit') return text.includes('compose_clips') || text.includes('初剪') || text.includes('剪辑');
   if (stageKey === 'artifact') return text.includes('artifact') || text.includes('产物') || text.includes('写入');
   if (stageKey === 'prompt') return text.includes('prompt') || text.includes('提示词');
-  if (stageKey === 'generate') return text.includes('image_generation') || text.includes('生图') || text.includes('图片');
+  if (stageKey === 'generate') return text.includes('image_generation') || text.includes('video_generation') || text.includes('生图') || text.includes('生视频') || text.includes('图片') || text.includes('视频');
   if (stageKey === 'quality') return text.includes('quality') || text.includes('质检');
   if (stageKey === 'plan') return text.includes('topic') || text.includes('选题') || text.includes('operation video');
   if (stageKey === 'script') return text.includes('script') || text.includes('脚本') || text.includes('分镜');
@@ -12049,7 +12275,8 @@ function stageWasObserved(stageKey: string, text: string): boolean {
 
 function hasFactoryArtifactForStage(task: DesktopTaskDetail, stageKey: string): boolean {
   if (stageKey === 'artifact') {
-    return task.artifacts.some(isUserDeliverableArtifact);
+    return task.artifacts.some(isUserDeliverableArtifact) ||
+      Boolean(task.factoryOutputs?.some((item) => item.status !== 'excluded'));
   }
 
   if (stageKey === 'edit') {
@@ -12057,7 +12284,8 @@ function hasFactoryArtifactForStage(task: DesktopTaskDetail, stageKey: string): 
   }
 
   if (stageKey === 'generate') {
-    return task.artifacts.some((artifact) => artifact.factoryPreview?.kind === 'digital_factory_image_batch');
+    return task.artifacts.some((artifact) => artifact.factoryPreview?.kind === 'digital_factory_image_batch') ||
+      Boolean(task.factoryOutputs?.some((item) => item.kind === 'image' || item.kind === 'video'));
   }
 
   if (stageKey === 'package') {
@@ -12196,12 +12424,26 @@ function buildFactoryTaskBatchStats(task: DesktopTaskDetail, isVideoFactory: boo
 
 function buildFactoryBatchStatItems(
   stats: FactoryTaskBatchStats,
-  isVideoFactory: boolean
+  isVideoFactory: boolean,
+  isVideoGenerationFactory = false
 ): FactoryBatchStatItem[] {
   const items: FactoryBatchStatItem[] = [
     { key: 'total', label: '输入', value: stats.total, tone: 'neutral' },
     { key: 'artifacts', label: '产物', value: stats.artifacts, tone: stats.artifacts > 0 ? 'good' : 'neutral' }
   ];
+
+  if (isVideoGenerationFactory) {
+    return [
+      { key: 'total', label: '输出视频', value: stats.total, tone: 'neutral' },
+      { key: 'qualified', label: '成功', value: stats.qualified ?? '待统计', tone: 'good' },
+      { key: 'review', label: '需复核', value: stats.review ?? '待统计', tone: 'warning' },
+      { key: 'rejected', label: '不通过', value: stats.rejected ?? '待统计', tone: 'danger' },
+      ...(stats.processingError !== undefined
+        ? [{ key: 'processingError', label: '失败', value: stats.processingError, tone: 'danger' as const }]
+        : []),
+      { key: 'artifacts', label: '产物', value: stats.artifacts, tone: stats.artifacts > 0 ? 'good' : 'neutral' }
+    ];
+  }
 
   if (!isVideoFactory) {
     return items;
@@ -12245,8 +12487,17 @@ function getFactoryOutputLocalPath(item: FactoryOutputItem): string | undefined 
   return item.outputPath?.trim() || item.sourcePath?.trim() || undefined;
 }
 
+function getFactoryOutputRemoteUrl(item: FactoryOutputItem): string | undefined {
+  const url = item.outputUrl?.trim() || item.sourceUrl?.trim() || undefined;
+  return isHttpUrl(url) ? url : undefined;
+}
+
+function getFactoryOutputPreviewTarget(item: FactoryOutputItem): string | undefined {
+  return getFactoryOutputLocalPath(item) ?? getFactoryOutputRemoteUrl(item);
+}
+
 function getFactoryOutputSuggestedFileName(item: FactoryOutputItem, sourcePath: string): string {
-  const sourceFileName = getPathFileName(sourcePath);
+  const sourceFileName = getUrlFileName(sourcePath) ?? getPathFileName(sourcePath);
   if (sourceFileName) {
     return sourceFileName;
   }
@@ -12259,6 +12510,23 @@ function getFactoryOutputSuggestedFileName(item: FactoryOutputItem, sourcePath: 
         ? '.xlsx'
         : '';
   return `${item.title || 'factory-output'}${extension}`;
+}
+
+function isHttpUrl(value: string | undefined): value is string {
+  return typeof value === 'string' && /^https?:\/\//i.test(value.trim());
+}
+
+function getUrlFileName(value: string | undefined): string | undefined {
+  if (!isHttpUrl(value)) {
+    return undefined;
+  }
+
+  try {
+    const fileName = decodeURIComponent(new URL(value).pathname.split('/').filter(Boolean).pop() ?? '');
+    return fileName || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function factoryOutputStatusLabel(status: FactoryOutputItemStatus): string {
@@ -13165,6 +13433,7 @@ interface DigitalFactoryManifest {
     goals?: Array<{ key: string; label: string }>;
     styles?: Array<{ key: string; label: string }>;
     ratios?: Array<{ key: string; label: string }>;
+    durationSecondOptions?: number[];
   };
   output?: {
     defaultImageFormat?: string;
@@ -13447,7 +13716,8 @@ function readFactoryManifest(manifest: RoleTemplateDependencyManifest | undefine
       maxVideoCount: readNumber(contentControls?.maxVideoCount),
       goals: readFactoryKeyLabelOptionsFromValue(contentControls?.goals),
       styles: readFactoryKeyLabelOptionsFromValue(contentControls?.styles),
-      ratios: readFactoryKeyLabelOptionsFromValue(contentControls?.ratios)
+      ratios: readFactoryKeyLabelOptionsFromValue(contentControls?.ratios),
+      durationSecondOptions: readNumberArray(contentControls?.durationSecondOptions)
     },
     output: {
       defaultImageFormat: readString(output?.defaultImageFormat),
@@ -13497,6 +13767,12 @@ function readFactoryOperationStyles(factory: DigitalFactoryManifest) {
 
 function readFactoryOperationRatios(factory: DigitalFactoryManifest) {
   return factory.contentControls?.ratios?.length ? factory.contentControls.ratios : defaultFactoryOperationRatios;
+}
+
+function readFactoryVideoDurationOptions(factory: DigitalFactoryManifest): number[] {
+  return factory.contentControls?.durationSecondOptions?.length
+    ? factory.contentControls.durationSecondOptions
+    : [5, 8, 10, 15];
 }
 
 function readFactoryPromptControlFields(factory: DigitalFactoryManifest): DigitalFactoryPromptControlField[] {
@@ -13581,6 +13857,10 @@ function isMedicalCaseVideoFactory(factory: DigitalFactoryManifest) {
 
 function isOperationVideoFactory(factory: DigitalFactoryManifest) {
   return readFactoryKind(factory) === 'operation_video_factory';
+}
+
+function isEcommerceProductVideoFactory(factory: DigitalFactoryManifest) {
+  return readFactoryKind(factory) === 'ecommerce_product_video_factory';
 }
 
 function buildFactoryPromptControls(values: FactoryRunFormValues) {
@@ -13674,6 +13954,105 @@ function buildFactoryTaskInput({
         '只生成用户勾选的产物包；不要生成未勾选的图片类型。',
         '生成结果只保存图片 URL 元数据；大图片不经过服务端，PC 端按 URL 展示缩略图。',
         '如果质检方式为 none，跳过额外智能质检；如果为 basic，只做文件数量、格式、命名检查。'
+      ]
+    },
+    null,
+    2
+  );
+}
+
+function buildEcommerceProductVideoFactoryTaskInput({
+  template,
+  factory,
+  values,
+  attachments
+}: {
+  template: DesktopRoleTemplate;
+  factory: DigitalFactoryManifest;
+  values: FactoryRunFormValues;
+  attachments: ComposerAttachment[];
+}) {
+  const platform = readFactoryPlatformOptions(factory).find((item) => item.key === values.platform);
+  const packageOptions = normalizeFactoryPackageDefinitions(
+    values.packageDefinitions,
+    readFactoryPackageOptions(factory)
+  );
+  const selectedPackageKeys = values.packageKeys ?? [];
+  const selectedPackages = packageOptions.filter((item) => selectedPackageKeys.includes(item.key));
+  const qualityMode = readFactoryQualityModes(factory).find((item) => item.key === values.qualityCheckMode);
+  const imageAttachments = attachments.filter((attachment) => isFactoryImageAttachment(attachment));
+  const tableAttachments = attachments.filter((attachment) => !isFactoryImageAttachment(attachment));
+  const ratio = readFactoryOperationRatios(factory).find((item) => item.key === values.videoRatio);
+  const durationOptions = readFactoryVideoDurationOptions(factory);
+  const requestedDuration = Number(values.videoDurationSeconds);
+  const videoDurationSeconds = durationOptions.includes(requestedDuration)
+    ? requestedDuration
+    : durationOptions[1] ?? durationOptions[0] ?? 8;
+  const promptControls = buildFactoryPromptControls(values);
+  const factoryRequest = {
+    applicationType: 'digital_factory',
+    factoryKind: 'ecommerce_product_video_factory',
+    factoryName: template.name,
+    platform: {
+      key: platform?.key ?? values.platform ?? 'tiktok_shop',
+      label: platform?.label ?? values.platform ?? 'TikTok Shop',
+      imageRatio: platform?.imageRatio,
+      notes: platform?.notes
+    },
+    packages: selectedPackages.map((item) => ({
+      key: item.key,
+      label: item.label,
+      description: item.description,
+      outputType: item.outputType ?? 'video'
+    })),
+    qualityCheckMode: values.qualityCheckMode ?? 'basic',
+    qualityCheckLabel: qualityMode?.label ?? values.qualityCheckMode ?? 'basic',
+    itemCount: imageAttachments.length,
+    maxItems: readFactoryMaxItems(factory),
+    concurrency: 3,
+    maxRetries: 2,
+    videoGeneration: {
+      durationSeconds: videoDurationSeconds,
+      ratio: {
+        key: ratio?.key ?? values.videoRatio ?? platform?.imageRatio ?? '9:16',
+        label: ratio?.label ?? values.videoRatio ?? platform?.imageRatio ?? '竖屏 9:16'
+      },
+      outputFormat: factory.output?.videoFormat ?? 'mp4'
+    },
+    output: {
+      folder: factory.output?.folder ?? 'product-videos',
+      packageFormat: factory.output?.packageFormat ?? 'url_manifest',
+      videoFormat: factory.output?.videoFormat ?? 'mp4'
+    },
+    promptControls,
+    attachments: attachments.map((attachment) => ({
+      name: attachment.name,
+      size: attachment.size,
+      type: attachment.type,
+      localPath: attachment.localPath,
+      kind: isFactoryImageAttachment(attachment) ? 'product_image' : 'sku_table'
+    })),
+    instruction: values.instruction?.trim() || undefined
+  };
+  const taskBrief = `请运行「${template.name}」，为 ${factoryRequest.platform.label} 批量生成电商商品视频。`;
+
+  return JSON.stringify(
+    {
+      taskBrief,
+      factory_request: factoryRequest,
+      platform: factoryRequest.platform,
+      selectedPackages: factoryRequest.packages,
+      qualityCheckMode: factoryRequest.qualityCheckMode,
+      imageCount: imageAttachments.length,
+      tableCount: tableAttachments.length,
+      videoDurationSeconds,
+      videoRatio: factoryRequest.videoGeneration.ratio,
+      instructions: [
+        '按 factory_request 逐项处理每张商品图片。',
+        '只生成用户勾选的商品视频产物包；不要生成未勾选的视频类型。',
+        '提示词必须优先遵守 factory_request.promptControls 和 videoGeneration；画面文字必须使用指定语言，不需要文字时要明确避免画面文字。',
+        '生成结果只保存视频 URL 元数据；大视频不经过服务端，PC 端按 URL 展示和导出。',
+        '如果质检方式为 none，跳过额外智能质检；如果为 basic，只做产物数量、URL、命名和基础元数据检查。'
       ]
     },
     null,

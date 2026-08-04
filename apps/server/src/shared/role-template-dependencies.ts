@@ -368,7 +368,8 @@ function getSemanticModelProfileIdForNode(node: ServerRoleWorkflowGraphNode): st
   if (taskType === 'audio_transcription') return 'qiu-asr-default';
   if (taskType === 'image_generation') return 'qiu-image-generation-default';
   if (taskType === 'image_editing') return 'qiu-image-editing-default';
-  if (taskType === 'video_understanding' || taskType === 'video_generation') return 'qiu-vision-default';
+  if (taskType === 'video_generation') return 'qiu-video-generation-default';
+  if (taskType === 'video_understanding') return 'qiu-vision-default';
   if (taskType === 'embedding') return 'qiu-embedding-default';
   if (taskType === 'rerank') return 'qiu-rerank-default';
   return 'qiu-general-default';
@@ -413,6 +414,22 @@ function mapModelProfileIdToSemanticDefault(profileId: string): string | undefin
     normalized.includes('r1')
   ) {
     return 'qiu-reasoning-default';
+  }
+  if (
+    normalized.includes('veo') ||
+    normalized.includes('kling') ||
+    normalized.includes('pika') ||
+    normalized.includes('hailuo') ||
+    normalized.includes('runway') ||
+    normalized.includes('sora') ||
+    normalized.includes('seedance') ||
+    normalized.includes('text-to-video') ||
+    normalized.includes('image-to-video') ||
+    normalized.includes('t2v') ||
+    normalized.includes('i2v') ||
+    normalized.includes('wanx-video')
+  ) {
+    return 'qiu-video-generation-default';
   }
   if (normalized.includes('gpt-image') || normalized.includes('img2img') || normalized.includes('image-edit')) {
     return 'qiu-image-editing-default';

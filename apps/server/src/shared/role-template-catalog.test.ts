@@ -6,6 +6,52 @@ import {
   serverRoleTemplateCatalog
 } from './role-template-catalog';
 import { buildRoleTemplateDependencyManifest } from './role-template-dependencies';
+import { normalizeWorkflowGraph } from './workflow-graph';
+
+test('workflow graph llm task type controls semantic model slots', () => {
+  const graph = normalizeWorkflowGraph({
+    version: '1.0.0',
+    entryNodeId: 'start',
+    nodes: [
+      { id: 'start', type: 'start', name: 'Start' },
+      {
+        id: 'generate_videos',
+        type: 'llm',
+        name: 'Generate videos',
+        modelProfileId: 'qiu-vision-default',
+        config: {
+          llmTaskType: 'video_generation',
+          outputMode: 'json'
+        }
+      }
+    ],
+    edges: []
+  });
+
+  assert.equal(
+    graph.nodes.find((node) => node.id === 'generate_videos')?.modelProfileId,
+    'qiu-video-generation-default'
+  );
+  assert.throws(
+    () => normalizeWorkflowGraph({
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'bad_model_node',
+          type: 'llm',
+          name: 'Bad model node',
+          config: {
+            llmTaskType: 'unknown_media_task'
+          }
+        }
+      ],
+      edges: []
+    }),
+    /llmTaskType is invalid/
+  );
+});
 
 test('server role template catalog is focused and production-oriented', () => {
   const freeTemplateIds = [
@@ -102,11 +148,13 @@ test('server role template catalog is focused and production-oriented', () => {
 
   const factoryTemplateIds = [
     'factory_cross_border_product_images_v1',
+    'factory_ecommerce_product_videos_v1',
     'factory_medical_case_video_screening_v1',
     'factory_operation_video_v1'
   ];
   const factoryManifestKinds = new Set([
     'cross_border_product_image_factory',
+    'ecommerce_product_video_factory',
     'medical_case_video_screening_factory',
     'operation_video_factory'
   ]);
@@ -120,7 +168,7 @@ test('server role template catalog is focused and production-oriented', () => {
 
   assert.equal(
     templateById.get('factory_medical_case_video_screening_v1')?.name,
-    '视频质检剪辑工厂',
+    'AI质检视频工厂',
     'video factory must use the generic product name'
   );
   const videoFactoryTemplate = templateById.get('factory_medical_case_video_screening_v1');
