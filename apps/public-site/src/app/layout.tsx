@@ -23,6 +23,14 @@ const displayFont = Unbounded({
 export const metadata: Metadata = {
   title: "qiuaihub - QiuAI WorkOS 企业 AI 工作系统",
   description: "QiuAI WorkOS 面向企业提供数字员工、数字工厂、企业知识库、模型配置和 Windows 桌面端工作流。",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icon-192.png", type: "image/png", sizes: "192x192" },
+      { url: "/icon-512.png", type: "image/png", sizes: "512x512" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", type: "image/png", sizes: "180x180" }],
+  },
 };
 
 export default async function RootLayout({
