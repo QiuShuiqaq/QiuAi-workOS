@@ -1244,7 +1244,8 @@ function buildCrossBorderImageFactoryManifest() {
       packageFormat: 'url_manifest',
       folder: 'product-images'
     },
-    requiredCapabilities: ['vision', 'image_generation', 'image_editing'],
+    requiredCapabilities: ['image_generation', 'image_editing'],
+    optionalCapabilities: ['vision'],
     ui: {
       primaryActionLabel: '开始生成',
       uploadHint: '上传商品参考图，可选上传 SKU 表格；单批最多 50 个商品。',
@@ -1393,13 +1394,14 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
     {
       id: 'generate_package_prompts',
       type: 'llm',
-      name: '理解图片并生成提示词',
+      name: '可选图片理解增强',
       instruction: '使用多模态模型读取商品参考图、平台规则、品牌规则和 factory_request.promptControls，直接输出每个商品、每个所选产物包的生图提示词。必须遵守文字语言、图片风格、希望效果、必须保留和不要出现；如果用户要求图片里出现文字，必须使用指定语言；如果用户填写不生成文字，则提示词要明确避免图片文字。不要出现的内容要写入 negativePrompt。不要生成图片，只输出 JSON。',
       modelProfileId: 'qiu-vision-default',
       inputVariables: ['factory_request', 'factory_items', 'selected_packages', 'target_platform', 'knowledge_context'],
       outputVariables: ['package_instructions'],
       config: {
         llmTaskType: 'vision',
+        optionalModel: true,
         outputMode: 'json',
         schema: {
           items: [
@@ -1448,6 +1450,7 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
       outputVariables: ['quality_report'],
       config: {
         llmTaskType: 'vision',
+        optionalModel: true,
         outputMode: 'json',
         schema: {
           mode: 'basic',
@@ -3230,7 +3233,7 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     knowledgeSources: ['企业知识库', '品牌素材规范', '跨境平台图片规则', '历史优质商品图案例'],
     tools: ['local-filesystem'],
     skills: [
-      skill('product_image_understanding', '商品图理解', '识别商品主体、材质、颜色、使用场景和平台展示约束。'),
+      skill('product_image_understanding', '可选图片理解增强', '开启后识别商品主体、材质、颜色、使用场景和平台展示约束。'),
       skill('prompt_package_generation', '分包提示词生成', '按白底图、主图、场景图等产物包生成稳定生图提示词。'),
       skill('image_batch_generation', '批量生图', '按用户勾选产物包并发生成商品图结果，输出 URL 和缩略图预览。')
     ],
@@ -3260,8 +3263,8 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
         id: 'generate_package_prompts',
         order: 4,
         type: 'llm',
-        name: '理解图片并生成提示词',
-        instruction: '用多模态模型理解商品图，同时生成各产物包的稳定生图提示词。'
+        name: '可选图片理解增强',
+        instruction: '用户开启图片理解增强时，用多模态模型理解商品图，同时生成各产物包的稳定生图提示词。'
       },
       {
         id: 'generate_images',

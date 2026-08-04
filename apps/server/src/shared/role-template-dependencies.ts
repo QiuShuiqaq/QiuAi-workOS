@@ -237,6 +237,7 @@ function upsertModelAsset(
   const key = semanticModelProfileId ?? asset?.key ?? explicitAssetKey ?? resolvedModelProfileId;
   const current = modelAssets.get(key);
   const inferredRequirement = inferModelRequirementFromNode(node);
+  const required = !readConfigBoolean(node.config, 'optionalModel');
 
   modelAssets.set(key, {
     key,
@@ -267,7 +268,7 @@ function upsertModelAsset(
     apiStyle: current?.apiStyle ?? readSchemaString(asset, 'apiStyle'),
     availabilityStatus: current?.availabilityStatus ?? readSchemaString(asset, 'availabilityStatus'),
     supportsModelList: current?.supportsModelList ?? readSchemaBoolean(asset, 'supportsModelList'),
-    required: true,
+    required: Boolean(current?.required || required),
     nodeIds: uniqueStrings([...(current?.nodeIds ?? []), node.id])
   });
 }
@@ -638,6 +639,10 @@ function readToolPortTypes(asset: RoleTemplateDependencyAsset | undefined, key: 
 function readConfigString(config: Record<string, unknown> | undefined, key: string): string | undefined {
   const value = config?.[key];
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function readConfigBoolean(config: Record<string, unknown> | undefined, key: string): boolean {
+  return config?.[key] === true;
 }
 
 function readConfigStringArray(config: Record<string, unknown> | undefined, key: string): string[] {

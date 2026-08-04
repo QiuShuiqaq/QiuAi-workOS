@@ -225,15 +225,30 @@ try {
   globalThis.fetch = originalFetch;
 }
 
-let capturedImageTestUrl = '';
+const capturedImageTestUrls: string[] = [];
 let capturedImageTestBody: Record<string, unknown> | undefined;
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-  capturedImageTestUrl = String(input);
-  capturedImageTestBody = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
+  const url = String(input);
+  capturedImageTestUrls.push(url);
+  if (init?.body) {
+    capturedImageTestBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+  }
+
+  if (url.includes('/api/result')) {
+    return new Response(
+      JSON.stringify({
+        id: 'grsai-test-job',
+        status: 'succeeded',
+        results: ['https://cdn.example.test/generated/model-test.png']
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    );
+  }
 
   return new Response(
     JSON.stringify({
-      data: [{ url: 'https://cdn.example.test/generated/model-test.png' }]
+      id: 'grsai-test-job',
+      status: 'pending'
     }),
     { status: 200, headers: { 'content-type': 'application/json' } }
   );
@@ -250,11 +265,16 @@ try {
       capabilities: ['image_generation', 'text_to_image'],
       apiBaseUrl: 'https://grsai.dakka.com.cn/v1',
       apiKey: 'image-key'
-    }
+    },
+    timeoutMs: 6_000
   });
 
-  assert.equal(capturedImageTestUrl, 'https://grsai.dakka.com.cn/v1/images/generations');
+  assert.deepEqual(capturedImageTestUrls, [
+    'https://grsai.dakka.com.cn/v1/api/generate',
+    'https://grsai.dakka.com.cn/v1/api/result?id=grsai-test-job'
+  ]);
   assert.equal(capturedImageTestBody?.model, 'gpt-image-2');
+  assert.equal(capturedImageTestBody?.replyType, 'url');
   assert.equal(response.ok, true);
   assert.equal(response.checks?.[0]?.id, 'image_generation');
   assert.equal(response.checks?.[0]?.status, 'passed');

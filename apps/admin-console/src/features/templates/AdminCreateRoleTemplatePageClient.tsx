@@ -1668,8 +1668,8 @@ function createWorkflowSteps(preset: WorkflowPreset): RoleWorkflowGraphSourceSte
         id: 'generate_package_prompts',
         order: 2,
         type: 'llm',
-        name: '理解图片并生成提示词',
-        instruction: '用多模态模型理解商品图，同时生成各产物包的稳定生图提示词。'
+        name: '可选图片理解增强',
+        instruction: '用户开启图片理解增强时，用多模态模型理解商品图，同时生成各产物包的稳定生图提示词。'
       },
       {
         id: 'generate_images',
@@ -2056,7 +2056,7 @@ function createCrossBorderImageFactoryWorkflowGraph(): RoleWorkflowGraph {
     {
       id: 'generate_package_prompts',
       type: 'llm',
-      name: '理解图片并生成提示词',
+      name: '可选图片理解增强',
       instruction:
         '使用多模态模型读取商品参考图和平台规则，直接输出每个商品、每个所选产物包的生图提示词。不要生成图片，只输出 JSON。',
       modelProfileId: 'qiu-vision-default',
@@ -2064,6 +2064,7 @@ function createCrossBorderImageFactoryWorkflowGraph(): RoleWorkflowGraph {
       outputVariables: ['package_instructions'],
       config: {
         llmTaskType: 'vision',
+        optionalModel: true,
         outputMode: 'json',
         schema: {
           items: [
@@ -2113,6 +2114,7 @@ function createCrossBorderImageFactoryWorkflowGraph(): RoleWorkflowGraph {
       outputVariables: ['quality_report'],
       config: {
         llmTaskType: 'vision',
+        optionalModel: true,
         outputMode: 'json',
         schema: {
           mode: 'basic',
@@ -5469,7 +5471,8 @@ function buildCrossBorderImageFactoryManifest() {
       packageFormat: 'url_manifest',
       folder: 'product-images'
     },
-    requiredCapabilities: ['vision', 'image_generation', 'image_editing'],
+    requiredCapabilities: ['image_generation', 'image_editing'],
+    optionalCapabilities: ['vision'],
     ui: {
       primaryActionLabel: '开始生成',
       uploadHint: '上传商品参考图，可选上传 SKU 表格；单批最多 50 个商品。',

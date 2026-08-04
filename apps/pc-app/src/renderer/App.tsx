@@ -213,6 +213,7 @@ interface FactoryRunFormValues {
   packageKeys?: string[];
   packageDefinitions?: FactoryRunPackageDefinition[];
   qualityCheckMode?: 'none' | 'basic' | 'smart';
+  enableImageUnderstanding?: boolean;
   asrModelProfileId?: string;
   dialect?: string;
   screeningProfileKey?: string;
@@ -6381,6 +6382,14 @@ export default function App() {
                                 }))}
                               />
                             </Form.Item>
+                            <Form.Item
+                              name="enableImageUnderstanding"
+                              label="图片理解增强"
+                              valuePropName="checked"
+                              extra="默认关闭以提升批量生成速度；开启后会先调用图片理解模型分析商品图并生成更细的提示词。"
+                            >
+                              <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+                            </Form.Item>
                             <div className="factory-prompt-control-block">
                               <Flex align="center" justify="space-between" gap={8}>
                                 <Typography.Text strong>提示词控制</Typography.Text>
@@ -9208,6 +9217,7 @@ export default function App() {
       packageDefinitions,
       packageKeys: defaultPackages.length ? defaultPackages : packageDefinitions.map((item) => item.key),
       qualityCheckMode: qualityModes[0]?.key ?? 'basic',
+      enableImageUnderstanding: false,
       promptLanguage: '',
       promptStyle: '',
       promptGoal: '',
@@ -9660,6 +9670,18 @@ export default function App() {
       message.warning('请至少选择一个产物包。');
       return;
     }
+    const optionalVisionModelProfileIds =
+      imageFactoryValues.enableImageUnderstanding === true || imageFactoryValues.qualityCheckMode === 'smart'
+        ? findReadyImageUnderstandingModelProfileIds(runtimeState, values.roleCode)
+        : [];
+    if (
+      (imageFactoryValues.enableImageUnderstanding === true || imageFactoryValues.qualityCheckMode === 'smart') &&
+      optionalVisionModelProfileIds.length === 0
+    ) {
+      message.warning('图片理解增强或智能质检需要先配置并启用图片理解模型；也可以关闭增强/智能质检后走快速生成。');
+      navigateToSection('models');
+      return;
+    }
 
     const platform = readFactoryPlatformOptions(factory).find((item) => item.key === imageFactoryValues.platform);
     const title = `${template.name} - ${platform?.label ?? imageFactoryValues.platform} - ${imageAttachments.length} 个商品`;
@@ -9675,6 +9697,7 @@ export default function App() {
       title,
       input,
       attachments: factoryAttachments,
+      extraModelProfileIds: optionalVisionModelProfileIds,
       useKnowledge: values.useKnowledge === true
     });
     if (created) {
@@ -11429,6 +11452,24 @@ function hasConfiguredModelApi(
     credentials: state.modelCredentials,
     roleBindings: state.roleModelCredentialBindings
   }).configured;
+}
+
+function findReadyImageUnderstandingModelProfileIds(
+  state: DesktopRuntimeState,
+  roleCode?: string
+): string[] {
+  const enabledModelProfileIds = new Set(state.localRuntime.enabledModelProfileIds);
+  return state.modelProfiles
+    .filter((profile) =>
+      enabledModelProfileIds.has(profile.id) &&
+      hasConfiguredModelApi(state, profile, roleCode) &&
+      modelProfileSupportsRequiredCapabilities(profile, [
+        'image_understanding',
+        'vision_understanding',
+        'vision_text'
+      ])
+    )
+    .map((profile) => profile.id);
 }
 
 function roleTemplateCategory(template: DesktopRoleTemplate): string {
@@ -13214,6 +13255,7 @@ function buildFactoryTaskInput({
     })),
     qualityCheckMode: values.qualityCheckMode ?? 'basic',
     qualityCheckLabel: qualityMode?.label ?? values.qualityCheckMode ?? 'basic',
+    enableImageUnderstanding: values.enableImageUnderstanding === true,
     itemCount: imageAttachments.length,
     maxItems: readFactoryMaxItems(factory),
     output: {
@@ -13244,7 +13286,9 @@ function buildFactoryTaskInput({
       tableCount: tableAttachments.length,
       instructions: [
         '按 factory_request 逐项处理每张商品图片。',
-        '图片理解和提示词生成在同一个多模态 LLM 节点内完成。',
+        factoryRequest.enableImageUnderstanding
+          ? '已开启图片理解增强：先用图片理解模型分析商品图并生成分包提示词。'
+          : '未开启图片理解增强：直接使用平台、产物包和提示词控制生成基础生图提示词。',
         '提示词生成必须优先遵守 factory_request.promptControls；不要出现的内容必须写入 negativePrompt。',
         '只生成用户勾选的产物包；不要生成未勾选的图片类型。',
         '生成结果只保存图片 URL 元数据；大图片不经过服务端，PC 端按 URL 展示缩略图。',

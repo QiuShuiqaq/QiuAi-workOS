@@ -163,6 +163,7 @@ interface FactoryImageGenerationTask {
 }
 
 type FactoryImageGenerationResult = FactoryArtifactPreviewItem;
+type FactoryImageGenerationErrorType = NonNullable<FactoryArtifactPreviewItem['errorType']>;
 
 interface FactoryVideoScreeningRule {
   metric: string;
@@ -2943,6 +2944,36 @@ async function invokeWorkflowRuntimeModelNode(input: {
   outputVariables: string[];
   message: string;
 }> {
+  if (
+    isOptionalCrossBorderFactoryPromptNode(input.node, input.rolePackage) &&
+    !shouldRunCrossBorderFactoryImageUnderstanding(input.pool)
+  ) {
+    return completeOptionalCrossBorderFactoryPromptNodeWithoutVisionModel({
+      task: input.task,
+      node: input.node,
+      pool: input.pool,
+      createdAt: input.createdAt,
+      currentResponse: input.currentResponse,
+      primaryProfile: input.primaryProfile,
+      reason: '本次任务未开启图片理解增强。',
+      intro: '图片理解增强未开启，已跳过提示词增强节点。'
+    });
+  }
+
+  if (
+    isOptionalCrossBorderFactoryQualityCheckNode(input.node, input.rolePackage) &&
+    !shouldRunCrossBorderFactorySmartQualityCheck(input.pool)
+  ) {
+    return completeCrossBorderFactoryQualityCheckWithoutVisionModel({
+      task: input.task,
+      node: input.node,
+      pool: input.pool,
+      createdAt: input.createdAt,
+      currentResponse: input.currentResponse,
+      primaryProfile: input.primaryProfile
+    });
+  }
+
   let profile: ModelProfile;
   try {
     profile = selectWorkflowRuntimeModelProfile(
@@ -2953,7 +2984,10 @@ async function invokeWorkflowRuntimeModelNode(input: {
       input.roleModelCredentialBindings
     );
   } catch (error) {
-    if (isOptionalCrossBorderFactoryPromptNode(input.node, input.rolePackage)) {
+    if (
+      isOptionalCrossBorderFactoryPromptNode(input.node, input.rolePackage) &&
+      !shouldRunCrossBorderFactoryImageUnderstanding(input.pool)
+    ) {
       return completeOptionalCrossBorderFactoryPromptNodeWithoutVisionModel({
         task: input.task,
         node: input.node,
@@ -2961,7 +2995,8 @@ async function invokeWorkflowRuntimeModelNode(input: {
         createdAt: input.createdAt,
         currentResponse: input.currentResponse,
         primaryProfile: input.primaryProfile,
-        reason: readErrorMessage(error)
+        reason: readErrorMessage(error),
+        intro: '未配置兼容的图片理解模型，已跳过提示词增强节点。'
       });
     }
 
@@ -3477,15 +3512,18 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
     input.createdAt,
     sanitizeLogSuffix(input.node.id)
   );
-  const results = await runWorkflowRuntimeConcurrent(batchTasks, concurrency, (task) =>
-    runFactoryImageGenerationTask({
+  const batchRun = await runFactoryImageGenerationTasksAdaptive({
+    tasks: batchTasks,
+    maxConcurrency: concurrency,
+    worker: (task) => runFactoryImageGenerationTask({
       task,
       node: input.node,
       profile: input.profile,
       modelInvoker: input.modelInvoker,
       maxRetries
     })
-  );
+  });
+  const results = batchRun.results;
   const completed = results.filter((item) => item.status === 'completed').length;
   const failed = results.filter((item) => item.status === 'failed').length;
   const generatedImages = results.map((item) => ({
@@ -3502,7 +3540,11 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
     packageKey: item.packageKey,
     packageLabel: item.packageLabel,
     status: item.status,
-    error: item.error
+    error: item.error,
+    errorType: item.errorType,
+    attempts: item.attempts,
+    providerJobId: item.providerJobId,
+    providerStatus: item.providerStatus
   }));
   const outputVariables = writeWorkflowNodeOutputs({
     pool: input.pool,
@@ -3515,7 +3557,9 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
   const summaryContent = [
     `数字工厂图片批次完成：${completed}/${batchTasks.length}`,
     failed > 0 ? `失败：${failed}` : '失败：0',
-    `并发数：${concurrency}`,
+    `并发数：${batchRun.minConcurrency === batchRun.maxObservedConcurrency
+      ? batchRun.maxObservedConcurrency
+      : `${batchRun.minConcurrency}-${batchRun.maxObservedConcurrency}`}（上限 ${concurrency}）`,
     targetPlatform.label ? `平台：${targetPlatform.label}` : undefined
   ].filter(Boolean).join('\n');
   const preview = {
@@ -3547,13 +3591,18 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
     sanitizeLogSuffix(`${input.node.id}-factory-batch`),
     {
       concurrency,
+      minConcurrency: batchRun.minConcurrency,
+      maxObservedConcurrency: batchRun.maxObservedConcurrency,
+      concurrencyAdjustments: batchRun.concurrencyAdjustments,
       completed,
       failed,
       total: batchTasks.length,
       failedItems: results.filter((item) => item.status === 'failed').map((item) => ({
         sku: item.sku,
         packageKey: item.packageKey,
-        error: item.error
+        error: item.error,
+        errorType: item.errorType,
+        attempts: item.attempts
       }))
     }
   );
@@ -4911,6 +4960,134 @@ async function runWorkflowRuntimeConcurrent<T, R>(
   return results;
 }
 
+async function runFactoryImageGenerationTasksAdaptive(input: {
+  tasks: FactoryImageGenerationTask[];
+  maxConcurrency: number;
+  worker: (task: FactoryImageGenerationTask, index: number) => Promise<FactoryImageGenerationResult>;
+}): Promise<{
+  results: FactoryImageGenerationResult[];
+  minConcurrency: number;
+  maxObservedConcurrency: number;
+  concurrencyAdjustments: Array<{
+    afterCompleted: number;
+    from: number;
+    to: number;
+    reason: string;
+  }>;
+}> {
+  const maxConcurrency = Math.min(Math.max(1, Math.floor(input.maxConcurrency)), Math.max(1, input.tasks.length));
+  const results = new Array<FactoryImageGenerationResult>(input.tasks.length);
+  const concurrencyAdjustments: Array<{
+    afterCompleted: number;
+    from: number;
+    to: number;
+    reason: string;
+  }> = [];
+  let currentConcurrency = maxConcurrency;
+  let minConcurrency = currentConcurrency;
+  let maxObservedConcurrency = currentConcurrency;
+  let completedCount = 0;
+  let stableWaves = 0;
+
+  while (completedCount < input.tasks.length) {
+    const waveConcurrency = Math.min(currentConcurrency, input.tasks.length - completedCount);
+    minConcurrency = Math.min(minConcurrency, waveConcurrency);
+    maxObservedConcurrency = Math.max(maxObservedConcurrency, waveConcurrency);
+    const waveStart = completedCount;
+    const waveTasks = input.tasks.slice(waveStart, waveStart + waveConcurrency);
+    const waveResults = await Promise.all(
+      waveTasks.map((task, offset) => input.worker(task, waveStart + offset))
+    );
+    for (let index = 0; index < waveResults.length; index += 1) {
+      results[waveStart + index] = waveResults[index]!;
+    }
+    completedCount += waveResults.length;
+
+    const shouldBackoff = waveResults.some((item) => shouldBackoffFactoryImageConcurrency(item.errorType));
+    const hasFailures = waveResults.some((item) => item.status === 'failed');
+    if (shouldBackoff && currentConcurrency > 1) {
+      const nextConcurrency = Math.max(1, Math.floor(currentConcurrency / 2));
+      concurrencyAdjustments.push({
+        afterCompleted: completedCount,
+        from: currentConcurrency,
+        to: nextConcurrency,
+        reason: 'provider_or_network_backoff'
+      });
+      currentConcurrency = nextConcurrency;
+      stableWaves = 0;
+      continue;
+    }
+
+    if (!hasFailures) {
+      stableWaves += 1;
+      if (stableWaves >= 2 && currentConcurrency < maxConcurrency) {
+        const nextConcurrency = Math.min(maxConcurrency, currentConcurrency + 1);
+        concurrencyAdjustments.push({
+          afterCompleted: completedCount,
+          from: currentConcurrency,
+          to: nextConcurrency,
+          reason: 'stable_recovery'
+        });
+        currentConcurrency = nextConcurrency;
+        stableWaves = 0;
+      }
+      continue;
+    }
+
+    stableWaves = 0;
+  }
+
+  return {
+    results,
+    minConcurrency,
+    maxObservedConcurrency,
+    concurrencyAdjustments
+  };
+}
+
+function shouldBackoffFactoryImageConcurrency(errorType: FactoryImageGenerationErrorType | undefined): boolean {
+  return errorType === 'timeout' ||
+    errorType === 'network' ||
+    errorType === 'rate_limit' ||
+    errorType === 'provider';
+}
+
+function classifyFactoryImageGenerationError(message: string): FactoryImageGenerationErrorType {
+  const normalized = message.toLowerCase();
+  if (/api key|unauthorized|forbidden|401|403|base url|model name|does not support|invalidparameter|invalid parameter/.test(normalized)) {
+    return 'configuration';
+  }
+  if (/quota|余额|insufficient|payment|required|billing|credits|limit exceeded/.test(normalized)) {
+    return 'quota';
+  }
+  if (/429|rate limit|too many requests|限流|频率/.test(normalized)) {
+    return 'rate_limit';
+  }
+  if (/timeout|timed out|aborted due to timeout|operation was aborted/.test(normalized)) {
+    return 'timeout';
+  }
+  if (/network|fetch failed|econnreset|enotfound|etimedout|socket|dns|tls/.test(normalized)) {
+    return 'network';
+  }
+  if (/5\d\d|bad gateway|service unavailable|internalerror|provider|upstream/.test(normalized)) {
+    return 'provider';
+  }
+  return 'unknown';
+}
+
+function shouldStopFactoryImageRetry(errorType: FactoryImageGenerationErrorType): boolean {
+  return errorType === 'configuration' || errorType === 'quota';
+}
+
+function getFactoryImageRetryDelayMs(errorType: FactoryImageGenerationErrorType, attempt: number): number {
+  const baseDelay =
+    errorType === 'rate_limit' ? 2_000 :
+    errorType === 'timeout' || errorType === 'network' ? 1_200 :
+    errorType === 'provider' ? 1_500 :
+    800;
+  return Math.min(8_000, baseDelay * (attempt + 1));
+}
+
 async function runFactoryImageGenerationTask(input: {
   task: FactoryImageGenerationTask;
   node: WorkflowGraphNode;
@@ -4919,7 +5096,10 @@ async function runFactoryImageGenerationTask(input: {
   maxRetries: number;
 }): Promise<FactoryImageGenerationResult> {
   let lastError = '';
+  let lastErrorType: FactoryImageGenerationErrorType = 'unknown';
+  let attempts = 0;
   for (let attempt = 0; attempt <= input.maxRetries; attempt += 1) {
+    attempts = attempt + 1;
     try {
       const response = await input.modelInvoker({
         profile: input.profile,
@@ -4950,10 +5130,21 @@ async function runFactoryImageGenerationTask(input: {
         thumbnailPath: imageResult.thumbnailPath,
         sourceImagePath: input.task.sourceImage.localPath,
         prompt: input.task.prompt,
+        attempts,
+        providerJobId: imageResult.providerJobId,
+        providerStatus: imageResult.providerStatus,
         createdAt: input.task.createdAt
       };
     } catch (error) {
       lastError = readErrorMessage(error);
+      lastErrorType = classifyFactoryImageGenerationError(lastError);
+      if (shouldStopFactoryImageRetry(lastErrorType)) {
+        break;
+      }
+      const retryDelayMs = getFactoryImageRetryDelayMs(lastErrorType, attempt);
+      if (retryDelayMs > 0 && attempt < input.maxRetries) {
+        await sleepFactoryRuntime(retryDelayMs);
+      }
     }
   }
 
@@ -4967,6 +5158,8 @@ async function runFactoryImageGenerationTask(input: {
     sourceImagePath: input.task.sourceImage.localPath,
     prompt: input.task.prompt,
     error: lastError || 'Image generation failed.',
+    errorType: lastErrorType,
+    attempts,
     createdAt: input.task.createdAt
   };
 }
@@ -5004,13 +5197,15 @@ function buildFactoryImageGenerationMessages(task: FactoryImageGenerationTask): 
 
 function readFactoryImageGenerationResponse(
   response: DesktopModelChatResponse
-): { remoteUrl?: string; localPath?: string; thumbnailPath?: string } {
+): { remoteUrl?: string; localPath?: string; thumbnailPath?: string; providerJobId?: string; providerStatus?: string } {
   const artifact = response.artifacts?.find((item) => item.remoteUrl || item.localPath);
   if (artifact) {
     return {
       remoteUrl: readWorkflowRuntimeString(artifact.remoteUrl),
       localPath: readWorkflowRuntimeString(artifact.localPath),
-      thumbnailPath: readWorkflowRuntimeString(artifact.thumbnailPath)
+      thumbnailPath: readWorkflowRuntimeString(artifact.thumbnailPath),
+      providerJobId: readWorkflowRuntimeString(artifact.providerJobId),
+      providerStatus: readWorkflowRuntimeString(artifact.providerStatus)
     };
   }
 
@@ -5029,6 +5224,8 @@ function readFactoryImageResultFromValue(value: unknown): {
   remoteUrl?: string;
   localPath?: string;
   thumbnailPath?: string;
+  providerJobId?: string;
+  providerStatus?: string;
 } {
   if (typeof value === 'string') {
     return value.startsWith('http://') || value.startsWith('https://')
@@ -5064,7 +5261,12 @@ function readFactoryImageResultFromValue(value: unknown): {
       remoteUrl: directRemoteUrl,
       localPath: directLocalPath,
       thumbnailPath: readWorkflowRuntimeString(value.thumbnailPath)
-        ?? readWorkflowRuntimeString(value.thumbnailUrl)
+        ?? readWorkflowRuntimeString(value.thumbnailUrl),
+      providerJobId: readWorkflowRuntimeString(value.providerJobId)
+        ?? readWorkflowRuntimeString(value.taskId)
+        ?? readWorkflowRuntimeString(value.id),
+      providerStatus: readWorkflowRuntimeString(value.providerStatus)
+        ?? readWorkflowRuntimeString(value.status)
     };
   }
 
@@ -6229,6 +6431,38 @@ function isOptionalCrossBorderFactoryPromptNode(
   );
 }
 
+function isOptionalCrossBorderFactoryQualityCheckNode(
+  node: WorkflowGraphNode,
+  rolePackage?: RolePackageManifest
+): boolean {
+  const isCrossBorderFactory =
+    rolePackage?.templateId === 'factory_cross_border_product_images_v1' ||
+    rolePackage?.roleCode === 'cross-border-image-factory' ||
+    rolePackage?.roleCode.includes('cross-border') === true;
+
+  return (
+    isCrossBorderFactory &&
+    node.id === 'quality_check' &&
+    getWorkflowEffectiveModelTaskType(node) === 'vision'
+  );
+}
+
+function shouldRunCrossBorderFactoryImageUnderstanding(pool: WorkflowVariablePool): boolean {
+  const factoryRequest = readFactoryRuntimeObject(pool.get('factory_request'));
+  return readFactoryRuntimeBoolean(
+    factoryRequest?.enableImageUnderstanding ??
+    factoryRequest?.imageUnderstandingEnabled ??
+    factoryRequest?.useImageUnderstanding
+  );
+}
+
+function shouldRunCrossBorderFactorySmartQualityCheck(pool: WorkflowVariablePool): boolean {
+  const mode = readWorkflowRuntimeString(pool.get('quality_check_mode'))?.toLowerCase();
+  const factoryRequest = readFactoryRuntimeObject(pool.get('factory_request'));
+  const requestMode = readWorkflowRuntimeString(factoryRequest?.qualityCheckMode)?.toLowerCase();
+  return (mode ?? requestMode) === 'smart';
+}
+
 function completeOptionalCrossBorderFactoryPromptNodeWithoutVisionModel(input: {
   task: DesktopTaskDetail;
   node: WorkflowGraphNode;
@@ -6237,6 +6471,7 @@ function completeOptionalCrossBorderFactoryPromptNodeWithoutVisionModel(input: {
   currentResponse: DesktopModelChatResponse;
   primaryProfile: ModelProfile;
   reason: string;
+  intro?: string;
 }): {
   response: DesktopModelChatResponse;
   primaryProfile: ModelProfile;
@@ -6248,7 +6483,7 @@ function completeOptionalCrossBorderFactoryPromptNodeWithoutVisionModel(input: {
   message: string;
 } {
   const message = [
-    '未配置兼容的图片理解模型，已跳过提示词增强节点。',
+    input.intro ?? '图片理解增强已跳过。',
     '后续生图将使用平台、产物包和用户提示词控制生成兜底提示词。',
     `原因：${input.reason}`
   ].join('\n');
@@ -6290,6 +6525,87 @@ function completeOptionalCrossBorderFactoryPromptNodeWithoutVisionModel(input: {
     inputVariables: input.node.inputVariables ?? [],
     outputVariables,
     message
+  };
+}
+
+function completeCrossBorderFactoryQualityCheckWithoutVisionModel(input: {
+  task: DesktopTaskDetail;
+  node: WorkflowGraphNode;
+  pool: WorkflowVariablePool;
+  createdAt: string;
+  currentResponse: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+}): {
+  response: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  logs: DesktopExecutionLogEntry[];
+  usedToolIds: string[];
+  generatedArtifacts: DesktopArtifactSummary[];
+  inputVariables: string[];
+  outputVariables: string[];
+  message: string;
+} {
+  const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
+  const mode =
+    readWorkflowRuntimeString(input.pool.get('quality_check_mode'))?.toLowerCase() ??
+    readWorkflowRuntimeString(factoryRequest?.qualityCheckMode)?.toLowerCase() ??
+    'none';
+  const generatedImages = input.pool.get('factory_generated_images');
+  const imageCount = Array.isArray(generatedImages)
+    ? generatedImages.length
+    : isWorkflowRuntimeRecord(generatedImages) && Array.isArray(generatedImages.items)
+      ? generatedImages.items.length
+      : 0;
+  const report = {
+    mode,
+    passed: true,
+    skippedSmartCheck: true,
+    imageCount,
+    issues: [] as string[],
+    message: mode === 'basic'
+      ? '基础质检完成：已跳过额外多模态质检，保留人工发布前复核。'
+      : '未启用质检：已跳过额外多模态质检，保留人工发布前复核。'
+  };
+  const text = JSON.stringify(report, null, 2);
+  const outputVariables = writeWorkflowNodeOutputs({
+    pool: input.pool,
+    node: input.node,
+    text,
+    json: report,
+    result: report,
+    outputValue: report
+  });
+
+  input.pool.set('runtime.previous_text', text);
+  input.pool.set('runtime.last_model_node', input.node.id);
+
+  return {
+    response: mergeWorkflowRuntimeResponses(input.currentResponse, {
+      provider: input.primaryProfile.providerName,
+      modelName: input.primaryProfile.modelName,
+      content: text
+    }),
+    primaryProfile: input.primaryProfile,
+    logs: [
+      createLog(
+        input.task.taskId,
+        'info',
+        'WORKFLOW_RUNTIME_OPTIONAL_VISION_SKIPPED',
+        report.message,
+        input.createdAt,
+        sanitizeLogSuffix(input.node.id),
+        {
+          mode,
+          imageCount,
+          fallback: 'factory_basic_quality_check'
+        }
+      )
+    ],
+    usedToolIds: [],
+    generatedArtifacts: [],
+    inputVariables: input.node.inputVariables ?? [],
+    outputVariables,
+    message: report.message
   };
 }
 

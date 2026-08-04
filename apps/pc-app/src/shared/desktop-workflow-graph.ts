@@ -619,12 +619,14 @@ function readDependencyManifestModelProfileIds(
   }
 
   return uniqueStrings(
-    manifest.modelAssets.map((asset) => readDependencyManifestSemanticModelProfileId(asset))
+    manifest.modelAssets
+      .filter((asset) => asset.required !== false)
+      .map((asset) => readDependencyManifestSemanticModelProfileId(asset))
   );
 }
 
 function readWorkflowNodeSemanticModelProfileIds(node: WorkflowGraphNode): string[] {
-  if (node.type !== 'llm') {
+  if (node.type !== 'llm' || isOptionalWorkflowModelNode(node)) {
     return [];
   }
 
@@ -651,6 +653,10 @@ function getSemanticModelProfileIdForTaskType(taskType: string | undefined): str
   if (taskType === 'embedding') return 'qiu-embedding-default';
   if (taskType === 'rerank') return 'qiu-rerank-default';
   return 'qiu-general-default';
+}
+
+function isOptionalWorkflowModelNode(node: WorkflowGraphNode): boolean {
+  return node.config?.optionalModel === true;
 }
 
 function getSemanticModelProfileIdForCapabilities(input: {

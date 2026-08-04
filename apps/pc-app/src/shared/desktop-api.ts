@@ -349,6 +349,9 @@ export interface DesktopModelChatResponse {
     localPath?: string;
     thumbnailPath?: string;
     mimeType?: string;
+    providerJobId?: string;
+    providerStatus?: string;
+    metadata?: Record<string, unknown>;
   }>;
 }
 

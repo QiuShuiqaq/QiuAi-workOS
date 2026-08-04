@@ -671,6 +671,20 @@ function validateFactoryArtifactPreviewItem(
     sourceImagePath: optionalString(record.sourceImagePath, `${fieldName}.sourceImagePath`),
     prompt: optionalString(record.prompt, `${fieldName}.prompt`),
     error: optionalString(record.error, `${fieldName}.error`),
+    errorType: record.errorType === undefined
+      ? undefined
+      : requireEnum(record.errorType, `${fieldName}.errorType`, [
+          'configuration',
+          'quota',
+          'rate_limit',
+          'timeout',
+          'network',
+          'provider',
+          'unknown'
+        ]) as FactoryArtifactPreview['items'][number]['errorType'],
+    attempts: optionalInteger(record.attempts, `${fieldName}.attempts`),
+    providerJobId: optionalString(record.providerJobId, `${fieldName}.providerJobId`),
+    providerStatus: optionalString(record.providerStatus, `${fieldName}.providerStatus`),
     createdAt: requireString(record.createdAt, `${fieldName}.createdAt`)
   };
 }

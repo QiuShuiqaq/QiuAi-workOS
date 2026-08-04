@@ -79,6 +79,9 @@ interface OpenAiCompatibleTranscriptionResponse {
 
 const defaultTimeoutMs = 45_000;
 const imageGenerationTestTimeoutMs = 180_000;
+const grsaiImageSubmitTimeoutMs = 45_000;
+const grsaiImagePollIntervalMs = 2_000;
+const grsaiImagePollRequestTimeoutMs = 30_000;
 const lightweightPngBytes = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
   'base64'
@@ -182,6 +185,22 @@ async function invokeOpenAiCompatibleImageGeneration(input: {
     throw new Error(`Source image file does not exist: ${sourceImagePath}`);
   }
 
+  if (isGrsaiProvider({
+    providerId: input.request.profile.providerId,
+    providerName: input.request.profile.providerName,
+    apiBaseUrl: input.apiBaseUrl
+  })) {
+    return invokeGrsaiAsyncImageGeneration({
+      request: input.request,
+      apiBaseUrl: input.apiBaseUrl,
+      apiKey: input.apiKey,
+      modelName: input.modelName,
+      prompt,
+      sourceImagePath,
+      timeoutMs
+    });
+  }
+
   const imageEndpoint = sourceImagePath
     ? `${input.apiBaseUrl}/images/edits`
     : `${input.apiBaseUrl}/images/generations`;
@@ -239,6 +258,133 @@ async function invokeOpenAiCompatibleImageGeneration(input: {
       }
     ]
   };
+}
+
+async function invokeGrsaiAsyncImageGeneration(input: {
+  request: DesktopModelChatRequest;
+  apiBaseUrl: string;
+  apiKey: string;
+  modelName: string;
+  prompt: string;
+  sourceImagePath?: string;
+  timeoutMs: number;
+}): Promise<DesktopModelChatResponse> {
+  const submitEndpoint = `${input.apiBaseUrl}/api/generate`;
+  const startedAt = Date.now();
+  const response = await fetchModelApi(submitEndpoint, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${input.apiKey}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify(buildGrsaiImageGenerationPayload(input)),
+    signal: AbortSignal.timeout(Math.min(input.timeoutMs, grsaiImageSubmitTimeoutMs))
+  }, 'GrsAI image task submit');
+
+  const bodyText = await response.text();
+  const body = parseJsonObject(bodyText);
+  if (!response.ok) {
+    const errorMessage = readProviderErrorMessage(body) ?? readGrsaiErrorMessage(body) ?? bodyText.slice(0, 500);
+    throw new Error(`GrsAI image task submit returned HTTP ${response.status}: ${errorMessage}`);
+  }
+
+  const submittedUrl = readImageUrlFromUnknown(body);
+  const providerJobId = readGrsaiJobId(body);
+  const submittedStatus = readGrsaiJobStatus(body);
+  if (submittedUrl) {
+    return buildImageGenerationResponse({
+      provider: input.request.profile.providerName,
+      modelName: input.modelName,
+      remoteUrl: submittedUrl,
+      providerJobId,
+      providerStatus: submittedStatus,
+      asyncMode: Boolean(providerJobId)
+    });
+  }
+
+  if (!providerJobId) {
+    throw new Error('GrsAI image task response did not include an image URL or task id.');
+  }
+
+  const pollResult = await pollGrsaiImageGenerationResult({
+    apiBaseUrl: input.apiBaseUrl,
+    apiKey: input.apiKey,
+    providerJobId,
+    timeoutMs: input.timeoutMs,
+    startedAt
+  });
+
+  return buildImageGenerationResponse({
+    provider: input.request.profile.providerName,
+    modelName: input.modelName,
+    remoteUrl: pollResult.remoteUrl,
+    providerJobId,
+    providerStatus: pollResult.providerStatus,
+    asyncMode: true
+  });
+}
+
+function buildGrsaiImageGenerationPayload(input: {
+  request: DesktopModelChatRequest;
+  modelName: string;
+  prompt: string;
+  sourceImagePath?: string;
+}): Record<string, unknown> {
+  const images = input.sourceImagePath
+    ? [buildLocalImageDataUrl(input.sourceImagePath)]
+    : [];
+  const aspectRatio = inferImageAspectRatioFromSize(input.request.imageGeneration?.size);
+  return {
+    model: input.modelName,
+    prompt: input.prompt,
+    images,
+    aspectRatio,
+    replyType: 'url',
+    response_format: 'url'
+  };
+}
+
+async function pollGrsaiImageGenerationResult(input: {
+  apiBaseUrl: string;
+  apiKey: string;
+  providerJobId: string;
+  timeoutMs: number;
+  startedAt: number;
+}): Promise<{ remoteUrl: string; providerStatus?: string }> {
+  const resultEndpoint = `${input.apiBaseUrl}/api/result?id=${encodeURIComponent(input.providerJobId)}`;
+  let lastStatus: string | undefined;
+  let lastBodyText = '';
+  while (Date.now() - input.startedAt < input.timeoutMs) {
+    await sleep(grsaiImagePollIntervalMs);
+    const response = await fetchModelApi(resultEndpoint, {
+      method: 'GET',
+      headers: {
+        authorization: `Bearer ${input.apiKey}`
+      },
+      signal: AbortSignal.timeout(Math.min(grsaiImagePollRequestTimeoutMs, input.timeoutMs))
+    }, 'GrsAI image task result');
+    lastBodyText = await response.text();
+    const body = parseJsonObject(lastBodyText);
+    if (!response.ok) {
+      const errorMessage = readProviderErrorMessage(body) ?? readGrsaiErrorMessage(body) ?? lastBodyText.slice(0, 500);
+      throw new Error(`GrsAI image task result returned HTTP ${response.status}: ${errorMessage}`);
+    }
+
+    const remoteUrl = readImageUrlFromUnknown(body);
+    lastStatus = readGrsaiJobStatus(body) ?? lastStatus;
+    if (remoteUrl && (!lastStatus || !isGrsaiPendingStatus(lastStatus))) {
+      return { remoteUrl, providerStatus: lastStatus };
+    }
+
+    if (isGrsaiFailedStatus(lastStatus)) {
+      const errorMessage = readGrsaiErrorMessage(body) ?? lastBodyText.slice(0, 500);
+      throw new Error(`GrsAI image task failed: ${errorMessage || lastStatus}`);
+    }
+  }
+
+  throw new Error(
+    `GrsAI image task timed out while polling result. taskId=${input.providerJobId}${lastStatus ? `, status=${lastStatus}` : ''}`
+  );
 }
 
 async function invokeOpenAiCompatibleAudioTranscription(input: {
@@ -1140,6 +1286,179 @@ function readImageResponseUrl(body: OpenAiCompatibleImageResponse | undefined): 
 function readImageResponseBase64(body: OpenAiCompatibleImageResponse | undefined): string | undefined {
   const value = body?.data?.find((item) => typeof item.b64_json === 'string' && item.b64_json.trim())?.b64_json;
   return typeof value === 'string' ? value.trim() : undefined;
+}
+
+function buildImageGenerationResponse(input: {
+  provider: string;
+  modelName: string;
+  remoteUrl: string;
+  providerJobId?: string;
+  providerStatus?: string;
+  asyncMode?: boolean;
+}): DesktopModelChatResponse {
+  const content = JSON.stringify({
+    remoteUrl: input.remoteUrl,
+    providerJobId: input.providerJobId,
+    providerStatus: input.providerStatus,
+    asyncMode: input.asyncMode === true
+  });
+  return {
+    provider: input.provider,
+    modelName: input.modelName,
+    content,
+    artifacts: [
+      {
+        type: 'image',
+        remoteUrl: input.remoteUrl,
+        thumbnailPath: input.remoteUrl,
+        providerJobId: input.providerJobId,
+        providerStatus: input.providerStatus,
+        metadata: {
+          asyncMode: input.asyncMode === true
+        }
+      }
+    ]
+  };
+}
+
+function readGrsaiJobId(body: Record<string, unknown> | undefined): string | undefined {
+  return readStringFromUnknownPath(body, ['id'])
+    ?? readStringFromUnknownPath(body, ['taskId'])
+    ?? readStringFromUnknownPath(body, ['task_id'])
+    ?? readStringFromUnknownPath(body, ['jobId'])
+    ?? readStringFromUnknownPath(body, ['data', 'id'])
+    ?? readStringFromUnknownPath(body, ['data', 'taskId'])
+    ?? readStringFromUnknownPath(body, ['result', 'id']);
+}
+
+function readGrsaiJobStatus(body: Record<string, unknown> | undefined): string | undefined {
+  return normalizeProviderStatus(
+    readStringFromUnknownPath(body, ['status'])
+    ?? readStringFromUnknownPath(body, ['state'])
+    ?? readStringFromUnknownPath(body, ['data', 'status'])
+    ?? readStringFromUnknownPath(body, ['data', 'state'])
+    ?? readStringFromUnknownPath(body, ['result', 'status'])
+    ?? readStringFromUnknownPath(body, ['output', 'status'])
+  );
+}
+
+function readGrsaiErrorMessage(body: Record<string, unknown> | undefined): string | undefined {
+  return readStringFromUnknownPath(body, ['message'])
+    ?? readStringFromUnknownPath(body, ['error'])
+    ?? readStringFromUnknownPath(body, ['errorMessage'])
+    ?? readStringFromUnknownPath(body, ['data', 'message'])
+    ?? readStringFromUnknownPath(body, ['result', 'message']);
+}
+
+function readImageUrlFromUnknown(value: unknown, depth = 0): string | undefined {
+  if (depth > 6) {
+    return undefined;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return /^https?:\/\//i.test(trimmed) ? trimmed : undefined;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const url = readImageUrlFromUnknown(item, depth + 1);
+      if (url) {
+        return url;
+      }
+    }
+    return undefined;
+  }
+
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const key of [
+    'remoteUrl',
+    'url',
+    'imageUrl',
+    'image_url',
+    'outputUrl',
+    'output_url',
+    'thumbnailPath',
+    'thumbnailUrl'
+  ]) {
+    const url = readImageUrlFromUnknown(record[key], depth + 1);
+    if (url) {
+      return url;
+    }
+  }
+
+  for (const key of ['results', 'images', 'data', 'result', 'output', 'artifacts', 'artifact']) {
+    const url = readImageUrlFromUnknown(record[key], depth + 1);
+    if (url) {
+      return url;
+    }
+  }
+
+  return undefined;
+}
+
+function readStringFromUnknownPath(value: unknown, pathItems: string[]): string | undefined {
+  const valueAtPath = typeof value === 'object' && value !== null
+    ? readNestedUnknown(value as Record<string, unknown>, pathItems)
+    : undefined;
+  return typeof valueAtPath === 'string' && valueAtPath.trim() ? valueAtPath.trim() : undefined;
+}
+
+function normalizeProviderStatus(value: string | undefined): string | undefined {
+  return value?.trim().toLowerCase() || undefined;
+}
+
+function isGrsaiPendingStatus(value: string | undefined): boolean {
+  if (!value) {
+    return true;
+  }
+
+  return ['pending', 'queued', 'running', 'processing', 'submitted', 'created', 'starting'].includes(value);
+}
+
+function isGrsaiFailedStatus(value: string | undefined): boolean {
+  return Boolean(value && ['failed', 'error', 'cancelled', 'canceled', 'timeout', 'rejected'].includes(value));
+}
+
+function buildLocalImageDataUrl(filePath: string): string {
+  return `data:${inferImageMimeType(filePath)};base64,${readFileSync(filePath).toString('base64')}`;
+}
+
+function inferImageAspectRatioFromSize(size: string | undefined): string | undefined {
+  const match = size?.trim().match(/^(\d+)\s*x\s*(\d+)$/i);
+  if (!match) {
+    return undefined;
+  }
+
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return undefined;
+  }
+
+  const divisor = greatestCommonDivisor(width, height);
+  return `${Math.round(width / divisor)}:${Math.round(height / divisor)}`;
+}
+
+function greatestCommonDivisor(left: number, right: number): number {
+  let a = Math.abs(Math.round(left));
+  let b = Math.abs(Math.round(right));
+  while (b > 0) {
+    const next = a % b;
+    a = b;
+    b = next;
+  }
+  return a || 1;
+}
+
+function sleep(delayMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, Math.max(0, delayMs));
+  });
 }
 
 function inferImageMimeType(filePath: string): string {

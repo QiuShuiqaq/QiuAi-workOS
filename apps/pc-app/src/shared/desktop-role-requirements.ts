@@ -50,7 +50,7 @@ export function readWorkflowRequiredModelProfileIds(workflowGraph: unknown): str
                 .filter(Boolean)
             : [];
           const semanticProfileId = node.type === 'llm' ? getSemanticModelProfileIdForWorkflowNode(node) : undefined;
-          return node.type === 'llm'
+          return node.type === 'llm' && !isOptionalWorkflowModelNode(node)
             ? [semanticProfileId, ...requiredModelProfileIds.map(mapModelProfileIdToSemanticDefault)]
             : requiredModelProfileIds;
         })
@@ -318,6 +318,7 @@ function readDependencyManifestModelProfileIds(
 
   return mergeUniqueStrings(
     manifest.modelAssets
+      .filter((asset) => asset.required !== false)
       .map(readDependencyManifestSemanticModelProfileId)
       .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
     []
@@ -333,6 +334,10 @@ function readDependencyManifestModelNodeIdsByModelProfileId(
   }
 
   for (const asset of manifest.modelAssets) {
+    if (asset.required === false) {
+      continue;
+    }
+
     const profileId = readDependencyManifestSemanticModelProfileId(asset);
     if (!profileId) {
       continue;
@@ -366,6 +371,10 @@ function readConfigString(config: Record<string, unknown> | undefined, key: stri
 
 function getSemanticModelProfileIdForWorkflowNode(node: WorkflowGraphNode): string {
   return getSemanticModelProfileIdForTaskType(getWorkflowEffectiveModelTaskType(node)) ?? 'qiu-general-default';
+}
+
+function isOptionalWorkflowModelNode(node: WorkflowGraphNode): boolean {
+  return node.config?.optionalModel === true;
 }
 
 function getSemanticModelProfileIdForTaskType(taskType: string | undefined): string | undefined {

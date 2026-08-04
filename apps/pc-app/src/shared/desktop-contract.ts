@@ -96,6 +96,10 @@ export interface FactoryArtifactPreviewItem {
   sourceImagePath?: string;
   prompt?: string;
   error?: string;
+  errorType?: 'configuration' | 'quota' | 'rate_limit' | 'timeout' | 'network' | 'provider' | 'unknown';
+  attempts?: number;
+  providerJobId?: string;
+  providerStatus?: string;
   createdAt: string;
 }
 
