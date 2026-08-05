@@ -87,6 +87,7 @@ export interface FactoryArtifactPreviewItem {
   id: string;
   order: number;
   sku: string;
+  sourceName?: string;
   packageKey: string;
   packageLabel: string;
   status: FactoryArtifactPreviewItemStatus;

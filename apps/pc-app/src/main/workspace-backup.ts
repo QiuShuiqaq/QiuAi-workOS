@@ -667,6 +667,7 @@ function validateFactoryArtifactPreviewItem(
     id: requireString(record.id, `${fieldName}.id`),
     order: requireInteger(record.order, `${fieldName}.order`),
     sku: requireString(record.sku, `${fieldName}.sku`),
+    sourceName: optionalString(record.sourceName, `${fieldName}.sourceName`),
     packageKey: requireString(record.packageKey, `${fieldName}.packageKey`),
     packageLabel: requireString(record.packageLabel, `${fieldName}.packageLabel`),
     status: requireEnum(record.status, `${fieldName}.status`, ['queued', 'running', 'completed', 'failed', 'retrying']),

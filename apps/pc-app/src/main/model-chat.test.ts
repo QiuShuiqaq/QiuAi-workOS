@@ -227,6 +227,15 @@ try {
 
 const capturedImageTestUrls: string[] = [];
 let capturedImageTestBody: Record<string, unknown> | undefined;
+const capturedImageTestTimeouts: number[] = [];
+const originalAbortSignalTimeout = AbortSignal.timeout.bind(AbortSignal);
+Object.defineProperty(AbortSignal, 'timeout', {
+  configurable: true,
+  value: (milliseconds: number) => {
+    capturedImageTestTimeouts.push(milliseconds);
+    return originalAbortSignalTimeout(milliseconds);
+  }
+});
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(input);
   capturedImageTestUrls.push(url);
@@ -274,7 +283,8 @@ try {
     'https://grsai.dakka.com.cn/v1/api/result?id=grsai-test-job'
   ]);
   assert.equal(capturedImageTestBody?.model, 'gpt-image-2');
-  assert.equal(capturedImageTestBody?.replyType, 'url');
+  assert.equal(capturedImageTestBody?.replyType, 'json');
+  assert.equal(capturedImageTestTimeouts[0], 180_000);
   assert.equal(response.ok, true);
   assert.equal(response.checks?.[0]?.id, 'image_generation');
   assert.equal(response.checks?.[0]?.status, 'passed');
@@ -282,6 +292,10 @@ try {
   assert.equal(response.capabilityMetadata?.source, 'verified');
 } finally {
   globalThis.fetch = originalFetch;
+  Object.defineProperty(AbortSignal, 'timeout', {
+    configurable: true,
+    value: originalAbortSignalTimeout
+  });
 }
 
 const grsaiModelListUrls: string[] = [];

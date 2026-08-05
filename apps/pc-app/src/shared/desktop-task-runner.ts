@@ -188,6 +188,7 @@ interface FactoryVideoGenerationResult {
   id: string;
   order: number;
   sku: string;
+  sourceName?: string;
   packageKey: string;
   packageLabel: string;
   status: FactoryArtifactPreviewItemStatus;
@@ -4205,28 +4206,33 @@ async function invokeWorkflowRuntimeEcommerceProductVideoFactoryNode(input: {
   const results = batchRun.results;
   const completed = results.filter((item) => item.status === 'completed').length;
   const failed = results.filter((item) => item.status === 'failed').length;
-  const generatedVideos = results.map((item) => ({
-    id: item.id,
-    name: `${item.sku}-${item.packageLabel}`,
-    kind: 'video',
-    uri: item.localPath ? `local://${item.localPath}` : item.remoteUrl,
-    mimeType: 'video/mp4',
-    remoteUrl: item.remoteUrl,
-    localPath: item.localPath,
-    thumbnailPath: item.thumbnailPath,
-    sourceImagePath: item.sourceImagePath,
-    sku: item.sku,
-    packageKey: item.packageKey,
-    packageLabel: item.packageLabel,
-    status: item.status,
-    error: item.error,
-    errorType: item.errorType,
-    attempts: item.attempts,
-    providerJobId: item.providerJobId,
-    providerStatus: item.providerStatus,
-    durationSeconds: item.durationSeconds,
-    videoRatio: item.videoRatio
-  }));
+  const generatedVideos = results.map((item) => {
+    const displayName = getFactoryImageResultDisplayName(item);
+    const order = String(item.order || 1).padStart(2, '0');
+    return {
+      id: item.id,
+      name: `${displayName}-${order}-${item.packageLabel}`,
+      kind: 'video',
+      uri: item.localPath ? `local://${item.localPath}` : item.remoteUrl,
+      mimeType: 'video/mp4',
+      remoteUrl: item.remoteUrl,
+      localPath: item.localPath,
+      thumbnailPath: item.thumbnailPath,
+      sourceImagePath: item.sourceImagePath,
+      sku: item.sku,
+      sourceName: item.sourceName,
+      packageKey: item.packageKey,
+      packageLabel: item.packageLabel,
+      status: item.status,
+      error: item.error,
+      errorType: item.errorType,
+      attempts: item.attempts,
+      providerJobId: item.providerJobId,
+      providerStatus: item.providerStatus,
+      durationSeconds: item.durationSeconds,
+      videoRatio: item.videoRatio
+    };
+  });
   const outputVariables = writeWorkflowNodeOutputs({
     pool: input.pool,
     node: input.node,
@@ -4579,26 +4585,31 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
   const results = batchRun.results;
   const completed = results.filter((item) => item.status === 'completed').length;
   const failed = results.filter((item) => item.status === 'failed').length;
-  const generatedImages = results.map((item) => ({
-    id: item.id,
-    name: `${item.sku}-${item.packageLabel}`,
-    kind: 'image',
-    uri: item.localPath ? `local://${item.localPath}` : item.remoteUrl,
-    mimeType: 'image/png',
-    remoteUrl: item.remoteUrl,
-    localPath: item.localPath,
-    thumbnailPath: item.thumbnailPath,
-    sourceImagePath: item.sourceImagePath,
-    sku: item.sku,
-    packageKey: item.packageKey,
-    packageLabel: item.packageLabel,
-    status: item.status,
-    error: item.error,
-    errorType: item.errorType,
-    attempts: item.attempts,
-    providerJobId: item.providerJobId,
-    providerStatus: item.providerStatus
-  }));
+  const generatedImages = results.map((item) => {
+    const displayName = getFactoryImageResultDisplayName(item);
+    const order = String(item.order || 1).padStart(2, '0');
+    return {
+      id: item.id,
+      name: `${displayName}-${order}-${item.packageLabel}`,
+      kind: 'image',
+      uri: item.localPath ? `local://${item.localPath}` : item.remoteUrl,
+      mimeType: 'image/png',
+      remoteUrl: item.remoteUrl,
+      localPath: item.localPath,
+      thumbnailPath: item.thumbnailPath,
+      sourceImagePath: item.sourceImagePath,
+      sku: item.sku,
+      sourceName: item.sourceName,
+      packageKey: item.packageKey,
+      packageLabel: item.packageLabel,
+      status: item.status,
+      error: item.error,
+      errorType: item.errorType,
+      attempts: item.attempts,
+      providerJobId: item.providerJobId,
+      providerStatus: item.providerStatus
+    };
+  });
   const outputVariables = writeWorkflowNodeOutputs({
     pool: input.pool,
     node: input.node,
@@ -5771,11 +5782,13 @@ function buildFactoryEcommerceVideoOutputItems(input: {
 }): FactoryOutputItem[] {
   return input.results.map((result) => {
     const status: FactoryOutputItemStatus = result.status === 'completed' ? 'qualified' : 'processing_error';
+    const displayName = getFactoryImageResultDisplayName(result);
+    const order = String(result.order || 1).padStart(2, '0');
     return {
       id: `${input.taskId}-ecommerce-video-output-${result.order}`,
       factoryKind: 'ecommerce_product_video_factory',
       kind: 'video',
-      title: `${result.sku}-${result.packageLabel}`,
+      title: `${displayName}-${order}-${result.packageLabel}`,
       status,
       originalStatus: status,
       sourcePath: result.sourceImagePath,
@@ -5790,6 +5803,7 @@ function buildFactoryEcommerceVideoOutputItems(input: {
       metadata: {
         order: result.order,
         sku: result.sku,
+        sourceName: result.sourceName,
         packageKey: result.packageKey,
         packageLabel: result.packageLabel,
         providerJobId: result.providerJobId,
@@ -6603,6 +6617,32 @@ function createFactoryImageGenerationTasks(input: {
   return tasks;
 }
 
+function getFactoryImageResultDisplayName(item: {
+  sku?: string;
+  sourceName?: string;
+  sourceImagePath?: string;
+}): string {
+  const sku = item.sku?.trim();
+  const sourceName = stripFactoryImageNameExtension(
+    item.sourceName ?? getPathFileName(item.sourceImagePath ?? '')
+  );
+
+  if (sourceName && (!sku || /^SKU-\d+$/i.test(sku))) {
+    return sourceName;
+  }
+
+  return sku || sourceName || 'product';
+}
+
+function stripFactoryImageNameExtension(value: string | undefined): string {
+  const name = value?.trim();
+  if (!name) {
+    return '';
+  }
+
+  return name.replace(/\.(png|jpe?g|webp|gif|bmp|tiff?)$/i, '');
+}
+
 function readFactoryRuntimeVideoGenerationConfig(factoryRequest: Record<string, unknown> | undefined): {
   durationSeconds: number;
   ratio: string;
@@ -7041,6 +7081,7 @@ async function runFactoryImageGenerationTask(input: {
         id: input.task.id,
         order: input.task.order,
         sku: input.task.sku,
+        sourceName: input.task.sourceName,
         packageKey: input.task.packageKey,
         packageLabel: input.task.packageLabel,
         status: 'completed',
@@ -7071,6 +7112,7 @@ async function runFactoryImageGenerationTask(input: {
     id: input.task.id,
     order: input.task.order,
     sku: input.task.sku,
+    sourceName: input.task.sourceName,
     packageKey: input.task.packageKey,
     packageLabel: input.task.packageLabel,
     status: 'failed',
@@ -7119,6 +7161,7 @@ async function runFactoryVideoGenerationTask(input: {
         id: input.task.id,
         order: input.task.order,
         sku: input.task.sku,
+        sourceName: input.task.sourceName,
         packageKey: input.task.packageKey,
         packageLabel: input.task.packageLabel,
         status: 'completed',
@@ -7151,6 +7194,7 @@ async function runFactoryVideoGenerationTask(input: {
     id: input.task.id,
     order: input.task.order,
     sku: input.task.sku,
+    sourceName: input.task.sourceName,
     packageKey: input.task.packageKey,
     packageLabel: input.task.packageLabel,
     status: 'failed',
@@ -7171,7 +7215,7 @@ function buildFactoryImageGenerationMessages(task: FactoryImageGenerationTask): 
       role: 'system',
       content: [
         'You are a QiuAI WorkOS digital factory image generation executor.',
-        'Generate exactly one image for the requested SKU and package.',
+        'Generate exactly one image for the requested source item and package.',
         'Return JSON only: {"remoteUrl":"https://...","thumbnailPath":"https://..."} or {"localPath":"C:\\\\...\\\\image.png"}.',
         'Do not return image binary data, base64, or markdown.'
       ].join('\n')
@@ -7179,7 +7223,7 @@ function buildFactoryImageGenerationMessages(task: FactoryImageGenerationTask): 
     {
       role: 'user',
       content: [
-        `SKU: ${task.sku}`,
+        `Internal item id: ${task.sku}`,
         task.sourceName ? `Source name: ${task.sourceName}` : undefined,
         `Source image local path: ${task.sourceImage.localPath}`,
         task.sourceImage.uri ? `Source image URI: ${task.sourceImage.uri}` : undefined,
@@ -7210,7 +7254,7 @@ function buildFactoryVideoGenerationMessages(task: FactoryVideoGenerationTask): 
     {
       role: 'user',
       content: [
-        `SKU: ${task.sku}`,
+        `Internal item id: ${task.sku}`,
         task.sourceName ? `Source name: ${task.sourceName}` : undefined,
         task.sourceImage?.localPath ? `Source image local path: ${task.sourceImage.localPath}` : undefined,
         task.sourceImage?.uri ? `Source image URI: ${task.sourceImage.uri}` : undefined,
@@ -7408,7 +7452,7 @@ function buildFactoryImageGenerationFallbackPrompt(
 ): string {
   return [
     `Use the source product image ${item.image.localPath} as the reference.`,
-    `Create a ${packageItem.label} image for SKU ${item.sku}.`,
+    `Create a ${packageItem.label} image for source image ${item.sourceName ?? item.image.name ?? item.sku}.`,
     packageItem.description ? `Package requirement: ${packageItem.description}.` : undefined,
     platform.label ? `Target platform: ${platform.label}.` : undefined,
     platform.imageRatio ? `Required ratio: ${platform.imageRatio}.` : undefined,
@@ -7432,7 +7476,7 @@ function buildFactoryVideoGenerationFallbackPrompt(
 ): string {
   return [
     `Use the source product image ${item.image.localPath} as the visual reference.`,
-    `Create one ecommerce product video for SKU ${item.sku}.`,
+    `Create one ecommerce product video for source image ${item.sourceName ?? item.image.name ?? item.sku}.`,
     `Video package: ${packageItem.label} (${packageItem.key}).`,
     packageItem.description ? `Package requirement: ${packageItem.description}.` : undefined,
     platform.label ? `Target platform: ${platform.label}.` : undefined,

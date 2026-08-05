@@ -81,7 +81,6 @@ interface OpenAiCompatibleTranscriptionResponse {
 const defaultTimeoutMs = 45_000;
 const imageGenerationTestTimeoutMs = 180_000;
 const videoGenerationTestTimeoutMs = 240_000;
-const grsaiImageSubmitTimeoutMs = 45_000;
 const grsaiImagePollIntervalMs = 2_000;
 const grsaiImagePollRequestTimeoutMs = 30_000;
 const lightweightPngBytes = Buffer.from(
@@ -368,7 +367,7 @@ async function invokeGrsaiAsyncImageGeneration(input: {
       'content-type': 'application/json'
     },
     body: JSON.stringify(buildGrsaiImageGenerationPayload(input)),
-    signal: AbortSignal.timeout(Math.min(input.timeoutMs, grsaiImageSubmitTimeoutMs))
+    signal: AbortSignal.timeout(input.timeoutMs)
   }, 'GrsAI image task submit');
 
   const bodyText = await response.text();
@@ -429,8 +428,7 @@ function buildGrsaiImageGenerationPayload(input: {
     prompt: input.prompt,
     images,
     aspectRatio,
-    replyType: 'url',
-    response_format: 'url'
+    replyType: 'json'
   };
 }
 
@@ -495,7 +493,7 @@ async function invokeGrsaiAsyncVideoGeneration(input: {
       'content-type': 'application/json'
     },
     body: JSON.stringify(buildGrsaiVideoGenerationPayload(input)),
-    signal: AbortSignal.timeout(Math.min(input.timeoutMs, grsaiImageSubmitTimeoutMs))
+    signal: AbortSignal.timeout(input.timeoutMs)
   }, 'GrsAI video task submit');
 
   const bodyText = await response.text();
@@ -557,8 +555,7 @@ function buildGrsaiVideoGenerationPayload(input: {
     aspectRatio: input.request.videoGeneration?.aspectRatio,
     duration: input.request.videoGeneration?.durationSeconds,
     durationSeconds: input.request.videoGeneration?.durationSeconds,
-    replyType: 'url',
-    response_format: 'url'
+    replyType: 'json'
   };
 }
 

@@ -3164,6 +3164,10 @@ assert.deepEqual(
   factoryPreviewArtifact?.factoryPreview?.items.map((item) => item.order),
   [1, 2, 3, 4]
 );
+assert.deepEqual(
+  factoryPreviewArtifact?.factoryPreview?.items.map((item) => item.sourceName),
+  ['sku-1.png', 'sku-1.png', 'sku-2.png', 'sku-2.png']
+);
 assert.ok(
   factoryPreviewArtifact?.factoryPreview?.items.every((item) => item.remoteUrl?.startsWith('https://cdn.example.test/'))
 );

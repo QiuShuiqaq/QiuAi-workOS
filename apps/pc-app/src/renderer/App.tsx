@@ -433,6 +433,7 @@ const sectionItems: Array<{ key: SectionKey; icon: ReactNode; label: string }> =
 
 const desktopClientPreferenceStorageKey = 'qiuai.pc.client.preferences.v1';
 const factoryPackagePresetStorageKey = 'qiuai.pc.factory.package.presets.v1';
+const factoryPackageSelectionStorageKey = 'qiuai.pc.factory.package.selections.v1';
 const factoryScreeningProfileStorageKey = 'qiuai.pc.factory.screening.profiles.v1';
 const defaultDesktopClientPreferences: DesktopClientPreferences = {
   theme: 'light',
@@ -2043,6 +2044,103 @@ function removeFactoryPackagePreset(roleCode: string) {
   } catch {
     // Local factory package presets are optional.
   }
+}
+
+function readFactoryPackageSelection(roleCode: string, availableKeys: string[]): string[] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(factoryPackageSelectionStorageKey);
+    if (!rawValue) {
+      return [];
+    }
+
+    const parsed = JSON.parse(rawValue);
+    if (!isPlainObject(parsed) || !Array.isArray(parsed[roleCode])) {
+      return [];
+    }
+
+    const availableKeySet = new Set(availableKeys);
+    const usedKeys = new Set<string>();
+    return parsed[roleCode].filter((item) => {
+      if (typeof item !== 'string' || usedKeys.has(item) || !availableKeySet.has(item)) {
+        return false;
+      }
+
+      usedKeys.add(item);
+      return true;
+    });
+  } catch {
+    return [];
+  }
+}
+
+function writeFactoryPackageSelection(roleCode: string, packageKeys: string[], availableKeys: string[]) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const availableKeySet = new Set(availableKeys);
+    const selectedKeys = packageKeys.filter((item, index) =>
+      availableKeySet.has(item) && packageKeys.indexOf(item) === index
+    );
+    if (!selectedKeys.length) {
+      return;
+    }
+
+    const rawValue = window.localStorage.getItem(factoryPackageSelectionStorageKey);
+    const parsed = rawValue ? JSON.parse(rawValue) : {};
+    const current = isPlainObject(parsed) ? parsed : {};
+    window.localStorage.setItem(
+      factoryPackageSelectionStorageKey,
+      JSON.stringify({
+        ...current,
+        [roleCode]: selectedKeys
+      })
+    );
+  } catch {
+    // Local package selections are optional; task execution should not depend on storage.
+  }
+}
+
+function removeFactoryPackageSelection(roleCode: string) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(factoryPackageSelectionStorageKey);
+    const parsed = rawValue ? JSON.parse(rawValue) : {};
+    if (!isPlainObject(parsed)) {
+      return;
+    }
+
+    const next = { ...parsed };
+    delete next[roleCode];
+    window.localStorage.setItem(factoryPackageSelectionStorageKey, JSON.stringify(next));
+  } catch {
+    // Local package selections are optional.
+  }
+}
+
+function resolveFactoryPackageSelection(roleCode: string, packageDefinitions: FactoryRunPackageDefinition[]): string[] {
+  const availableKeys = packageDefinitions.map((item) => item.key);
+  const rememberedKeys = readFactoryPackageSelection(roleCode, availableKeys);
+  if (rememberedKeys.length) {
+    return rememberedKeys;
+  }
+
+  const defaultKeys = packageDefinitions
+    .filter((item) => item.defaultSelected !== false)
+    .map((item) => item.key);
+  if (defaultKeys.length > 0 && defaultKeys.length < packageDefinitions.length) {
+    return defaultKeys;
+  }
+
+  return packageDefinitions[0]?.key ? [packageDefinitions[0].key] : [];
 }
 
 function readFactoryCustomScreeningProfiles(roleCode: string): FactoryRunScreeningProfileDefinition[] {
@@ -4774,7 +4872,7 @@ export default function App() {
   function renderFactoryImagePreviewModal() {
     const imageSrc = previewFactoryImage ? getFactoryPreviewImageSrc(previewFactoryImage) : '';
     const title = previewFactoryImage
-      ? `${previewFactoryImage.sku} / ${previewFactoryImage.packageLabel}`
+      ? `${getFactoryPreviewItemDisplayName(previewFactoryImage)} / ${previewFactoryImage.packageLabel}`
       : '图片预览';
 
     return (
@@ -5599,18 +5697,18 @@ export default function App() {
                                         type="button"
                                         className={`factory-preview-tile ${item.status}`}
                                         disabled={!imageSrc}
-                                        title={item.error ?? `${item.sku} / ${item.packageLabel}`}
+                                        title={item.error ?? `${getFactoryPreviewItemDisplayName(item)} / ${item.packageLabel}`}
                                         onClick={() => setPreviewFactoryImage(item)}
                                       >
                                         <span className="factory-preview-thumb">
                                           {imageSrc ? (
-                                            <img src={imageSrc} alt={`${item.sku} ${item.packageLabel}`} loading="lazy" />
+                                            <img src={imageSrc} alt={`${getFactoryPreviewItemDisplayName(item)} ${item.packageLabel}`} loading="lazy" />
                                           ) : (
                                             <FileImageOutlined />
                                           )}
                                         </span>
                                         <span className="factory-preview-caption">
-                                          <span>{item.sku}</span>
+                                          <span>{getFactoryPreviewItemDisplayName(item)}</span>
                                           <span>{item.packageLabel}</span>
                                         </span>
                                       </button>
@@ -5914,7 +6012,7 @@ export default function App() {
       ? factoryAttachments.filter((attachment) => isFactoryVideoAttachment(attachment))
       : isOperationFactory
         ? factoryAttachments.filter((attachment) => isFactoryOperationAttachment(attachment))
-        : factoryAttachments.filter((attachment) => isFactoryImageInputAttachment(attachment));
+        : factoryAttachments.filter((attachment) => isFactoryImageAttachment(attachment));
     const invalidFactoryAttachmentCount = factoryAttachments.length - validFactoryAttachments.length;
     const latestFactoryLogs = focusedFactoryTask ? selectFactoryVisibleLogs(focusedFactoryTask) : [];
     const focusedFactoryArtifacts = focusedFactoryTask?.artifacts.filter(isUserDeliverableArtifact) ?? [];
@@ -6261,7 +6359,7 @@ export default function App() {
                               ? isFactoryVideoAttachment(attachment)
                               : isOperationFactory
                                 ? isFactoryOperationAttachment(attachment)
-                              : isFactoryImageInputAttachment(attachment);
+                              : isFactoryImageAttachment(attachment);
                             return (
                               <div key={attachment.id} className={valid ? 'factory-attachment-item' : 'factory-attachment-item invalid'}>
                                 <Space size={8}>
@@ -7128,18 +7226,18 @@ export default function App() {
                         type="button"
                         className={`factory-preview-tile ${item.status}`}
                         disabled={!imageSrc}
-                        title={item.error ?? `${item.sku} / ${item.packageLabel}`}
+                        title={item.error ?? `${getFactoryPreviewItemDisplayName(item)} / ${item.packageLabel}`}
                         onClick={() => setPreviewFactoryImage(item)}
                       >
                         <span className="factory-preview-thumb">
                           {imageSrc ? (
-                            <img src={imageSrc} alt={`${item.sku} ${item.packageLabel}`} loading="lazy" />
+                            <img src={imageSrc} alt={`${getFactoryPreviewItemDisplayName(item)} ${item.packageLabel}`} loading="lazy" />
                           ) : (
                             <FileImageOutlined />
                           )}
                         </span>
                         <span className="factory-preview-caption">
-                          <span>{item.sku}</span>
+                          <span>{getFactoryPreviewItemDisplayName(item)}</span>
                           <span>{item.packageLabel}</span>
                         </span>
                       </button>
@@ -9565,9 +9663,6 @@ export default function App() {
     if (isEcommerceProductVideoFactory(factory)) {
       const packageOptions = readFactoryPackageOptions(factory);
       const packageDefinitions = readFactoryPackagePreset(roleCode, packageOptions);
-      const defaultPackages = packageDefinitions
-        .filter((item) => item.defaultSelected !== false)
-        .map((item) => item.key);
       const platformOptions = readFactoryPlatformOptions(factory);
       const qualityModes = readFactoryQualityModes(factory);
       const ratios = readFactoryOperationRatios(factory);
@@ -9578,7 +9673,7 @@ export default function App() {
         useKnowledge: true,
         platform: platformOptions[0]?.key ?? 'tiktok_shop',
         packageDefinitions,
-        packageKeys: defaultPackages.length ? defaultPackages : packageDefinitions.map((item) => item.key),
+        packageKeys: resolveFactoryPackageSelection(roleCode, packageDefinitions),
         qualityCheckMode: qualityModes[0]?.key ?? 'basic',
         videoDurationSeconds: durationOptions[1] ?? durationOptions[0] ?? 8,
         videoRatio: platformOptions[0]?.imageRatio ?? ratios[0]?.key ?? '9:16',
@@ -9594,9 +9689,6 @@ export default function App() {
     if (isOperationVideoFactory(factory)) {
       const packageOptions = readFactoryPackageOptions(factory);
       const packageDefinitions = readFactoryPackagePreset(roleCode, packageOptions);
-      const defaultPackages = packageDefinitions
-        .filter((item) => item.defaultSelected !== false)
-        .map((item) => item.key);
       const platformOptions = readFactoryPlatformOptions(factory);
       const operationGoals = readFactoryOperationGoals(factory);
       const operationStyles = readFactoryOperationStyles(factory);
@@ -9608,7 +9700,7 @@ export default function App() {
         useKnowledge: true,
         platform: platformOptions[0]?.key ?? 'douyin',
         packageDefinitions,
-        packageKeys: defaultPackages.length ? defaultPackages : packageDefinitions.map((item) => item.key),
+        packageKeys: resolveFactoryPackageSelection(roleCode, packageDefinitions),
         contentGoal: operationGoals[0]?.key ?? 'lead_generation',
         contentStyle: operationStyles[0]?.key ?? 'pain_point',
         videoCount: factory.contentControls?.defaultVideoCount ?? 3,
@@ -9625,16 +9717,13 @@ export default function App() {
     const packageDefinitions = readFactoryPackagePreset(roleCode, packageOptions);
     const platformOptions = readFactoryPlatformOptions(factory);
     const qualityModes = readFactoryQualityModes(factory);
-    const defaultPackages = packageDefinitions
-      .filter((item) => item.defaultSelected !== false)
-      .map((item) => item.key);
 
     return {
       roleCode,
       useKnowledge: false,
       platform: platformOptions[0]?.key ?? 'amazon',
       packageDefinitions,
-      packageKeys: defaultPackages.length ? defaultPackages : packageDefinitions.map((item) => item.key),
+      packageKeys: resolveFactoryPackageSelection(roleCode, packageDefinitions),
       qualityCheckMode: qualityModes[0]?.key ?? 'basic',
       enableImageUnderstanding: false,
       promptLanguage: '',
@@ -9656,6 +9745,18 @@ export default function App() {
     factoryRunForm.setFieldsValue(defaultValues);
     setFactoryAttachments([]);
     return true;
+  }
+
+  function rememberFactoryRunPackageSelection(values: FactoryRunFormValues, factory: DigitalFactoryManifest) {
+    const packageDefinitions = normalizeFactoryPackageDefinitions(
+      values.packageDefinitions,
+      readFactoryPackageOptions(factory)
+    );
+    writeFactoryPackageSelection(
+      values.roleCode,
+      values.packageKeys ?? [],
+      packageDefinitions.map((item) => item.key)
+    );
   }
 
   function readFactoryManifestForRoleCode(roleCode: string) {
@@ -9740,14 +9841,17 @@ export default function App() {
       .map((item) => item.key);
     const selectedPackageKeys = nextPackageKeys.length
       ? nextPackageKeys
-      : normalizedPackages
-          .filter((item) => item.defaultSelected !== false)
-          .map((item) => item.key);
+      : resolveFactoryPackageSelection(factoryPackageEditorRoleCode, normalizedPackages);
 
     factoryRunForm.setFieldsValue({
       packageDefinitions: normalizedPackages,
-      packageKeys: selectedPackageKeys.length ? selectedPackageKeys : normalizedPackages.map((item) => item.key)
+      packageKeys: selectedPackageKeys
     });
+    writeFactoryPackageSelection(
+      factoryPackageEditorRoleCode,
+      selectedPackageKeys,
+      normalizedPackages.map((item) => item.key)
+    );
 
     if (options?.saveAsDefault) {
       writeFactoryPackagePreset(factoryPackageEditorRoleCode, normalizedPackages);
@@ -9766,13 +9870,12 @@ export default function App() {
 
     const factory = readFactoryManifestForRoleCode(factoryPackageEditorRoleCode);
     const defaultPackages = normalizeFactoryPackageDefinitions(readFactoryPackageOptions(factory), []);
-    const selectedPackageKeys = defaultPackages
-      .filter((item) => item.defaultSelected !== false)
-      .map((item) => item.key);
     removeFactoryPackagePreset(factoryPackageEditorRoleCode);
+    removeFactoryPackageSelection(factoryPackageEditorRoleCode);
+    const selectedPackageKeys = resolveFactoryPackageSelection(factoryPackageEditorRoleCode, defaultPackages);
     factoryRunForm.setFieldsValue({
       packageDefinitions: defaultPackages,
-      packageKeys: selectedPackageKeys.length ? selectedPackageKeys : defaultPackages.map((item) => item.key)
+      packageKeys: selectedPackageKeys
     });
     setFactoryPackageEditorDraft(defaultPackages);
     message.success('已恢复官方默认产物包。');
@@ -10046,14 +10149,14 @@ export default function App() {
     if (isEcommerceProductVideoFactory(factory)) {
       const ecommerceAttachments = factoryAttachments.filter((attachment) => isFactoryImageAttachment(attachment));
       const invalidEcommerceAttachments = factoryAttachments.filter(
-        (attachment) => !isFactoryImageInputAttachment(attachment)
+        (attachment) => !isFactoryImageAttachment(attachment)
       );
       if (ecommerceAttachments.length === 0) {
         message.warning('请至少上传一张商品参考图。');
         return;
       }
       if (invalidEcommerceAttachments.length > 0) {
-        message.warning('当前工厂只支持图片、Excel 或 CSV，请移除不适用文件后再运行。');
+        message.warning('当前工厂只支持图片，请移除不适用文件后再运行。');
         return;
       }
       if (ecommerceAttachments.length > maxItems) {
@@ -10072,6 +10175,7 @@ export default function App() {
         message.warning('请至少选择一个产物包。');
         return;
       }
+      rememberFactoryRunPackageSelection(ecommerceVideoValues, factory);
       const optionalVisionModelProfileIds =
         ecommerceVideoValues.qualityCheckMode === 'smart'
           ? findReadyImageUnderstandingModelProfileIds(runtimeState, values.roleCode)
@@ -10132,6 +10236,7 @@ export default function App() {
         message.warning('请至少选择一个产物包。');
         return;
       }
+      rememberFactoryRunPackageSelection(operationFactoryValues, factory);
       const hasUserContext = [
         operationFactoryValues.targetAudience,
         operationFactoryValues.sourceUrls,
@@ -10178,14 +10283,14 @@ export default function App() {
 
     const imageAttachments = factoryAttachments.filter((attachment) => isFactoryImageAttachment(attachment));
     const invalidImageFactoryAttachments = factoryAttachments.filter(
-      (attachment) => !isFactoryImageInputAttachment(attachment)
+      (attachment) => !isFactoryImageAttachment(attachment)
     );
     if (imageAttachments.length === 0) {
       message.warning('请至少上传一张商品参考图。');
       return;
     }
     if (invalidImageFactoryAttachments.length > 0) {
-      message.warning('当前工厂只支持图片、Excel 或 CSV，请移除不适用文件后再运行。');
+      message.warning('当前工厂只支持图片，请移除不适用文件后再运行。');
       return;
     }
     if (imageAttachments.length > maxItems) {
@@ -10203,6 +10308,7 @@ export default function App() {
       message.warning('请至少选择一个产物包。');
       return;
     }
+    rememberFactoryRunPackageSelection(imageFactoryValues, factory);
     const optionalVisionModelProfileIds =
       imageFactoryValues.enableImageUnderstanding === true || imageFactoryValues.qualityCheckMode === 'smart'
         ? findReadyImageUnderstandingModelProfileIds(runtimeState, values.roleCode)
@@ -12749,9 +12855,27 @@ function getFactoryPreviewImageSrc(item: FactoryArtifactPreviewItem) {
 
 function getFactoryPreviewImageFileName(item: FactoryArtifactPreviewItem) {
   const extension = getFactoryPreviewImageExtension(item.remoteUrl ?? item.thumbnailPath ?? item.localPath) ?? 'png';
-  const sku = sanitizeFactoryPreviewFileNamePart(item.sku) || 'SKU';
+  const displayName = sanitizeFactoryPreviewFileNamePart(getFactoryPreviewItemDisplayName(item)) || 'product';
+  const order = String(item.order || 1).padStart(2, '0');
   const packageLabel = sanitizeFactoryPreviewFileNamePart(item.packageLabel) || item.packageKey || 'image';
-  return `${sku}-${packageLabel}.${extension}`;
+  return `${displayName}-${order}-${packageLabel}.${extension}`;
+}
+
+function getFactoryPreviewItemDisplayName(item: FactoryArtifactPreviewItem) {
+  const sku = item.sku?.trim();
+  const sourceName = stripFactoryPreviewImageExtension(
+    getPathFileName(item.sourceName ?? item.sourceImagePath ?? '') || item.sourceName
+  );
+
+  if (sourceName && (!sku || /^SKU-\d+$/i.test(sku))) {
+    return sourceName;
+  }
+
+  return sku || sourceName || '商品';
+}
+
+function stripFactoryPreviewImageExtension(value: string | undefined) {
+  return (value ?? '').trim().replace(/\.(png|jpe?g|webp|gif|bmp|tiff?)$/i, '');
 }
 
 function getFactoryPreviewImageExtension(value: string | undefined) {
@@ -13875,10 +13999,6 @@ function isFactoryTableAttachment(attachment: ComposerAttachment) {
   return factoryTableExtensions.has(extension);
 }
 
-function isFactoryImageInputAttachment(attachment: ComposerAttachment) {
-  return isFactoryImageAttachment(attachment) || isFactoryTableAttachment(attachment);
-}
-
 function isFactoryOperationAttachment(attachment: ComposerAttachment) {
   if (isFactoryImageAttachment(attachment) || isFactoryTableAttachment(attachment)) {
     return true;
@@ -13937,7 +14057,6 @@ function buildFactoryTaskInput({
   const selectedPackages = packageOptions.filter((item) => selectedPackageKeys.includes(item.key));
   const qualityMode = readFactoryQualityModes(factory).find((item) => item.key === values.qualityCheckMode);
   const imageAttachments = attachments.filter((attachment) => isFactoryImageAttachment(attachment));
-  const tableAttachments = attachments.filter((attachment) => !isFactoryImageAttachment(attachment));
   const promptControls = buildFactoryPromptControls(values);
   const factoryRequest = {
     applicationType: 'digital_factory',
@@ -13966,12 +14085,12 @@ function buildFactoryTaskInput({
       folder: factory.output?.folder ?? 'product-images'
     },
     promptControls,
-    attachments: attachments.map((attachment) => ({
+    attachments: imageAttachments.map((attachment) => ({
       name: attachment.name,
       size: attachment.size,
       type: attachment.type,
       localPath: attachment.localPath,
-      kind: isFactoryImageAttachment(attachment) ? 'product_image' : 'sku_table'
+      kind: 'product_image'
     })),
     instruction: values.instruction?.trim() || undefined
   };
@@ -13985,7 +14104,6 @@ function buildFactoryTaskInput({
       selectedPackages: factoryRequest.packages,
       qualityCheckMode: factoryRequest.qualityCheckMode,
       imageCount: imageAttachments.length,
-      tableCount: tableAttachments.length,
       instructions: [
         '按 factory_request 逐项处理每张商品图片。',
         factoryRequest.enableImageUnderstanding
@@ -14022,7 +14140,6 @@ function buildEcommerceProductVideoFactoryTaskInput({
   const selectedPackages = packageOptions.filter((item) => selectedPackageKeys.includes(item.key));
   const qualityMode = readFactoryQualityModes(factory).find((item) => item.key === values.qualityCheckMode);
   const imageAttachments = attachments.filter((attachment) => isFactoryImageAttachment(attachment));
-  const tableAttachments = attachments.filter((attachment) => !isFactoryImageAttachment(attachment));
   const ratio = readFactoryOperationRatios(factory).find((item) => item.key === values.videoRatio);
   const durationOptions = readFactoryVideoDurationOptions(factory);
   const requestedDuration = Number(values.videoDurationSeconds);
@@ -14066,12 +14183,12 @@ function buildEcommerceProductVideoFactoryTaskInput({
       videoFormat: factory.output?.videoFormat ?? 'mp4'
     },
     promptControls,
-    attachments: attachments.map((attachment) => ({
+    attachments: imageAttachments.map((attachment) => ({
       name: attachment.name,
       size: attachment.size,
       type: attachment.type,
       localPath: attachment.localPath,
-      kind: isFactoryImageAttachment(attachment) ? 'product_image' : 'sku_table'
+      kind: 'product_image'
     })),
     instruction: values.instruction?.trim() || undefined
   };
@@ -14085,7 +14202,6 @@ function buildEcommerceProductVideoFactoryTaskInput({
       selectedPackages: factoryRequest.packages,
       qualityCheckMode: factoryRequest.qualityCheckMode,
       imageCount: imageAttachments.length,
-      tableCount: tableAttachments.length,
       videoDurationSeconds,
       videoRatio: factoryRequest.videoGeneration.ratio,
       instructions: [
