@@ -183,8 +183,12 @@ test('server role template catalog is focused and production-oriented', () => {
   const videoFactoryModelProfiles = new Set(
     videoFactoryDependencyManifest.modelAssets.map((asset) => asset.modelProfileId)
   );
+  const videoFactoryAsrAsset = videoFactoryDependencyManifest.modelAssets.find(
+    (asset) => asset.modelProfileId === 'qiu-asr-default'
+  );
   assert.ok(videoFactoryModelProfiles.has('qiu-general-default'));
   assert.ok(videoFactoryModelProfiles.has('qiu-asr-default'));
+  assert.ok(videoFactoryAsrAsset?.capabilities.includes('audio_to_text'));
   assert.ok(videoFactoryToolActions.has('video-processing/video.probe'));
   assert.ok(videoFactoryToolActions.has('video-processing/video.extract_audio'));
   assert.ok(videoFactoryToolActions.has('video-processing/video.compose_clips'));

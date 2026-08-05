@@ -353,6 +353,12 @@ function readDependencyManifestModelNodeIdsByModelProfileId(
 function readDependencyManifestSemanticModelProfileId(
   asset: NonNullable<RolePackageManifest['dependencyManifest']>['modelAssets'][number]
 ): string {
+  const declaredProfileId = asset.modelProfileId || asset.modelId || asset.key;
+  const declaredSemanticProfileId = mapModelProfileIdToSemanticDefault(declaredProfileId);
+  if (declaredProfileId.trim().toLowerCase().startsWith('qiu-')) {
+    return declaredSemanticProfileId;
+  }
+
   const capabilityProfileId = getSemanticModelProfileIdForCapabilities({
     capabilities: asset.capabilities,
     inputTypes: asset.inputTypes,
@@ -362,7 +368,7 @@ function readDependencyManifestSemanticModelProfileId(
     return capabilityProfileId;
   }
 
-  return mapModelProfileIdToSemanticDefault(asset.modelProfileId || asset.modelId || asset.key);
+  return declaredSemanticProfileId;
 }
 
 function readConfigString(config: Record<string, unknown> | undefined, key: string): string | undefined {

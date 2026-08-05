@@ -236,7 +236,7 @@ function upsertModelAsset(
     'qiu-general-default';
   const key = semanticModelProfileId ?? asset?.key ?? explicitAssetKey ?? resolvedModelProfileId;
   const current = modelAssets.get(key);
-  const inferredRequirement = inferModelRequirementFromNode(node);
+  const inferredRequirement = inferModelRequirementFromNode(node, semanticModelProfileId);
   const required = !readConfigBoolean(node.config, 'optionalModel');
 
   modelAssets.set(key, {
@@ -273,12 +273,19 @@ function upsertModelAsset(
   });
 }
 
-function inferModelRequirementFromNode(node: ServerRoleWorkflowGraphNode): {
+function inferModelRequirementFromNode(node: ServerRoleWorkflowGraphNode, semanticModelProfileId?: string): {
   name: string;
   capabilities: string[];
   inputTypes: string[];
   outputTypes: string[];
 } {
+  const semanticRequirement = semanticModelProfileId
+    ? inferModelRequirementFromSemanticProfileId(semanticModelProfileId)
+    : undefined;
+  if (semanticRequirement) {
+    return semanticRequirement;
+  }
+
   const taskType = getEffectiveModelTaskTypeForNode(node);
 
   if (taskType === 'vision') {
@@ -359,6 +366,96 @@ function inferModelRequirementFromNode(node: ServerRoleWorkflowGraphNode): {
     inputTypes: ['text'],
     outputTypes: ['text', 'json']
   };
+}
+
+function inferModelRequirementFromSemanticProfileId(profileId: string): {
+  name: string;
+  capabilities: string[];
+  inputTypes: string[];
+  outputTypes: string[];
+} | undefined {
+  if (profileId === 'qiu-vision-default') {
+    return {
+      name: '图片理解模型',
+      capabilities: ['image_understanding', 'vision_understanding', 'vision_text'],
+      inputTypes: ['image', 'text'],
+      outputTypes: ['text', 'json']
+    };
+  }
+
+  if (profileId === 'qiu-image-generation-default') {
+    return {
+      name: '生图模型',
+      capabilities: ['image_generation', 'text_to_image'],
+      inputTypes: ['text'],
+      outputTypes: ['image']
+    };
+  }
+
+  if (profileId === 'qiu-image-editing-default') {
+    return {
+      name: '参考图编辑模型',
+      capabilities: ['image_editing', 'image_to_image'],
+      inputTypes: ['image', 'text'],
+      outputTypes: ['image']
+    };
+  }
+
+  if (profileId === 'qiu-video-generation-default') {
+    return {
+      name: '生视频模型',
+      capabilities: ['video_generation', 'text_to_video', 'image_to_video'],
+      inputTypes: ['text', 'image'],
+      outputTypes: ['video']
+    };
+  }
+
+  if (profileId === 'qiu-asr-default') {
+    return {
+      name: '语音识别模型',
+      capabilities: ['audio_to_text'],
+      inputTypes: ['audio', 'video'],
+      outputTypes: ['text', 'json']
+    };
+  }
+
+  if (profileId === 'qiu-embedding-default') {
+    return {
+      name: '向量模型',
+      capabilities: ['embedding'],
+      inputTypes: ['text'],
+      outputTypes: ['embedding']
+    };
+  }
+
+  if (profileId === 'qiu-rerank-default') {
+    return {
+      name: '重排模型',
+      capabilities: ['rerank'],
+      inputTypes: ['text'],
+      outputTypes: ['scores']
+    };
+  }
+
+  if (profileId === 'qiu-reasoning-default') {
+    return {
+      name: '推理文本模型',
+      capabilities: ['reasoning_text', 'text'],
+      inputTypes: ['text'],
+      outputTypes: ['text', 'json']
+    };
+  }
+
+  if (profileId === 'qiu-general-default') {
+    return {
+      name: '文本模型',
+      capabilities: ['text'],
+      inputTypes: ['text'],
+      outputTypes: ['text', 'json']
+    };
+  }
+
+  return undefined;
 }
 
 function getSemanticModelProfileIdForNode(node: ServerRoleWorkflowGraphNode): string | undefined {

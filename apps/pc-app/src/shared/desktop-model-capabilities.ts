@@ -137,11 +137,11 @@ export function modelProfileSupportsRequiredCapabilities(
     return true;
   }
 
-  if (
-    isDedicatedAudioTranscriptionModelName(profile.modelName) &&
-    inferredCapabilities.includes('audio_to_text') &&
-    !required.includes('audio_to_text')
-  ) {
+  const isAudioTranscriptionProfile =
+    profile.purpose === 'audio' ||
+    inferredCapabilities.includes('audio_to_text') ||
+    capabilities.has('audio_to_text');
+  if (isAudioTranscriptionProfile && !required.includes('audio_to_text')) {
     return false;
   }
 

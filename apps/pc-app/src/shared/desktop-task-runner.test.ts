@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import type { ModelProfile, RolePackageManifest, ToolManifest } from './desktop-contract.js';
+import type { ModelProfile, RoleModelCredentialBinding, RolePackageManifest, ToolManifest } from './desktop-contract.js';
 import { runDesktopTask } from './desktop-task-runner.js';
 import { createMockTaskDetail } from './workbench-data.js';
 
@@ -3989,6 +3989,219 @@ assert.ok(
 );
 assert.ok(
   videoFactoryTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_RUNTIME_VIDEO_FACTORY_COMPLETED')
+);
+
+const boundAliyunAsrProfile: ModelProfile = {
+  id: 'aliyun-qwen3-asr-flash-filetrans',
+  providerId: 'aliyun-bailian',
+  providerName: '阿里云百炼',
+  modelName: 'qwen3-asr-flash',
+  purpose: 'audio',
+  capabilities: ['audio_to_text'],
+  apiBaseUrl: 'https://dashscope.aliyuncs.com/api/v1',
+  apiKey: 'aliyun-asr-key'
+};
+const boundAsrRolePackage: RolePackageManifest = {
+  roleCode: 'case-video-factory-bound-asr',
+  applicationType: 'digital_factory',
+  name: 'Case Video Factory Bound ASR',
+  version: '1.0.0',
+  workflowGraph: {
+    version: '1.0.0',
+    entryNodeId: 'start',
+    nodes: [
+      { id: 'start', type: 'start', name: 'Start' },
+      {
+        id: 'screen_score_and_edit',
+        type: 'llm',
+        name: 'Screen score and edit',
+        modelProfileId: 'qiu-general-default',
+        inputVariables: ['factory_request', 'start.files'],
+        outputVariables: ['video_screening_results', 'screening_summary'],
+        config: {
+          llmTaskType: 'video_screening_batch',
+          outputMode: 'json',
+          concurrency: 1,
+          requiredModelProfileIds: ['qiu-asr-default']
+        }
+      },
+      {
+        id: 'factory_output',
+        type: 'output',
+        name: 'Return result',
+        inputVariables: ['video_screening_results', 'screening_summary'],
+        outputVariables: ['final_answer']
+      }
+    ],
+    edges: [
+      { id: 'start-screen', sourceNodeId: 'start', targetNodeId: 'screen_score_and_edit' },
+      { id: 'screen-output', sourceNodeId: 'screen_score_and_edit', targetNodeId: 'factory_output' }
+    ]
+  },
+  dependencyManifest: {
+    version: '1.0.0',
+    generatedAt: '2026-07-29T00:00:00.000Z',
+    variables: [],
+    modelAssets: [
+      {
+        key: 'qiu-asr-default',
+        name: 'Legacy ASR Slot',
+        providerId: 'provider-pending',
+        providerName: 'Pending',
+        modelId: 'qiu-asr-default',
+        modelProfileId: 'qiu-asr-default',
+        capabilities: ['text'],
+        inputTypes: ['text'],
+        outputTypes: ['text'],
+        credentialFields: ['apiKey', 'apiBaseUrl'],
+        required: true,
+        nodeIds: ['screen_score_and_edit']
+      },
+      {
+        key: 'qiu-general-default',
+        name: 'Text Slot',
+        providerId: 'provider-pending',
+        providerName: 'Pending',
+        modelId: 'qiu-general-default',
+        modelProfileId: 'qiu-general-default',
+        capabilities: ['text'],
+        inputTypes: ['text'],
+        outputTypes: ['text', 'json'],
+        credentialFields: ['apiKey', 'apiBaseUrl'],
+        required: true,
+        nodeIds: ['screen_score_and_edit']
+      }
+    ],
+    toolActions: [],
+    artifactTemplates: [],
+    nodeTemplates: [],
+    warnings: []
+  },
+  modelProfileIds: ['qiu-general-default', 'qiu-asr-default'],
+  toolIds: ['video-processing', 'office-document', 'local-filesystem'],
+  requiredKnowledgeSources: [],
+  defaultTaskTypes: ['factory_video_screening'],
+  syncPolicy: 'summary_only'
+};
+const boundAsrBinding: RoleModelCredentialBinding = {
+  roleCode: boundAsrRolePackage.roleCode,
+  modelProfileId: 'qiu-asr-default',
+  runtimeModelProfileId: boundAliyunAsrProfile.id,
+  mode: 'provider_default',
+  updatedAt: '2026-07-29T00:00:00.000Z'
+};
+let boundAsrCalls = 0;
+const boundAsrTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-factory-video-bound-asr-001',
+    roleCode: boundAsrRolePackage.roleCode,
+    roleName: boundAsrRolePackage.name,
+    title: 'Screen videos with bound ASR profile',
+    input: JSON.stringify({
+      factory_request: {
+        factoryKind: 'medical_case_video_screening_factory',
+        asr: {
+          modelProfileId: 'qiu-asr-default',
+          language: 'zh',
+          dialect: 'auto'
+        },
+        editEnabled: false
+      }
+    }),
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0,
+    executionContext: {
+      modelProfileIds: ['qiu-general-default', 'qiu-asr-default'],
+      toolIds: ['video-processing', 'office-document', 'local-filesystem'],
+      knowledgeBindingIds: [],
+      attachmentPaths: ['C:\\QiuAI\\factory\\bound-asr-video.mp4']
+    }
+  }),
+  rolePackage: boundAsrRolePackage,
+  modelProfiles: [boundAliyunAsrProfile, ...modelProfiles],
+  roleModelCredentialBindings: [boundAsrBinding],
+  tools,
+  workspaceId: 'workspace-video-factory',
+  enabledModelProfileIds: ['qiu-general-default', boundAliyunAsrProfile.id],
+  enabledToolIds: ['video-processing', 'office-document', 'local-filesystem'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    if (request.taskKind === 'audio_transcription') {
+      boundAsrCalls += 1;
+      assert.equal(request.profile.id, boundAliyunAsrProfile.id);
+      return {
+        provider: request.profile.providerName,
+        modelName: request.profile.modelName,
+        content:
+          '使用前我的症状比较明显，晚上经常疼痛不舒服，睡眠也不好，说话时能清楚描述原来的问题。后来按照要求使用产品并坚持了一段时间，使用后现在疼痛缓解很多，睡眠改善明显，精神状态也好了。我能完整说明使用前的问题、使用过程和使用后的变化，内容表达比较连贯。'
+      };
+    }
+
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: 'Bound ASR video screening completed.'
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    if (request.action === 'video.probe') {
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          width: 1920,
+          height: 1080,
+          durationSeconds: 45,
+          hasVideo: true,
+          hasAudio: true,
+          audioStreamCount: 1
+        }
+      };
+    }
+
+    if (request.action === 'video.extract_audio') {
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          localPath: 'C:\\QiuAI\\workspace\\asr-audio\\bound-asr-video-audio.mp3'
+        }
+      };
+    }
+
+    if (request.action === 'filesystem.write_text_file') {
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          localPath: 'C:\\QiuAI\\workspace\\qualified-videos\\bound-asr-qualified-list.md'
+        }
+      };
+    }
+
+    assert.equal(request.action, 'spreadsheet.write_xlsx');
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\spreadsheets\\bound-asr-video-screening.xlsx'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:14.700Z'
+});
+
+assert.equal(boundAsrTask.task.state, 'completed');
+assert.equal(boundAsrCalls, 1);
+assert.equal(boundAsrTask.task.factoryOutputs?.[0]?.status, 'qualified');
+assert.equal(
+  boundAsrTask.task.executionLogs.some((log) => log.eventType === 'MODEL_API_CONFIG_MISSING'),
+  false
 );
 
 let videoFactoryAsrFailureCalls = 0;

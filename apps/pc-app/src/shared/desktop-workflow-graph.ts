@@ -636,11 +636,17 @@ function readWorkflowNodeSemanticModelProfileIds(node: WorkflowGraphNode): strin
 function readDependencyManifestSemanticModelProfileId(
   asset: NonNullable<RolePackageManifest['dependencyManifest']>['modelAssets'][number]
 ): string {
+  const declaredProfileId = asset.modelProfileId || asset.modelId || asset.key;
+  const declaredSemanticProfileId = mapModelProfileIdToSemanticDefault(declaredProfileId);
+  if (declaredProfileId.trim().toLowerCase().startsWith('qiu-')) {
+    return declaredSemanticProfileId;
+  }
+
   return getSemanticModelProfileIdForCapabilities({
     capabilities: asset.capabilities,
     inputTypes: asset.inputTypes,
     outputTypes: asset.outputTypes
-  }) ?? mapModelProfileIdToSemanticDefault(asset.modelProfileId || asset.modelId || asset.key);
+  }) ?? declaredSemanticProfileId;
 }
 
 function getSemanticModelProfileIdForTaskType(taskType: string | undefined): string {

@@ -101,6 +101,54 @@ assert.deepEqual(readWorkflowRequiredModelProfileIds(videoFactoryWorkflowGraph),
   'qiu-asr-default'
 ]);
 
+const legacyVideoFactoryManifestRolePackage: RolePackageManifest = {
+  ...rolePackage,
+  roleCode: 'legacy-video-factory',
+  dependencyManifest: {
+    version: '1.0.0',
+    generatedAt: '2026-07-29T00:00:00.000Z',
+    variables: [],
+    modelAssets: [
+      {
+        key: 'qiu-asr-default',
+        name: 'Legacy ASR Slot',
+        providerId: 'provider-pending',
+        providerName: 'Pending',
+        modelId: 'qiu-asr-default',
+        modelProfileId: 'qiu-asr-default',
+        capabilities: ['text'],
+        inputTypes: ['text'],
+        outputTypes: ['text'],
+        credentialFields: ['apiKey', 'apiBaseUrl'],
+        required: true,
+        nodeIds: ['screen_score_and_edit']
+      },
+      {
+        key: 'qiu-general-default',
+        name: 'Text Slot',
+        providerId: 'provider-pending',
+        providerName: 'Pending',
+        modelId: 'qiu-general-default',
+        modelProfileId: 'qiu-general-default',
+        capabilities: ['text'],
+        inputTypes: ['text'],
+        outputTypes: ['text', 'json'],
+        credentialFields: ['apiKey', 'apiBaseUrl'],
+        required: true,
+        nodeIds: ['screen_score_and_edit']
+      }
+    ],
+    toolActions: [],
+    artifactTemplates: [],
+    nodeTemplates: [],
+    warnings: []
+  }
+};
+assert.deepEqual(readRequiredModelProfileIdsForRolePackage(legacyVideoFactoryManifestRolePackage), [
+  'qiu-asr-default',
+  'qiu-general-default'
+]);
+
 const asrProfile = createPlaceholderModelProfile('qiu-asr-default');
 assert.equal(asrProfile.purpose, 'audio');
 assert.ok(asrProfile.capabilities?.includes('audio_to_text'));

@@ -140,7 +140,8 @@ import {
   getRoleModelRuntimeRequirementStatuses,
   readRequiredModelProfileIdsForRolePackage,
   readWorkflowRequiredModelProfileIds,
-  type RoleModelRuntimeIssue
+  type RoleModelRuntimeIssue,
+  type RoleModelRuntimeRequirementStatus
 } from '../shared/desktop-role-requirements';
 import {
   createCustomCompatibleModelProfile,
@@ -259,7 +260,6 @@ interface FactoryRunFormValues {
   packageDefinitions?: FactoryRunPackageDefinition[];
   qualityCheckMode?: 'none' | 'basic' | 'smart';
   enableImageUnderstanding?: boolean;
-  asrModelProfileId?: string;
   dialect?: string;
   screeningProfileKey?: string;
   editEnabled?: boolean;
@@ -4857,6 +4857,24 @@ export default function App() {
     }
 
     const normalizedModelProfileIds = readRequiredModelProfileIdsForRolePackage(rolePackage);
+    const incompatibleSelection = findIncompatibleRuntimeModelSelection({
+      state: runtimeState,
+      rolePackage,
+      modelProfileIds: normalizedModelProfileIds,
+      runtimeSelections: values.runtimeModels
+    });
+    if (incompatibleSelection) {
+      message.warning(
+        `模型槽位不匹配：${modelCapabilitySummary(
+          incompatibleSelection.requirementProfile.capabilities,
+          incompatibleSelection.requirementProfile.purpose
+        )} 不能选择 ${incompatibleSelection.runtimeProfile
+          ? `${incompatibleSelection.runtimeProfile.providerName} / ${incompatibleSelection.runtimeProfile.modelName}`
+          : incompatibleSelection.runtimeModelProfileId}。`
+      );
+      return;
+    }
+
     const selectedRuntimeModelProfileIds = Object.values(values.runtimeModels ?? {})
       .map((profileId) => profileId?.trim())
       .filter((profileId): profileId is string => Boolean(profileId));
@@ -5887,25 +5905,6 @@ export default function App() {
     const targetSecondOptions = selectedFactoryManifest.editing?.targetSecondOptions?.length
       ? selectedFactoryManifest.editing.targetSecondOptions
       : [15, 30, 45];
-    const audioProfileOptions = selectedFactoryModelReadiness
-      .filter((requirement) => readModelProfileCapabilities(requirement.profile).includes('audio_to_text'))
-      .map((requirement) => {
-        const profile = requirement.profile;
-        const suffix = [
-          requirement.enabled ? '' : '未启用',
-          requirement.configured ? '' : '未配置'
-        ].filter(Boolean).join(' / ');
-
-        return {
-          value: profile.id,
-          label: `${profile.providerName} / ${profile.modelName}${suffix ? `（${suffix}）` : ''}`,
-          disabled: !requirement.known
-        };
-      });
-    const hasReadyAudioProfile = selectedFactoryModelReadiness.some(
-      (requirement) =>
-        requirement.ready && readModelProfileCapabilities(requirement.profile).includes('audio_to_text')
-    );
     const acceptedFactoryFileTypes = isMedicalVideoFactory
       ? '.mp4,.mov,.mkv,.avi,.webm,.m4v'
       : isOperationFactory
@@ -5958,17 +5957,21 @@ export default function App() {
 
         <div className="factory-status-list">
           {selectedFactoryModelReadiness.length > 0 ? (
-            selectedFactoryModelReadiness.map((requirement) => (
-              <div key={requirement.profile.id} className="factory-status-row">
-                <span>
-                  <ApiOutlined />
-                  <Typography.Text ellipsis>{requirement.profile.modelName}</Typography.Text>
-                </span>
-                <Tag color={requirement.ready ? 'green' : 'orange'}>
-                  {renderModelRequirementStatusLabel(requirement.issue)}
-                </Tag>
-              </div>
-            ))
+            selectedFactoryModelReadiness.map((requirement) => {
+              const displayProfile = getRuntimeRequirementEffectiveProfile(requirement);
+
+              return (
+                <div key={requirement.profile.id} className="factory-status-row">
+                  <span>
+                    <ApiOutlined />
+                    <Typography.Text ellipsis>{displayProfile.modelName}</Typography.Text>
+                  </span>
+                  <Tag color={requirement.ready ? 'green' : 'orange'}>
+                    {renderModelRequirementStatusLabel(requirement.issue)}
+                  </Tag>
+                </div>
+              );
+            })
           ) : (
             <Typography.Text type="secondary">未声明指定模型。</Typography.Text>
           )}
@@ -6344,23 +6347,6 @@ export default function App() {
 
                         {isMedicalVideoFactory ? (
                           <>
-                            <Form.Item
-                              name="asrModelProfileId"
-                              label="语音转文字模型"
-                              rules={[{ required: true, message: '请选择可用的语音转文字模型' }]}
-                            >
-                              <Select
-                                size="large"
-                                placeholder="选择语音转文字模型"
-                                options={audioProfileOptions}
-                                notFoundContent="暂无支持语音转文字的模型"
-                              />
-                            </Form.Item>
-                            {!hasReadyAudioProfile ? (
-                              <Typography.Text type="warning">
-                                语音转文字模型未配置时，任务会停在语音识别前。请先到模型配置填写 API Key。
-                              </Typography.Text>
-                            ) : null}
                             <div className="factory-inline-form-grid">
                               <Form.Item name="dialect" label="语言 / 方言" rules={[{ required: true }]}>
                                 <Select
@@ -9565,29 +9551,9 @@ export default function App() {
     if (isMedicalCaseVideoFactory(factory)) {
       const screeningProfiles = readFactoryScreeningProfiles(factory, roleCode);
       const defaultProfile = screeningProfiles.find((item) => item.defaultSelected) ?? screeningProfiles[0];
-      const rolePackage =
-        getPreparedInstalledRolePackage(roleCode) ??
-        normalizeRolePackageRequiredModelProfiles(toInstalledRolePackage(template));
-      const modelRequirements = getRoleModelRuntimeRequirementStatuses(
-        ensureModelProfilesForRolePackage(runtimeState.modelProfiles, rolePackage),
-        runtimeState.localRuntime.enabledModelProfileIds,
-        rolePackage,
-        {
-          roleCode,
-          credentials: runtimeState.modelCredentials,
-          roleBindings: runtimeState.roleModelCredentialBindings
-        }
-      );
-      const audioRequirements = modelRequirements.filter((requirement) =>
-        readModelProfileCapabilities(requirement.profile).includes('audio_to_text')
-      );
-      const readyAudioProfile = audioRequirements.find((requirement) => requirement.ready)?.profile;
-      const firstAudioProfile = audioRequirements[0]?.profile;
-
       return {
         roleCode,
         useKnowledge: false,
-        asrModelProfileId: readyAudioProfile?.id ?? firstAudioProfile?.id,
         dialect: factory.asr?.defaultDialect ?? 'auto',
         screeningProfileKey: defaultProfile?.key ?? 'default_medical_case',
         editEnabled: factory.editing?.defaultEnabled ?? false,
@@ -10055,24 +10021,6 @@ export default function App() {
         message.warning('当前运行环境没有暴露视频本地路径，无法执行本机视频筛选。');
         return;
       }
-      if (!values.asrModelProfileId) {
-        message.warning('请选择一个可用的语音转文字模型。');
-        return;
-      }
-
-      const rolePackage =
-        getPreparedInstalledRolePackage(values.roleCode) ??
-        normalizeRolePackageRequiredModelProfiles(toInstalledRolePackage(template));
-      const availableModelProfiles = ensureModelProfilesForRolePackage(runtimeState.modelProfiles, rolePackage);
-      const asrProfile = availableModelProfiles.find((profile) => profile.id === values.asrModelProfileId);
-      if (
-        !asrProfile ||
-        !readModelProfileCapabilities(asrProfile).includes('audio_to_text')
-      ) {
-        message.warning('请选择语音转文字能力对应的模型。');
-        return;
-      }
-
       const title = `${template.name} - ${videoAttachments.length} 个视频`;
       const input = buildMedicalCaseVideoFactoryTaskInput({
         template,
@@ -10085,7 +10033,6 @@ export default function App() {
         title,
         input,
         attachments: videoAttachments,
-        extraModelProfileIds: [values.asrModelProfileId],
         useKnowledge: values.useKnowledge === true
       });
       if (created) {
@@ -11055,7 +11002,7 @@ export default function App() {
 
     if (firstUnreadyModel) {
       setRuntimeState(preparedState);
-      setSelectedModelId(firstUnreadyModel.profile.id);
+      setSelectedModelId(firstUnreadyModel.runtimeProfileId ?? firstUnreadyModel.profile.id);
       setModelConfigOpen(true);
       setModelTestNotice(
         firstUnreadyModel.issue === 'disabled'
@@ -11126,7 +11073,7 @@ export default function App() {
     if (firstUnreadyModel) {
       if (notifyUser) {
         setRuntimeState(preparedState);
-        setSelectedModelId(firstUnreadyModel.profile.id);
+        setSelectedModelId(firstUnreadyModel.runtimeProfileId ?? firstUnreadyModel.profile.id);
         setModelConfigOpen(true);
         setModelTestNotice('值守数字员工需要先完成模型配置。');
         navigateToSection('models');
@@ -14186,7 +14133,7 @@ function buildMedicalCaseVideoFactoryTaskInput({
       gates: screeningProfile?.gates ?? []
     },
     asr: {
-      modelProfileId: values.asrModelProfileId,
+      modelProfileId: 'qiu-asr-default',
       language: factory.asr?.defaultLanguage ?? 'zh',
       dialect: values.dialect ?? factory.asr?.defaultDialect ?? 'auto',
       dialectLabel: dialect?.label ?? values.dialect ?? '自动识别'
@@ -15668,14 +15615,77 @@ function resolveModelProfileLabel(modelProfiles: ModelProfile[], profileId: stri
   return profile ? `${profile.providerName} / ${profile.modelName}` : profileId;
 }
 
+function getRuntimeRequirementEffectiveProfile(
+  requirement: RoleModelRuntimeRequirementStatus
+): ModelProfile {
+  return requirement.runtimeProfile ?? requirement.profile;
+}
+
+function findIncompatibleRuntimeModelSelection(input: {
+  state: DesktopRuntimeState;
+  rolePackage: RolePackageManifest;
+  modelProfileIds: string[];
+  runtimeSelections: RuntimeModelQuickSwitchFormValues['runtimeModels'] | undefined;
+}): {
+  requirementProfile: ModelProfile;
+  runtimeProfile?: ModelProfile;
+  runtimeModelProfileId: string;
+} | undefined {
+  const modelProfiles = ensureModelProfilesForRolePackage(input.state.modelProfiles, input.rolePackage);
+  const modelProfileById = new Map(modelProfiles.map((profile) => [profile.id, profile]));
+
+  for (const modelProfileId of input.modelProfileIds) {
+    const requirementProfile = modelProfileById.get(modelProfileId);
+    const runtimeModelProfileId =
+      input.runtimeSelections?.[modelProfileId]?.trim() || modelProfileId;
+    const runtimeProfile = modelProfileById.get(runtimeModelProfileId);
+    if (!requirementProfile || !runtimeProfile) {
+      return {
+        requirementProfile: requirementProfile ?? createMissingRuntimeRequirementProfile(modelProfileId),
+        runtimeProfile,
+        runtimeModelProfileId
+      };
+    }
+
+    if (
+      !modelProfileSupportsAnyRequiredCapability(
+        runtimeProfile,
+        readRequiredCapabilitiesForRuntimeRequirementProfile(requirementProfile)
+      )
+    ) {
+      return {
+        requirementProfile,
+        runtimeProfile,
+        runtimeModelProfileId
+      };
+    }
+  }
+
+  return undefined;
+}
+
+function createMissingRuntimeRequirementProfile(modelProfileId: string): ModelProfile {
+  return {
+    id: modelProfileId,
+    providerId: 'provider-pending',
+    providerName: '待配置',
+    modelName: modelProfileId,
+    purpose: 'general',
+    capabilities: ['text']
+  };
+}
+
+function readRequiredCapabilitiesForRuntimeRequirementProfile(profile: ModelProfile): string[] {
+  const requiredCapabilities = getRequiredCapabilitiesForSemanticProfileId(profile.id);
+  return requiredCapabilities.length > 0 ? requiredCapabilities : readModelProfileCapabilities(profile);
+}
+
 function buildCompatibleRuntimeModelOptions(
   state: DesktopRuntimeState,
   requirementProfile: ModelProfile,
   roleCode?: string
 ): Array<{ label: string; value: string }> {
-  const requiredCapabilities = getRequiredCapabilitiesForSemanticProfileId(requirementProfile.id);
-  const effectiveRequiredCapabilities =
-    requiredCapabilities.length > 0 ? requiredCapabilities : readModelProfileCapabilities(requirementProfile);
+  const effectiveRequiredCapabilities = readRequiredCapabilitiesForRuntimeRequirementProfile(requirementProfile);
   const enabledModelIds = new Set(state.localRuntime.enabledModelProfileIds);
   const compatibleProfiles = state.modelProfiles.filter((profile) => {
     const isCurrentRequirement = profile.id === requirementProfile.id;

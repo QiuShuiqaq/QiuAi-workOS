@@ -279,6 +279,28 @@ assert.equal(
   true
 );
 
+const aliyunAsrProfile: ModelProfile = {
+  id: 'aliyun-qwen3-asr-flash-audio',
+  providerId: 'aliyun-bailian',
+  providerName: '阿里云百炼',
+  modelName: 'qwen3-asr-flash',
+  purpose: 'audio',
+  capabilities: ['audio_to_text', 'text']
+};
+
+assert.equal(
+  modelProfileSupportsRequiredCapabilities(aliyunAsrProfile, ['audio_to_text']),
+  true
+);
+assert.equal(
+  modelProfileSupportsRequiredCapabilities(aliyunAsrProfile, ['text']),
+  false
+);
+assert.equal(
+  modelProfileSupportsRequiredCapabilities(aliyunAsrProfile, ['reasoning_text', 'text']),
+  false
+);
+
 assert.deepEqual(
   readModelCatalogEntryEffectiveCapabilities({
     id: 'mystery-2026',

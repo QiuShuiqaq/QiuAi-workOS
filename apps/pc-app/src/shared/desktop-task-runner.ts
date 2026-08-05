@@ -925,10 +925,10 @@ async function invokeConfiguredModel(input: {
   workflowPlan: WorkflowExecutionPlan;
   rolePackage?: RolePackageManifest;
   profiles: ModelProfile[];
+  roleModelCredentialBindings?: RoleModelCredentialBinding[];
   modelInvoker: DesktopModelInvoker;
   desktopToolInvoker?: DesktopToolInvoker;
   workspaceId?: string;
-  roleModelCredentialBindings?: RoleModelCredentialBinding[];
   createdAt: string;
   onProgress?: DesktopTaskProgressCallback;
 }): Promise<ModelInvocationResult> {
@@ -3222,6 +3222,7 @@ async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
   binding: ResolvedRuntimeBinding;
   rolePackage?: RolePackageManifest;
   profiles: ModelProfile[];
+  roleModelCredentialBindings?: RoleModelCredentialBinding[];
   modelInvoker: DesktopModelInvoker;
   desktopToolInvoker?: DesktopToolInvoker;
   workspaceId?: string;
@@ -3251,7 +3252,12 @@ async function invokeWorkflowRuntimeFactoryVideoScreeningNode(input: {
   }
 
   const gates = readFactoryVideoScreeningGates(factoryRequest);
-  const asrProfile = selectFactoryAsrProfile(input.profiles, factoryRequest);
+  const asrProfile = selectFactoryAsrProfile(
+    input.profiles,
+    factoryRequest,
+    input.task.roleCode,
+    input.roleModelCredentialBindings
+  );
   const editEnabled = readFactoryRuntimeBoolean(factoryRequest?.editEnabled);
   const editTargetSeconds = clampWorkflowRuntimeLimit(
     readFactoryRuntimeNumber(factoryRequest?.editTargetSeconds),
@@ -4971,14 +4977,35 @@ function defaultFactoryVideoScreeningGates(): FactoryVideoScreeningGate[] {
 
 function selectFactoryAsrProfile(
   profiles: ModelProfile[],
-  factoryRequest: Record<string, unknown> | undefined
+  factoryRequest: Record<string, unknown> | undefined,
+  roleCode?: string,
+  roleModelCredentialBindings: RoleModelCredentialBinding[] = []
 ): ModelProfile | undefined {
   const asr = isWorkflowRuntimeRecord(factoryRequest?.asr) ? factoryRequest.asr : undefined;
   const requestedProfileId = readWorkflowRuntimeString(asr?.modelProfileId);
   if (requestedProfileId) {
-    return profiles.find(
+    const requestedProfile = profiles.find(
       (profile) => profile.id === requestedProfileId && modelProfileSupportsAnyCapability(profile, ['audio_to_text'])
     );
+    if (requestedProfile) {
+      return requestedProfile;
+    }
+
+    const boundRuntimeProfileId = roleCode
+      ? roleModelCredentialBindings.find(
+          (binding) =>
+            binding.roleCode === roleCode &&
+            binding.modelProfileId === requestedProfileId &&
+            binding.runtimeModelProfileId?.trim()
+        )?.runtimeModelProfileId?.trim()
+      : undefined;
+    if (boundRuntimeProfileId) {
+      return profiles.find(
+        (profile) =>
+          profile.id === boundRuntimeProfileId &&
+          modelProfileSupportsAnyCapability(profile, ['audio_to_text'])
+      );
+    }
   }
 
   return profiles.find((profile) => modelProfileSupportsAnyCapability(profile, ['audio_to_text']));
@@ -8890,9 +8917,14 @@ function readDependencyManifestModelProfileIdForNode(
     typeof node.config?.modelAssetKey === 'string' && node.config.modelAssetKey.trim()
       ? node.config.modelAssetKey.trim()
       : undefined;
+  const semanticDefaultProfileId = getWorkflowSemanticDefaultProfileId(node);
   const asset = modelAssetKey
     ? modelAssets.find((item) => item.key === modelAssetKey)
-    : modelAssets.find((item) => item.nodeIds.includes(node.id));
+    : modelAssets.find(
+        (item) =>
+          item.nodeIds.includes(node.id) &&
+          readDependencyManifestSemanticModelProfileId(item) === semanticDefaultProfileId
+      ) ?? modelAssets.find((item) => item.nodeIds.includes(node.id));
   const profileId = asset
     ? readDependencyManifestSemanticModelProfileId(asset)
     : undefined;
@@ -8928,11 +8960,17 @@ function workflowNodeUsesReferenceImage(node: WorkflowGraphNode): boolean {
 function readDependencyManifestSemanticModelProfileId(
   asset: NonNullable<RolePackageManifest['dependencyManifest']>['modelAssets'][number]
 ): string {
+  const declaredProfileId = asset.modelProfileId || asset.modelId || asset.key;
+  const declaredSemanticProfileId = normalizeRuntimeRequirementModelProfileId(declaredProfileId);
+  if (declaredProfileId.trim().toLowerCase().startsWith('qiu-')) {
+    return declaredSemanticProfileId;
+  }
+
   return getSemanticModelProfileIdForAssetCapabilities({
     capabilities: asset.capabilities,
     inputTypes: asset.inputTypes,
     outputTypes: asset.outputTypes
-  }) ?? normalizeRuntimeRequirementModelProfileId(asset.modelProfileId || asset.modelId || asset.key);
+  }) ?? declaredSemanticProfileId;
 }
 
 function getSemanticModelProfileIdForAssetCapabilities(input: {
