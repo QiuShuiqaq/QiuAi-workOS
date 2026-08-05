@@ -353,7 +353,11 @@ function buildRunnableWorkflowGraphForTemplate(
         hasKnowledge ? 'gather_context.text' : undefined,
         hasWebSearch ? 'web_research.text' : undefined
       ].filter((value): value is string => Boolean(value)),
-      outputVariables: ['draft_text']
+      outputVariables: ['draft_text'],
+      modelProfileId: 'qiu-general-default',
+      config: {
+        llmTaskType: 'text'
+      }
     },
     {
       id: 'write_artifact',
@@ -798,7 +802,10 @@ function buildOfficeProductionWorkflowGraph(input: {
         input.includeBrowserAutomation ? 'rpa_browser_collect.text' : undefined
       ].filter((value): value is string => Boolean(value)),
       outputVariables: ['analysis_result'],
-      config: input.analysisTimeoutMs ? { timeoutMs: input.analysisTimeoutMs } : undefined
+      config: {
+        llmTaskType: input.analysisModelProfileId === 'qiu-general-default' ? 'text' : 'reasoning',
+        ...(input.analysisTimeoutMs ? { timeoutMs: input.analysisTimeoutMs } : {})
+      }
     },
     {
       id: 'draft_deliverable',
@@ -814,13 +821,14 @@ function buildOfficeProductionWorkflowGraph(input: {
       outputVariables: ['deliverable_content'],
       config: spreadsheetArtifactType
         ? {
+            llmTaskType: 'structured_extraction',
             outputMode: 'json',
             schema: buildSpreadsheetDeliverableSchema(spreadsheetArtifactType),
             ...(input.draftTimeoutMs ? { timeoutMs: input.draftTimeoutMs } : {})
           }
         : input.draftTimeoutMs
-          ? { timeoutMs: input.draftTimeoutMs }
-          : undefined
+          ? { llmTaskType: 'text', timeoutMs: input.draftTimeoutMs }
+          : { llmTaskType: 'text' }
     },
     {
       id: 'quality_check',
@@ -830,7 +838,10 @@ function buildOfficeProductionWorkflowGraph(input: {
       modelProfileId: 'qiu-general-default',
       inputVariables: ['deliverable_content', 'task_parameters'],
       outputVariables: ['quality_review'],
-      config: input.qualityTimeoutMs ? { timeoutMs: input.qualityTimeoutMs } : undefined
+      config: {
+        llmTaskType: 'text',
+        ...(input.qualityTimeoutMs ? { timeoutMs: input.qualityTimeoutMs } : {})
+      }
     },
     {
       id: 'write_artifact',

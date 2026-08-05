@@ -11326,7 +11326,7 @@ export default function App() {
       artifactCount: 0,
       costCents: 0,
       executionContext: buildTaskExecutionContextWithKnowledgeUsage(
-        buildExecutionContextForRole(preparedState.rolePackages, config.roleCode),
+        buildExecutionContextForRole(preparedState.rolePackages, config.roleCode, preparedState),
         config.useKnowledge ?? getDefaultUseKnowledgeForRolePackage(rolePackage)
       )
     });
@@ -11434,7 +11434,7 @@ export default function App() {
     const executionContext = buildTaskExecutionContextWithAttachments(
       buildTaskExecutionContextWithKnowledgeUsage(
         buildTaskExecutionContextWithExtraModels(
-          buildExecutionContextForRole(preparedState.rolePackages, roleCode),
+          buildExecutionContextForRole(preparedState.rolePackages, roleCode, preparedState),
           values.extraModelProfileIds ?? []
         ),
         values.useKnowledge
@@ -11996,19 +11996,12 @@ function buildVerificationExecutionContext(
 ): NonNullable<DesktopTaskDetail['executionContext']> {
   const availableToolIds = new Set(state.tools.map((tool) => tool.id));
   const enabledModelProfileIds = new Set(state.localRuntime.enabledModelProfileIds);
-  const roleModelProfileIds = rolePackage.modelProfileIds.filter((profileId) =>
-    enabledModelProfileIds.has(profileId)
-  );
-  const configuredModelProfileIds = state.modelProfiles
-    .filter(
-      (profile) =>
-        enabledModelProfileIds.has(profile.id) &&
-        hasConfiguredModelApi(state, profile, rolePackage.roleCode)
-    )
-    .map((profile) => profile.id);
-  const knownEnabledModelProfileIds = state.modelProfiles
-    .filter((profile) => enabledModelProfileIds.has(profile.id))
-    .map((profile) => profile.id);
+  const roleModelProfileIds = readRequiredModelProfileIdsForRolePackage(rolePackage);
+  const runtimeModelProfileIds = readRuntimeModelProfileIdsForRole(
+    rolePackage.roleCode,
+    roleModelProfileIds,
+    state.roleModelCredentialBindings
+  ).filter((profileId) => enabledModelProfileIds.has(profileId));
   const roleToolIds = rolePackage.toolIds.filter((toolId) => availableToolIds.has(toolId));
   const preferredToolIds = ['web-search', 'office-document', 'local-filesystem'].filter((toolId) =>
     availableToolIds.has(toolId)
@@ -12018,10 +12011,7 @@ function buildVerificationExecutionContext(
   );
 
   return {
-    modelProfileIds: mergeUniqueStrings(
-      mergeUniqueStrings(roleModelProfileIds, configuredModelProfileIds),
-      knownEnabledModelProfileIds
-    ),
+    modelProfileIds: mergeUniqueStrings(roleModelProfileIds, runtimeModelProfileIds),
     toolIds: mergeUniqueStrings(roleToolIds, preferredToolIds),
     knowledgeBindingIds: mergeUniqueStrings(roleKnowledgeBindingIds, state.localRuntime.knowledgeBindingIds)
   };
@@ -15627,19 +15617,50 @@ function getDefaultUseKnowledgeForRolePackage(rolePackage: RolePackageManifest |
 
 function buildExecutionContextForRole(
   rolePackages: RolePackageManifest[],
-  roleCode: string
+  roleCode: string,
+  state?: DesktopRuntimeState
 ): NonNullable<DesktopTaskDetail['executionContext']> | undefined {
   const rolePackage = rolePackages.find((item) => item.roleCode === roleCode);
   if (!rolePackage) {
     return undefined;
   }
 
+  const roleModelProfileIds = readRequiredModelProfileIdsForRolePackage(rolePackage);
+  const runtimeModelProfileIds = state
+    ? readRuntimeModelProfileIdsForRole(
+        rolePackage.roleCode,
+        roleModelProfileIds,
+        state.roleModelCredentialBindings
+      )
+    : [];
+
   return {
-    modelProfileIds: [...rolePackage.modelProfileIds],
+    modelProfileIds: mergeUniqueStrings(roleModelProfileIds, runtimeModelProfileIds),
     toolIds: [...rolePackage.toolIds],
     knowledgeBindingIds: rolePackage.requiredKnowledgeSources.map((source) => getKnowledgeBindingId(source)),
     useKnowledge: getDefaultUseKnowledgeForRolePackage(rolePackage)
   };
+}
+
+function readRuntimeModelProfileIdsForRole(
+  roleCode: string,
+  semanticModelProfileIds: string[],
+  bindings: RoleModelCredentialBinding[]
+): string[] {
+  const semanticModelProfileIdSet = new Set(semanticModelProfileIds);
+  return [
+    ...new Set(
+      bindings
+        .filter(
+          (binding) =>
+            binding.roleCode === roleCode &&
+            semanticModelProfileIdSet.has(binding.modelProfileId) &&
+            binding.runtimeModelProfileId?.trim()
+        )
+        .map((binding) => binding.runtimeModelProfileId?.trim())
+        .filter((profileId): profileId is string => Boolean(profileId))
+    )
+  ];
 }
 
 function resolveModelProfileLabel(modelProfiles: ModelProfile[], profileId: string): string {

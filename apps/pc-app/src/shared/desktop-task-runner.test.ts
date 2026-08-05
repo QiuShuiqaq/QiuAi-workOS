@@ -3678,7 +3678,7 @@ const legacyImageFactoryTask = await runDesktopTask({
     }
   ]),
   tools,
-  enabledModelProfileIds: ['qiu-image-editing-default', 'grsai-gpt-image-2'],
+  enabledModelProfileIds: ['qiu-image-editing-default'],
   enabledToolIds: [],
   enabledKnowledgeBindingIds: [],
   roleModelCredentialBindings: [
@@ -3720,6 +3720,10 @@ const legacyImageFactoryPreviewArtifact = legacyImageFactoryTask.task.artifacts.
 assert.equal(legacyImageFactoryTask.task.state, 'completed');
 assert.equal(legacyImageFactoryModelUsed, true);
 assert.equal(legacyImageFactoryPreviewArtifact?.factoryPreview?.completed, 1);
+assert.equal(
+  legacyImageFactoryTask.task.executionLogs.some((log) => log.eventType === 'MODEL_API_CONFIG_MISSING'),
+  false
+);
 
 const videoFactoryModelProfiles: ModelProfile[] = [
   {

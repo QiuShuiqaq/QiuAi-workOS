@@ -94,6 +94,7 @@ export interface RunDesktopTaskResult {
 }
 
 interface ResolvedRuntimeBinding {
+  requiredModelProfileIds: string[];
   modelProfiles: ModelProfile[];
   availableTools: ToolManifest[];
   availableKnowledgeSources: DesktopKnowledgeSourceSummary[];
@@ -411,6 +412,8 @@ export async function runDesktopTask(input: RunDesktopTaskInput): Promise<RunDes
 
   const binding = resolveRuntimeBinding({
     context,
+    roleCode: input.task.roleCode,
+    roleModelCredentialBindings: input.roleModelCredentialBindings ?? [],
     modelProfiles: input.modelProfiles,
     tools: input.tools,
     knowledgeSources: input.knowledgeSources ?? [],
@@ -479,7 +482,13 @@ export async function runDesktopTask(input: RunDesktopTaskInput): Promise<RunDes
       'No configured model API profile is available for this task. Add API Base URL and API Key before running it.',
       [
         ...buildWarningLogs(input.task, credentialedBinding, completedAt),
-        ...buildModelConfigWarningLogs(input.task, credentialedBinding.modelProfiles, completedAt)
+        ...buildModelConfigWarningLogs(
+          input.task,
+          credentialedBinding.modelProfiles.filter(
+            (profile) => credentialedBinding.requiredModelProfileIds.includes(profile.id)
+          ),
+          completedAt
+        )
       ]
     );
     await emitTaskProgress({
@@ -580,6 +589,8 @@ function buildContextFromRolePackage(rolePackage?: RolePackageManifest) {
 
 function resolveRuntimeBinding(input: {
   context: NonNullable<DesktopTaskDetail['executionContext']>;
+  roleCode?: string;
+  roleModelCredentialBindings?: RoleModelCredentialBinding[];
   modelProfiles: ModelProfile[];
   tools: ToolManifest[];
   knowledgeSources: DesktopKnowledgeSourceSummary[];
@@ -595,25 +606,55 @@ function resolveRuntimeBinding(input: {
   const knowledgeSourcesById = new Map(
     input.knowledgeSources.map((source) => [normalizeKnowledgeBindingId(source.id), source])
   );
+  const contextModelProfileIds = mergeUniqueStrings(
+    input.context.modelProfileIds.map((profileId) => profileId.trim())
+  );
+  const semanticModelProfileIds = mergeUniqueStrings(
+    contextModelProfileIds.map(normalizeRuntimeRequirementModelProfileId)
+  );
+  const runtimeModelProfileIdBySemanticId = new Map<string, string>();
+  if (input.roleCode) {
+    const semanticModelProfileIdSet = new Set(semanticModelProfileIds);
+    for (const binding of input.roleModelCredentialBindings ?? []) {
+      const runtimeModelProfileId = binding.runtimeModelProfileId?.trim();
+      if (
+        binding.roleCode === input.roleCode &&
+        semanticModelProfileIdSet.has(binding.modelProfileId) &&
+        runtimeModelProfileId
+      ) {
+        runtimeModelProfileIdBySemanticId.set(binding.modelProfileId, runtimeModelProfileId);
+      }
+    }
+  }
+  const boundRuntimeModelProfileIds = [...runtimeModelProfileIdBySemanticId.values()];
+  const requiredModelProfileIds = mergeUniqueStrings([
+    ...semanticModelProfileIds.map(
+      (profileId) => runtimeModelProfileIdBySemanticId.get(profileId) ?? profileId
+    )
+  ]);
+  const eligibleModelIds = new Set([
+    ...input.enabledModelProfileIds,
+    ...boundRuntimeModelProfileIds
+  ]);
   const requiredKnowledgeBindingIds = mergeUniqueStrings(
     isTaskKnowledgeEnabled(input.context)
       ? input.context.knowledgeBindingIds.map(normalizeKnowledgeBindingId)
       : []
   );
 
-  const requiredModelProfileIds = mergeUniqueStrings(
-    input.context.modelProfileIds.map(normalizeRuntimeRequirementModelProfileId)
-  );
   const candidateModelProfileIds = mergeUniqueStrings([
+    ...contextModelProfileIds,
+    ...semanticModelProfileIds,
     ...requiredModelProfileIds,
+    ...boundRuntimeModelProfileIds,
     ...input.enabledModelProfileIds
   ]);
   const modelProfiles = candidateModelProfileIds.flatMap((profileId) => {
     const profile = modelProfilesById.get(profileId);
-    return profile && enabledModelIds.has(profileId) ? [profile] : [];
+    return profile && eligibleModelIds.has(profileId) ? [profile] : [];
   });
   const missingModelProfileIds = requiredModelProfileIds.filter(
-    (profileId) => !modelProfilesById.has(profileId) || !enabledModelIds.has(profileId)
+    (profileId) => !modelProfilesById.has(profileId) || !eligibleModelIds.has(profileId)
   );
   const availableTools = input.context.toolIds.flatMap((toolId) => {
     const tool = toolsById.get(toolId);
@@ -632,6 +673,7 @@ function resolveRuntimeBinding(input: {
   );
 
   return {
+    requiredModelProfileIds,
     modelProfiles,
     availableTools,
     availableKnowledgeSources,
@@ -688,7 +730,11 @@ function completeTask(
     ...buildWarningLogs(task, binding, completedAt),
     ...buildModelConfigWarningLogs(
       task,
-      binding.modelProfiles.filter((profile) => !isModelApiConfigured(profile)),
+      binding.modelProfiles.filter(
+        (profile) =>
+          binding.requiredModelProfileIds.includes(profile.id) &&
+          !isModelApiConfigured(profile)
+      ),
       completedAt
     ),
     createLog(

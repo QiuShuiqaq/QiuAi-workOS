@@ -263,6 +263,11 @@ test('server role template catalog is focused and production-oriented', () => {
         node.modelProfileId && isSemanticModelProfileId(node.modelProfileId),
         `${template.templateId}/${node.id} must use a qiu semantic model slot`
       );
+      assert.equal(
+        typeof node.config?.llmTaskType,
+        'string',
+        `${template.templateId}/${node.id} must explicitly define llmTaskType`
+      );
       const requiredModelProfileIds = Array.isArray(node.config?.requiredModelProfileIds)
         ? node.config.requiredModelProfileIds
         : [];
