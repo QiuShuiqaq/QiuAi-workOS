@@ -326,6 +326,276 @@ try {
   globalThis.fetch = originalFetch;
 }
 
+let capturedMiniMaxModelListUrl = '';
+globalThis.fetch = (async (input: RequestInfo | URL) => {
+  capturedMiniMaxModelListUrl = String(input);
+  return new Response(
+    JSON.stringify({
+      data: [
+        { id: 'MiniMax-M2', owned_by: 'minimax' },
+        { id: 'MiniMax-M3', owned_by: 'minimax' }
+      ]
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+}) as typeof fetch;
+
+try {
+  const catalog = await listOpenAiCompatibleModels({
+    providerId: 'minimax',
+    providerName: 'MiniMax',
+    apiBaseUrl: 'https://api.minimax.io/v1',
+    apiKey: 'minimax-key',
+    modelName: 'MiniMax-M2',
+    capabilities: ['text']
+  });
+
+  assert.equal(capturedMiniMaxModelListUrl, 'https://api.minimax.io/v1/models');
+  assert.ok(catalog.models.some((model) => model.id === 'MiniMax-M2'));
+  assert.ok(catalog.models.some((model) => model.id === 'MiniMax-Hailuo-2.3-Fast'));
+  assert.ok(catalog.models.some((model) => model.id === 'MiniMax-Hailuo-02'));
+  assert.deepEqual(
+    catalog.models.find((model) => model.id === 'MiniMax-Hailuo-02')?.capabilities,
+    ['video_generation', 'text_to_video', 'image_to_video']
+  );
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+globalThis.fetch = (async () => {
+  return new Response(JSON.stringify({ error: { message: 'invalid api key (2049)' } }), {
+    status: 401,
+    headers: { 'content-type': 'application/json' }
+  });
+}) as typeof fetch;
+
+try {
+  await assert.rejects(
+    () =>
+      listOpenAiCompatibleModels({
+        providerId: 'minimax',
+        providerName: 'MiniMax',
+        apiBaseUrl: 'https://api.minimax.io/v1',
+        apiKey: 'invalid-minimax-key',
+        modelName: 'MiniMax-Hailuo-2.3-Fast',
+        capabilities: ['video_generation']
+      }),
+    /invalid api key/
+  );
+
+  const response = await testDesktopModelConnection({
+    profile: {
+      id: 'minimax-invalid-key',
+      providerId: 'minimax',
+      providerName: 'MiniMax',
+      modelName: 'MiniMax-Hailuo-2.3-Fast',
+      purpose: 'vision',
+      capabilities: ['video_generation', 'image_to_video'],
+      apiBaseUrl: 'https://api.minimax.io/v1',
+      apiKey: 'invalid-minimax-key'
+    }
+  });
+  assert.equal(response.ok, false);
+  assert.equal(response.checks?.[0]?.status, 'failed');
+  assert.match(response.checks?.[0]?.message ?? '', /invalid api key/);
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+globalThis.fetch = (async () => {
+  throw new TypeError('fetch failed');
+}) as typeof fetch;
+
+try {
+  const catalog = await listOpenAiCompatibleModels({
+    providerId: 'custom-provider',
+    providerName: 'Custom Provider',
+    apiBaseUrl: 'https://api.minimax.io/v1',
+    apiKey: 'minimax-key',
+    modelName: 'MiniMax-Hailuo-02',
+    capabilities: ['video_generation']
+  });
+
+  assert.ok(catalog.models.some((model) => model.id === 'MiniMax-Hailuo-2.3-Fast'));
+  assert.ok(catalog.models.some((model) => model.id === 'MiniMax-Hailuo-02'));
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+const minimaxVideoUrls: string[] = [];
+let capturedMiniMaxVideoBody: Record<string, unknown> | undefined;
+const originalSetTimeout = globalThis.setTimeout;
+globalThis.setTimeout = ((handler: TimerHandler, _timeout?: number, ...args: unknown[]) =>
+  originalSetTimeout(handler, 0, ...args)) as typeof setTimeout;
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = String(input);
+  minimaxVideoUrls.push(url);
+  const headers = new Headers(init?.headers);
+  assert.equal(headers.get('authorization'), 'Bearer minimax-key');
+
+  if (url.endsWith('/video_generation')) {
+    capturedMiniMaxVideoBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({ task_id: 'minimax-video-task-001', status: 'processing' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+
+  if (url.includes('/query/video_generation')) {
+    return new Response(JSON.stringify({ task_id: 'minimax-video-task-001', status: 'Success', file_id: 'file-001' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+
+  return new Response(JSON.stringify({ file: { download_url: 'https://cdn.example.test/minimax/video.mp4' } }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' }
+  });
+}) as typeof fetch;
+
+try {
+  const response = await invokeOpenAiCompatibleModelChat({
+    profile: {
+      id: 'minimax-video',
+      providerId: 'minimax',
+      providerName: 'MiniMax',
+      modelName: 'MiniMax-Hailuo-02',
+      purpose: 'vision',
+      capabilities: ['video_generation', 'text_to_video', 'image_to_video'],
+      apiBaseUrl: 'https://api.minimax.io/v1',
+      apiKey: 'minimax-key'
+    },
+    taskKind: 'video_generation',
+    videoGeneration: {
+      prompt: 'Create a short ecommerce product video.',
+      responseFormat: 'url'
+    },
+    messages: [{ role: 'user', content: 'Create product video.' }],
+    timeoutMs: 60_000
+  });
+
+  assert.deepEqual(minimaxVideoUrls, [
+    'https://api.minimax.io/v1/video_generation',
+    'https://api.minimax.io/v1/query/video_generation?task_id=minimax-video-task-001',
+    'https://api.minimax.io/v1/files/retrieve?file_id=file-001'
+  ]);
+  assert.equal(capturedMiniMaxVideoBody?.model, 'MiniMax-Hailuo-02');
+  assert.equal(capturedMiniMaxVideoBody?.prompt, 'Create a short ecommerce product video.');
+  assert.equal(capturedMiniMaxVideoBody?.prompt_optimizer, true);
+  assert.equal(response.artifacts?.[0]?.remoteUrl, 'https://cdn.example.test/minimax/video.mp4');
+  assert.equal(response.artifacts?.[0]?.providerJobId, 'minimax-video-task-001');
+  assert.equal(response.artifacts?.[0]?.providerStatus, 'success');
+} finally {
+  globalThis.fetch = originalFetch;
+  globalThis.setTimeout = originalSetTimeout;
+}
+
+const minimaxEndpointBaseUrls: string[] = [];
+let capturedMiniMaxEndpointBaseBody: Record<string, unknown> | undefined;
+const minimaxEndpointBaseTempDir = mkdtempSync(path.join(os.tmpdir(), 'qiuai-minimax-video-'));
+const minimaxEndpointBaseImagePath = path.join(minimaxEndpointBaseTempDir, 'source.png');
+writeFileSync(
+  minimaxEndpointBaseImagePath,
+  Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'base64')
+);
+globalThis.setTimeout = ((handler: TimerHandler, _timeout?: number, ...args: unknown[]) =>
+  originalSetTimeout(handler, 0, ...args)) as typeof setTimeout;
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = String(input);
+  minimaxEndpointBaseUrls.push(url);
+
+  if (url.endsWith('/video_generation')) {
+    capturedMiniMaxEndpointBaseBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({ task_id: 'minimax-video-task-002', status: 'Processing' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+
+  if (url.includes('/query/video_generation')) {
+    return new Response(JSON.stringify({ task_id: 'minimax-video-task-002', status: 'Success', file_id: 'file-002' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+
+  return new Response(JSON.stringify({ file: { download_url: 'www.cdn.example.test/minimax/video.mp4' } }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' }
+  });
+}) as typeof fetch;
+
+try {
+  const response = await invokeOpenAiCompatibleModelChat({
+    profile: {
+      id: 'minimax-video-endpoint-base',
+      providerId: 'minimax',
+      providerName: 'MiniMax',
+      modelName: 'MiniMax-Hailuo-2.3-Fast',
+      purpose: 'vision',
+      capabilities: ['video_generation', 'image_to_video'],
+      apiBaseUrl: 'https://api.minimaxi.com/v1/video_generation',
+      apiKey: 'minimax-key'
+    },
+    taskKind: 'video_generation',
+    videoGeneration: {
+      prompt: 'Create a short ecommerce product video from the product image.',
+      sourceImagePath: minimaxEndpointBaseImagePath,
+      durationSeconds: 8,
+      responseFormat: 'url'
+    },
+    messages: [{ role: 'user', content: 'Create product video.' }],
+    timeoutMs: 60_000
+  });
+
+  assert.deepEqual(minimaxEndpointBaseUrls, [
+    'https://api.minimaxi.com/v1/video_generation',
+    'https://api.minimaxi.com/v1/query/video_generation?task_id=minimax-video-task-002',
+    'https://api.minimaxi.com/v1/files/retrieve?file_id=file-002'
+  ]);
+  assert.equal(capturedMiniMaxEndpointBaseBody?.model, 'MiniMax-Hailuo-2.3-Fast');
+  assert.equal(capturedMiniMaxEndpointBaseBody?.duration, 6);
+  assert.match(String(capturedMiniMaxEndpointBaseBody?.first_frame_image), /^data:image\/png;base64,/);
+  assert.equal(response.artifacts?.[0]?.remoteUrl, 'https://www.cdn.example.test/minimax/video.mp4');
+} finally {
+  rmSync(minimaxEndpointBaseTempDir, { recursive: true, force: true });
+  globalThis.fetch = originalFetch;
+  globalThis.setTimeout = originalSetTimeout;
+}
+
+let capturedMiniMaxVideoProbeUrl = '';
+globalThis.fetch = (async (input: RequestInfo | URL) => {
+  capturedMiniMaxVideoProbeUrl = String(input);
+  return new Response(JSON.stringify({ data: [{ id: 'MiniMax-M2', owned_by: 'minimax' }] }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' }
+  });
+}) as typeof fetch;
+
+try {
+  const response = await testDesktopModelConnection({
+    profile: {
+      id: 'minimax-video-probe',
+      providerId: 'minimax',
+      providerName: 'MiniMax',
+      modelName: 'MiniMax-Hailuo-02',
+      purpose: 'vision',
+      capabilities: ['video_generation', 'text_to_video', 'image_to_video'],
+      apiBaseUrl: 'https://api.minimax.io/v1',
+      apiKey: 'minimax-key'
+    }
+  });
+
+  assert.equal(capturedMiniMaxVideoProbeUrl, 'https://api.minimax.io/v1/models');
+  assert.equal(response.ok, true);
+  assert.equal(response.checks?.[0]?.id, 'minimax_video_probe');
+  assert.equal(response.checks?.[0]?.status, 'passed');
+  assert.ok(response.verifiedCapabilities?.includes('video_generation'));
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
 let capturedTranscriptionUrl = '';
 let capturedTranscriptionAuthorization = '';
 const tempDir = mkdtempSync(path.join(os.tmpdir(), 'qiuai-model-chat-'));

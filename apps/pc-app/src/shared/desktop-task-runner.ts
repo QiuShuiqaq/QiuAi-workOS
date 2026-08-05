@@ -3980,7 +3980,18 @@ async function invokeWorkflowRuntimeOperationVideoGenerationNode(input: {
       maxRetries
     })
   });
-  const results = batchRun.results;
+  const localAssetSave = await persistFactoryRemoteAssetsLocally({
+    task: input.task,
+    binding: input.binding,
+    desktopToolInvoker: input.desktopToolInvoker,
+    workspaceId: input.workspaceId,
+    results: batchRun.results,
+    mediaKind: 'video',
+    folder: 'operation-videos',
+    createdAt: input.createdAt,
+    logSuffix: `${input.node.id}-operation-videos`
+  });
+  const results = localAssetSave.results;
   const completed = results.filter((item) => item.status === 'completed').length;
   const failed = results.filter((item) => item.status === 'failed').length;
   const generatedVideos = results.map((item) => ({
@@ -4018,9 +4029,9 @@ async function invokeWorkflowRuntimeOperationVideoGenerationNode(input: {
     results,
     createdAt: input.createdAt
   });
-  const usedToolIds = new Set<string>();
+  const usedToolIds = new Set<string>(localAssetSave.usedToolIds);
   const generatedArtifacts: DesktopArtifactSummary[] = [];
-  const extraLogs: DesktopExecutionLogEntry[] = [];
+  const extraLogs: DesktopExecutionLogEntry[] = [...localAssetSave.logs];
   const summaryContent = [
     `运营视频生成完成：共 ${batchTasks.length} 条视频`,
     `成功：${completed}`,
@@ -4209,7 +4220,18 @@ async function invokeWorkflowRuntimeEcommerceProductVideoFactoryNode(input: {
       maxRetries
     })
   });
-  const results = batchRun.results;
+  const localAssetSave = await persistFactoryRemoteAssetsLocally({
+    task: input.task,
+    binding: input.binding,
+    desktopToolInvoker: input.desktopToolInvoker,
+    workspaceId: input.workspaceId,
+    results: batchRun.results,
+    mediaKind: 'video',
+    folder: 'product-videos',
+    createdAt: input.createdAt,
+    logSuffix: `${input.node.id}-product-videos`
+  });
+  const results = localAssetSave.results;
   const completed = results.filter((item) => item.status === 'completed').length;
   const failed = results.filter((item) => item.status === 'failed').length;
   const generatedVideos = results.map((item) => {
@@ -4252,9 +4274,9 @@ async function invokeWorkflowRuntimeEcommerceProductVideoFactoryNode(input: {
     results,
     createdAt: input.createdAt
   });
-  const usedToolIds = new Set<string>();
+  const usedToolIds = new Set<string>(localAssetSave.usedToolIds);
   const generatedArtifacts: DesktopArtifactSummary[] = [];
-  const extraLogs: DesktopExecutionLogEntry[] = [];
+  const extraLogs: DesktopExecutionLogEntry[] = [...localAssetSave.logs];
   const summaryContent = [
     `电商视频生成完成：共 ${batchTasks.length} 条视频`,
     `成功：${completed}`,
@@ -4524,6 +4546,8 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
   rolePackage?: RolePackageManifest;
   profiles: ModelProfile[];
   modelInvoker: DesktopModelInvoker;
+  desktopToolInvoker?: DesktopToolInvoker;
+  workspaceId?: string;
   createdAt: string;
   currentResponse: DesktopModelChatResponse;
   primaryProfile: ModelProfile;
@@ -4597,7 +4621,18 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
           maxRetries
         })
       });
-  const results = batchRun.results;
+  const localAssetSave = await persistFactoryRemoteAssetsLocally({
+    task: input.task,
+    binding: input.binding,
+    desktopToolInvoker: input.desktopToolInvoker,
+    workspaceId: input.workspaceId,
+    results: batchRun.results,
+    mediaKind: 'image',
+    folder: 'product-images',
+    createdAt: input.createdAt,
+    logSuffix: `${input.node.id}-factory-images`
+  });
+  const results = localAssetSave.results;
   const completed = results.filter((item) => item.status === 'completed').length;
   const failed = results.filter((item) => item.status === 'failed').length;
   const generatedImages = results.map((item) => {
@@ -4696,8 +4731,8 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
       content: summaryContent
     }),
     primaryProfile: input.profile,
-    logs: [startedLog, completedLog],
-    usedToolIds: [],
+    logs: [startedLog, ...localAssetSave.logs, completedLog],
+    usedToolIds: localAssetSave.usedToolIds,
     generatedArtifacts: [artifact],
     inputVariables: ['factory_request', 'factory_items', 'selected_packages', 'target_platform', 'package_instructions'],
     outputVariables,
@@ -5044,6 +5079,181 @@ function hasFactoryToolAction(
 ): boolean {
   const tool = binding.availableTools.find((item) => item.id === toolId);
   return tool ? isToolActionEnabledForManifest(tool, action) : false;
+}
+
+function canUseFactoryRemoteAssetDownload(binding: ResolvedRuntimeBinding): boolean {
+  const tool = binding.availableTools.find((item) => item.id === 'local-filesystem');
+  if (!tool) {
+    return false;
+  }
+
+  return (
+    hasFactoryToolAction(binding, 'local-filesystem', 'filesystem.download_remote_file') ||
+    !tool.actions ||
+    tool.actions.length === 0
+  );
+}
+
+async function persistFactoryRemoteAssetsLocally<T extends {
+  id: string;
+  order: number;
+  sku?: string;
+  sourceName?: string;
+  sourceImagePath?: string;
+  packageKey: string;
+  packageLabel: string;
+  status: FactoryArtifactPreviewItemStatus;
+  remoteUrl?: string;
+  localPath?: string;
+  thumbnailPath?: string;
+}>(
+  input: {
+    task: DesktopTaskDetail;
+    binding: ResolvedRuntimeBinding;
+    desktopToolInvoker?: DesktopToolInvoker;
+    workspaceId?: string;
+    results: T[];
+    mediaKind: 'image' | 'video';
+    folder: string;
+    createdAt: string;
+    logSuffix: string;
+  }
+): Promise<{
+  results: T[];
+  logs: DesktopExecutionLogEntry[];
+  usedToolIds: string[];
+}> {
+  if (
+    !input.desktopToolInvoker ||
+    !input.workspaceId ||
+    !canUseFactoryRemoteAssetDownload(input.binding)
+  ) {
+    return {
+      results: input.results,
+      logs: [],
+      usedToolIds: []
+    };
+  }
+
+  const candidates = input.results
+    .map((result, index) => ({ result, index }))
+    .filter(({ result }) => result.status === 'completed' && Boolean(result.remoteUrl) && !result.localPath);
+
+  if (candidates.length === 0) {
+    return {
+      results: input.results,
+      logs: [],
+      usedToolIds: []
+    };
+  }
+
+  const updatedResults = [...input.results];
+  const downloadResults = await runWorkflowRuntimeConcurrent(
+    candidates,
+    input.mediaKind === 'video' ? 2 : 4,
+    async ({ result, index }) => {
+      const remoteUrl = result.remoteUrl;
+      if (!remoteUrl) {
+        return { index, ok: false, message: 'Remote URL is empty.' };
+      }
+
+      try {
+        const downloadResult = await input.desktopToolInvoker!({
+          workspaceId: input.workspaceId!,
+          toolId: 'local-filesystem',
+          action: 'filesystem.download_remote_file',
+          input: {
+            url: remoteUrl,
+            folder: input.folder,
+            fileName: buildFactoryRemoteAssetFileName(result),
+            mediaKind: input.mediaKind
+          }
+        });
+        const localPath = readWorkflowRuntimeString(downloadResult.output?.localPath);
+        if (!downloadResult.ok || !localPath) {
+          return {
+            index,
+            ok: false,
+            message: downloadResult.message ?? 'Remote asset download returned without a local path.'
+          };
+        }
+
+        return {
+          index,
+          ok: true,
+          localPath
+        };
+      } catch (error) {
+        return {
+          index,
+          ok: false,
+          message: readErrorMessage(error)
+        };
+      }
+    }
+  );
+
+  const logs: DesktopExecutionLogEntry[] = [];
+  let savedCount = 0;
+  for (const result of downloadResults) {
+    const current = updatedResults[result.index];
+    if (!current) {
+      continue;
+    }
+
+    if (result.ok && result.localPath) {
+      savedCount += 1;
+      updatedResults[result.index] = {
+        ...current,
+        localPath: result.localPath,
+        thumbnailPath: input.mediaKind === 'image'
+          ? result.localPath
+          : current.thumbnailPath
+      };
+      continue;
+    }
+
+    logs.push(createLog(
+      input.task.taskId,
+      'warning',
+      'WORKFLOW_RUNTIME_FACTORY_REMOTE_ASSET_SAVE_FAILED',
+      `Factory remote ${input.mediaKind} could not be stored locally: ${result.message ?? 'unknown error'}.`,
+      input.createdAt,
+      sanitizeLogSuffix(`${input.logSuffix}-${current.id}`)
+    ));
+  }
+
+  if (savedCount > 0) {
+    logs.unshift(createLog(
+      input.task.taskId,
+      'info',
+      'WORKFLOW_RUNTIME_FACTORY_REMOTE_ASSETS_SAVED',
+      `Factory remote ${input.mediaKind} assets saved locally: ${savedCount}/${candidates.length}.`,
+      input.createdAt,
+      sanitizeLogSuffix(`${input.logSuffix}-remote-assets`)
+    ));
+  }
+
+  return {
+    results: updatedResults,
+    logs,
+    usedToolIds: ['local-filesystem']
+  };
+}
+
+function buildFactoryRemoteAssetFileName(item: {
+  id: string;
+  order: number;
+  sku?: string;
+  sourceName?: string;
+  sourceImagePath?: string;
+  packageKey: string;
+  packageLabel: string;
+}): string {
+  const displayName = getFactoryImageResultDisplayName(item);
+  const order = String(item.order || 1).padStart(2, '0');
+  const stableSuffix = item.id.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').slice(-24);
+  return [displayName, order, item.packageLabel, stableSuffix].filter(Boolean).join('-');
 }
 
 async function runFactoryVideoScreeningItem(input: {
@@ -6410,7 +6620,7 @@ function buildFactoryEcommerceVideoManifestContent(input: {
         escapeMarkdownTableCell(item.sku),
         escapeMarkdownTableCell(item.packageLabel),
         item.status === 'completed' ? '成功' : '失败',
-        escapeMarkdownTableCell(item.remoteUrl ?? item.localPath ?? ''),
+        escapeMarkdownTableCell(item.localPath ?? item.remoteUrl ?? ''),
         escapeMarkdownTableCell(item.thumbnailPath ?? ''),
         escapeMarkdownTableCell(item.sourceImagePath ?? ''),
         escapeMarkdownTableCell(item.providerJobId ?? ''),

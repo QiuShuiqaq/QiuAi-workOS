@@ -25,6 +25,12 @@ const server = createServer((request, response) => {
     const bodyText = Buffer.concat(chunks).toString('utf8');
     response.setHeader('content-type', 'application/json');
 
+    if (request.url === '/asset.png') {
+      response.setHeader('content-type', 'image/png');
+      response.end(Buffer.from('fake-png-content'));
+      return;
+    }
+
     if (request.url === '/api') {
       response.end(JSON.stringify({ ok: true, method: request.method, body: bodyText ? JSON.parse(bodyText) : null }));
       return;
@@ -135,6 +141,23 @@ const listResult = await invokeDesktopTool(tempDir, {
 
 assert.equal(listResult.ok, true);
 assert.ok(Array.isArray(listResult.output?.entries));
+
+const remoteDownloadResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'local-filesystem',
+  action: 'filesystem.download_remote_file',
+  input: {
+    url: `${localServerBaseUrl}/asset.png`,
+    folder: 'factory-images',
+    fileName: 'SKU-1-main-image',
+    mediaKind: 'image'
+  }
+});
+
+assert.equal(remoteDownloadResult.ok, true);
+assert.equal(remoteDownloadResult.output?.sourceUrl, `${localServerBaseUrl}/asset.png`);
+assert.equal(remoteDownloadResult.output?.fileName, 'SKU-1-main-image.png');
+assert.equal(readFileSync(String(remoteDownloadResult.output?.localPath), 'utf8'), 'fake-png-content');
 
 const zipPackageResult = await invokeDesktopTool(tempDir, {
   workspaceId,

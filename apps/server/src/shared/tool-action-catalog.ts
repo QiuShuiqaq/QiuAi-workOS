@@ -313,6 +313,39 @@ export const serverToolActions: ServerToolActionDefinition[] = [
   },
   {
     packageId: 'local-filesystem',
+    actionId: 'filesystem.download_remote_file',
+    name: '下载远程文件',
+    category: 'file',
+    description: '把模型或工具返回的远程图片、视频等文件保存到本地工作区产物目录。',
+    input: [
+      { key: 'url', label: '远程文件 URL', type: 'text', required: true },
+      { key: 'folder', label: '目录', type: 'text' },
+      { key: 'fileName', label: '文件名', type: 'text' },
+      { key: 'mediaKind', label: '媒体类型', type: 'text' }
+    ],
+    output: [
+      { key: 'localPath', label: '本地文件路径', type: 'file' },
+      { key: 'sourceUrl', label: '来源 URL', type: 'text' },
+      { key: 'sizeBytes', label: '文件大小', type: 'number' }
+    ],
+    defaultInput: {
+      url: '{{runtime.remote_url}}',
+      folder: 'remote-assets',
+      fileName: '{{task.title}}',
+      mediaKind: 'file'
+    },
+    uiFields: [
+      { key: 'url', label: '远程文件 URL', placeholder: '{{runtime.remote_url}}' },
+      { key: 'folder', label: '目录' },
+      { key: 'fileName', label: '文件名' },
+      { key: 'mediaKind', label: '媒体类型' }
+    ],
+    requiredConfig: [],
+    requiredDependencies: [],
+    maturity: 'stable'
+  },
+  {
+    packageId: 'local-filesystem',
     actionId: 'filesystem.package_zip',
     name: '打包 ZIP',
     category: 'file',

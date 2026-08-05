@@ -445,6 +445,7 @@ export type DesktopToolInvocationAction =
   | 'filesystem.write_text_file'
   | 'filesystem.read_text_file'
   | 'filesystem.list_directory'
+  | 'filesystem.download_remote_file'
   | 'filesystem.package_zip'
   | 'document.extract_text'
   | 'web.fetch_url'

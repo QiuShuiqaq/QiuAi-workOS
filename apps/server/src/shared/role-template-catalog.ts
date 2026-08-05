@@ -1376,7 +1376,7 @@ function buildEcommerceProductVideoFactoryManifest() {
         { key: '1:1', label: '方形 1:1' },
         { key: '16:9', label: '横屏 16:9' }
       ],
-      durationSecondOptions: [5, 8, 10, 15]
+      durationSecondOptions: [6, 10]
     },
     qualityCheck: {
       defaultMode: 'basic',
@@ -1582,6 +1582,9 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
         outputMode: 'json',
         packageKeys: crossBorderFactoryDefaultPackageKeys,
         concurrency: 8,
+        requiredToolActions: [
+          { toolId: 'local-filesystem', action: 'filesystem.download_remote_file' }
+        ],
         output: {
           folder: 'product-images',
           imageFormat: 'png'
@@ -1734,6 +1737,9 @@ function buildEcommerceProductVideoFactoryWorkflowGraph(): ServerRoleWorkflowGra
         concurrency: 3,
         maxRetries: 2,
         timeoutMs: 240_000,
+        requiredToolActions: [
+          { toolId: 'local-filesystem', action: 'filesystem.download_remote_file' }
+        ],
         output: {
           folder: 'product-videos',
           videoFormat: 'mp4'
@@ -2167,6 +2173,9 @@ function buildOperationVideoFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
         concurrency: 3,
         maxRetries: 2,
         timeoutMs: 240_000,
+        requiredToolActions: [
+          { toolId: 'local-filesystem', action: 'filesystem.download_remote_file' }
+        ],
         output: {
           folder: 'operation-videos',
           videoFormat: 'mp4'

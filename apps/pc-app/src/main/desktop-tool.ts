@@ -1,13 +1,18 @@
 import {
+  createWriteStream,
   existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
+  rmSync,
   statSync,
   writeFileSync
 } from 'node:fs';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
+import { Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
 import JSZip from 'jszip';
 
@@ -36,6 +41,7 @@ const maxWebTextChars = 24_000;
 const maxBrowserTextChars = 50_000;
 const maxBrowserSteps = 30;
 const maxExtractedDocumentChars = 30_000;
+const maxRemoteToolAssetBytes = 500 * 1024 * 1024;
 const webFetchTimeoutMs = 15_000;
 const browserLoadTimeoutMs = 30_000;
 const builtInWebSearchBingEndpoint = 'https://cn.bing.com/search';
@@ -96,6 +102,8 @@ async function invokeLocalFilesystemTool(
       return readTextFile(request);
     case 'filesystem.list_directory':
       return listDirectory(request);
+    case 'filesystem.download_remote_file':
+      return await downloadRemoteFile(userDataPath, request);
     case 'filesystem.package_zip':
       return await packageZipFile(userDataPath, request);
     default:
@@ -921,6 +929,98 @@ function listDirectory(request: DesktopToolInvocationRequest): DesktopToolInvoca
       truncated: readdirSync(directoryPath).length > maxDirectoryEntries
     }
   };
+}
+
+async function downloadRemoteFile(
+  userDataPath: string,
+  request: DesktopToolInvocationRequest
+): Promise<DesktopToolInvocationResult> {
+  const layout = getDesktopStorageLayout(userDataPath, request.workspaceId);
+  ensureDesktopStorageLayout(layout);
+
+  const remoteUrl = normalizeRemoteDownloadUrl(readRequiredString(request.input.url ?? request.input.remoteUrl, 'url'));
+  const folder = readString(request.input.folder, 'remote-assets');
+  const mediaKind = readRemoteDownloadMediaKind(request.input.mediaKind ?? request.input.kind);
+  const requestedFileName = readString(
+    request.input.fileName,
+    getRemoteDownloadFallbackFileName(remoteUrl, mediaKind)
+  );
+  const timeoutMs = Math.min(
+    readOptionalPositiveInteger(request.input.timeoutMs, 300_000),
+    30 * 60 * 1000
+  );
+
+  const response = await fetch(remoteUrl, {
+    method: 'GET',
+    signal: AbortSignal.timeout(timeoutMs)
+  });
+
+  if (!response.ok) {
+    return fail(request, `Remote file download failed: HTTP ${response.status}.`);
+  }
+
+  const contentLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(contentLength) && contentLength > maxRemoteToolAssetBytes) {
+    return fail(request, 'Remote file is too large to store locally.');
+  }
+
+  const contentType = response.headers.get('content-type') ?? undefined;
+  const extension = inferRemoteDownloadExtension({
+    requestedFileName,
+    remoteUrl,
+    contentType,
+    mediaKind
+  });
+  const baseFileName = normalizePathSegment(stripRemoteDownloadExtension(requestedFileName) || 'remote-file');
+  const outputFolderPath = path.join(
+    layout.assetsPath,
+    'tools',
+    'remote-assets',
+    normalizePathSegment(folder)
+  );
+  mkdirSync(outputFolderPath, { recursive: true });
+
+  const fileName = createUniqueRemoteDownloadFileName(outputFolderPath, baseFileName, extension);
+  const outputPath = path.join(outputFolderPath, fileName);
+  const tempPath = `${outputPath}.${Date.now()}.download`;
+
+  try {
+    if (response.body) {
+      await pipeline(
+        Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]),
+        createByteLimitTransform(maxRemoteToolAssetBytes),
+        createWriteStream(tempPath)
+      );
+    } else {
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (buffer.byteLength > maxRemoteToolAssetBytes) {
+        throw new Error('Remote file is too large to store locally.');
+      }
+      writeFileSync(tempPath, buffer);
+    }
+
+    const stats = statSync(tempPath);
+    renameSync(tempPath, outputPath);
+
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: outputPath,
+        path: outputPath,
+        fileName,
+        bytes: stats.size,
+        sizeBytes: stats.size,
+        sourceUrl: remoteUrl,
+        contentType,
+        mediaKind
+      }
+    };
+  } catch (error) {
+    rmSync(tempPath, { force: true });
+    return fail(request, error instanceof Error ? error.message : 'Remote file download failed.');
+  }
 }
 
 async function packageZipFile(
@@ -2754,6 +2854,126 @@ function readSeconds(value: unknown): number | undefined {
 
 function isVideoFileExtension(extension: string): boolean {
   return ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v'].includes(extension.toLowerCase());
+}
+
+function readRemoteDownloadMediaKind(value: unknown): 'image' | 'video' | 'file' {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (normalized === 'image' || normalized === 'video') {
+    return normalized;
+  }
+
+  return 'file';
+}
+
+function normalizeRemoteDownloadUrl(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('Remote file URL is invalid.');
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('Only HTTP and HTTPS remote files can be downloaded.');
+  }
+
+  return url.toString();
+}
+
+function getRemoteDownloadFallbackFileName(remoteUrl: string, mediaKind: 'image' | 'video' | 'file'): string {
+  try {
+    const url = new URL(remoteUrl);
+    const fileName = decodeURIComponent(path.posix.basename(url.pathname)).trim();
+    if (fileName) {
+      return fileName;
+    }
+  } catch {
+    // Fall through to media-specific defaults.
+  }
+
+  return mediaKind === 'image'
+    ? 'generated-image.png'
+    : mediaKind === 'video'
+      ? 'generated-video.mp4'
+      : 'remote-file';
+}
+
+function inferRemoteDownloadExtension(input: {
+  requestedFileName: string;
+  remoteUrl: string;
+  contentType?: string;
+  mediaKind: 'image' | 'video' | 'file';
+}): string {
+  return normalizeFileExtension(path.extname(input.requestedFileName)) ??
+    normalizeFileExtension(path.extname(getRemoteDownloadFallbackFileName(input.remoteUrl, input.mediaKind))) ??
+    getRemoteDownloadExtensionFromContentType(input.contentType) ??
+    (input.mediaKind === 'image' ? 'png' : input.mediaKind === 'video' ? 'mp4' : 'bin');
+}
+
+function stripRemoteDownloadExtension(fileName: string): string {
+  const extension = path.extname(fileName);
+  return extension ? fileName.slice(0, -extension.length) : fileName;
+}
+
+function normalizeFileExtension(extension: string): string | undefined {
+  const normalized = extension.trim().toLowerCase().replace(/^\./, '');
+  if (!normalized || normalized.length > 10 || /[^a-z0-9]/.test(normalized)) {
+    return undefined;
+  }
+
+  return normalized === 'jpeg' ? 'jpg' : normalized;
+}
+
+function getRemoteDownloadExtensionFromContentType(contentType: string | undefined): string | undefined {
+  const normalized = contentType?.split(';')[0]?.trim().toLowerCase();
+  switch (normalized) {
+    case 'image/png':
+      return 'png';
+    case 'image/jpeg':
+      return 'jpg';
+    case 'image/webp':
+      return 'webp';
+    case 'image/gif':
+      return 'gif';
+    case 'video/mp4':
+      return 'mp4';
+    case 'video/webm':
+      return 'webm';
+    case 'video/quicktime':
+      return 'mov';
+    default:
+      return undefined;
+  }
+}
+
+function createUniqueRemoteDownloadFileName(
+  outputFolderPath: string,
+  baseFileName: string,
+  extension: string
+): string {
+  let fileName = `${baseFileName}.${extension}`;
+  let index = 2;
+  while (existsSync(path.join(outputFolderPath, fileName))) {
+    fileName = `${baseFileName}-${index}.${extension}`;
+    index += 1;
+  }
+
+  return fileName;
+}
+
+function createByteLimitTransform(limitBytes: number): Transform {
+  let totalBytes = 0;
+  return new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      totalBytes += chunk.byteLength;
+      if (totalBytes > limitBytes) {
+        callback(new Error('Remote file is too large to store locally.'));
+        return;
+      }
+
+      callback(null, chunk);
+    }
+  });
 }
 
 function readOptionalPositiveInteger(value: unknown, fallback: number): number {

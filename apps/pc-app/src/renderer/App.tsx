@@ -1286,7 +1286,7 @@ const modelProviderPresets: ModelProviderPreset[] = [
     id: 'minimax',
     name: 'MiniMax',
     summary: '适合客服、营销文案、长文本生成和中文场景的兼容接口。',
-    apiBaseUrl: 'https://api.minimax.chat/v1',
+    apiBaseUrl: 'https://api.minimaxi.com/v1',
     models: [
       {
         label: 'MiniMax M1 / 推理',
@@ -1308,6 +1308,38 @@ const modelProviderPresets: ModelProviderPreset[] = [
         purpose: 'vision',
         temperature: 0.2,
         maxTokens: 4096
+      },
+      {
+        label: 'MiniMax Hailuo 2.3 / video generation',
+        modelName: 'MiniMax-Hailuo-2.3',
+        purpose: 'vision',
+        capabilities: ['video_generation', 'text_to_video', 'image_to_video'],
+        temperature: 0,
+        maxTokens: 0
+      },
+      {
+        label: 'MiniMax Hailuo 2.3 Fast / image to video',
+        modelName: 'MiniMax-Hailuo-2.3-Fast',
+        purpose: 'vision',
+        capabilities: ['video_generation', 'image_to_video'],
+        temperature: 0,
+        maxTokens: 0
+      },
+      {
+        label: 'MiniMax Hailuo 02 / video generation',
+        modelName: 'MiniMax-Hailuo-02',
+        purpose: 'vision',
+        capabilities: ['video_generation', 'text_to_video', 'image_to_video'],
+        temperature: 0,
+        maxTokens: 0
+      },
+      {
+        label: 'MiniMax I2V-01-Director / image to video',
+        modelName: 'I2V-01-Director',
+        purpose: 'vision',
+        capabilities: ['video_generation', 'image_to_video'],
+        temperature: 0,
+        maxTokens: 0
       }
     ]
   },
@@ -2457,7 +2489,7 @@ export default function App() {
   const [providerModelSearchQuery, setProviderModelSearchQuery] = useState('');
   const [providerModelCapabilityFilter, setProviderModelCapabilityFilter] =
     useState<ProviderModelCapabilityFilter>('all');
-  const [providerModelCompatibilityOnly, setProviderModelCompatibilityOnly] = useState(true);
+  const [providerModelCompatibilityOnly, setProviderModelCompatibilityOnly] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string>('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -3082,7 +3114,7 @@ export default function App() {
     setExportingFactoryOutputBatch(batchKey);
     try {
       const result = await window.qiuDesktop.exportLocalFiles({
-        targetFolderName: `${task.title}-${batchKey === 'qualified' ? '合格输出' : '输出物'}`,
+        targetFolderName: `${task.title}-${factoryOutputBatchExportLabel(batchKey)}`,
         files: exportableFiles
       });
       if (!result.canceled) {
@@ -3557,6 +3589,69 @@ export default function App() {
       preset.id,
       credential?.apiBaseUrl ?? preset.apiBaseUrl
     );
+  }
+
+  function resetProviderModelCatalogFilters() {
+    setProviderModelSearchQuery('');
+    setProviderModelCapabilityFilter('all');
+    setProviderModelCompatibilityOnly(false);
+  }
+
+  function findPreferredModelProfileForPreset(preset: ModelProviderPreset): ModelProfile | undefined {
+    const presetName = preset.name.trim().toLowerCase();
+    const providerProfiles = runtimeState.modelProfiles.filter(
+      (profile) =>
+        profile.providerId === preset.id ||
+        profile.providerName.trim().toLowerCase() === presetName
+    );
+    const currentSelectedProfile = providerProfiles.find((profile) => profile.id === selectedModelId);
+    if (currentSelectedProfile) {
+      return currentSelectedProfile;
+    }
+
+    return (
+      providerProfiles.find(
+        (profile) =>
+          runtimeState.localRuntime.enabledModelProfileIds.includes(profile.id) &&
+          isRuntimeModelProfileConfigured(profile)
+      ) ??
+      providerProfiles.find((profile) => isRuntimeModelProfileConfigured(profile)) ??
+      providerProfiles.find((profile) =>
+        runtimeState.localRuntime.enabledModelProfileIds.includes(profile.id)
+      ) ??
+      providerProfiles[0]
+    );
+  }
+
+  function openModelProfileConfiguration(profileId: string) {
+    resetProviderModelCatalogFilters();
+    setSelectedModelId(profileId);
+    setModelConfigOpen(true);
+  }
+
+  function openPresetModelConfiguration(
+    preset: ModelProviderPreset,
+    model?: ModelProviderPresetModel
+  ) {
+    resetProviderModelCatalogFilters();
+    if (model) {
+      applyModelProviderPreset(preset, model);
+      setModelConfigOpen(true);
+      return;
+    }
+
+    const preferredProfile = findPreferredModelProfileForPreset(preset);
+    if (preferredProfile) {
+      setSelectedModelId(preferredProfile.id);
+      setModelConfigOpen(true);
+      return;
+    }
+
+    const firstModel = preset.models[0];
+    if (firstModel) {
+      applyModelProviderPreset(preset, firstModel);
+      setModelConfigOpen(true);
+    }
   }
 
   function findRecommendedPresetForRequiredModelProfile(profile: ModelProfile):
@@ -5080,7 +5175,8 @@ export default function App() {
                           options={buildCompatibleRuntimeModelOptions(
                             runtimeState,
                             requirement.profile,
-                            rolePackage.roleCode
+                            rolePackage.roleCode,
+                            runtimeModelProfileId
                           )}
                         />
                       </Form.Item>
@@ -6015,7 +6111,14 @@ export default function App() {
         : factoryAttachments.filter((attachment) => isFactoryImageAttachment(attachment));
     const invalidFactoryAttachmentCount = factoryAttachments.length - validFactoryAttachments.length;
     const latestFactoryLogs = focusedFactoryTask ? selectFactoryVisibleLogs(focusedFactoryTask) : [];
-    const focusedFactoryArtifacts = focusedFactoryTask?.artifacts.filter(isUserDeliverableArtifact) ?? [];
+    const focusedFactoryArtifacts =
+      focusedFactoryTask?.artifacts
+        .filter(isUserDeliverableArtifact)
+        .filter((artifact) =>
+          isEcommerceVideoFactory
+            ? artifact.type === 'video' || getArtifactExtension(artifact) === 'mp4'
+            : true
+        ) ?? [];
     const focusedFactoryOutputs =
       focusedFactoryTask?.factoryOutputs?.filter((item) => item.status !== 'excluded') ?? [];
     const focusedFactoryCostCents =
@@ -6592,15 +6695,6 @@ export default function App() {
                                 />
                               </Form.Item>
                             </div>
-                            <Form.Item name="qualityCheckMode" label="质检方式" rules={[{ required: true }]}>
-                              <Select
-                                size="large"
-                                options={qualityModes.map((item) => ({
-                                  value: item.key,
-                                  label: item.label
-                                }))}
-                              />
-                            </Form.Item>
                             <div className="factory-prompt-control-block">
                               <Flex align="center" justify="space-between" gap={8}>
                                 <InlineHelpTitle help="控制生视频模型的画面、风格、镜头语言和画面文字，最终会参与生成视频提示词。">
@@ -6873,11 +6967,9 @@ export default function App() {
                                   </span>
                                 </span>
                                 <span className="factory-queue-stats">
-                                  {batchStats.qualified !== undefined ? <span>合格 {batchStats.qualified}</span> : null}
-                                  {batchStats.rejected !== undefined ? <span>筛掉 {batchStats.rejected}</span> : null}
-                                  {batchStats.review !== undefined ? <span>复核 {batchStats.review}</span> : null}
-                                  {batchStats.processingError !== undefined ? <span>异常 {batchStats.processingError}</span> : null}
-                                  {batchStats.edited !== undefined ? <span>初剪 {batchStats.edited}</span> : null}
+                                  {buildFactoryQueueStatLabels(batchStats, isMedicalVideoFactory, isEcommerceVideoFactory).map((item) => (
+                                    <span key={item.key}>{item.label} {item.value}</span>
+                                  ))}
                                 </span>
                                 <span className="factory-progress-bar" aria-label={`进度 ${progress}%`}>
                                   <span style={{ width: `${progress}%` }} />
@@ -6900,7 +6992,10 @@ export default function App() {
 
                     <section className="factory-panel factory-output-panel">
                       <Flex align="center" justify="space-between" gap={12}>
-                        <InlineHelpTitle help="集中查看产物和每一条输出物，支持预览、导出、状态修改和删除。">
+                        <InlineHelpTitle help={isEcommerceVideoFactory
+                          ? '集中查看已生成的视频产物，支持预览、导出和删除。'
+                          : '集中查看产物和每一条输出物，支持预览、导出、状态修改和删除。'}
+                        >
                           <Typography.Text strong>输出队列</Typography.Text>
                         </InlineHelpTitle>
                         <Tag color={focusedFactoryArtifacts.length + focusedFactoryOutputs.length > 0 ? 'green' : 'default'}>
@@ -6931,7 +7026,7 @@ export default function App() {
                               ))}
                             </div>
                           ) : null}
-                          {focusedFactoryFinalAnswer ? (
+                          {focusedFactoryFinalAnswer && !isEcommerceVideoFactory ? (
                             <div className="factory-result-preview">
                               <Flex align="center" justify="space-between" gap={10}>
                                 <Typography.Text strong>结果说明</Typography.Text>
@@ -6951,9 +7046,12 @@ export default function App() {
                               </Typography.Paragraph>
                             </div>
                           ) : null}
-                          {renderFactoryOutputItems(focusedFactoryTask)}
+                          {renderFactoryOutputItems(focusedFactoryTask, {
+                            mode: isEcommerceVideoFactory ? 'generated_video' : 'review'
+                          })}
                           {renderFactoryTaskArtifacts(focusedFactoryTask, {
-                            showEmpty: focusedFactoryOutputs.length === 0
+                            showEmpty: focusedFactoryOutputs.length === 0,
+                            mode: isEcommerceVideoFactory ? 'generated_video' : 'default'
                           })}
                         </div>
                       ) : (
@@ -7005,7 +7103,10 @@ export default function App() {
     );
   }
 
-  function renderFactoryOutputItems(task: DesktopTaskDetail) {
+  function renderFactoryOutputItems(
+    task: DesktopTaskDetail,
+    options: { mode?: 'review' | 'generated_video' } = {}
+  ) {
     const outputItems = [...(task.factoryOutputs ?? [])]
       .filter((item) => item.status !== 'excluded')
       .sort((left, right) => getFactoryOutputOrder(left) - getFactoryOutputOrder(right));
@@ -7014,33 +7115,52 @@ export default function App() {
       return null;
     }
 
+    const isGeneratedVideoMode = options.mode === 'generated_video';
     const qualifiedItems = outputItems.filter((item) => item.status === 'qualified');
+    const downloadableItems = outputItems.filter((item) => Boolean(getFactoryOutputPreviewTarget(item)));
+    const failedItems = outputItems.filter((item) => item.status === 'processing_error');
 
     return (
       <div className="factory-output-item-panel">
         <Flex align="center" justify="space-between" gap={10} wrap="wrap">
           <Space size={8} wrap>
-            <Typography.Text strong>输出物</Typography.Text>
+            <Typography.Text strong>{isGeneratedVideoMode ? '视频产物' : '输出物'}</Typography.Text>
             <Tag color="blue">{outputItems.length} 条</Tag>
-            {qualifiedItems.length > 0 ? <Tag color="green">合格 {qualifiedItems.length}</Tag> : null}
+            {isGeneratedVideoMode ? (
+              <>
+                <Tag color="green">已生成 {qualifiedItems.length}</Tag>
+                {failedItems.length > 0 ? <Tag color="red">失败 {failedItems.length}</Tag> : null}
+              </>
+            ) : (
+              qualifiedItems.length > 0 ? <Tag color="green">合格 {qualifiedItems.length}</Tag> : null
+            )}
           </Space>
           <Space size={6} wrap>
+            {isGeneratedVideoMode ? null : (
+              <Button
+                size="small"
+                icon={<DownloadOutlined />}
+                loading={exportingFactoryOutputBatch === 'qualified'}
+                disabled={qualifiedItems.length === 0}
+                onClick={() => void exportFactoryOutputItems(task, qualifiedItems, 'qualified')}
+              >
+                导出合格
+              </Button>
+            )}
             <Button
               size="small"
               icon={<DownloadOutlined />}
-              loading={exportingFactoryOutputBatch === 'qualified'}
-              disabled={qualifiedItems.length === 0}
-              onClick={() => void exportFactoryOutputItems(task, qualifiedItems, 'qualified')}
+              loading={exportingFactoryOutputBatch === (isGeneratedVideoMode ? 'generated' : 'all')}
+              disabled={isGeneratedVideoMode && downloadableItems.length === 0}
+              onClick={() =>
+                void exportFactoryOutputItems(
+                  task,
+                  isGeneratedVideoMode ? downloadableItems : outputItems,
+                  isGeneratedVideoMode ? 'generated' : 'all'
+                )
+              }
             >
-              导出合格
-            </Button>
-            <Button
-              size="small"
-              icon={<DownloadOutlined />}
-              loading={exportingFactoryOutputBatch === 'all'}
-              onClick={() => void exportFactoryOutputItems(task, outputItems, 'all')}
-            >
-              导出全部
+              {isGeneratedVideoMode ? '导出视频' : '导出全部'}
             </Button>
           </Space>
         </Flex>
@@ -7061,9 +7181,11 @@ export default function App() {
                         {item.title}
                       </Typography.Text>
                       <Tag color={factoryOutputStatusColor(item.status)}>
-                        {factoryOutputStatusLabel(item.status)}
+                        {isGeneratedVideoMode
+                          ? factoryGeneratedVideoStatusLabel(item.status)
+                          : factoryOutputStatusLabel(item.status)}
                       </Tag>
-                      {scoreLabel ? <Tag>{scoreLabel}</Tag> : null}
+                      {!isGeneratedVideoMode && scoreLabel ? <Tag>{scoreLabel}</Tag> : null}
                     </Space>
                     <Typography.Text type="secondary" className="factory-output-item-time">
                       {formatShortTime(item.updatedAt)}
@@ -7076,7 +7198,7 @@ export default function App() {
                     </Typography.Text>
                   ) : null}
 
-                  {item.risks?.length ? (
+                  {!isGeneratedVideoMode && item.risks?.length ? (
                     <Typography.Text type="secondary" className="factory-output-item-risk" ellipsis>
                       {item.risks.slice(0, 2).join('；')}
                     </Typography.Text>
@@ -7106,33 +7228,37 @@ export default function App() {
                     >
                       导出
                     </Button>
-                    <Button
-                      size="small"
-                      disabled={item.status === 'qualified'}
-                      onClick={() =>
-                        updateFactoryOutputItemStatus(task.taskId, item.id, 'qualified', '人工设为合格')
-                      }
-                    >
-                      设为合格
-                    </Button>
-                    <Button
-                      size="small"
-                      disabled={item.status === 'rejected'}
-                      onClick={() =>
-                        updateFactoryOutputItemStatus(task.taskId, item.id, 'rejected', '人工设为不通过')
-                      }
-                    >
-                      设为不通过
-                    </Button>
-                    <Button
-                      size="small"
-                      disabled={item.status === 'review_required'}
-                      onClick={() =>
-                        updateFactoryOutputItemStatus(task.taskId, item.id, 'review_required', '人工设为需复核')
-                      }
-                    >
-                      设为需复核
-                    </Button>
+                    {isGeneratedVideoMode ? null : (
+                      <>
+                        <Button
+                          size="small"
+                          disabled={item.status === 'qualified'}
+                          onClick={() =>
+                            updateFactoryOutputItemStatus(task.taskId, item.id, 'qualified', '人工设为合格')
+                          }
+                        >
+                          设为合格
+                        </Button>
+                        <Button
+                          size="small"
+                          disabled={item.status === 'rejected'}
+                          onClick={() =>
+                            updateFactoryOutputItemStatus(task.taskId, item.id, 'rejected', '人工设为不通过')
+                          }
+                        >
+                          设为不通过
+                        </Button>
+                        <Button
+                          size="small"
+                          disabled={item.status === 'review_required'}
+                          onClick={() =>
+                            updateFactoryOutputItemStatus(task.taskId, item.id, 'review_required', '人工设为需复核')
+                          }
+                        >
+                          设为需复核
+                        </Button>
+                      </>
+                    )}
                     <Button
                       size="small"
                       danger
@@ -7153,9 +7279,15 @@ export default function App() {
 
   function renderFactoryTaskArtifacts(
     task: DesktopTaskDetail,
-    options: { showEmpty?: boolean } = {}
+    options: { showEmpty?: boolean; mode?: 'default' | 'generated_video' } = {}
   ) {
-    const artifacts = task.artifacts.filter(isUserDeliverableArtifact);
+    const artifacts = task.artifacts
+      .filter(isUserDeliverableArtifact)
+      .filter((artifact) =>
+        options.mode === 'generated_video'
+          ? artifact.type === 'video' || getArtifactExtension(artifact) === 'mp4'
+          : true
+      );
     if (artifacts.length === 0) {
       return options.showEmpty === false
         ? null
@@ -8529,10 +8661,7 @@ export default function App() {
                             </Popconfirm>
                             <Button
                               type="primary"
-                              onClick={() => {
-                                setSelectedModelId(profile.id);
-                                setModelConfigOpen(true);
-                              }}
+                              onClick={() => openModelProfileConfiguration(profile.id)}
                             >
                               配置模型
                             </Button>
@@ -8584,10 +8713,7 @@ export default function App() {
                       <Tag
                         key={`${preset.id}-${model.modelName}-${model.purpose}`}
                         className="model-preset-tag"
-                        onClick={() => {
-                          applyModelProviderPreset(preset, model);
-                          setModelConfigOpen(true);
-                        }}
+                        onClick={() => openPresetModelConfiguration(preset, model)}
                       >
                         {model.label}
                       </Tag>
@@ -8604,10 +8730,7 @@ export default function App() {
                   <div className="catalog-card-action-row">
                     <Button
                       type="primary"
-                      onClick={() => {
-                        applyModelProviderPreset(preset, preset.models[0]);
-                        setModelConfigOpen(true);
-                      }}
+                      onClick={() => openPresetModelConfiguration(preset)}
                     >
                       配置模型
                     </Button>
@@ -8805,11 +8928,6 @@ export default function App() {
   }
 
   function renderRoleModelCredentialEditor(profile: ModelProfile) {
-    const compatibleRuntimeModelOptions = buildCompatibleRuntimeModelOptions(
-      runtimeState,
-      profile,
-      roleConfigRoleCode
-    );
     const runtimeModelPath = ['modelCredentialBindings', profile.id, 'runtimeModelProfileId'];
     const modePath = ['modelCredentialBindings', profile.id, 'mode'];
 
@@ -8830,6 +8948,12 @@ export default function App() {
             getFieldValue(runtimeModelPath).trim()
               ? getFieldValue(runtimeModelPath).trim()
               : profile.id;
+          const compatibleRuntimeModelOptions = buildCompatibleRuntimeModelOptions(
+            runtimeState,
+            profile,
+            roleConfigRoleCode,
+            runtimeModelProfileId
+          );
           const runtimeProfile =
             runtimeState.modelProfiles.find((item) => item.id === runtimeModelProfileId) ?? profile;
           const defaultCredential = findDefaultModelCredential(
@@ -10735,18 +10859,28 @@ export default function App() {
         capabilities,
         timeoutMs: 20_000
       });
+      const catalogToStore = preserveExistingProviderModelsForFallbackCatalog(
+        catalog,
+        findModelProviderCatalog(runtimeState.modelCatalogs, catalog.providerId, catalog.apiBaseUrl)
+      );
 
       setLatestPulledModelCatalog({
         profileId: selectedModelProfile.id,
-        catalog
+        catalog: catalogToStore
       });
       setRuntimeState((current) => ({
         ...current,
-        modelCatalogs: upsertModelProviderCatalog(current.modelCatalogs, catalog)
+        modelCatalogs: upsertModelProviderCatalog(
+          current.modelCatalogs,
+          preserveExistingProviderModelsForFallbackCatalog(
+            catalog,
+            findModelProviderCatalog(current.modelCatalogs, catalog.providerId, catalog.apiBaseUrl)
+          )
+        )
       }));
       setModelTestNotice(
-        catalog.models.length > 0
-          ? `已拉取 ${catalog.models.length} 个可配置模型。请选择需要启用的模型后保存。`
+        catalogToStore.models.length > 0
+          ? `已拉取 ${catalogToStore.models.length} 个可配置模型。请选择需要启用的模型后保存。`
           : '已拉取模型列表，但供应商没有返回可用模型。'
       );
     } catch (error) {
@@ -12581,14 +12715,12 @@ function buildFactoryBatchStatItems(
 
   if (isVideoGenerationFactory) {
     return [
-      { key: 'total', label: '输出视频', value: stats.total, tone: 'neutral' },
+      { key: 'total', label: '输入', value: stats.total, tone: 'neutral' },
       { key: 'qualified', label: '成功', value: stats.qualified ?? '待统计', tone: 'good' },
-      { key: 'review', label: '需复核', value: stats.review ?? '待统计', tone: 'warning' },
-      { key: 'rejected', label: '不通过', value: stats.rejected ?? '待统计', tone: 'danger' },
       ...(stats.processingError !== undefined
         ? [{ key: 'processingError', label: '失败', value: stats.processingError, tone: 'danger' as const }]
         : []),
-      { key: 'artifacts', label: '产物', value: stats.artifacts, tone: stats.artifacts > 0 ? 'good' : 'neutral' }
+      { key: 'artifacts', label: '输出物', value: stats.artifacts, tone: stats.artifacts > 0 ? 'good' : 'neutral' }
     ];
   }
 
@@ -12606,6 +12738,31 @@ function buildFactoryBatchStatItems(
       : []),
     { key: 'edited', label: '初剪', value: stats.edited ?? '未开启', tone: 'neutral' },
     { key: 'artifacts', label: '产物', value: stats.artifacts, tone: stats.artifacts > 0 ? 'good' : 'neutral' }
+  ];
+}
+
+function buildFactoryQueueStatLabels(
+  stats: FactoryTaskBatchStats,
+  isVideoFactory: boolean,
+  isVideoGenerationFactory = false
+): Array<{ key: string; label: string; value: string | number }> {
+  if (isVideoGenerationFactory) {
+    return [
+      ...(stats.qualified !== undefined ? [{ key: 'qualified', label: '成功', value: stats.qualified }] : []),
+      ...(stats.processingError !== undefined ? [{ key: 'processingError', label: '失败', value: stats.processingError }] : [])
+    ];
+  }
+
+  if (!isVideoFactory) {
+    return [];
+  }
+
+  return [
+    ...(stats.qualified !== undefined ? [{ key: 'qualified', label: '合格', value: stats.qualified }] : []),
+    ...(stats.rejected !== undefined ? [{ key: 'rejected', label: '筛掉', value: stats.rejected }] : []),
+    ...(stats.review !== undefined ? [{ key: 'review', label: '复核', value: stats.review }] : []),
+    ...(stats.processingError !== undefined ? [{ key: 'processingError', label: '异常', value: stats.processingError }] : []),
+    ...(stats.edited !== undefined ? [{ key: 'edited', label: '初剪', value: stats.edited }] : [])
   ];
 }
 
@@ -12684,12 +12841,25 @@ function factoryOutputStatusLabel(status: FactoryOutputItemStatus): string {
   return '已删除';
 }
 
+function factoryGeneratedVideoStatusLabel(status: FactoryOutputItemStatus): string {
+  if (status === 'qualified') return '已生成';
+  if (status === 'processing_error') return '生成失败';
+  if (status === 'excluded') return '已删除';
+  return factoryOutputStatusLabel(status);
+}
+
 function factoryOutputStatusColor(status: FactoryOutputItemStatus): string {
   if (status === 'qualified') return 'green';
   if (status === 'rejected') return 'red';
   if (status === 'review_required') return 'orange';
   if (status === 'processing_error') return 'volcano';
   return 'default';
+}
+
+function factoryOutputBatchExportLabel(batchKey: string): string {
+  if (batchKey === 'qualified') return '合格输出';
+  if (batchKey === 'generated') return '视频产物';
+  return '输出物';
 }
 
 function renderFactoryOutputKindIcon(kind: FactoryOutputItem['kind']): ReactNode {
@@ -13935,6 +14105,10 @@ function readFactoryOperationRatios(factory: DigitalFactoryManifest) {
 }
 
 function readFactoryVideoDurationOptions(factory: DigitalFactoryManifest): number[] {
+  if (factory.kind === 'ecommerce_product_video_factory') {
+    return [6, 10];
+  }
+
   return factory.contentControls?.durationSecondOptions?.length
     ? factory.contentControls.durationSecondOptions
     : [5, 8, 10, 15];
@@ -15119,6 +15293,31 @@ function findModelProviderCatalog(
   );
 }
 
+function preserveExistingProviderModelsForFallbackCatalog(
+  catalog: ModelProviderCatalog,
+  existing: ModelProviderCatalog | undefined
+): ModelProviderCatalog {
+  const isFallbackOnlyCatalog =
+    catalog.models.length > 0 &&
+    catalog.models.every((model) => model.source === 'built_in');
+  const existingHasProviderModels = Boolean(
+    existing?.models.some((model) => model.source !== 'built_in')
+  );
+  if (!isFallbackOnlyCatalog || !existingHasProviderModels || !existing) {
+    return catalog;
+  }
+
+  const merged = new Map(existing.models.map((model) => [model.id, model] as const));
+  for (const model of catalog.models) {
+    merged.set(model.id, model);
+  }
+
+  return {
+    ...catalog,
+    models: [...merged.values()].sort((left, right) => left.id.localeCompare(right.id))
+  };
+}
+
 function upsertModelProviderCatalog(
   catalogs: ModelProviderCatalog[],
   catalog: ModelProviderCatalog
@@ -15799,42 +15998,132 @@ function readRequiredCapabilitiesForRuntimeRequirementProfile(profile: ModelProf
 function buildCompatibleRuntimeModelOptions(
   state: DesktopRuntimeState,
   requirementProfile: ModelProfile,
-  roleCode?: string
+  roleCode?: string,
+  currentRuntimeModelProfileId?: string
 ): Array<{ label: string; value: string }> {
   const effectiveRequiredCapabilities = readRequiredCapabilitiesForRuntimeRequirementProfile(requirementProfile);
   const enabledModelIds = new Set(state.localRuntime.enabledModelProfileIds);
-  const compatibleProfiles = state.modelProfiles.filter((profile) => {
-    const isCurrentRequirement = profile.id === requirementProfile.id;
-    const isEnabled = enabledModelIds.has(profile.id);
-    const isConfigured = resolveModelProfileCredential({
+  const currentSelectionId = currentRuntimeModelProfileId?.trim();
+  const profileIsConfigured = (profile: ModelProfile) =>
+    resolveModelProfileCredential({
       profile,
       roleCode,
       credentials: state.modelCredentials,
       roleBindings: state.roleModelCredentialBindings
     }).configured;
+  const compatibleProfiles = state.modelProfiles.filter((profile) => {
+    const isCurrentSelection = profile.id === currentSelectionId;
+    const isEnabled = enabledModelIds.has(profile.id);
+    const isConfigured = profileIsConfigured(profile);
     const isSelectableConfiguredProvider =
       isConfigured && !isPendingModelProviderProfile(profile);
 
     return (
-      (isCurrentRequirement || ((isEnabled || isSelectableConfiguredProvider) && isConfigured)) &&
+      (isCurrentSelection || ((isEnabled || isSelectableConfiguredProvider) && isConfigured)) &&
       modelProfileSupportsAnyRequiredCapability(profile, effectiveRequiredCapabilities)
     );
   });
+  const configuredCompatibleProfiles = compatibleProfiles.filter(
+    (profile) => !isPendingModelProviderProfile(profile) && profileIsConfigured(profile)
+  );
   const requirementProfileIsCompatible = modelProfileSupportsAnyRequiredCapability(
     requirementProfile,
     effectiveRequiredCapabilities
   );
+  const shouldIncludeRequirementProfile =
+    requirementProfileIsCompatible &&
+    (
+      requirementProfile.id === currentSelectionId ||
+      configuredCompatibleProfiles.length === 0 ||
+      !isPendingModelProviderProfile(requirementProfile)
+    );
 
   const profiles = compatibleProfiles.some((profile) => profile.id === requirementProfile.id)
     ? compatibleProfiles
-    : requirementProfileIsCompatible
+    : shouldIncludeRequirementProfile
       ? [requirementProfile, ...compatibleProfiles]
       : compatibleProfiles;
+  const dedupedProfiles = dedupeRuntimeModelOptionProfiles(
+    profiles,
+    state,
+    roleCode,
+    currentSelectionId
+  );
 
-  return profiles.map((profile) => ({
+  return dedupedProfiles.map((profile) => ({
     value: profile.id,
     label: `${profile.providerName} / ${profile.modelName} · ${modelCapabilitySummary(profile.capabilities, profile.purpose)}`
   }));
+}
+
+function dedupeRuntimeModelOptionProfiles(
+  profiles: ModelProfile[],
+  state: DesktopRuntimeState,
+  roleCode: string | undefined,
+  currentSelectionId: string | undefined
+): ModelProfile[] {
+  const byKey = new Map<string, ModelProfile>();
+
+  for (const profile of profiles) {
+    const key = runtimeModelOptionDedupeKey(profile);
+    const existing = byKey.get(key);
+    if (!existing || compareRuntimeModelOptionProfilePriority(profile, existing, state, roleCode, currentSelectionId) < 0) {
+      byKey.set(key, profile);
+    }
+  }
+
+  return [...byKey.values()].sort((left, right) =>
+    compareRuntimeModelOptionProfilePriority(left, right, state, roleCode, currentSelectionId)
+  );
+}
+
+function runtimeModelOptionDedupeKey(profile: ModelProfile): string {
+  return [
+    profile.providerId.trim().toLowerCase(),
+    profile.providerName.trim().toLowerCase(),
+    profile.modelName.trim().toLowerCase(),
+    (profile.apiBaseUrl ?? '').trim().toLowerCase()
+  ].join('|');
+}
+
+function compareRuntimeModelOptionProfilePriority(
+  left: ModelProfile,
+  right: ModelProfile,
+  state: DesktopRuntimeState,
+  roleCode: string | undefined,
+  currentSelectionId: string | undefined
+): number {
+  const leftScore = runtimeModelOptionProfilePriority(left, state, roleCode, currentSelectionId);
+  const rightScore = runtimeModelOptionProfilePriority(right, state, roleCode, currentSelectionId);
+  if (leftScore !== rightScore) {
+    return rightScore - leftScore;
+  }
+
+  return left.id.localeCompare(right.id);
+}
+
+function runtimeModelOptionProfilePriority(
+  profile: ModelProfile,
+  state: DesktopRuntimeState,
+  roleCode: string | undefined,
+  currentSelectionId: string | undefined
+): number {
+  const configured = resolveModelProfileCredential({
+    profile,
+    roleCode,
+    credentials: state.modelCredentials,
+    roleBindings: state.roleModelCredentialBindings
+  }).configured;
+  const enabled = state.localRuntime.enabledModelProfileIds.includes(profile.id);
+  const capabilityCount = readModelProfileCapabilities(profile).length;
+
+  return [
+    profile.id === currentSelectionId ? 1000 : 0,
+    configured ? 200 : 0,
+    enabled ? 80 : 0,
+    isPendingModelProviderProfile(profile) ? -100 : 0,
+    capabilityCount
+  ].reduce((total, value) => total + value, 0);
 }
 
 function modelProfileSupportsAnyRequiredCapability(profile: ModelProfile, requiredCapabilities: string[]): boolean {

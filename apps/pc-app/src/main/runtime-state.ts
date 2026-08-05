@@ -16,6 +16,7 @@ import {
 import { createTaskDetailFromSummary } from '../shared/workbench-data.js';
 import {
   migrateLegacyModelProfileCredentials,
+  migrateMiniMaxChinaApiBaseUrls,
   normalizeRoleModelCredentialBindings
 } from '../shared/desktop-model-credentials.js';
 import type {
@@ -505,8 +506,14 @@ function hydratePersistedRuntimeState(state: DesktopRuntimeState): DesktopRuntim
     modelProfiles: state.modelProfiles,
     credentials: state.modelCredentials
   });
+  const migratedModelState = migrateMiniMaxChinaApiBaseUrls({
+    modelProfiles: state.modelProfiles,
+    credentials: modelCredentials,
+    modelCatalogs: state.modelCatalogs ?? [],
+    roleModelCredentialBindings: state.roleModelCredentialBindings
+  });
   const validRoleCodes = new Set(state.rolePackages.map((rolePackage) => rolePackage.roleCode));
-  const validModelProfileIds = new Set(state.modelProfiles.map((profile) => profile.id));
+  const validModelProfileIds = new Set(migratedModelState.modelProfiles.map((profile) => profile.id));
   const normalizedState = {
     ...state,
     localRuntime: {
@@ -516,10 +523,11 @@ function hydratePersistedRuntimeState(state: DesktopRuntimeState): DesktopRuntim
       ]
     },
     knowledgeSources: normalizePersistedKnowledgeSources(state.knowledgeSources ?? []),
-    modelCredentials,
-    modelCatalogs: state.modelCatalogs ?? [],
+    modelProfiles: migratedModelState.modelProfiles,
+    modelCredentials: migratedModelState.modelCredentials,
+    modelCatalogs: migratedModelState.modelCatalogs,
     roleModelCredentialBindings: normalizeRoleModelCredentialBindings(
-      state.roleModelCredentialBindings,
+      migratedModelState.roleModelCredentialBindings,
       validRoleCodes,
       validModelProfileIds
     )

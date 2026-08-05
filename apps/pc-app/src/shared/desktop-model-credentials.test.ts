@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 
 import {
+  migrateMiniMaxChinaApiBaseUrls,
   migrateLegacyModelProfileCredentials,
   resolveModelProfileCredential
 } from './desktop-model-credentials.js';
 import type {
   ModelCredential,
+  ModelProviderCatalog,
   ModelProfile,
   RoleModelCredentialBinding
 } from './desktop-contract.js';
@@ -172,5 +174,78 @@ const aliasedLegacyCredentials = migrateLegacyModelProfileCredentials({
 
 assert.equal(aliasedLegacyCredentials.length, 1);
 assert.equal(aliasedLegacyCredentials[0]?.providerId, 'aliyun-bailian');
+
+const minimaxProfile: ModelProfile = {
+  id: 'minimax-hailuo-fast',
+  providerId: 'minimax',
+  providerName: 'MiniMax',
+  modelName: 'MiniMax-Hailuo-2.3-Fast',
+  purpose: 'general',
+  capabilities: ['video_generation', 'image_to_video'],
+  apiBaseUrl: 'https://api.minimax.io/v1'
+};
+const minimaxCredential: ModelCredential = {
+  id: 'credential-default-minimax',
+  providerId: 'minimax',
+  providerName: 'MiniMax',
+  label: 'MiniMax 默认 Key',
+  apiBaseUrl: 'https://api.minimax.io/v1',
+  apiKey: 'minimax-key',
+  isDefault: true,
+  createdAt: '2026-08-05T00:00:00.000Z',
+  updatedAt: '2026-08-05T00:00:00.000Z'
+};
+const minimaxCatalog: ModelProviderCatalog = {
+  providerId: 'minimax',
+  providerName: 'MiniMax',
+  apiBaseUrl: 'https://api.minimax.io/v1',
+  fetchedAt: '2026-08-05T00:00:00.000Z',
+  models: [
+    {
+      id: 'MiniMax-Hailuo-2.3-Fast',
+      capabilities: ['video_generation', 'image_to_video']
+    }
+  ]
+};
+const minimaxBinding: RoleModelCredentialBinding = {
+  roleCode: 'ecommerce-video-factory',
+  modelProfileId: 'qiu-video-generation-default',
+  runtimeModelProfileId: 'minimax-hailuo-fast',
+  mode: 'inline',
+  apiBaseUrl: 'https://api.minimax.io/v1',
+  apiKey: 'minimax-key',
+  updatedAt: '2026-08-05T00:00:00.000Z'
+};
+const migratedMiniMax = migrateMiniMaxChinaApiBaseUrls({
+  modelProfiles: [minimaxProfile],
+  credentials: [minimaxCredential],
+  modelCatalogs: [minimaxCatalog],
+  roleModelCredentialBindings: [minimaxBinding],
+  now: '2026-08-05T01:00:00.000Z'
+});
+
+assert.equal(migratedMiniMax.modelProfiles[0]?.apiBaseUrl, 'https://api.minimaxi.com/v1');
+assert.equal(migratedMiniMax.modelCredentials[0]?.apiBaseUrl, 'https://api.minimaxi.com/v1');
+assert.equal(migratedMiniMax.modelCredentials[0]?.updatedAt, '2026-08-05T01:00:00.000Z');
+assert.equal(migratedMiniMax.modelCatalogs[0]?.apiBaseUrl, 'https://api.minimaxi.com/v1');
+assert.equal(migratedMiniMax.roleModelCredentialBindings[0]?.apiBaseUrl, 'https://api.minimaxi.com/v1');
+
+const migratedMiniMaxChat = migrateMiniMaxChinaApiBaseUrls({
+  modelProfiles: [
+    {
+      ...minimaxProfile,
+      apiBaseUrl: 'https://api.minimax.chat/v1'
+    }
+  ],
+  credentials: [
+    {
+      ...minimaxCredential,
+      apiBaseUrl: 'https://api.minimax.chat/v1'
+    }
+  ]
+});
+
+assert.equal(migratedMiniMaxChat.modelProfiles[0]?.apiBaseUrl, 'https://api.minimax.chat/v1');
+assert.equal(migratedMiniMaxChat.modelCredentials[0]?.apiBaseUrl, 'https://api.minimax.chat/v1');
 
 console.log('Desktop model credentials passed.');

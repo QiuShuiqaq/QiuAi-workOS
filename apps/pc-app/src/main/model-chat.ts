@@ -85,6 +85,10 @@ const grsaiImageSubmitTimeoutMs = 120_000;
 const grsaiImagePollInitialIntervalMs = 3_000;
 const grsaiImagePollMaxIntervalMs = 15_000;
 const grsaiImagePollRequestTimeoutMs = 30_000;
+const minimaxVideoSubmitTimeoutMs = 30_000;
+const minimaxVideoPollInitialIntervalMs = 8_000;
+const minimaxVideoPollMaxIntervalMs = 20_000;
+const minimaxVideoPollRequestTimeoutMs = 30_000;
 const lightweightPngBytes = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
   'base64'
@@ -292,6 +296,23 @@ async function invokeOpenAiCompatibleVideoGeneration(input: {
     apiBaseUrl: input.apiBaseUrl
   })) {
     return invokeGrsaiAsyncVideoGeneration({
+      request: input.request,
+      apiBaseUrl: input.apiBaseUrl,
+      apiKey: input.apiKey,
+      modelName: input.modelName,
+      prompt,
+      sourceImagePath,
+      timeoutMs
+    });
+  }
+
+  if (isMiniMaxProvider({
+    providerId: input.request.profile.providerId,
+    providerName: input.request.profile.providerName,
+    apiBaseUrl: input.apiBaseUrl,
+    modelName: input.modelName
+  })) {
+    return invokeMiniMaxAsyncVideoGeneration({
       request: input.request,
       apiBaseUrl: input.apiBaseUrl,
       apiKey: input.apiKey,
@@ -667,6 +688,232 @@ async function pollGrsaiVideoGenerationResult(input: {
   );
 }
 
+async function invokeMiniMaxAsyncVideoGeneration(input: {
+  request: DesktopModelChatRequest;
+  apiBaseUrl: string;
+  apiKey: string;
+  modelName: string;
+  prompt: string;
+  sourceImagePath?: string;
+  timeoutMs: number;
+}): Promise<DesktopModelChatResponse> {
+  const startedAt = Date.now();
+  const apiBaseUrl = normalizeMiniMaxVideoApiBaseUrl(input.apiBaseUrl);
+  const submitEndpoint = `${apiBaseUrl}/video_generation`;
+  const response = await fetchModelApi(submitEndpoint, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${input.apiKey}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify(buildMiniMaxVideoGenerationPayload(input)),
+    signal: AbortSignal.timeout(Math.min(input.timeoutMs, minimaxVideoSubmitTimeoutMs))
+  }, 'MiniMax video task submit');
+
+  const bodyText = await response.text();
+  const body = parseJsonObject(bodyText);
+  if (!response.ok) {
+    const errorMessage = readProviderErrorMessage(body) ?? readMiniMaxProviderMessage(body) ?? bodyText.slice(0, 500);
+    throw new Error(`MiniMax video task submit returned HTTP ${response.status}: ${errorMessage}`);
+  }
+  const providerError = readMiniMaxProviderError(body);
+  if (providerError) {
+    throw new Error(`MiniMax video task submit failed: ${providerError}`);
+  }
+
+  const submittedUrl = readVideoUrlFromUnknown(body);
+  const providerJobId = readMiniMaxTaskId(body);
+  const submittedStatus = readMiniMaxJobStatus(body);
+  if (submittedUrl) {
+    return buildVideoGenerationResponse({
+      provider: input.request.profile.providerName,
+      modelName: input.modelName,
+      remoteUrl: submittedUrl,
+      providerJobId,
+      providerStatus: submittedStatus,
+      asyncMode: Boolean(providerJobId)
+    });
+  }
+
+  if (!providerJobId) {
+    throw new Error('MiniMax video task response did not include a video URL or task id.');
+  }
+
+  const pollResult = await pollMiniMaxVideoGenerationResult({
+    apiBaseUrl,
+    apiKey: input.apiKey,
+    providerJobId,
+    timeoutMs: input.timeoutMs,
+    startedAt
+  });
+
+  return buildVideoGenerationResponse({
+    provider: input.request.profile.providerName,
+    modelName: input.modelName,
+    remoteUrl: pollResult.remoteUrl,
+    providerJobId,
+    providerStatus: pollResult.providerStatus,
+    asyncMode: true
+  });
+}
+
+function buildMiniMaxVideoGenerationPayload(input: {
+  request: DesktopModelChatRequest;
+  modelName: string;
+  prompt: string;
+  sourceImagePath?: string;
+}): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    model: input.modelName,
+    prompt: input.prompt,
+    prompt_optimizer: true
+  };
+  if (input.sourceImagePath) {
+    payload.first_frame_image = buildLocalImageDataUrl(input.sourceImagePath);
+  }
+  const durationSeconds = normalizeMiniMaxVideoDurationSeconds(input.request.videoGeneration?.durationSeconds);
+  if (durationSeconds) {
+    payload.duration = durationSeconds;
+  }
+  return payload;
+}
+
+function normalizeMiniMaxVideoDurationSeconds(value: number | undefined): number | undefined {
+  if (!Number.isFinite(value) || Number(value) <= 0) {
+    return undefined;
+  }
+
+  const rounded = Math.round(Number(value));
+  const allowedDurations = [6, 10];
+  if (allowedDurations.includes(rounded)) {
+    return rounded;
+  }
+
+  return [...allowedDurations].reverse().find((duration) => duration <= rounded) ?? allowedDurations[0];
+}
+
+async function pollMiniMaxVideoGenerationResult(input: {
+  apiBaseUrl: string;
+  apiKey: string;
+  providerJobId: string;
+  timeoutMs: number;
+  startedAt: number;
+}): Promise<{ remoteUrl: string; providerStatus?: string }> {
+  let lastStatus: string | undefined;
+  let pollIntervalMs = minimaxVideoPollInitialIntervalMs;
+  let lastBodyText = '';
+  while (Date.now() - input.startedAt < input.timeoutMs) {
+    await sleep(pollIntervalMs);
+    const remainingMs = Math.max(1, input.timeoutMs - (Date.now() - input.startedAt));
+    const queryEndpoint = `${input.apiBaseUrl}/query/video_generation?task_id=${encodeURIComponent(input.providerJobId)}`;
+    const response = await fetchModelApi(queryEndpoint, {
+      method: 'GET',
+      headers: {
+        authorization: `Bearer ${input.apiKey}`
+      },
+      signal: AbortSignal.timeout(Math.min(minimaxVideoPollRequestTimeoutMs, remainingMs))
+    }, 'MiniMax video task result');
+    lastBodyText = await response.text();
+    const body = parseJsonObject(lastBodyText);
+    if (!response.ok) {
+      const errorMessage = readProviderErrorMessage(body) ?? readMiniMaxProviderMessage(body) ?? lastBodyText.slice(0, 500);
+      throw new Error(`MiniMax video task result returned HTTP ${response.status}: ${errorMessage}`);
+    }
+    const providerError = readMiniMaxProviderError(body);
+    if (providerError) {
+      throw new Error(`MiniMax video task failed: ${providerError}`);
+    }
+
+    lastStatus = readMiniMaxJobStatus(body) ?? lastStatus;
+    if (isMiniMaxFailedStatus(lastStatus)) {
+      const errorMessage = readMiniMaxProviderMessage(body) ?? lastBodyText.slice(0, 500);
+      throw new Error(`MiniMax video task failed: ${errorMessage || lastStatus}`);
+    }
+
+    const directRemoteUrl = readVideoUrlFromUnknown(body);
+    if (directRemoteUrl && (!lastStatus || !isMiniMaxPendingStatus(lastStatus))) {
+      return { remoteUrl: directRemoteUrl, providerStatus: lastStatus };
+    }
+
+    if (isMiniMaxSucceededStatus(lastStatus)) {
+      const fileId = readMiniMaxFileId(body);
+      if (!fileId) {
+        throw new Error('MiniMax video task succeeded but did not include a file id or video URL.');
+      }
+      const remoteUrl = await retrieveMiniMaxVideoUrl({
+        apiBaseUrl: input.apiBaseUrl,
+        apiKey: input.apiKey,
+        fileId,
+        timeoutMs: Math.min(minimaxVideoPollRequestTimeoutMs, remainingMs)
+      });
+      return { remoteUrl, providerStatus: lastStatus };
+    }
+
+    pollIntervalMs = Math.min(minimaxVideoPollMaxIntervalMs, Math.ceil(pollIntervalMs * 1.5));
+  }
+
+  throw new Error(
+    `MiniMax video task timed out while polling result. taskId=${input.providerJobId}${lastStatus ? `, status=${lastStatus}` : ''}`
+  );
+}
+
+async function retrieveMiniMaxVideoUrl(input: {
+  apiBaseUrl: string;
+  apiKey: string;
+  fileId: string;
+  timeoutMs: number;
+}): Promise<string> {
+  const retrieveEndpoint = `${input.apiBaseUrl}/files/retrieve?file_id=${encodeURIComponent(input.fileId)}`;
+  const response = await fetchModelApi(retrieveEndpoint, {
+    method: 'GET',
+    headers: {
+      authorization: `Bearer ${input.apiKey}`
+    },
+    signal: AbortSignal.timeout(Math.max(1, input.timeoutMs))
+  }, 'MiniMax video file retrieve');
+
+  const bodyText = await response.text();
+  const body = parseJsonObject(bodyText);
+  if (!response.ok) {
+    const errorMessage = readProviderErrorMessage(body) ?? readMiniMaxProviderMessage(body) ?? bodyText.slice(0, 500);
+    throw new Error(`MiniMax video file retrieve returned HTTP ${response.status}: ${errorMessage}`);
+  }
+
+  const remoteUrl = readVideoUrlFromUnknown(body);
+  if (!remoteUrl) {
+    throw new Error('MiniMax video file retrieve response did not include a download URL.');
+  }
+  return remoteUrl;
+}
+
+function normalizeMiniMaxVideoApiBaseUrl(value: string): string {
+  const normalized = requireOpenAiCompatibleApiBaseUrl(value);
+  try {
+    const url = new URL(normalized);
+    url.search = '';
+    url.hash = '';
+    let pathname = url.pathname.replace(/\/+$/g, '');
+    for (const suffix of ['/query/video_generation', '/video_generation', '/files/retrieve', '/models']) {
+      if (pathname.toLowerCase().endsWith(suffix)) {
+        pathname = pathname.slice(0, -suffix.length).replace(/\/+$/g, '');
+        break;
+      }
+    }
+    if ((!pathname || pathname === '/') && isMiniMaxOfficialApiHost(url.hostname)) {
+      pathname = '/v1';
+    }
+    url.pathname = pathname || '/';
+    return url.toString().replace(/\/+$/g, '');
+  } catch {
+    return normalized
+      .replace(/\/+$/g, '')
+      .replace(/\/query\/video_generation$/i, '')
+      .replace(/\/video_generation$/i, '')
+      .replace(/\/files\/retrieve$/i, '')
+      .replace(/\/models$/i, '');
+  }
+}
+
 async function invokeOpenAiCompatibleAudioTranscription(input: {
   request: DesktopModelChatRequest;
   apiBaseUrl: string;
@@ -730,7 +977,8 @@ export async function listOpenAiCompatibleModels(
     throw new Error('Model API Key is missing.');
   }
 
-  const builtInModels = listBuiltInCompatibleProviderModels(request);
+  const providerRequest = { ...request, apiBaseUrl };
+  const builtInModels = listBuiltInCompatibleProviderModels(providerRequest);
   let providerModels: ModelCatalogEntry[] = [];
   try {
     providerModels = await fetchOpenAiCompatibleProviderModels({
@@ -739,7 +987,10 @@ export async function listOpenAiCompatibleModels(
       timeoutMs: request.timeoutMs
     });
   } catch (error) {
-    if (builtInModels.length === 0) {
+    if (isModelAuthenticationError(error)) {
+      throw error;
+    }
+    if (builtInModels.length === 0 && !isMiniMaxProvider(providerRequest)) {
       throw error;
     }
   }
@@ -930,6 +1181,14 @@ async function runOpenAiCompatibleModelTestChecks(
   }
 
   if (hasAnyCapability(capabilities, ['video_generation', 'text_to_video', 'image_to_video'])) {
+    if (isMiniMaxProvider({
+      providerId: request.profile.providerId,
+      providerName: request.profile.providerName,
+      apiBaseUrl: request.profile.apiBaseUrl,
+      modelName: request.profile.modelName
+    })) {
+      checks.push(await runMiniMaxVideoConnectionTestCheck(request));
+    } else {
     checks.push({
       id: 'video_generation',
       label: '视频生成',
@@ -938,6 +1197,7 @@ async function runOpenAiCompatibleModelTestChecks(
       capabilities: ['video_generation', 'text_to_video', 'image_to_video'],
       costWarning: true
     });
+    }
   }
 
   if (hasAnyCapability(capabilities, ['video_text', 'video_understanding'])) {
@@ -1038,6 +1298,37 @@ async function runImageEditingTestCheck(request: DesktopModelTestRequest): Promi
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
+}
+
+async function runMiniMaxVideoConnectionTestCheck(request: DesktopModelTestRequest): Promise<ModelTestCheck> {
+  const apiBaseUrl = requireOpenAiCompatibleApiBaseUrl(request.profile.apiBaseUrl);
+  return runModelTestCheck({
+    id: 'minimax_video_probe',
+    label: 'MiniMax video connection',
+    capabilities: ['video_generation', 'text_to_video', 'image_to_video'],
+    endpoint: `${apiBaseUrl}/models`,
+    action: async () => {
+      const catalog = await listOpenAiCompatibleModels({
+        providerId: request.profile.providerId,
+        providerName: request.profile.providerName,
+        apiBaseUrl: request.profile.apiBaseUrl,
+        apiKey: request.profile.apiKey ?? '',
+        modelName: request.profile.modelName,
+        capabilities: ['video_generation', 'text_to_video', 'image_to_video'],
+        timeoutMs: request.timeoutMs ?? 20_000
+      });
+      const hasVideoModel = catalog.models.some((model) =>
+        model.id === request.profile.modelName ||
+        model.capabilities.some((capability) =>
+          ['video_generation', 'text_to_video', 'image_to_video'].includes(capability)
+        )
+      );
+      if (!hasVideoModel) {
+        throw new Error('MiniMax catalog did not include a usable video generation model.');
+      }
+      return `MiniMax API Key is usable. Catalog contains ${catalog.models.length} models; no video was generated.`;
+    }
+  });
 }
 
 async function runVisionUnderstandingTestCheck(request: DesktopModelTestRequest): Promise<ModelTestCheck> {
@@ -1184,6 +1475,15 @@ function listBuiltInCompatibleProviderModels(request: DesktopModelListRequest): 
     ];
   }
 
+  if (isMiniMaxProvider(request)) {
+    return [
+      builtInModelCatalogEntry('MiniMax-Hailuo-2.3', 'MiniMax Hailuo 2.3 / video generation', ['video_generation', 'text_to_video', 'image_to_video']),
+      builtInModelCatalogEntry('MiniMax-Hailuo-2.3-Fast', 'MiniMax Hailuo 2.3 Fast / image to video', ['video_generation', 'image_to_video']),
+      builtInModelCatalogEntry('MiniMax-Hailuo-02', 'MiniMax Hailuo 02 / video generation', ['video_generation', 'text_to_video', 'image_to_video']),
+      builtInModelCatalogEntry('I2V-01-Director', 'MiniMax I2V-01-Director / image to video', ['video_generation', 'image_to_video'])
+    ];
+  }
+
   return [];
 }
 
@@ -1291,6 +1591,30 @@ function isGrsaiProvider(request: {
     .join(' ')
     .toLowerCase();
   return text.includes('grsai') || text.includes('grsaiapi.com') || text.includes('grsai.dakka.com.cn');
+}
+
+function isMiniMaxProvider(request: {
+  providerId?: string;
+  providerName?: string;
+  apiBaseUrl?: string;
+  modelName?: string;
+}): boolean {
+  const text = [request.providerId, request.providerName, request.apiBaseUrl, request.modelName]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return text.includes('minimax') ||
+    text.includes('minimaxi') ||
+    text.includes('api.minimax.io') ||
+    text.includes('api.minimax.chat') ||
+    text.includes('api.minimaxi.com');
+}
+
+function isMiniMaxOfficialApiHost(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase();
+  return normalized === 'api.minimax.io' ||
+    normalized === 'api.minimax.chat' ||
+    normalized === 'api.minimaxi.com';
 }
 
 function buildAudioTranscriptionFormData(
@@ -1571,6 +1895,17 @@ function readProviderErrorMessage(body: unknown): string | undefined {
   return typeof message === 'string' ? message : undefined;
 }
 
+function isModelAuthenticationError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /http\s*(401|403)\b/i.test(message) ||
+    /\b(401|403)\b/.test(message) ||
+    /\b2049\b/.test(message) ||
+    /invalid\s+(api\s*)?key/i.test(message) ||
+    /unauthori[sz]ed/i.test(message) ||
+    /forbidden/i.test(message) ||
+    /authentication/i.test(message);
+}
+
 function readTranscriptionText(body: OpenAiCompatibleTranscriptionResponse | undefined): string | undefined {
   for (const value of [body?.text, body?.result, body?.transcript]) {
     if (typeof value === 'string' && value.trim()) {
@@ -1728,14 +2063,73 @@ function readGrsaiErrorMessage(body: Record<string, unknown> | undefined): strin
     ?? readStringFromUnknownPath(body, ['result', 'message']);
 }
 
+function readMiniMaxTaskId(body: Record<string, unknown> | undefined): string | undefined {
+  return readStringFromUnknownPath(body, ['task_id'])
+    ?? readStringFromUnknownPath(body, ['taskId'])
+    ?? readStringFromUnknownPath(body, ['id'])
+    ?? readStringFromUnknownPath(body, ['output', 'task_id'])
+    ?? readStringFromUnknownPath(body, ['output', 'taskId'])
+    ?? readStringFromUnknownPath(body, ['data', 'task_id'])
+    ?? readStringFromUnknownPath(body, ['data', 'taskId'])
+    ?? readStringFromUnknownPath(body, ['result', 'task_id']);
+}
+
+function readMiniMaxFileId(body: Record<string, unknown> | undefined): string | undefined {
+  return readStringFromUnknownPath(body, ['file_id'])
+    ?? readStringFromUnknownPath(body, ['fileId'])
+    ?? readStringFromUnknownPath(body, ['video_file_id'])
+    ?? readStringFromUnknownPath(body, ['output', 'file_id'])
+    ?? readStringFromUnknownPath(body, ['output', 'fileId'])
+    ?? readStringFromUnknownPath(body, ['output', 'video_file_id'])
+    ?? readStringFromUnknownPath(body, ['data', 'file_id'])
+    ?? readStringFromUnknownPath(body, ['data', 'fileId'])
+    ?? readStringFromUnknownPath(body, ['result', 'file_id']);
+}
+
+function readMiniMaxJobStatus(body: Record<string, unknown> | undefined): string | undefined {
+  return normalizeProviderStatus(
+    readStringFromUnknownPath(body, ['status'])
+    ?? readStringFromUnknownPath(body, ['state'])
+    ?? readStringFromUnknownPath(body, ['task_status'])
+    ?? readStringFromUnknownPath(body, ['output', 'status'])
+    ?? readStringFromUnknownPath(body, ['output', 'task_status'])
+    ?? readStringFromUnknownPath(body, ['data', 'status'])
+    ?? readStringFromUnknownPath(body, ['result', 'status'])
+  );
+}
+
+function readMiniMaxProviderMessage(body: Record<string, unknown> | undefined): string | undefined {
+  return readStringFromUnknownPath(body, ['base_resp', 'status_msg'])
+    ?? readStringFromUnknownPath(body, ['base_resp', 'message'])
+    ?? readStringFromUnknownPath(body, ['message'])
+    ?? readStringFromUnknownPath(body, ['msg'])
+    ?? readStringFromUnknownPath(body, ['error_msg'])
+    ?? readStringFromUnknownPath(body, ['error', 'message']);
+}
+
+function readMiniMaxProviderError(body: Record<string, unknown> | undefined): string | undefined {
+  if (!body) {
+    return undefined;
+  }
+  const code = readUnknownFromPath(body, ['base_resp', 'status_code'])
+    ?? readUnknownFromPath(body, ['base_resp', 'code'])
+    ?? readUnknownFromPath(body, ['code'])
+    ?? readUnknownFromPath(body, ['status_code']);
+  const normalizedCode = typeof code === 'number' ? String(code) : typeof code === 'string' ? code.trim() : '';
+  if (!normalizedCode || normalizedCode === '0' || normalizedCode.toLowerCase() === 'success') {
+    return undefined;
+  }
+  const message = readMiniMaxProviderMessage(body);
+  return message ? `${normalizedCode}: ${message}` : normalizedCode;
+}
+
 function readImageUrlFromUnknown(value: unknown, depth = 0): string | undefined {
   if (depth > 6) {
     return undefined;
   }
 
   if (typeof value === 'string') {
-    const trimmed = value.trim();
-    return /^https?:\/\//i.test(trimmed) ? trimmed : undefined;
+    return normalizeProviderHttpUrl(value);
   }
 
   if (Array.isArray(value)) {
@@ -1787,8 +2181,7 @@ function readVideoUrlFromUnknown(value: unknown, depth = 0): string | undefined 
   }
 
   if (typeof value === 'string') {
-    const trimmed = value.trim();
-    return /^https?:\/\//i.test(trimmed) ? trimmed : undefined;
+    return normalizeProviderHttpUrl(value);
   }
 
   if (Array.isArray(value)) {
@@ -1811,6 +2204,8 @@ function readVideoUrlFromUnknown(value: unknown, depth = 0): string | undefined 
     'url',
     'videoUrl',
     'video_url',
+    'downloadUrl',
+    'download_url',
     'outputUrl',
     'output_url',
     'fileUrl',
@@ -1827,7 +2222,7 @@ function readVideoUrlFromUnknown(value: unknown, depth = 0): string | undefined 
     return openAiUrl;
   }
 
-  for (const key of ['results', 'videos', 'data', 'result', 'output', 'artifacts', 'artifact']) {
+  for (const key of ['results', 'videos', 'data', 'result', 'output', 'file', 'artifacts', 'artifact']) {
     const url = readVideoUrlFromUnknown(record[key], depth + 1);
     if (url) {
       return url;
@@ -1844,6 +2239,23 @@ function readStringFromUnknownPath(value: unknown, pathItems: string[]): string 
   return typeof valueAtPath === 'string' && valueAtPath.trim() ? valueAtPath.trim() : undefined;
 }
 
+function readUnknownFromPath(value: unknown, pathItems: string[]): unknown {
+  return typeof value === 'object' && value !== null
+    ? readNestedUnknown(value as Record<string, unknown>, pathItems)
+    : undefined;
+}
+
+function normalizeProviderHttpUrl(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  if (/^www\./i.test(trimmed)) {
+    return `https://${trimmed}`;
+  }
+  return undefined;
+}
+
 function normalizeProviderStatus(value: string | undefined): string | undefined {
   return value?.trim().toLowerCase() || undefined;
 }
@@ -1858,6 +2270,32 @@ function isGrsaiPendingStatus(value: string | undefined): boolean {
 
 function isGrsaiFailedStatus(value: string | undefined): boolean {
   return Boolean(value && ['failed', 'error', 'cancelled', 'canceled', 'timeout', 'rejected'].includes(value));
+}
+
+function isMiniMaxPendingStatus(value: string | undefined): boolean {
+  if (!value) {
+    return true;
+  }
+
+  return [
+    'pending',
+    'queued',
+    'queueing',
+    'submitted',
+    'created',
+    'starting',
+    'preparing',
+    'processing',
+    'running'
+  ].includes(value);
+}
+
+function isMiniMaxSucceededStatus(value: string | undefined): boolean {
+  return Boolean(value && ['success', 'succeeded', 'finished', 'completed', 'done'].includes(value));
+}
+
+function isMiniMaxFailedStatus(value: string | undefined): boolean {
+  return Boolean(value && ['fail', 'failed', 'failure', 'error', 'cancelled', 'canceled', 'timeout', 'rejected'].includes(value));
 }
 
 function buildLocalImageDataUrl(filePath: string): string {

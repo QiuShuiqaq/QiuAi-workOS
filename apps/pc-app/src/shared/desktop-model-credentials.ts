@@ -1,5 +1,6 @@
 import type {
   ModelCredential,
+  ModelProviderCatalog,
   ModelProfile,
   RoleModelCredentialBinding
 } from './desktop-contract.js';
@@ -23,6 +24,8 @@ const providerCredentialAliasGroups = [
   ['aliyun-bailian', 'aliyun-asr-compatible', 'dashscope'],
   ['tencent-cloud', 'tencent-asr-compatible']
 ];
+const minimaxLegacyApiHost = 'api.minimax.io';
+const minimaxChinaApiBaseUrl = 'https://api.minimaxi.com/v1';
 
 export function resolveModelProfileCredential(
   input: ModelCredentialResolutionInput
@@ -193,6 +196,43 @@ export function migrateLegacyModelProfileCredentials(input: {
   return credentials;
 }
 
+export function migrateMiniMaxChinaApiBaseUrls(input: {
+  modelProfiles: ModelProfile[];
+  credentials?: ModelCredential[];
+  modelCatalogs?: ModelProviderCatalog[];
+  roleModelCredentialBindings?: RoleModelCredentialBinding[];
+  now?: string;
+}): {
+  modelProfiles: ModelProfile[];
+  modelCredentials: ModelCredential[];
+  modelCatalogs: ModelProviderCatalog[];
+  roleModelCredentialBindings: RoleModelCredentialBinding[];
+} {
+  const now = input.now ?? new Date().toISOString();
+  return {
+    modelProfiles: input.modelProfiles.map((profile) => {
+      const apiBaseUrl = migrateMiniMaxApiBaseUrl(profile.apiBaseUrl);
+      return apiBaseUrl === profile.apiBaseUrl ? profile : { ...profile, apiBaseUrl };
+    }),
+    modelCredentials: (input.credentials ?? []).map((credential) => {
+      const apiBaseUrl = migrateMiniMaxApiBaseUrl(credential.apiBaseUrl);
+      return apiBaseUrl === credential.apiBaseUrl
+        ? credential
+        : { ...credential, apiBaseUrl, updatedAt: now };
+    }),
+    modelCatalogs: (input.modelCatalogs ?? []).map((catalog) => {
+      const apiBaseUrl = migrateMiniMaxApiBaseUrl(catalog.apiBaseUrl);
+      return apiBaseUrl === catalog.apiBaseUrl ? catalog : { ...catalog, apiBaseUrl };
+    }),
+    roleModelCredentialBindings: (input.roleModelCredentialBindings ?? []).map((binding) => {
+      const apiBaseUrl = migrateMiniMaxApiBaseUrl(binding.apiBaseUrl);
+      return apiBaseUrl === binding.apiBaseUrl
+        ? binding
+        : { ...binding, apiBaseUrl, updatedAt: now };
+    })
+  };
+}
+
 export function upsertDefaultModelCredential(input: {
   credentials: ModelCredential[];
   profile: ModelProfile;
@@ -266,6 +306,34 @@ function providerIdsShareCredentialScope(left: string, right: string): boolean {
 
 function normalizeProviderCredentialId(providerId: string): string {
   return providerId.trim().toLowerCase();
+}
+
+function migrateMiniMaxApiBaseUrl(apiBaseUrl: string | undefined): string | undefined {
+  if (!apiBaseUrl?.trim()) {
+    return apiBaseUrl;
+  }
+
+  try {
+    const url = new URL(apiBaseUrl.trim());
+    if (url.hostname.trim().toLowerCase() !== minimaxLegacyApiHost) {
+      return apiBaseUrl;
+    }
+
+    url.hostname = 'api.minimaxi.com';
+    url.pathname = url.pathname.replace(/\/+$/g, '') || '/v1';
+    if (url.pathname === '/') {
+      url.pathname = '/v1';
+    }
+    url.search = '';
+    url.hash = '';
+    return url.toString().replace(/\/+$/g, '');
+  } catch {
+    const normalized = apiBaseUrl.trim().replace(/\/+$/g, '');
+    return normalized === `https://${minimaxLegacyApiHost}` ||
+      normalized === `https://${minimaxLegacyApiHost}/v1`
+      ? minimaxChinaApiBaseUrl
+      : apiBaseUrl;
+  }
 }
 
 function applyCredentialFields(

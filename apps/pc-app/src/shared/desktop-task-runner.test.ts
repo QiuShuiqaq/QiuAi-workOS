@@ -121,6 +121,12 @@ const tools: ToolManifest[] = [
         outputTypes: ['json']
       },
       {
+        action: 'filesystem.download_remote_file',
+        name: 'Download remote file',
+        inputTypes: ['text'],
+        outputTypes: ['artifact']
+      },
+      {
         action: 'filesystem.package_zip',
         name: 'Package ZIP',
         inputTypes: ['file', 'json'],
@@ -3008,6 +3014,7 @@ let factoryMaxActiveModelCalls = 0;
 let factoryModelInvocationCount = 0;
 let factorySubmitModelCallCount = 0;
 let factoryPollModelCallCount = 0;
+let factoryDownloadCallCount = 0;
 const factoryTask = await runDesktopTask({
   task: createMockTaskDetail({
     taskId: 'task-runner-factory-image-batch-001',
@@ -3032,7 +3039,7 @@ const factoryTask = await runDesktopTask({
     costCents: 0,
     executionContext: {
       modelProfileIds: ['qiu-general-default'],
-      toolIds: [],
+      toolIds: ['local-filesystem'],
       knowledgeBindingIds: [],
       attachmentPaths: ['C:\\QiuAI\\factory\\sku-1.png', 'C:\\QiuAI\\factory\\sku-2.png']
     }
@@ -3099,7 +3106,7 @@ const factoryTask = await runDesktopTask({
       ]
     },
     modelProfileIds: ['qiu-image-editing-default'],
-    toolIds: [],
+    toolIds: ['local-filesystem'],
     requiredKnowledgeSources: [],
     defaultTaskTypes: ['factory_image_batch'],
     syncPolicy: 'summary_only'
@@ -3117,8 +3124,9 @@ const factoryTask = await runDesktopTask({
     }
   ]),
   tools,
+  workspaceId: 'workspace-factory-image-batch',
   enabledModelProfileIds: ['qiu-general-default', 'qiu-image-editing-default'],
-  enabledToolIds: [],
+  enabledToolIds: ['local-filesystem'],
   enabledKnowledgeBindingIds: [],
   modelInvoker: async (request) => {
     factoryActiveModelCalls += 1;
@@ -3185,6 +3193,23 @@ const factoryTask = await runDesktopTask({
       factoryActiveModelCalls -= 1;
     }
   },
+  desktopToolInvoker: async (request) => {
+    factoryDownloadCallCount += 1;
+    assert.equal(request.toolId, 'local-filesystem');
+    assert.equal(request.action, 'filesystem.download_remote_file');
+    assert.equal(request.input.mediaKind, 'image');
+    assert.equal(request.input.folder, 'product-images');
+    assert.match(String(request.input.url ?? ''), /^https:\/\/cdn\.example\.test\/factory\/image-\d+\.png$/);
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: `C:\\QiuAI\\workspace\\product-images\\image-${factoryDownloadCallCount}.png`,
+        sourceUrl: request.input.url
+      }
+    };
+  },
   completedAt: '2026-07-20T10:00:14.000Z'
 });
 
@@ -3193,6 +3218,7 @@ assert.equal(factoryTask.task.state, 'completed');
 assert.equal(factoryModelInvocationCount, 8);
 assert.equal(factorySubmitModelCallCount, 4);
 assert.equal(factoryPollModelCallCount, 4);
+assert.equal(factoryDownloadCallCount, 4);
 assert.equal(factoryMaxActiveModelCalls > 1, true);
 assert.equal(factoryMaxActiveModelCalls <= 2, true);
 assert.equal(factoryPreviewArtifact?.factoryPreview?.total, 4);
@@ -3210,10 +3236,16 @@ assert.ok(
   factoryPreviewArtifact?.factoryPreview?.items.every((item) => item.remoteUrl?.startsWith('https://cdn.example.test/'))
 );
 assert.ok(
+  factoryPreviewArtifact?.factoryPreview?.items.every((item) => item.localPath?.startsWith('C:\\QiuAI\\workspace\\product-images\\'))
+);
+assert.ok(
   factoryPreviewArtifact?.factoryPreview?.items.every((item) => item.attempts === 1)
 );
 assert.ok(
   factoryTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_RUNTIME_FACTORY_BATCH_COMPLETED')
+);
+assert.ok(
+  factoryTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_RUNTIME_FACTORY_REMOTE_ASSETS_SAVED')
 );
 
 let fallbackFactoryImageCalls = 0;
