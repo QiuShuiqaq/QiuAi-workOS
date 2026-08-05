@@ -3082,7 +3082,8 @@ export default function App() {
   async function exportFactoryOutputItems(
     task: DesktopTaskDetail,
     items: FactoryOutputItem[],
-    batchKey: string
+    batchKey: string,
+    options: { generatedOnly?: boolean } = {}
   ) {
     if (!window.qiuDesktop) {
       return;
@@ -3091,7 +3092,7 @@ export default function App() {
     const exportableFiles = items
       .filter((item) => item.status !== 'excluded')
       .map((item) => {
-        const sourcePath = getFactoryOutputLocalPath(item);
+        const sourcePath = getFactoryOutputLocalPath(item, options);
         return sourcePath
           ? {
               sourcePath,
@@ -3100,7 +3101,7 @@ export default function App() {
           : undefined;
       })
       .filter((item): item is { sourcePath: string; suggestedFileName: string } => Boolean(item));
-    const remoteFileCount = items.filter((item) => getFactoryOutputRemoteUrl(item)).length;
+    const remoteFileCount = items.filter((item) => getFactoryOutputRemoteUrl(item, options)).length;
 
     if (exportableFiles.length === 0) {
       message.warning(remoteFileCount > 0 ? '当前批次包含远程 URL，请先使用单个导出保存。' : '没有可导出的本地文件。');
@@ -3129,13 +3130,17 @@ export default function App() {
     }
   }
 
-  async function exportSingleFactoryOutputItem(task: DesktopTaskDetail, item: FactoryOutputItem) {
+  async function exportSingleFactoryOutputItem(
+    task: DesktopTaskDetail,
+    item: FactoryOutputItem,
+    options: { generatedOnly?: boolean } = {}
+  ) {
     if (!window.qiuDesktop) {
       return;
     }
 
-    const sourcePath = getFactoryOutputLocalPath(item);
-    const remoteUrl = getFactoryOutputRemoteUrl(item);
+    const sourcePath = getFactoryOutputLocalPath(item, options);
+    const remoteUrl = getFactoryOutputRemoteUrl(item, options);
     if (!sourcePath && !remoteUrl) {
       message.warning('这个输出物没有可导出的文件或 URL。');
       return;
@@ -7117,7 +7122,9 @@ export default function App() {
 
     const isGeneratedVideoMode = options.mode === 'generated_video';
     const qualifiedItems = outputItems.filter((item) => item.status === 'qualified');
-    const downloadableItems = outputItems.filter((item) => Boolean(getFactoryOutputPreviewTarget(item)));
+    const downloadableItems = outputItems.filter((item) =>
+      Boolean(getFactoryOutputPreviewTarget(item, { generatedOnly: isGeneratedVideoMode }))
+    );
     const failedItems = outputItems.filter((item) => item.status === 'processing_error');
 
     return (
@@ -7156,7 +7163,8 @@ export default function App() {
                 void exportFactoryOutputItems(
                   task,
                   isGeneratedVideoMode ? downloadableItems : outputItems,
-                  isGeneratedVideoMode ? 'generated' : 'all'
+                  isGeneratedVideoMode ? 'generated' : 'all',
+                  { generatedOnly: isGeneratedVideoMode }
                 )
               }
             >
@@ -7167,7 +7175,8 @@ export default function App() {
 
         <div className="factory-output-item-list">
           {outputItems.map((item) => {
-            const previewPath = getFactoryOutputPreviewTarget(item);
+            const previewPath = getFactoryOutputPreviewTarget(item, { generatedOnly: isGeneratedVideoMode });
+            const sourceTarget = isGeneratedVideoMode ? getFactoryOutputSourceTarget(item) : undefined;
             const scoreLabel = item.score === undefined ? undefined : `${item.score} 分${item.grade ? ` / ${item.grade}` : ''}`;
             return (
               <div key={item.id} className={`factory-output-item-card ${item.status}`}>
@@ -7224,10 +7233,15 @@ export default function App() {
                       icon={<DownloadOutlined />}
                       loading={exportingFactoryOutputId === item.id}
                       disabled={!previewPath}
-                      onClick={() => void exportSingleFactoryOutputItem(task, item)}
+                      onClick={() => void exportSingleFactoryOutputItem(task, item, { generatedOnly: isGeneratedVideoMode })}
                     >
                       导出
                     </Button>
+                    {sourceTarget ? (
+                      <Button size="small" onClick={() => void openLocalPath(sourceTarget)}>
+                        查看原图
+                      </Button>
+                    ) : null}
                     {isGeneratedVideoMode ? null : (
                       <>
                         <Button
@@ -12787,17 +12801,40 @@ function getFactoryOutputOrder(item: FactoryOutputItem): number {
   return typeof order === 'number' && Number.isFinite(order) ? order : Number.MAX_SAFE_INTEGER;
 }
 
-function getFactoryOutputLocalPath(item: FactoryOutputItem): string | undefined {
-  return item.outputPath?.trim() || item.sourcePath?.trim() || undefined;
+function getFactoryOutputLocalPath(
+  item: FactoryOutputItem,
+  options: { generatedOnly?: boolean } = {}
+): string | undefined {
+  return options.generatedOnly
+    ? item.outputPath?.trim() || undefined
+    : item.outputPath?.trim() || item.sourcePath?.trim() || undefined;
 }
 
-function getFactoryOutputRemoteUrl(item: FactoryOutputItem): string | undefined {
-  const url = item.outputUrl?.trim() || item.sourceUrl?.trim() || undefined;
+function getFactoryOutputRemoteUrl(
+  item: FactoryOutputItem,
+  options: { generatedOnly?: boolean } = {}
+): string | undefined {
+  const url = options.generatedOnly
+    ? item.outputUrl?.trim() || undefined
+    : item.outputUrl?.trim() || item.sourceUrl?.trim() || undefined;
   return isHttpUrl(url) ? url : undefined;
 }
 
-function getFactoryOutputPreviewTarget(item: FactoryOutputItem): string | undefined {
-  return getFactoryOutputLocalPath(item) ?? getFactoryOutputRemoteUrl(item);
+function getFactoryOutputPreviewTarget(
+  item: FactoryOutputItem,
+  options: { generatedOnly?: boolean } = {}
+): string | undefined {
+  return getFactoryOutputLocalPath(item, options) ?? getFactoryOutputRemoteUrl(item, options);
+}
+
+function getFactoryOutputSourceTarget(item: FactoryOutputItem): string | undefined {
+  const sourcePath = item.sourcePath?.trim();
+  if (sourcePath) {
+    return sourcePath;
+  }
+
+  const sourceUrl = item.sourceUrl?.trim();
+  return isHttpUrl(sourceUrl) ? sourceUrl : undefined;
 }
 
 function getFactoryOutputSuggestedFileName(item: FactoryOutputItem, sourcePath: string): string {
