@@ -81,7 +81,9 @@ interface OpenAiCompatibleTranscriptionResponse {
 const defaultTimeoutMs = 45_000;
 const imageGenerationTestTimeoutMs = 180_000;
 const videoGenerationTestTimeoutMs = 240_000;
-const grsaiImagePollIntervalMs = 2_000;
+const grsaiImageSubmitTimeoutMs = 120_000;
+const grsaiImagePollInitialIntervalMs = 3_000;
+const grsaiImagePollMaxIntervalMs = 15_000;
 const grsaiImagePollRequestTimeoutMs = 30_000;
 const lightweightPngBytes = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
@@ -358,8 +360,39 @@ async function invokeGrsaiAsyncImageGeneration(input: {
   sourceImagePath?: string;
   timeoutMs: number;
 }): Promise<DesktopModelChatResponse> {
+  const asyncMode = input.request.imageGeneration?.asyncMode ?? 'wait';
+  if (asyncMode === 'poll_once') {
+    const providerJobId = input.request.imageGeneration?.providerJobId?.trim();
+    if (!providerJobId) {
+      throw new Error('GrsAI image poll request did not include a task id.');
+    }
+
+    const pollResult = await queryGrsaiImageGenerationResult({
+      apiBaseUrl: input.apiBaseUrl,
+      apiKey: input.apiKey,
+      providerJobId,
+      timeoutMs: input.timeoutMs
+    });
+    if (!pollResult.remoteUrl) {
+      return buildPendingImageGenerationResponse({
+        provider: input.request.profile.providerName,
+        modelName: input.modelName,
+        providerJobId,
+        providerStatus: pollResult.providerStatus
+      });
+    }
+
+    return buildImageGenerationResponse({
+      provider: input.request.profile.providerName,
+      modelName: input.modelName,
+      remoteUrl: pollResult.remoteUrl,
+      providerJobId,
+      providerStatus: pollResult.providerStatus,
+      asyncMode: true
+    });
+  }
+
   const submitEndpoint = `${input.apiBaseUrl}/api/generate`;
-  const startedAt = Date.now();
   const response = await fetchModelApi(submitEndpoint, {
     method: 'POST',
     headers: {
@@ -367,7 +400,7 @@ async function invokeGrsaiAsyncImageGeneration(input: {
       'content-type': 'application/json'
     },
     body: JSON.stringify(buildGrsaiImageGenerationPayload(input)),
-    signal: AbortSignal.timeout(input.timeoutMs)
+    signal: AbortSignal.timeout(Math.min(input.timeoutMs, grsaiImageSubmitTimeoutMs))
   }, 'GrsAI image task submit');
 
   const bodyText = await response.text();
@@ -395,12 +428,21 @@ async function invokeGrsaiAsyncImageGeneration(input: {
     throw new Error('GrsAI image task response did not include an image URL or task id.');
   }
 
+  if (asyncMode === 'submit_only') {
+    return buildPendingImageGenerationResponse({
+      provider: input.request.profile.providerName,
+      modelName: input.modelName,
+      providerJobId,
+      providerStatus: submittedStatus
+    });
+  }
+
   const pollResult = await pollGrsaiImageGenerationResult({
     apiBaseUrl: input.apiBaseUrl,
     apiKey: input.apiKey,
     providerJobId,
     timeoutMs: input.timeoutMs,
-    startedAt
+    startedAt: Date.now()
   });
 
   return buildImageGenerationResponse({
@@ -439,40 +481,63 @@ async function pollGrsaiImageGenerationResult(input: {
   timeoutMs: number;
   startedAt: number;
 }): Promise<{ remoteUrl: string; providerStatus?: string }> {
-  const resultEndpoint = `${input.apiBaseUrl}/api/result?id=${encodeURIComponent(input.providerJobId)}`;
   let lastStatus: string | undefined;
-  let lastBodyText = '';
+  let pollIntervalMs = grsaiImagePollInitialIntervalMs;
   while (Date.now() - input.startedAt < input.timeoutMs) {
-    await sleep(grsaiImagePollIntervalMs);
-    const response = await fetchModelApi(resultEndpoint, {
-      method: 'GET',
-      headers: {
-        authorization: `Bearer ${input.apiKey}`
-      },
-      signal: AbortSignal.timeout(Math.min(grsaiImagePollRequestTimeoutMs, input.timeoutMs))
-    }, 'GrsAI image task result');
-    lastBodyText = await response.text();
-    const body = parseJsonObject(lastBodyText);
-    if (!response.ok) {
-      const errorMessage = readProviderErrorMessage(body) ?? readGrsaiErrorMessage(body) ?? lastBodyText.slice(0, 500);
-      throw new Error(`GrsAI image task result returned HTTP ${response.status}: ${errorMessage}`);
+    await sleep(pollIntervalMs);
+    const remainingMs = Math.max(1, input.timeoutMs - (Date.now() - input.startedAt));
+    const result = await queryGrsaiImageGenerationResult({
+      apiBaseUrl: input.apiBaseUrl,
+      apiKey: input.apiKey,
+      providerJobId: input.providerJobId,
+      timeoutMs: Math.min(grsaiImagePollRequestTimeoutMs, remainingMs)
+    });
+    lastStatus = result.providerStatus ?? lastStatus;
+    if (result.remoteUrl) {
+      return { remoteUrl: result.remoteUrl, providerStatus: lastStatus };
     }
 
-    const remoteUrl = readImageUrlFromUnknown(body);
-    lastStatus = readGrsaiJobStatus(body) ?? lastStatus;
-    if (remoteUrl && (!lastStatus || !isGrsaiPendingStatus(lastStatus))) {
-      return { remoteUrl, providerStatus: lastStatus };
-    }
-
-    if (isGrsaiFailedStatus(lastStatus)) {
-      const errorMessage = readGrsaiErrorMessage(body) ?? lastBodyText.slice(0, 500);
-      throw new Error(`GrsAI image task failed: ${errorMessage || lastStatus}`);
-    }
+    pollIntervalMs = Math.min(grsaiImagePollMaxIntervalMs, Math.ceil(pollIntervalMs * 1.5));
   }
 
   throw new Error(
     `GrsAI image task timed out while polling result. taskId=${input.providerJobId}${lastStatus ? `, status=${lastStatus}` : ''}`
   );
+}
+
+async function queryGrsaiImageGenerationResult(input: {
+  apiBaseUrl: string;
+  apiKey: string;
+  providerJobId: string;
+  timeoutMs: number;
+}): Promise<{ remoteUrl?: string; providerStatus?: string }> {
+  const resultEndpoint = `${input.apiBaseUrl}/api/result?id=${encodeURIComponent(input.providerJobId)}`;
+  const response = await fetchModelApi(resultEndpoint, {
+    method: 'GET',
+    headers: {
+      authorization: `Bearer ${input.apiKey}`
+    },
+    signal: AbortSignal.timeout(Math.min(grsaiImagePollRequestTimeoutMs, Math.max(1, input.timeoutMs)))
+  }, 'GrsAI image task result');
+  const bodyText = await response.text();
+  const body = parseJsonObject(bodyText);
+  if (!response.ok) {
+    const errorMessage = readProviderErrorMessage(body) ?? readGrsaiErrorMessage(body) ?? bodyText.slice(0, 500);
+    throw new Error(`GrsAI image task result returned HTTP ${response.status}: ${errorMessage}`);
+  }
+
+  const providerStatus = readGrsaiJobStatus(body);
+  if (isGrsaiFailedStatus(providerStatus)) {
+    const errorMessage = readGrsaiErrorMessage(body) ?? bodyText.slice(0, 500);
+    throw new Error(`GrsAI image task failed: ${errorMessage || providerStatus}`);
+  }
+
+  const remoteUrl = readImageUrlFromUnknown(body);
+  if (remoteUrl && (!providerStatus || !isGrsaiPendingStatus(providerStatus))) {
+    return { remoteUrl, providerStatus };
+  }
+
+  return { providerStatus };
 }
 
 async function invokeGrsaiAsyncVideoGeneration(input: {
@@ -570,7 +635,7 @@ async function pollGrsaiVideoGenerationResult(input: {
   let lastStatus: string | undefined;
   let lastBodyText = '';
   while (Date.now() - input.startedAt < input.timeoutMs) {
-    await sleep(grsaiImagePollIntervalMs);
+    await sleep(grsaiImagePollInitialIntervalMs);
     const response = await fetchModelApi(resultEndpoint, {
       method: 'GET',
       headers: {
@@ -1564,6 +1629,36 @@ function buildImageGenerationResponse(input: {
         providerStatus: input.providerStatus,
         metadata: {
           asyncMode: input.asyncMode === true
+        }
+      }
+    ]
+  };
+}
+
+function buildPendingImageGenerationResponse(input: {
+  provider: string;
+  modelName: string;
+  providerJobId: string;
+  providerStatus?: string;
+}): DesktopModelChatResponse {
+  const content = JSON.stringify({
+    pending: true,
+    providerJobId: input.providerJobId,
+    providerStatus: input.providerStatus,
+    asyncMode: true
+  });
+  return {
+    provider: input.provider,
+    modelName: input.modelName,
+    content,
+    artifacts: [
+      {
+        type: 'image',
+        providerJobId: input.providerJobId,
+        providerStatus: input.providerStatus,
+        metadata: {
+          asyncMode: true,
+          pending: true
         }
       }
     ]

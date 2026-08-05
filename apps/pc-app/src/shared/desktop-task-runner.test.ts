@@ -3006,6 +3006,8 @@ assert.ok(multiToolTask.task.executionLogs.some((log) => log.eventType === 'ATTA
 let factoryActiveModelCalls = 0;
 let factoryMaxActiveModelCalls = 0;
 let factoryModelInvocationCount = 0;
+let factorySubmitModelCallCount = 0;
+let factoryPollModelCallCount = 0;
 const factoryTask = await runDesktopTask({
   task: createMockTaskDetail({
     taskId: 'task-runner-factory-image-batch-001',
@@ -3105,12 +3107,12 @@ const factoryTask = await runDesktopTask({
   modelProfiles: modelProfiles.concat([
     {
       id: 'qiu-image-editing-default',
-      providerId: 'openai-compatible',
-      providerName: 'OpenAI Compatible',
+      providerId: 'grsai',
+      providerName: 'GrsAI',
       modelName: 'gpt-image-2',
       purpose: 'vision',
       capabilities: ['image_generation', 'image_to_image', 'image_editing'],
-      apiBaseUrl: 'https://image.example/v1',
+      apiBaseUrl: 'https://grsai.dakka.com.cn/v1',
       apiKey: 'image-api-key'
     }
   ]),
@@ -3124,37 +3126,73 @@ const factoryTask = await runDesktopTask({
     factoryModelInvocationCount += 1;
     assert.equal(request.profile.id, 'qiu-image-editing-default');
     assert.equal(request.taskKind, 'image_generation');
-    assert.ok(request.imageGeneration?.prompt);
-    assert.match(request.imageGeneration?.prompt ?? '', /Text language: English/);
-    assert.equal(request.imageGeneration?.negativePrompt, 'watermark, malformed logo');
-    assert.match(request.imageGeneration?.sourceImagePath ?? '', /sku-[12]\.png/);
-    assert.match(request.messages[1]?.content ?? '', /Source image local path/);
-    assert.match(request.messages[1]?.content ?? '', /Package:/);
+    const asyncMode = request.imageGeneration?.asyncMode;
     const invocationId = factoryModelInvocationCount;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    factoryActiveModelCalls -= 1;
-    return {
-      provider: request.profile.providerName,
-      modelName: request.profile.modelName,
-      content: JSON.stringify({
-        remoteUrl: `https://cdn.example.test/factory/image-${invocationId}.png`,
-        thumbnailPath: `https://cdn.example.test/factory/thumb-${invocationId}.png`
-      }),
-      artifacts: [
-        {
-          type: 'image',
+    try {
+      if (asyncMode === 'submit_only') {
+        factorySubmitModelCallCount += 1;
+        assert.ok(request.imageGeneration?.prompt);
+        assert.match(request.imageGeneration?.prompt ?? '', /Text language: English/);
+        assert.equal(request.imageGeneration?.negativePrompt, 'watermark, malformed logo');
+        assert.match(request.imageGeneration?.sourceImagePath ?? '', /sku-[12]\.png/);
+        assert.match(request.messages[1]?.content ?? '', /Source image local path/);
+        assert.match(request.messages[1]?.content ?? '', /Package:/);
+        assert.equal(request.timeoutMs, 120_000);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        return {
+          provider: request.profile.providerName,
+          modelName: request.profile.modelName,
+          content: JSON.stringify({
+            pending: true,
+            providerJobId: `grsai-job-${invocationId}`,
+            providerStatus: 'pending'
+          }),
+          artifacts: [
+            {
+              type: 'image',
+              providerJobId: `grsai-job-${invocationId}`,
+              providerStatus: 'pending'
+            }
+          ]
+        };
+      }
+
+      assert.equal(asyncMode, 'poll_once');
+      factoryPollModelCallCount += 1;
+      assert.equal(factorySubmitModelCallCount, 4);
+      assert.match(request.imageGeneration?.providerJobId ?? '', /^grsai-job-\d+$/);
+      assert.equal(request.timeoutMs, 30_000);
+      return {
+        provider: request.profile.providerName,
+        modelName: request.profile.modelName,
+        content: JSON.stringify({
           remoteUrl: `https://cdn.example.test/factory/image-${invocationId}.png`,
-          thumbnailPath: `https://cdn.example.test/factory/thumb-${invocationId}.png`
-        }
-      ]
-    };
+          thumbnailPath: `https://cdn.example.test/factory/thumb-${invocationId}.png`,
+          providerJobId: request.imageGeneration?.providerJobId,
+          providerStatus: 'succeeded'
+        }),
+        artifacts: [
+          {
+            type: 'image',
+            remoteUrl: `https://cdn.example.test/factory/image-${invocationId}.png`,
+            thumbnailPath: `https://cdn.example.test/factory/thumb-${invocationId}.png`,
+            providerJobId: request.imageGeneration?.providerJobId,
+            providerStatus: 'succeeded'
+          }
+        ]
+      };
+    } finally {
+      factoryActiveModelCalls -= 1;
+    }
   },
   completedAt: '2026-07-20T10:00:14.000Z'
 });
 
 const factoryPreviewArtifact = factoryTask.task.artifacts.find((artifact) => artifact.factoryPreview);
 assert.equal(factoryTask.task.state, 'completed');
-assert.equal(factoryModelInvocationCount, 4);
+assert.equal(factoryModelInvocationCount, 8);
+assert.equal(factorySubmitModelCallCount, 4);
+assert.equal(factoryPollModelCallCount, 4);
 assert.equal(factoryMaxActiveModelCalls > 1, true);
 assert.equal(factoryMaxActiveModelCalls <= 2, true);
 assert.equal(factoryPreviewArtifact?.factoryPreview?.total, 4);

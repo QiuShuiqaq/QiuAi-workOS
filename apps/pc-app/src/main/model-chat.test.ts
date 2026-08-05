@@ -284,7 +284,8 @@ try {
   ]);
   assert.equal(capturedImageTestBody?.model, 'gpt-image-2');
   assert.equal(capturedImageTestBody?.replyType, 'json');
-  assert.equal(capturedImageTestTimeouts[0], 180_000);
+  assert.equal(capturedImageTestTimeouts[0], 120_000);
+  assert.equal(capturedImageTestTimeouts[1], 30_000);
   assert.equal(response.ok, true);
   assert.equal(response.checks?.[0]?.id, 'image_generation');
   assert.equal(response.checks?.[0]?.status, 'passed');

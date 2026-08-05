@@ -300,6 +300,8 @@ export interface DesktopModelChatRequest {
     sourceImagePath?: string;
     size?: string;
     responseFormat?: 'url';
+    asyncMode?: 'wait' | 'submit_only' | 'poll_once';
+    providerJobId?: string;
   };
   videoGeneration?: {
     prompt: string;

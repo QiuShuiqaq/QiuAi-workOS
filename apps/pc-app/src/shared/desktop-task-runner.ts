@@ -141,6 +141,12 @@ interface FactoryRuntimePromptControls {
   extraInstruction?: string;
 }
 
+const factoryGrsaiImageSubmitTimeoutMs = 120_000;
+const factoryGrsaiImagePollRequestTimeoutMs = 30_000;
+const factoryGrsaiImageFinalDeadlineMs = 30 * 60 * 1000;
+const factoryGrsaiImagePollInitialIntervalMs = 3_000;
+const factoryGrsaiImagePollMaxIntervalMs = 15_000;
+
 interface FactoryRuntimePackageInstruction {
   sku?: string;
   packageKey?: string;
@@ -4571,17 +4577,26 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
     input.createdAt,
     sanitizeLogSuffix(input.node.id)
   );
-  const batchRun = await runFactoryImageGenerationTasksAdaptive({
-    tasks: batchTasks,
-    maxConcurrency: concurrency,
-    worker: (task) => runFactoryImageGenerationTask({
-      task,
-      node: input.node,
-      profile: input.profile,
-      modelInvoker: input.modelInvoker,
-      maxRetries
-    })
-  });
+  const batchRun = isGrsaiFactoryImageModelProfile(input.profile)
+    ? await runFactoryImageGenerationTasksWithProviderPolling({
+        tasks: batchTasks,
+        maxConcurrency: concurrency,
+        node: input.node,
+        profile: input.profile,
+        modelInvoker: input.modelInvoker,
+        maxRetries
+      })
+    : await runFactoryImageGenerationTasksAdaptive({
+        tasks: batchTasks,
+        maxConcurrency: concurrency,
+        worker: (task) => runFactoryImageGenerationTask({
+          task,
+          node: input.node,
+          profile: input.profile,
+          modelInvoker: input.modelInvoker,
+          maxRetries
+        })
+      });
   const results = batchRun.results;
   const completed = results.filter((item) => item.status === 'completed').length;
   const failed = results.filter((item) => item.status === 'failed').length;
@@ -7004,6 +7019,113 @@ async function runFactoryVideoGenerationTasksAdaptive(input: {
   };
 }
 
+async function runFactoryImageGenerationTasksWithProviderPolling(input: {
+  tasks: FactoryImageGenerationTask[];
+  maxConcurrency: number;
+  node: WorkflowGraphNode;
+  profile: ModelProfile;
+  modelInvoker: DesktopModelInvoker;
+  maxRetries: number;
+}): Promise<{
+  results: FactoryImageGenerationResult[];
+  minConcurrency: number;
+  maxObservedConcurrency: number;
+  concurrencyAdjustments: Array<{
+    afterCompleted: number;
+    from: number;
+    to: number;
+    reason: string;
+  }>;
+}> {
+  const submittedAtById = new Map<string, number>();
+  const submitRun = await runFactoryImageGenerationTasksAdaptive({
+    tasks: input.tasks,
+    maxConcurrency: input.maxConcurrency,
+    worker: async (task) => {
+      const result = await submitFactoryImageGenerationTask({
+        task,
+        node: input.node,
+        profile: input.profile,
+        modelInvoker: input.modelInvoker,
+        maxRetries: input.maxRetries
+      });
+      if (result.providerJobId && result.status === 'running') {
+        submittedAtById.set(result.id, Date.now());
+      }
+      return result;
+    }
+  });
+
+  const results = [...submitRun.results];
+  let pendingIndexes = results
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => item.status === 'running' && Boolean(item.providerJobId))
+    .map(({ index }) => index);
+  let pollIntervalMs = factoryGrsaiImagePollInitialIntervalMs;
+
+  while (pendingIndexes.length > 0) {
+    const now = Date.now();
+    const expiredIndexes: number[] = [];
+    pendingIndexes = pendingIndexes.filter((index) => {
+      const result = results[index]!;
+      const submittedAt = submittedAtById.get(result.id) ?? now;
+      if (now - submittedAt >= factoryGrsaiImageFinalDeadlineMs) {
+        expiredIndexes.push(index);
+        return false;
+      }
+      return true;
+    });
+
+    for (const index of expiredIndexes) {
+      const current = results[index]!;
+      results[index] = {
+        ...current,
+        status: 'failed',
+        error: `GrsAI image task timed out after 30 minutes. taskId=${current.providerJobId}${current.providerStatus ? `, status=${current.providerStatus}` : ''}`,
+        errorType: 'timeout',
+        attempts: current.attempts ?? 1
+      };
+    }
+
+    if (pendingIndexes.length === 0) {
+      break;
+    }
+
+    await sleepFactoryRuntime(pollIntervalMs);
+    const polledResults = await runWorkflowRuntimeConcurrent(
+      pendingIndexes,
+      input.maxConcurrency,
+      async (resultIndex) => {
+        const current = results[resultIndex]!;
+        return {
+          resultIndex,
+          result: await pollFactoryImageGenerationTaskOnce({
+            current,
+            node: input.node,
+            profile: input.profile,
+            modelInvoker: input.modelInvoker
+          })
+        };
+      }
+    );
+
+    for (const { resultIndex, result } of polledResults) {
+      results[resultIndex] = result;
+    }
+
+    pendingIndexes = results
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item.status === 'running' && Boolean(item.providerJobId))
+      .map(({ index }) => index);
+    pollIntervalMs = Math.min(factoryGrsaiImagePollMaxIntervalMs, Math.ceil(pollIntervalMs * 1.5));
+  }
+
+  return {
+    ...submitRun,
+    results
+  };
+}
+
 function shouldBackoffFactoryImageConcurrency(errorType: FactoryImageGenerationErrorType | undefined): boolean {
   return errorType === 'timeout' ||
     errorType === 'network' ||
@@ -7045,6 +7167,219 @@ function getFactoryImageRetryDelayMs(errorType: FactoryImageGenerationErrorType,
     errorType === 'provider' ? 1_500 :
     800;
   return Math.min(8_000, baseDelay * (attempt + 1));
+}
+
+function isGrsaiFactoryImageModelProfile(profile: ModelProfile): boolean {
+  const normalized = [
+    profile.providerId,
+    profile.providerName,
+    profile.apiBaseUrl
+  ].filter(Boolean).join(' ').toLowerCase();
+  return normalized.includes('grsai') || normalized.includes('dakka.com.cn');
+}
+
+async function submitFactoryImageGenerationTask(input: {
+  task: FactoryImageGenerationTask;
+  node: WorkflowGraphNode;
+  profile: ModelProfile;
+  modelInvoker: DesktopModelInvoker;
+  maxRetries: number;
+}): Promise<FactoryImageGenerationResult> {
+  let lastError = '';
+  let lastErrorType: FactoryImageGenerationErrorType = 'unknown';
+  let attempts = 0;
+  for (let attempt = 0; attempt <= input.maxRetries; attempt += 1) {
+    attempts = attempt + 1;
+    try {
+      const response = await input.modelInvoker({
+        profile: input.profile,
+        taskKind: 'image_generation',
+        imageGeneration: {
+          prompt: input.task.prompt,
+          negativePrompt: input.task.negativePrompt,
+          sourceImagePath: input.task.sourceImage.localPath,
+          responseFormat: 'url',
+          asyncMode: 'submit_only'
+        },
+        messages: buildFactoryImageGenerationMessages(input.task),
+        timeoutMs: Math.min(
+          readWorkflowRuntimeModelTimeoutMs(input.node.config?.submitTimeoutMs ?? factoryGrsaiImageSubmitTimeoutMs),
+          factoryGrsaiImageSubmitTimeoutMs
+        )
+      });
+      const imageResult = readFactoryImageGenerationResponse(response);
+      if (imageResult.remoteUrl || imageResult.localPath) {
+        return buildCompletedFactoryImageGenerationResult({
+          task: input.task,
+          imageResult,
+          attempts
+        });
+      }
+
+      if (imageResult.providerJobId) {
+        return {
+          id: input.task.id,
+          order: input.task.order,
+          sku: input.task.sku,
+          sourceName: input.task.sourceName,
+          packageKey: input.task.packageKey,
+          packageLabel: input.task.packageLabel,
+          status: 'running',
+          sourceImagePath: input.task.sourceImage.localPath,
+          prompt: input.task.prompt,
+          attempts,
+          providerJobId: imageResult.providerJobId,
+          providerStatus: imageResult.providerStatus ?? 'submitted',
+          createdAt: input.task.createdAt
+        };
+      }
+
+      throw new Error('Image generation submit response did not include a remoteUrl, localPath, or task id.');
+    } catch (error) {
+      lastError = readErrorMessage(error);
+      lastErrorType = classifyFactoryImageGenerationError(lastError);
+      if (shouldStopFactoryImageRetry(lastErrorType)) {
+        break;
+      }
+      const retryDelayMs = getFactoryImageRetryDelayMs(lastErrorType, attempt);
+      if (retryDelayMs > 0 && attempt < input.maxRetries) {
+        await sleepFactoryRuntime(retryDelayMs);
+      }
+    }
+  }
+
+  return {
+    id: input.task.id,
+    order: input.task.order,
+    sku: input.task.sku,
+    sourceName: input.task.sourceName,
+    packageKey: input.task.packageKey,
+    packageLabel: input.task.packageLabel,
+    status: 'failed',
+    sourceImagePath: input.task.sourceImage.localPath,
+    prompt: input.task.prompt,
+    error: lastError || 'Image generation submit failed.',
+    errorType: lastErrorType,
+    attempts,
+    createdAt: input.task.createdAt
+  };
+}
+
+async function pollFactoryImageGenerationTaskOnce(input: {
+  current: FactoryImageGenerationResult;
+  node: WorkflowGraphNode;
+  profile: ModelProfile;
+  modelInvoker: DesktopModelInvoker;
+}): Promise<FactoryImageGenerationResult> {
+  if (!input.current.providerJobId) {
+    return {
+      ...input.current,
+      status: 'failed',
+      error: 'Image generation polling cannot continue without a provider task id.',
+      errorType: 'provider'
+    };
+  }
+
+  try {
+    const response = await input.modelInvoker({
+      profile: input.profile,
+      taskKind: 'image_generation',
+      imageGeneration: {
+        prompt: input.current.prompt ?? '',
+        sourceImagePath: input.current.sourceImagePath,
+        responseFormat: 'url',
+        asyncMode: 'poll_once',
+        providerJobId: input.current.providerJobId
+      },
+      messages: [{ role: 'user', content: `Poll GrsAI image task ${input.current.providerJobId}.` }],
+      timeoutMs: readWorkflowRuntimeModelTimeoutMs(
+        input.node.config?.pollRequestTimeoutMs ?? factoryGrsaiImagePollRequestTimeoutMs
+      )
+    });
+    const imageResult = readFactoryImageGenerationResponse(response);
+    if (imageResult.remoteUrl || imageResult.localPath) {
+      return buildCompletedFactoryImageGenerationResult({
+        task: {
+          id: input.current.id,
+          order: input.current.order,
+          sku: input.current.sku,
+          sourceName: input.current.sourceName,
+          sourceImage: {
+            id: input.current.id,
+            name: input.current.sourceName ?? input.current.sku,
+            kind: 'image',
+            uri: input.current.sourceImagePath ? `local://${input.current.sourceImagePath}` : '',
+            localPath: input.current.sourceImagePath ?? ''
+          },
+          packageKey: input.current.packageKey,
+          packageLabel: input.current.packageLabel,
+          prompt: input.current.prompt ?? '',
+          createdAt: input.current.createdAt
+        },
+        imageResult: {
+          ...imageResult,
+          providerJobId: imageResult.providerJobId ?? input.current.providerJobId,
+          providerStatus: imageResult.providerStatus ?? input.current.providerStatus
+        },
+        attempts: input.current.attempts ?? 1
+      });
+    }
+
+    return {
+      ...input.current,
+      providerStatus: imageResult.providerStatus ?? input.current.providerStatus ?? 'pending'
+    };
+  } catch (error) {
+    const errorMessage = readErrorMessage(error);
+    const errorType = classifyFactoryImageGenerationError(errorMessage);
+    if (!shouldStopFactoryImageRetry(errorType) && !/grsai image task failed/i.test(errorMessage)) {
+      return {
+        ...input.current,
+        status: 'running',
+        providerStatus: input.current.providerStatus ?? 'pending',
+        error: errorMessage,
+        errorType
+      };
+    }
+
+    return {
+      ...input.current,
+      status: 'failed',
+      error: errorMessage,
+      errorType
+    };
+  }
+}
+
+function buildCompletedFactoryImageGenerationResult(input: {
+  task: Pick<FactoryImageGenerationTask, 'id' | 'order' | 'sku' | 'sourceName' | 'sourceImage' | 'packageKey' | 'packageLabel' | 'prompt' | 'createdAt'>;
+  imageResult: {
+    remoteUrl?: string;
+    localPath?: string;
+    thumbnailPath?: string;
+    providerJobId?: string;
+    providerStatus?: string;
+  };
+  attempts: number;
+}): FactoryImageGenerationResult {
+  return {
+    id: input.task.id,
+    order: input.task.order,
+    sku: input.task.sku,
+    sourceName: input.task.sourceName,
+    packageKey: input.task.packageKey,
+    packageLabel: input.task.packageLabel,
+    status: 'completed',
+    remoteUrl: input.imageResult.remoteUrl,
+    localPath: input.imageResult.localPath,
+    thumbnailPath: input.imageResult.thumbnailPath,
+    sourceImagePath: input.task.sourceImage.localPath,
+    prompt: input.task.prompt,
+    attempts: input.attempts,
+    providerJobId: input.imageResult.providerJobId,
+    providerStatus: input.imageResult.providerStatus,
+    createdAt: input.task.createdAt
+  };
 }
 
 async function runFactoryImageGenerationTask(input: {
@@ -7274,15 +7609,16 @@ function buildFactoryVideoGenerationMessages(task: FactoryVideoGenerationTask): 
 
 function readFactoryImageGenerationResponse(
   response: DesktopModelChatResponse
-): { remoteUrl?: string; localPath?: string; thumbnailPath?: string; providerJobId?: string; providerStatus?: string } {
-  const artifact = response.artifacts?.find((item) => item.remoteUrl || item.localPath);
+): { remoteUrl?: string; localPath?: string; thumbnailPath?: string; providerJobId?: string; providerStatus?: string; pending?: boolean } {
+  const artifact = response.artifacts?.find((item) => item.remoteUrl || item.localPath || item.providerJobId);
   if (artifact) {
     return {
       remoteUrl: readWorkflowRuntimeString(artifact.remoteUrl),
       localPath: readWorkflowRuntimeString(artifact.localPath),
       thumbnailPath: readWorkflowRuntimeString(artifact.thumbnailPath),
       providerJobId: readWorkflowRuntimeString(artifact.providerJobId),
-      providerStatus: readWorkflowRuntimeString(artifact.providerStatus)
+      providerStatus: readWorkflowRuntimeString(artifact.providerStatus),
+      pending: !artifact.remoteUrl && !artifact.localPath && Boolean(artifact.providerJobId)
     };
   }
 
@@ -7303,6 +7639,7 @@ function readFactoryImageResultFromValue(value: unknown): {
   thumbnailPath?: string;
   providerJobId?: string;
   providerStatus?: string;
+  pending?: boolean;
 } {
   if (typeof value === 'string') {
     return value.startsWith('http://') || value.startsWith('https://')
@@ -7333,17 +7670,28 @@ function readFactoryImageResultFromValue(value: unknown): {
     readWorkflowRuntimeString(value.localPath)
     ?? readWorkflowRuntimeString(value.path)
     ?? readWorkflowRuntimeString(value.filePath);
+  const providerJobId = readWorkflowRuntimeString(value.providerJobId)
+    ?? readWorkflowRuntimeString(value.taskId)
+    ?? readWorkflowRuntimeString(value.task_id)
+    ?? readWorkflowRuntimeString(value.id);
+  const providerStatus = readWorkflowRuntimeString(value.providerStatus)
+    ?? readWorkflowRuntimeString(value.status);
   if (directRemoteUrl || directLocalPath) {
     return {
       remoteUrl: directRemoteUrl,
       localPath: directLocalPath,
       thumbnailPath: readWorkflowRuntimeString(value.thumbnailPath)
         ?? readWorkflowRuntimeString(value.thumbnailUrl),
-      providerJobId: readWorkflowRuntimeString(value.providerJobId)
-        ?? readWorkflowRuntimeString(value.taskId)
-        ?? readWorkflowRuntimeString(value.id),
-      providerStatus: readWorkflowRuntimeString(value.providerStatus)
-        ?? readWorkflowRuntimeString(value.status)
+      providerJobId,
+      providerStatus
+    };
+  }
+
+  if (providerJobId || providerStatus || value.pending === true) {
+    return {
+      providerJobId,
+      providerStatus,
+      pending: true
     };
   }
 
