@@ -17,6 +17,7 @@ import { createBrowserApiClient } from '../api/browser-api';
 import { QiuWorkspaceSwitcher } from '@qiuai/ui';
 import Layout from 'antd/es/layout';
 import Menu from 'antd/es/menu';
+import Alert from 'antd/es/alert';
 import Button from 'antd/es/button';
 import Flex from 'antd/es/flex';
 import Typography from 'antd/es/typography';
@@ -47,6 +48,7 @@ export function ConsoleShell({ currentAccount, children }: ConsoleShellProps) {
   const searchParams = useSearchParams();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const activeWorkspaceId = searchParams.get('workspaceId') ?? currentAccount.activeWorkspaceId;
+  const isSupportMode = searchParams.get('support') === 'admin';
 
   function withWorkspaceId(href: string) {
     const params = new URLSearchParams(searchParams.toString());
@@ -156,7 +158,17 @@ export function ConsoleShell({ currentAccount, children }: ConsoleShellProps) {
           ]}
         />
       </Layout.Sider>
-      <Layout.Content>{children}</Layout.Content>
+      <Layout.Content>
+        {isSupportMode ? (
+          <Alert
+            banner
+            type="warning"
+            message="平台管理员代客维护模式"
+            description="当前会话用于协助企业初始化、配置或排查问题，关键操作会记录到后台审计日志。"
+          />
+        ) : null}
+        {children}
+      </Layout.Content>
     </Layout>
   );
 }

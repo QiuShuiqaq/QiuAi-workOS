@@ -14,6 +14,7 @@ import {
   CreateAdminWorkspaceInvitationResponseDto,
   CreateAdminWorkspaceRequestDto,
   CreateAdminWorkspaceResponseDto,
+  CreateAdminWorkspaceSupportLoginResponseDto,
   GetAdminWorkspaceResponseDto,
   GrantAdminWorkspaceAuthorizationRequestDto,
   GrantAdminWorkspaceAuthorizationResponseDto,
@@ -193,6 +194,15 @@ export class AdminController {
     @Req() request: FastifyRequest
   ): Promise<GetAdminWorkspaceResponseDto> {
     return this.adminService.getWorkspace(workspaceId, request.headers.cookie);
+  }
+
+  @Post('workspaces/:workspaceId/support-login')
+  @ApiOkResponse({ type: CreateAdminWorkspaceSupportLoginResponseDto })
+  createWorkspaceSupportLogin(
+    @Param('workspaceId') workspaceId: string,
+    @Req() request: FastifyRequest
+  ): Promise<CreateAdminWorkspaceSupportLoginResponseDto> {
+    return this.adminService.createWorkspaceSupportLogin(workspaceId, request.headers.cookie);
   }
 
   @Post('workspaces/:workspaceId/invitations')

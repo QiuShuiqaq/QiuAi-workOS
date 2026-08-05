@@ -38,6 +38,7 @@ import type {
   CreateAdminWorkspaceResponse,
   CreateAdminWorkspaceInvitationRequest,
   CreateAdminWorkspaceInvitationResponse,
+  CreateAdminWorkspaceSupportLoginResponse,
   GrantAdminWorkspaceAuthorizationRequest,
   GrantAdminWorkspaceAuthorizationResponse,
   ArchiveAdminRoleTemplateResponse,
@@ -429,6 +430,10 @@ export class QiuApiClient {
 
   getAdminWorkspace(workspaceId: string): Promise<GetAdminWorkspaceResponse> {
     return this.get(`/api/v1/admin/workspaces/${encodeURIComponent(workspaceId)}`);
+  }
+
+  createAdminWorkspaceSupportLogin(workspaceId: string): Promise<CreateAdminWorkspaceSupportLoginResponse> {
+    return this.post(`/api/v1/admin/workspaces/${encodeURIComponent(workspaceId)}/support-login`, {});
   }
 
   grantAdminWorkspaceAuthorization(

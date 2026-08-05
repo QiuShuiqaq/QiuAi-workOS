@@ -958,6 +958,25 @@ export class CreateAdminWorkspaceResponseDto {
   temporaryPassword?: string;
 }
 
+export class CreateAdminWorkspaceSupportLoginResponseDto {
+  @ApiProperty({
+    example: {
+      workspaceId: '20000000-0000-4000-8000-000000000002',
+      workspaceName: 'QiuAI Demo Enterprise',
+      ownerEmail: 'enterprise-admin@example.com',
+      webConsoleUrl: 'https://workos.qiuaihub.com/support-login?token=...&workspaceId=...',
+      expiresAt: '2026-08-05T02:00:00.000Z'
+    }
+  })
+  data!: {
+    workspaceId: string;
+    workspaceName: string;
+    ownerEmail: string;
+    webConsoleUrl: string;
+    expiresAt: string;
+  };
+}
+
 export class GrantAdminWorkspaceAuthorizationRequestDto {
   @ApiProperty({ example: 'ENTERPRISE_BASIC_MONTHLY' })
   @IsString()

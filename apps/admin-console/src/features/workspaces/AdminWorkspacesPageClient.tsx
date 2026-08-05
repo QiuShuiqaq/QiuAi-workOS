@@ -18,6 +18,7 @@ import {
   EyeOutlined,
   InboxOutlined,
   LinkOutlined,
+  LoginOutlined,
   PlusOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
@@ -204,6 +205,7 @@ export function AdminWorkspacesPageClient({
   const [selectedWorkspace, setSelectedWorkspace] = useState<AdminWorkspaceSummary | null>(null);
   const [statusModal, setStatusModal] = useState<WorkspaceStatusModalState | null>(null);
   const [statusChanging, setStatusChanging] = useState(false);
+  const [supportLoginWorkspaceId, setSupportLoginWorkspaceId] = useState<string | null>(null);
   const [invitationOpen, setInvitationOpen] = useState(false);
   const [creatingInvitation, setCreatingInvitation] = useState(false);
   const [createdInvitationNotice, setCreatedInvitationNotice] = useState<CreatedInvitationNotice | null>(null);
@@ -340,6 +342,40 @@ export function AdminWorkspacesPageClient({
     statusForm.setFieldsValue({
       reason: defaultStatusReason(status),
       note: ''
+    });
+  }
+
+  function openSupportLogin(workspace: AdminWorkspaceSummary) {
+    if (workspace.workspaceType !== 'enterprise' || workspace.status !== 'active') {
+      message.warning('只有正常状态的企业工作区可以代客进入');
+      return;
+    }
+
+    Modal.confirm({
+      title: `代客进入：${workspace.name}`,
+      content: '系统会生成 2 小时有效的企业控制台维护入口，并记录到审计日志。请只在初始化、配置或排查问题时使用。',
+      okText: '生成并打开',
+      cancelText: '取消',
+      onOk: async () => {
+        const supportWindow = window.open('about:blank', '_blank');
+        setSupportLoginWorkspaceId(workspace.id);
+        try {
+          const response = await createBrowserApiClient().createAdminWorkspaceSupportLogin(workspace.id);
+          if (supportWindow) {
+            supportWindow.location.href = response.data.webConsoleUrl;
+          } else {
+            window.location.assign(response.data.webConsoleUrl);
+          }
+          message.success('已打开企业控制台代客维护入口');
+        } catch (error) {
+          supportWindow?.close();
+          const errorMessage = error instanceof Error ? error.message : '生成代客维护入口失败';
+          message.error(errorMessage);
+          throw error;
+        } finally {
+          setSupportLoginWorkspaceId(null);
+        }
+      }
     });
   }
 
@@ -644,6 +680,14 @@ export function AdminWorkspacesPageClient({
             详情
           </Button>
           <Button
+            icon={<LoginOutlined />}
+            disabled={workspace.workspaceType !== 'enterprise' || workspace.status !== 'active'}
+            loading={supportLoginWorkspaceId === workspace.id}
+            onClick={() => openSupportLogin(workspace)}
+          >
+            代客进入
+          </Button>
+          <Button
             type="primary"
             icon={<SafetyCertificateOutlined />}
             onClick={() => openAuthorization(workspace)}
@@ -753,6 +797,14 @@ export function AdminWorkspacesPageClient({
             <Space wrap>
               <Button icon={<ReloadOutlined />} onClick={() => void refreshDetail(detail.workspace.id)}>
                 刷新
+              </Button>
+              <Button
+                icon={<LoginOutlined />}
+                disabled={detail.workspace.workspaceType !== 'enterprise' || detail.workspace.status !== 'active'}
+                loading={supportLoginWorkspaceId === detail.workspace.id}
+                onClick={() => openSupportLogin(detail.workspace)}
+              >
+                代客进入
               </Button>
               <Button icon={<TeamOutlined />} onClick={openInvitationCreator}>
                 邀请成员

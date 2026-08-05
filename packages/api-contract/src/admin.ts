@@ -145,6 +145,16 @@ export interface CreateAdminWorkspaceResponse {
   temporaryPassword?: string;
 }
 
+export interface CreateAdminWorkspaceSupportLoginResponse {
+  data: {
+    workspaceId: string;
+    workspaceName: string;
+    ownerEmail: string;
+    webConsoleUrl: string;
+    expiresAt: string;
+  };
+}
+
 export interface GrantAdminWorkspaceAuthorizationRequest {
   planCode: string;
   durationDays?: number;

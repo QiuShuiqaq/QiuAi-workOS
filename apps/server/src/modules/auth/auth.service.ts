@@ -391,6 +391,53 @@ export class AuthService {
     };
   }
 
+  async createSessionForAccount(
+    accountId: string,
+    options: {
+      maxAgeSeconds: number;
+      userAgent?: string;
+      ipAddress?: string;
+    }
+  ) {
+    if (!isDatabasePersistenceEnabled()) {
+      throw new ServiceUnavailableException({
+        error: {
+          code: 'PERSISTENCE_MODE_REQUIRED',
+          message: 'Database persistence is required to create account sessions.'
+        }
+      });
+    }
+
+    const account = await this.loadDatabaseAccount(accountId);
+    if (account.status !== 'ACTIVE') {
+      throw new ForbiddenException({
+        error: {
+          code: 'ACCOUNT_NOT_ACTIVE',
+          message: 'Account is not active.',
+          details: { accountId }
+        }
+      });
+    }
+
+    const expiresAt = new Date(Date.now() + options.maxAgeSeconds * 1000);
+    const sessionToken = createSessionToken();
+    await this.prismaService.authSession.create({
+      data: {
+        accountId: account.id,
+        sessionTokenHash: hashSessionToken(sessionToken),
+        expiresAt,
+        userAgent: options.userAgent,
+        ipAddress: options.ipAddress
+      }
+    });
+
+    return {
+      sessionToken,
+      maxAgeSeconds: options.maxAgeSeconds,
+      response: this.buildDatabaseSessionResponse(account, expiresAt)
+    };
+  }
+
   async getSession(cookieHeader?: string): Promise<AuthSessionResponseDto> {
     if (!isDatabasePersistenceEnabled()) {
       const sessionToken = this.readSessionToken(cookieHeader);

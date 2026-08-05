@@ -41,6 +41,7 @@ import {
   CreateAdminWorkspaceInvitationResponseDto,
   CreateAdminWorkspaceRequestDto,
   CreateAdminWorkspaceResponseDto,
+  CreateAdminWorkspaceSupportLoginResponseDto,
   GetAdminWorkspaceResponseDto,
   GrantAdminWorkspaceAuthorizationRequestDto,
   GrantAdminWorkspaceAuthorizationResponseDto,
@@ -82,6 +83,7 @@ const PLAN_DISPLAY_ORDER = [
 ] as const;
 
 const PLAN_CODES = new Set<string>(PLAN_DISPLAY_ORDER);
+const SUPPORT_LOGIN_MAX_AGE_SECONDS = 60 * 60 * 2;
 
 type WorkspaceSummaryRecord = {
   id: string;
@@ -1164,6 +1166,89 @@ export class AdminService {
     };
   }
 
+  async createWorkspaceSupportLogin(
+    workspaceId: string,
+    cookieHeader?: string
+  ): Promise<CreateAdminWorkspaceSupportLoginResponseDto> {
+    const operator = await this.requireAdminOperator(cookieHeader);
+    this.requireDatabaseMode();
+
+    const workspace = await this.prismaService.workspace.findUnique({
+      where: {
+        id: workspaceId
+      },
+      include: {
+        ownerAccount: true
+      }
+    });
+
+    if (!workspace) {
+      throw this.workspaceNotFound(workspaceId);
+    }
+    if (workspace.type !== 'ENTERPRISE') {
+      throw new BadRequestException({
+        error: {
+          code: 'WORKSPACE_TYPE_NOT_SUPPORTED',
+          message: 'Support login is only available for enterprise workspaces.',
+          details: {
+            workspaceId,
+            workspaceType: workspace.type
+          }
+        }
+      });
+    }
+    this.requireActiveWorkspace(workspace);
+
+    if (workspace.ownerAccount.status !== 'ACTIVE') {
+      throw new ForbiddenException({
+        error: {
+          code: 'OWNER_ACCOUNT_NOT_ACTIVE',
+          message: 'Workspace owner account is not active.',
+          details: {
+            workspaceId,
+            ownerAccountId: workspace.ownerAccountId
+          }
+        }
+      });
+    }
+
+    const session = await this.authService.createSessionForAccount(workspace.ownerAccountId, {
+      maxAgeSeconds: SUPPORT_LOGIN_MAX_AGE_SECONDS,
+      userAgent: `admin-support:${operator.account.primaryEmail}`
+    });
+    const webConsoleUrl = this.buildSupportLoginUrl(session.sessionToken, workspace.id);
+    const expiresAt =
+      session.response.expiresAt ??
+      new Date(Date.now() + SUPPORT_LOGIN_MAX_AGE_SECONDS * 1000).toISOString();
+
+    await this.prismaService.adminActionLog.create({
+      data: {
+        operatorAccountId: operator.account.id,
+        action: 'ADMIN_SUPPORT_LOGIN',
+        targetType: 'workspace',
+        targetId: workspace.id,
+        summary: `Created support login for ${workspace.name}`,
+        metadata: this.toJsonValue({
+          workspaceName: workspace.name,
+          ownerAccountId: workspace.ownerAccountId,
+          ownerEmail: workspace.ownerAccount.primaryEmail,
+          expiresAt,
+          reason: 'support_maintenance'
+        })
+      }
+    });
+
+    return {
+      data: {
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        ownerEmail: workspace.ownerAccount.primaryEmail,
+        webConsoleUrl,
+        expiresAt
+      }
+    };
+  }
+
   async createWorkspaceInvitation(
     workspaceId: string,
     input: CreateAdminWorkspaceInvitationRequestDto,
@@ -2238,6 +2323,20 @@ export class AdminService {
     }
 
     return filters.length > 0 ? { AND: filters } : {};
+  }
+
+  private buildSupportLoginUrl(sessionToken: string, workspaceId: string): string {
+    const baseUrl = (
+      process.env.WORKOS_PUBLIC_BASE_URL ??
+      process.env.NEXT_PUBLIC_WORKOS_CONSOLE_URL ??
+      'http://127.0.0.1:3000'
+    )
+      .trim()
+      .replace(/\/$/, '');
+    const url = new URL('/support-login', baseUrl);
+    url.searchParams.set('token', sessionToken);
+    url.searchParams.set('workspaceId', workspaceId);
+    return url.toString();
   }
 
   private workspaceSummaryInclude() {
