@@ -348,6 +348,17 @@ body,
   gap: 10px;
 }
 
+.account-help-launcher {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
 .account-help-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -477,6 +488,20 @@ body,
   gap: 6px;
   padding-top: 12px;
   border-top: 1px solid #eef2f7;
+}
+
+.digital-employee-tour-description {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.digital-employee-tour-action {
+  align-self: flex-start;
+}
+
+.digital-employee-tutorial-tour .ant-tour-inner {
+  border-radius: 8px;
 }
 
 .product-surface {

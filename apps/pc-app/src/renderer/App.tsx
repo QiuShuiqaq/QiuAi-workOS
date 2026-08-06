@@ -8,6 +8,7 @@ import {
   CloseOutlined,
   DatabaseOutlined,
   DeleteOutlined,
+  CompassOutlined,
   DownOutlined,
   ExclamationCircleOutlined,
   FileAddOutlined,
@@ -62,6 +63,7 @@ import Space from 'antd/es/space';
 import Switch from 'antd/es/switch';
 import Tag from 'antd/es/tag';
 import Tooltip from 'antd/es/tooltip';
+import Tour from 'antd/es/tour';
 import Typography from 'antd/es/typography';
 import zhCN from 'antd/es/locale/zh_CN';
 import { type ChangeEvent, type DragEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
@@ -193,6 +195,17 @@ interface DesktopClientPreferences {
   theme: DesktopThemePreference;
   density: DesktopDensityPreference;
   startupSection: SectionKey;
+}
+
+type DesktopOnboardingTutorialStepId =
+  | 'bind_enterprise'
+  | 'install_employee'
+  | 'configure_model'
+  | 'try_employee';
+
+interface DesktopOnboardingTutorialProgress {
+  completedAt?: string;
+  dismissedAt?: string;
 }
 
 interface HelpTipProps {
@@ -435,6 +448,7 @@ const sectionItems: Array<{ key: SectionKey; icon: ReactNode; label: string }> =
 ];
 
 const desktopClientPreferenceStorageKey = 'qiuai.pc.client.preferences.v1';
+const desktopOnboardingTutorialStorageKey = 'qiuai.pc.tutorial.digital-employee.v1';
 const factoryPackagePresetStorageKey = 'qiuai.pc.factory.package.presets.v1';
 const factoryPackageSelectionStorageKey = 'qiuai.pc.factory.package.selections.v1';
 const factoryRunParameterStorageKey = 'qiuai.pc.factory.run.parameters.v1';
@@ -1977,6 +1991,51 @@ function writeDesktopClientPreferences(preferences: DesktopClientPreferences) {
   }
 }
 
+function readDesktopOnboardingTutorialProgress(): DesktopOnboardingTutorialProgress {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(desktopOnboardingTutorialStorageKey);
+    if (!rawValue) {
+      return {};
+    }
+
+    const parsed = JSON.parse(rawValue) as Partial<DesktopOnboardingTutorialProgress>;
+    return {
+      completedAt: typeof parsed.completedAt === 'string' ? parsed.completedAt : undefined,
+      dismissedAt: typeof parsed.dismissedAt === 'string' ? parsed.dismissedAt : undefined
+    };
+  } catch {
+    return {};
+  }
+}
+
+function writeDesktopOnboardingTutorialProgress(progress: DesktopOnboardingTutorialProgress) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      desktopOnboardingTutorialStorageKey,
+      JSON.stringify(progress)
+    );
+  } catch {
+    // Tutorial progress is optional; keep the app usable if storage is unavailable.
+  }
+}
+
+function findDigitalEmployeeTutorialTarget(selector: string): HTMLElement | null {
+  if (typeof document === 'undefined') {
+    return null;
+  }
+
+  const element = document.querySelector(selector);
+  return element instanceof HTMLElement ? element : null;
+}
+
 function normalizeFactoryPackageDefinitions(
   value: unknown,
   fallback: Array<DigitalFactoryPackageOption | FactoryRunPackageDefinition>
@@ -2742,6 +2801,11 @@ export default function App() {
   const [isSubmittingIssueFeedback, setIsSubmittingIssueFeedback] = useState(false);
   const [issueFeedbackNotice, setIssueFeedbackNotice] = useState('');
   const [selectedLegalDocumentId, setSelectedLegalDocumentId] = useState('');
+  const [digitalEmployeeTutorialOpen, setDigitalEmployeeTutorialOpen] = useState(false);
+  const [digitalEmployeeTutorialStepIndex, setDigitalEmployeeTutorialStepIndex] = useState(0);
+  const [digitalEmployeeTutorialReplayMode, setDigitalEmployeeTutorialReplayMode] = useState(false);
+  const [digitalEmployeeTutorialProgress, setDigitalEmployeeTutorialProgress] =
+    useState<DesktopOnboardingTutorialProgress>(() => readDesktopOnboardingTutorialProgress());
   const [isUnbindingDevice, setIsUnbindingDevice] = useState(false);
   const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
   const [isComposerDragOver, setIsComposerDragOver] = useState(false);
@@ -2937,6 +3001,157 @@ export default function App() {
       ),
     [refreshedInstalledRolePackages]
   );
+
+  const tutorialIsEnterpriseUnbound = runtimeState.localRuntime.workspaceId === pendingWorkspaceId;
+
+  const digitalEmployeeTutorialSteps = [
+    {
+      id: 'bind_enterprise' as const,
+      title: '绑定企业',
+      description: '先把这台电脑接入企业工作区，后续数字员工、知识库和模板都会自动同步。',
+      actionLabel: '去绑定企业',
+      targetSelector: '.tutorial-bind-enterprise-target',
+      placement: 'bottom',
+      isComplete: !tutorialIsEnterpriseUnbound,
+      prepare: () => {
+        setAccountMenuOpen(false);
+        setAccountModal(null);
+      },
+      onPrimaryAction: () => setOnboardingOpen(true)
+    },
+    {
+      id: 'install_employee' as const,
+      title: '安装数字员工',
+      description: '去数字市场先装一个数字员工，建议从常用模板开始。',
+      actionLabel: '去数字市场',
+      targetSelector: '.tutorial-role-market-target, .tutorial-nav-roles',
+      placement: 'right',
+      isComplete: installedDigitalEmployeePackages.length > 0,
+      prepare: () => {
+        setAccountMenuOpen(false);
+        setAccountModal(null);
+        setSelectedRoleApplicationType('digital_employee');
+        setSelectedRoleCategory('全部');
+        navigateToSection('roles');
+      },
+      onPrimaryAction: () => {
+        setSelectedRoleApplicationType('digital_employee');
+        setSelectedRoleCategory('全部');
+        navigateToSection('roles');
+      }
+    },
+    {
+      id: 'configure_model' as const,
+      title: '配置文本模型',
+      description: '先配置一个可用的文本模型，推荐 DeepSeek，实际可以换成你已经接好的任意文本供应商。',
+      actionLabel: '打开 DeepSeek',
+      targetSelector: '.tutorial-deepseek-model-target, .tutorial-model-provider-grid-target, .tutorial-nav-models',
+      placement: 'left',
+      isComplete: runtimeState.modelProfiles.some(
+        (profile) =>
+          ['general', 'reasoning', 'document'].includes(profile.purpose) &&
+          isRuntimeModelProfileConfigured(profile)
+      ),
+      prepare: () => {
+        setAccountMenuOpen(false);
+        setAccountModal(null);
+        setModelSearchQuery('');
+        navigateToSection('models');
+      },
+      onPrimaryAction: () => openRecommendedTextModelConfiguration()
+    },
+    {
+      id: 'try_employee' as const,
+      title: '开始对话',
+      description: '回到数字员工对话区，发一句简单的任务试试，先感受完整链路。',
+      actionLabel: '去对话区',
+      targetSelector: '.tutorial-chat-composer-target, .tutorial-nav-workbench',
+      placement: 'top',
+      isComplete: getRuntimeTaskDetails(runtimeState).some(
+        (task) =>
+          installedDigitalEmployeePackages.some((rolePackage) => rolePackage.roleCode === task.roleCode) &&
+          task.state === 'completed' &&
+          countUserDeliverableArtifacts(task) > 0
+      ),
+      prepare: () => {
+        setAccountMenuOpen(false);
+        setAccountModal(null);
+        if (installedDigitalEmployeePackages.length > 0) {
+          activateRole(installedDigitalEmployeePackages[0].roleCode);
+        }
+        setTaskHistoryOpen(false);
+        navigateToSection('workbench');
+      },
+      onPrimaryAction: () => {
+        if (installedDigitalEmployeePackages.length > 0) {
+          activateRole(installedDigitalEmployeePackages[0].roleCode);
+        } else {
+          setSelectedRoleApplicationType('digital_employee');
+          setSelectedRoleCategory('全部');
+          navigateToSection('roles');
+          return;
+        }
+
+        setTaskHistoryOpen(false);
+        navigateToSection('workbench');
+      }
+    }
+  ] satisfies Array<{
+    id: DesktopOnboardingTutorialStepId;
+    title: string;
+    description: string;
+    actionLabel: string;
+    targetSelector: string;
+    placement: 'top' | 'right' | 'bottom' | 'left';
+    isComplete: boolean;
+    prepare: () => void;
+    onPrimaryAction: () => void;
+  }>;
+
+  const digitalEmployeeTutorialActiveStepIndex = digitalEmployeeTutorialOpen
+    ? digitalEmployeeTutorialReplayMode
+      ? Math.min(digitalEmployeeTutorialStepIndex, digitalEmployeeTutorialSteps.length - 1)
+      : digitalEmployeeTutorialSteps.findIndex(
+          (step, index) => index >= digitalEmployeeTutorialStepIndex && !step.isComplete
+        )
+    : -1;
+
+  useEffect(() => {
+    if (!hasLoadedPersistedState || !userAgreementStatus?.accepted) {
+      return;
+    }
+
+    if (
+      digitalEmployeeTutorialOpen ||
+      digitalEmployeeTutorialProgress.completedAt ||
+      digitalEmployeeTutorialProgress.dismissedAt
+    ) {
+      return;
+    }
+
+    setDigitalEmployeeTutorialStepIndex(0);
+    setDigitalEmployeeTutorialReplayMode(false);
+    setDigitalEmployeeTutorialOpen(true);
+  }, [
+    digitalEmployeeTutorialOpen,
+    digitalEmployeeTutorialProgress.completedAt,
+    digitalEmployeeTutorialProgress.dismissedAt,
+    hasLoadedPersistedState,
+    userAgreementStatus?.accepted
+  ]);
+
+  useEffect(() => {
+    if (!digitalEmployeeTutorialOpen) {
+      return;
+    }
+
+    if (digitalEmployeeTutorialActiveStepIndex < 0) {
+      closeDigitalEmployeeTutorial(true);
+      return;
+    }
+
+    digitalEmployeeTutorialSteps[digitalEmployeeTutorialActiveStepIndex]?.prepare();
+  }, [digitalEmployeeTutorialActiveStepIndex, digitalEmployeeTutorialOpen]);
 
   useEffect(() => {
     const currentActiveEmployee = installedDigitalEmployeePackages.find(
@@ -3892,6 +4107,34 @@ export default function App() {
     setModelConfigOpen(true);
   }
 
+  function openRecommendedTextModelConfiguration() {
+    navigateToSection('models');
+
+    const recommendedPreset =
+      modelProviderPresets.find(
+        (preset) => preset.id === 'deepseek' || /deepseek/i.test(preset.name)
+      ) ?? modelProviderPresets.find((preset) => preset.models.some((model) => model.purpose === 'general'));
+    const recommendedModel =
+      recommendedPreset?.models.find((model) => model.modelName === 'deepseek-v4-flash') ??
+      recommendedPreset?.models[0];
+
+    if (recommendedPreset && recommendedModel) {
+      openPresetModelConfiguration(recommendedPreset, recommendedModel);
+      return;
+    }
+
+    const fallbackProfile = runtimeState.modelProfiles.find((profile) =>
+      ['general', 'reasoning', 'document'].includes(profile.purpose)
+    );
+
+    if (fallbackProfile) {
+      openModelProfileConfiguration(fallbackProfile.id);
+      return;
+    }
+
+    setModelConfigOpen(true);
+  }
+
   function openPresetModelConfiguration(
     preset: ModelProviderPreset,
     model?: ModelProviderPresetModel
@@ -3915,6 +4158,33 @@ export default function App() {
       applyModelProviderPreset(preset, firstModel);
       setModelConfigOpen(true);
     }
+  }
+
+  function openDigitalEmployeeTutorial() {
+    setDigitalEmployeeTutorialStepIndex(0);
+    setDigitalEmployeeTutorialReplayMode(true);
+    setDigitalEmployeeTutorialOpen(true);
+    setAccountMenuOpen(false);
+    setAccountModal(null);
+  }
+
+  function closeDigitalEmployeeTutorial(completed = false) {
+    const nextProgress: DesktopOnboardingTutorialProgress = completed
+      ? {
+          ...digitalEmployeeTutorialProgress,
+          completedAt: new Date().toISOString(),
+          dismissedAt: undefined
+        }
+      : {
+          ...digitalEmployeeTutorialProgress,
+          dismissedAt: new Date().toISOString()
+        };
+
+    setDigitalEmployeeTutorialProgress(nextProgress);
+    writeDesktopOnboardingTutorialProgress(nextProgress);
+    setDigitalEmployeeTutorialOpen(false);
+    setDigitalEmployeeTutorialReplayMode(false);
+    setDigitalEmployeeTutorialStepIndex(0);
   }
 
   function findRecommendedPresetForRequiredModelProfile(profile: ModelProfile):
@@ -4182,7 +4452,11 @@ export default function App() {
 
                 <Space wrap>
                   {isEnterpriseUnbound ? (
-                    <Button type="primary" onClick={() => setOnboardingOpen(true)}>
+                    <Button
+                      type="primary"
+                      className="tutorial-bind-enterprise-target"
+                      onClick={() => setOnboardingOpen(true)}
+                    >
                       绑定企业
                     </Button>
                   ) : null}
@@ -4224,6 +4498,7 @@ export default function App() {
         </Layout>
         {renderOnboardingModal()}
         {renderAccountModal()}
+        {renderDigitalEmployeeTutorialTour()}
         {renderIssueFeedbackModal()}
         {renderRoleUninstallModal()}
         {renderRuntimeModelQuickSwitchModal()}
@@ -4251,7 +4526,12 @@ export default function App() {
 
         <div className="product-titlebar-actions">
           {isEnterpriseUnbound ? (
-            <Button size="small" type="primary" onClick={() => setOnboardingOpen(true)}>
+            <Button
+              size="small"
+              type="primary"
+              className="tutorial-bind-enterprise-target"
+              onClick={() => setOnboardingOpen(true)}
+            >
               绑定企业
             </Button>
           ) : null}
@@ -4303,6 +4583,7 @@ export default function App() {
             <Button
               key={item.key}
               shape="circle"
+              className={`product-rail-nav-button tutorial-nav-${item.key}`}
               type={selectedSection === item.key ? 'primary' : 'default'}
               title={item.label}
               icon={item.icon}
@@ -4331,6 +4612,10 @@ export default function App() {
                 <button type="button" onClick={() => openAccountModal('help')}>
                   <QuestionCircleOutlined />
                   <span>帮助中心</span>
+                </button>
+                <button type="button" onClick={() => openDigitalEmployeeTutorial()}>
+                  <CompassOutlined />
+                  <span>新手引导</span>
                 </button>
                 <button type="button" onClick={() => openAccountModal('release')}>
                   <SafetyCertificateOutlined />
@@ -4684,6 +4969,17 @@ export default function App() {
 
         {accountModal === 'help' ? (
           <Space direction="vertical" size={18} className="account-modal-body">
+            <div className="account-help-launcher">
+              <Space direction="vertical" size={4}>
+                <Typography.Text strong>新手引导</Typography.Text>
+                <Typography.Text type="secondary">
+                  4 步带你完成第一次使用。可以随时关闭，也可以从这里重新打开。
+                </Typography.Text>
+              </Space>
+              <Button type="primary" icon={<CompassOutlined />} onClick={() => openDigitalEmployeeTutorial()}>
+                重新打开
+              </Button>
+            </div>
             {accountHelpSections.map((section) => (
               <section key={section.title} className="account-help-section">
                 <Typography.Text strong>{section.title}</Typography.Text>
@@ -4892,6 +5188,60 @@ export default function App() {
           </Space>
         ) : null}
       </Modal>
+    );
+  }
+
+  function renderDigitalEmployeeTutorialTour() {
+    if (digitalEmployeeTutorialActiveStepIndex < 0) {
+      return null;
+    }
+
+    return (
+      <Tour
+        open={digitalEmployeeTutorialOpen}
+        current={digitalEmployeeTutorialActiveStepIndex}
+        rootClassName="digital-employee-tutorial-tour"
+        mask
+        disabledInteraction={false}
+        onChange={(nextIndex) => setDigitalEmployeeTutorialStepIndex(nextIndex)}
+        onClose={() => closeDigitalEmployeeTutorial(false)}
+        onFinish={() => closeDigitalEmployeeTutorial(true)}
+        steps={digitalEmployeeTutorialSteps.map((step, index) => {
+          const isLastStep = index >= digitalEmployeeTutorialSteps.length - 1;
+          const target = findDigitalEmployeeTutorialTarget(step.targetSelector);
+
+          return {
+            title: step.title,
+            description: (
+              <div className="digital-employee-tour-description">
+                <Typography.Text type="secondary">{step.description}</Typography.Text>
+                {step.isComplete ? <Tag color="green">这一步已完成</Tag> : null}
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<CompassOutlined />}
+                  className="digital-employee-tour-action"
+                  onClick={step.onPrimaryAction}
+                >
+                  {step.actionLabel}
+                </Button>
+              </div>
+            ),
+            target: target ? () => target : null,
+            placement: step.placement,
+            nextButtonProps: {
+              children: isLastStep ? '完成' : '知道了，下一步'
+            },
+            prevButtonProps: {
+              children: '上一步'
+            },
+            scrollIntoViewOptions: {
+              block: 'center',
+              inline: 'center'
+            } as ScrollIntoViewOptions
+          };
+        })}
+      />
     );
   }
 
@@ -6208,7 +6558,11 @@ export default function App() {
 
           <Form<TaskFormValues>
             form={taskForm}
-            className={isComposerDragOver ? 'chat-composer dragging' : 'chat-composer'}
+            className={[
+              'chat-composer',
+              'tutorial-chat-composer-target',
+              isComposerDragOver ? 'dragging' : ''
+            ].filter(Boolean).join(' ')}
             onDragOver={handleComposerDragOver}
             onDragLeave={handleComposerDragLeave}
             onDrop={handleComposerDrop}
@@ -8291,7 +8645,7 @@ export default function App() {
               }
             />
           ) : (
-          <div className="catalog-grid role-catalog-grid">
+          <div className="catalog-grid role-catalog-grid tutorial-role-market-target">
             {filteredRoleTemplates.map((template) => {
               const installed = installedRoleCodes.has(template.roleCode);
               const isFactory = readRoleApplicationType(template) === 'digital_factory';
@@ -8996,12 +9350,19 @@ export default function App() {
             </div>
           ) : null}
 
-          <div className="catalog-grid model-provider-grid">
+          <div className="catalog-grid model-provider-grid tutorial-model-provider-grid-target">
             {filteredPresets.map((preset) => {
               const defaultCredential = findPresetDefaultCredential(preset);
               const modelCatalog = findPresetModelCatalog(preset);
               return (
-              <Card key={preset.id} bordered={false} className="catalog-card model-provider-card">
+              <Card
+                key={preset.id}
+                bordered={false}
+                className={[
+                  'catalog-card model-provider-card',
+                  preset.id === 'deepseek' ? 'tutorial-deepseek-model-target' : ''
+                ].filter(Boolean).join(' ')}
+              >
                 <Space direction="vertical" size={12} className="catalog-card-content">
                   <Flex align="flex-start" justify="space-between" gap={12}>
                     <span
