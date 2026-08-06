@@ -2032,8 +2032,15 @@ function findDigitalEmployeeTutorialTarget(selector: string): HTMLElement | null
     return null;
   }
 
-  const element = document.querySelector(selector);
-  return element instanceof HTMLElement ? element : null;
+  const elements = Array.from(document.querySelectorAll(selector));
+  return elements.find((element): element is HTMLElement => {
+    if (!(element instanceof HTMLElement)) {
+      return false;
+    }
+
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && element.offsetParent !== null;
+  }) ?? null;
 }
 
 function normalizeFactoryPackageDefinitions(
@@ -2804,6 +2811,7 @@ export default function App() {
   const [digitalEmployeeTutorialOpen, setDigitalEmployeeTutorialOpen] = useState(false);
   const [digitalEmployeeTutorialStepIndex, setDigitalEmployeeTutorialStepIndex] = useState(0);
   const [digitalEmployeeTutorialReplayMode, setDigitalEmployeeTutorialReplayMode] = useState(false);
+  const [digitalEmployeeTutorialTargetReady, setDigitalEmployeeTutorialTargetReady] = useState(false);
   const [digitalEmployeeTutorialProgress, setDigitalEmployeeTutorialProgress] =
     useState<DesktopOnboardingTutorialProgress>(() => readDesktopOnboardingTutorialProgress());
   const [isUnbindingDevice, setIsUnbindingDevice] = useState(false);
@@ -3008,10 +3016,10 @@ export default function App() {
     {
       id: 'bind_enterprise' as const,
       title: '绑定企业',
-      description: '先把这台电脑接入企业工作区，后续数字员工、知识库和模板都会自动同步。',
+      description: '输入企业绑定码后，这台电脑会同步企业授权、数字员工模板和企业知识库。',
       actionLabel: '去绑定企业',
-      targetSelector: '.tutorial-bind-enterprise-target',
-      placement: 'bottom',
+      targetSelector: '.tutorial-titlebar-bind-enterprise-target',
+      placement: 'bottomRight',
       isComplete: !tutorialIsEnterpriseUnbound,
       prepare: () => {
         setAccountMenuOpen(false);
@@ -3022,7 +3030,7 @@ export default function App() {
     {
       id: 'install_employee' as const,
       title: '安装数字员工',
-      description: '去数字市场先装一个数字员工，建议从常用模板开始。',
+      description: '进入数字市场，先安装一个免费或企业授权的数字员工，安装后才能在对话区使用。',
       actionLabel: '去数字市场',
       targetSelector: '.tutorial-role-market-target, .tutorial-nav-roles',
       placement: 'right',
@@ -3043,8 +3051,8 @@ export default function App() {
     {
       id: 'configure_model' as const,
       title: '配置文本模型',
-      description: '先配置一个可用的文本模型，推荐 DeepSeek，实际可以换成你已经接好的任意文本供应商。',
-      actionLabel: '打开 DeepSeek',
+      description: '数字员工需要文本模型才能工作。建议先配置 DeepSeek，填入 API Key 后拉取并选择模型。',
+      actionLabel: '配置 DeepSeek',
       targetSelector: '.tutorial-deepseek-model-target, .tutorial-model-provider-grid-target, .tutorial-nav-models',
       placement: 'left',
       isComplete: runtimeState.modelProfiles.some(
@@ -3063,7 +3071,7 @@ export default function App() {
     {
       id: 'try_employee' as const,
       title: '开始对话',
-      description: '回到数字员工对话区，发一句简单的任务试试，先感受完整链路。',
+      description: '回到数字员工对话区，输入一句简单任务，测试从提问到产物输出的完整流程。',
       actionLabel: '去对话区',
       targetSelector: '.tutorial-chat-composer-target, .tutorial-nav-workbench',
       placement: 'top',
@@ -3102,7 +3110,7 @@ export default function App() {
     description: string;
     actionLabel: string;
     targetSelector: string;
-    placement: 'top' | 'right' | 'bottom' | 'left';
+    placement: 'top' | 'right' | 'bottom' | 'left' | 'bottomRight';
     isComplete: boolean;
     prepare: () => void;
     onPrimaryAction: () => void;
@@ -3142,6 +3150,7 @@ export default function App() {
 
   useEffect(() => {
     if (!digitalEmployeeTutorialOpen) {
+      setDigitalEmployeeTutorialTargetReady(false);
       return;
     }
 
@@ -3150,7 +3159,24 @@ export default function App() {
       return;
     }
 
+    setDigitalEmployeeTutorialTargetReady(false);
     digitalEmployeeTutorialSteps[digitalEmployeeTutorialActiveStepIndex]?.prepare();
+
+    let cancelled = false;
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        if (!cancelled) {
+          setDigitalEmployeeTutorialTargetReady(true);
+        }
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+    };
   }, [digitalEmployeeTutorialActiveStepIndex, digitalEmployeeTutorialOpen]);
 
   useEffect(() => {
@@ -4161,9 +4187,10 @@ export default function App() {
   }
 
   function openDigitalEmployeeTutorial() {
-    setDigitalEmployeeTutorialStepIndex(0);
+    setDigitalEmployeeTutorialStepIndex(tutorialIsEnterpriseUnbound ? 0 : 1);
     setDigitalEmployeeTutorialReplayMode(true);
     setDigitalEmployeeTutorialOpen(true);
+    setDigitalEmployeeTutorialTargetReady(false);
     setAccountMenuOpen(false);
     setAccountModal(null);
   }
@@ -4184,6 +4211,7 @@ export default function App() {
     writeDesktopOnboardingTutorialProgress(nextProgress);
     setDigitalEmployeeTutorialOpen(false);
     setDigitalEmployeeTutorialReplayMode(false);
+    setDigitalEmployeeTutorialTargetReady(false);
     setDigitalEmployeeTutorialStepIndex(0);
   }
 
@@ -4454,7 +4482,6 @@ export default function App() {
                   {isEnterpriseUnbound ? (
                     <Button
                       type="primary"
-                      className="tutorial-bind-enterprise-target"
                       onClick={() => setOnboardingOpen(true)}
                     >
                       绑定企业
@@ -4526,14 +4553,15 @@ export default function App() {
 
         <div className="product-titlebar-actions">
           {isEnterpriseUnbound ? (
-            <Button
-              size="small"
-              type="primary"
-              className="tutorial-bind-enterprise-target"
-              onClick={() => setOnboardingOpen(true)}
-            >
-              绑定企业
-            </Button>
+            <span className="tutorial-titlebar-bind-enterprise-target">
+              <Button
+                size="small"
+                type="primary"
+                onClick={() => setOnboardingOpen(true)}
+              >
+                绑定企业
+              </Button>
+            </span>
           ) : null}
           <Tag icon={<SafetyCertificateOutlined />} color={connectionTone}>
             {connectionLabel(runtimeState.serverConnection.state)}
@@ -5192,7 +5220,7 @@ export default function App() {
   }
 
   function renderDigitalEmployeeTutorialTour() {
-    if (digitalEmployeeTutorialActiveStepIndex < 0) {
+    if (digitalEmployeeTutorialActiveStepIndex < 0 || !digitalEmployeeTutorialTargetReady) {
       return null;
     }
 
@@ -5209,6 +5237,7 @@ export default function App() {
         steps={digitalEmployeeTutorialSteps.map((step, index) => {
           const isLastStep = index >= digitalEmployeeTutorialSteps.length - 1;
           const target = findDigitalEmployeeTutorialTarget(step.targetSelector);
+          const hidePreviousButton = !tutorialIsEnterpriseUnbound && index === 1;
 
           return {
             title: step.title,
@@ -5233,7 +5262,8 @@ export default function App() {
               children: isLastStep ? '完成' : '知道了，下一步'
             },
             prevButtonProps: {
-              children: '上一步'
+              children: '上一步',
+              style: hidePreviousButton ? { display: 'none' } : undefined
             },
             scrollIntoViewOptions: {
               block: 'center',

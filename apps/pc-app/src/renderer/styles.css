@@ -176,6 +176,10 @@ body,
   margin-inline-end: 0;
 }
 
+.tutorial-titlebar-bind-enterprise-target {
+  display: inline-flex;
+}
+
 .window-control-group {
   display: inline-flex;
   align-items: center;

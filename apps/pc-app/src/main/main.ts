@@ -34,8 +34,8 @@ if (process.platform === 'win32') {
 
 async function createMainWindow() {
   const mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 820,
+    width: 1360,
+    height: 860,
     minWidth: 1100,
     minHeight: 720,
     title: 'QiuAI WorkOS',

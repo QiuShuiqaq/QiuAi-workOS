@@ -21,6 +21,7 @@ Success means:
 - DeepSeek is the recommended example for the model step, but not the only allowed provider
 - Tutorial completion should be stored locally on the device, not on the server
 - The tutorial should be replayable from the help or guidance entry point
+- When replayed from the `Q` menu on an already-bound device, the guide should start from digital employee installation instead of the binding step.
 
 ## Tech Stack
 
@@ -85,6 +86,7 @@ Rules:
 - auto-skip completed steps
 - do not duplicate model-configuration logic
 - if a target is not rendered yet, navigate to the relevant existing page and fall back gracefully
+- keep each anchor unique where possible, especially the enterprise binding button
 
 ## Testing Strategy
 
