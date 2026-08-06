@@ -16,6 +16,8 @@ import type {
   DesktopRuntimeState,
   DesktopRuntimeSyncResponse,
   DesktopServerConnectionStatus,
+  DesktopUpdateDownloadProgress,
+  DesktopUpdateDownloadResult,
   DesktopArtifactSaveAsRequest,
   DesktopArtifactSaveAsResult,
   DesktopLocalFileExportRequest,
@@ -28,6 +30,8 @@ import type {
   DesktopToolInvocationResult,
   DesktopUpdateCheckResult,
   DesktopUpdateInstallResult,
+  DesktopUpdateLaunchRequest,
+  DesktopUpdateLaunchResult,
   DesktopWindowControlAction,
   QiuDesktopBridge
 } from '../shared/desktop-api.js';
@@ -45,7 +49,10 @@ const channels = {
   unbindDesktopDevice: 'qiuai:desktop:unbind-desktop-device',
   checkServerConnection: 'qiuai:desktop:check-server-connection',
   checkForUpdates: 'qiuai:desktop:check-for-updates',
+  downloadDesktopUpdate: 'qiuai:desktop:download-desktop-update',
+  installDesktopUpdate: 'qiuai:desktop:install-desktop-update',
   downloadAndInstallUpdate: 'qiuai:desktop:download-and-install-update',
+  updateDownloadProgress: 'qiuai:desktop:update-download-progress',
   listAuthorizedRoleTemplates: 'qiuai:desktop:list-authorized-role-templates',
   syncRuntimeState: 'qiuai:desktop:sync-runtime-state',
   saveRuntimeState: 'qiuai:desktop:save-runtime-state',
@@ -83,8 +90,19 @@ const bridge: QiuDesktopBridge = {
     ipcRenderer.invoke(channels.checkServerConnection) as Promise<DesktopServerConnectionStatus>,
   checkForUpdates: () =>
     ipcRenderer.invoke(channels.checkForUpdates) as Promise<DesktopUpdateCheckResult>,
+  downloadDesktopUpdate: () =>
+    ipcRenderer.invoke(channels.downloadDesktopUpdate) as Promise<DesktopUpdateDownloadResult>,
+  installDesktopUpdate: (request: DesktopUpdateLaunchRequest) =>
+    ipcRenderer.invoke(channels.installDesktopUpdate, request) as Promise<DesktopUpdateLaunchResult>,
   downloadAndInstallUpdate: () =>
     ipcRenderer.invoke(channels.downloadAndInstallUpdate) as Promise<DesktopUpdateInstallResult>,
+  onUpdateDownloadProgress: (listener: (progress: DesktopUpdateDownloadProgress) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, progress: DesktopUpdateDownloadProgress) => {
+      listener(progress);
+    };
+    ipcRenderer.on(channels.updateDownloadProgress, handler);
+    return () => ipcRenderer.removeListener(channels.updateDownloadProgress, handler);
+  },
   listAuthorizedRoleTemplates: () =>
     ipcRenderer.invoke(channels.listAuthorizedRoleTemplates) as Promise<DesktopAuthorizedRoleTemplateCatalog>,
   syncRuntimeState: (state: DesktopRuntimeState) =>

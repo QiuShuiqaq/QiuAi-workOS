@@ -55,6 +55,7 @@ import message from 'antd/es/message';
 import Modal from 'antd/es/modal';
 import Popconfirm from 'antd/es/popconfirm';
 import Popover from 'antd/es/popover';
+import Progress from 'antd/es/progress';
 import Radio from 'antd/es/radio';
 import Select from 'antd/es/select';
 import Space from 'antd/es/space';
@@ -80,6 +81,8 @@ import type {
   DesktopRoleWatchRun,
   DesktopRuntimeState,
   DesktopUpdateCheckResult,
+  DesktopUpdateDownloadProgress,
+  DesktopUpdateDownloadResult,
   DesktopWindowControlAction
 } from '../shared/desktop-api';
 import type {
@@ -434,6 +437,7 @@ const sectionItems: Array<{ key: SectionKey; icon: ReactNode; label: string }> =
 const desktopClientPreferenceStorageKey = 'qiuai.pc.client.preferences.v1';
 const factoryPackagePresetStorageKey = 'qiuai.pc.factory.package.presets.v1';
 const factoryPackageSelectionStorageKey = 'qiuai.pc.factory.package.selections.v1';
+const factoryRunParameterStorageKey = 'qiuai.pc.factory.run.parameters.v1';
 const factoryScreeningProfileStorageKey = 'qiuai.pc.factory.screening.profiles.v1';
 const defaultDesktopClientPreferences: DesktopClientPreferences = {
   theme: 'light',
@@ -1489,6 +1493,20 @@ const currencyFormatter = new Intl.NumberFormat('zh-CN', {
 });
 const pendingWorkspaceId = 'workspace_pending_login';
 const newTaskSelectionId = '__qiuai_new_task__';
+const modelProviderApiKeyUrls: Record<string, string> = {
+  'tencent-cloud': 'https://console.cloud.tencent.com/cam/capi',
+  'aliyun-bailian': 'https://bailian.console.aliyun.com/',
+  deepseek: 'https://platform.deepseek.com/api_keys',
+  openai: 'https://platform.openai.com/api-keys',
+  dashscope: 'https://bailian.console.aliyun.com/',
+  moonshot: 'https://platform.moonshot.cn/console/api-keys',
+  siliconflow: 'https://cloud.siliconflow.cn/account/ak',
+  zhipu: 'https://bigmodel.cn/usercenter/proj-mgmt/apikeys',
+  minimax: 'https://platform.minimaxi.com/user-center/basic-information/interface-key',
+  'volcengine-ark': 'https://console.volcengine.com/ark/region:ark+cn-beijing/apikey',
+  openrouter: 'https://openrouter.ai/settings/keys',
+  'gemini-openai': 'https://aistudio.google.com/apikey'
+};
 const initialAuthorizedRoleTemplateCatalog: DesktopAuthorizedRoleTemplateCatalog = {
   source: 'local_fallback',
   workspaceId: pendingWorkspaceId,
@@ -2175,6 +2193,158 @@ function resolveFactoryPackageSelection(roleCode: string, packageDefinitions: Fa
   return packageDefinitions[0]?.key ? [packageDefinitions[0].key] : [];
 }
 
+const factoryRunRememberedFieldKeys: Array<keyof FactoryRunFormValues> = [
+  'useKnowledge',
+  'platform',
+  'packageKeys',
+  'qualityCheckMode',
+  'enableImageUnderstanding',
+  'dialect',
+  'screeningProfileKey',
+  'editEnabled',
+  'editTargetSeconds',
+  'promptLanguage',
+  'promptStyle',
+  'promptGoal',
+  'promptMustKeep',
+  'promptAvoid',
+  'contentGoal',
+  'contentStyle',
+  'videoCount',
+  'videoDurationSeconds',
+  'videoRatio',
+  'targetAudience',
+  'sourceUrls',
+  'brandTone',
+  'instruction'
+];
+
+function readFactoryRunParameterMemory(roleCode: string): Partial<FactoryRunFormValues> {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(factoryRunParameterStorageKey);
+    if (!rawValue) {
+      return {};
+    }
+
+    const parsed = JSON.parse(rawValue);
+    if (!isPlainObject(parsed)) {
+      return {};
+    }
+
+    return normalizeFactoryRunParameterMemory(parsed[roleCode]);
+  } catch {
+    return {};
+  }
+}
+
+function writeFactoryRunParameterMemory(roleCode: string, values: FactoryRunFormValues) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(factoryRunParameterStorageKey);
+    const parsed = rawValue ? JSON.parse(rawValue) : {};
+    const current = isPlainObject(parsed) ? parsed : {};
+    window.localStorage.setItem(
+      factoryRunParameterStorageKey,
+      JSON.stringify({
+        ...current,
+        [roleCode]: normalizeFactoryRunParameterMemory(values)
+      })
+    );
+  } catch {
+    // Local factory parameters are convenience-only; task execution should not depend on storage.
+  }
+}
+
+function removeFactoryRunParameterMemory(roleCode: string) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(factoryRunParameterStorageKey);
+    const parsed = rawValue ? JSON.parse(rawValue) : {};
+    if (!isPlainObject(parsed)) {
+      return;
+    }
+
+    const next = { ...parsed };
+    delete next[roleCode];
+    window.localStorage.setItem(factoryRunParameterStorageKey, JSON.stringify(next));
+  } catch {
+    // Local factory parameters are optional.
+  }
+}
+
+function normalizeFactoryRunParameterMemory(value: unknown): Partial<FactoryRunFormValues> {
+  if (!isPlainObject(value)) {
+    return {};
+  }
+
+  const normalized: Partial<FactoryRunFormValues> = {};
+  for (const key of factoryRunRememberedFieldKeys) {
+    const item = value[key];
+    if (key === 'packageKeys') {
+      if (Array.isArray(item)) {
+        normalized.packageKeys = item.filter((entry): entry is string => typeof entry === 'string');
+      }
+      continue;
+    }
+
+    if (
+      key === 'editTargetSeconds' ||
+      key === 'videoCount' ||
+      key === 'videoDurationSeconds'
+    ) {
+      if (typeof item === 'number' && Number.isFinite(item)) {
+        (normalized as Record<string, unknown>)[key] = item;
+      }
+      continue;
+    }
+
+    if (
+      key === 'useKnowledge' ||
+      key === 'enableImageUnderstanding' ||
+      key === 'editEnabled'
+    ) {
+      if (typeof item === 'boolean') {
+        (normalized as Record<string, unknown>)[key] = item;
+      }
+      continue;
+    }
+
+    if (typeof item === 'string') {
+      (normalized as Record<string, unknown>)[key] = item;
+    }
+  }
+
+  return normalized;
+}
+
+function applyFactoryRunParameterMemory(
+  roleCode: string,
+  defaultValues: FactoryRunFormValues
+): FactoryRunFormValues {
+  const remembered = readFactoryRunParameterMemory(roleCode);
+  const packageDefinitions = defaultValues.packageDefinitions ?? [];
+  const availablePackageKeys = new Set(packageDefinitions.map((item) => item.key));
+  const rememberedPackageKeys = remembered.packageKeys?.filter((key) => availablePackageKeys.has(key));
+
+  return {
+    ...defaultValues,
+    ...remembered,
+    roleCode,
+    packageDefinitions,
+    packageKeys: rememberedPackageKeys?.length ? rememberedPackageKeys : defaultValues.packageKeys
+  };
+}
+
 function readFactoryCustomScreeningProfiles(roleCode: string): FactoryRunScreeningProfileDefinition[] {
   if (typeof window === 'undefined') {
     return [];
@@ -2496,12 +2666,16 @@ export default function App() {
   const [isBindingDevice, setIsBindingDevice] = useState(false);
   const [isBackupBusy, setIsBackupBusy] = useState(false);
   const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false);
+  const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
   const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
   const [syncNotice, setSyncNotice] = useState('');
   const [onboardingNotice, setOnboardingNotice] = useState('');
   const [backupNotice, setBackupNotice] = useState('');
   const [updateNotice, setUpdateNotice] = useState('');
   const [updateCheckResult, setUpdateCheckResult] = useState<DesktopUpdateCheckResult | null>(null);
+  const [updateDownloadProgress, setUpdateDownloadProgress] =
+    useState<DesktopUpdateDownloadProgress | null>(null);
+  const [downloadedUpdate, setDownloadedUpdate] = useState<DesktopUpdateDownloadResult | null>(null);
   const [userAgreementStatus, setUserAgreementStatus] = useState<DesktopAgreementStatus | null>(null);
   const [isCheckingUserAgreement, setIsCheckingUserAgreement] = useState(true);
   const [isAcceptingUserAgreement, setIsAcceptingUserAgreement] = useState(false);
@@ -2512,8 +2686,10 @@ export default function App() {
   );
   const [modelTestNotice, setModelTestNotice] = useState('');
   const [modelTestResult, setModelTestResult] = useState<DesktopModelTestResponse | null>(null);
+  const [isSavingModelProfile, setIsSavingModelProfile] = useState(false);
   const [isTestingModel, setIsTestingModel] = useState(false);
   const [isPullingProviderModels, setIsPullingProviderModels] = useState(false);
+  const [modelApiKeyClearRequested, setModelApiKeyClearRequested] = useState(false);
   const [latestPulledModelCatalog, setLatestPulledModelCatalog] = useState<{
     profileId: string;
     catalog: ModelProviderCatalog;
@@ -2678,6 +2854,20 @@ export default function App() {
   }, [hasLoadedPersistedState, runtimeState]);
 
   useEffect(() => {
+    const unsubscribe = window.qiuDesktop?.onUpdateDownloadProgress?.((progress) => {
+      setUpdateDownloadProgress(progress);
+      if (progress.status === 'started' || progress.status === 'downloading') {
+        setIsDownloadingUpdate(true);
+      }
+      if (progress.status === 'completed') {
+        setIsDownloadingUpdate(false);
+      }
+    });
+
+    return () => unsubscribe?.();
+  }, []);
+
+  useEffect(() => {
     const firstModelId = runtimeState.modelProfiles[0]?.id;
     if (!selectedModelId && firstModelId) {
       setSelectedModelId(firstModelId);
@@ -2795,7 +2985,7 @@ export default function App() {
 
     const defaultValues = buildFactoryRunDefaultValues(selectedFactoryRoleCode);
     if (defaultValues) {
-      factoryRunForm.setFieldsValue(defaultValues);
+      factoryRunForm.setFieldsValue(applyFactoryRunParameterMemory(selectedFactoryRoleCode, defaultValues));
       setFactoryAttachments([]);
     }
   }, [factoryRunForm, selectedFactoryRoleCode]);
@@ -3239,6 +3429,8 @@ export default function App() {
 
     setIsCheckingForUpdates(true);
     setUpdateNotice('');
+    setDownloadedUpdate(null);
+    setUpdateDownloadProgress(null);
     try {
       const result = await window.qiuDesktop.checkForUpdates();
       setUpdateCheckResult(result);
@@ -3254,21 +3446,86 @@ export default function App() {
     }
   }
 
-  async function downloadAndInstallUpdate() {
+  function hasUpdateBlockingTask() {
+    return getRuntimeTaskDetails(runtimeStateRef.current).some(
+      (task) => task.state === 'queued' || task.state === 'running' || task.state === 'waiting_approval'
+    );
+  }
+
+  async function downloadUpdateInstaller() {
     if (!updateCheckResult?.latestRelease || !window.qiuDesktop) {
       return;
     }
 
-    setIsInstallingUpdate(true);
+    setIsDownloadingUpdate(true);
     setUpdateNotice('');
+    setDownloadedUpdate(null);
+    setUpdateDownloadProgress({
+      releaseVersion: updateCheckResult.latestRelease.version,
+      status: 'started',
+      receivedBytes: 0,
+      totalBytes: updateCheckResult.latestRelease.fileSizeBytes,
+      percent: updateCheckResult.latestRelease.fileSizeBytes ? 0 : undefined,
+      updatedAt: new Date().toISOString()
+    });
     try {
-      const result = await window.qiuDesktop.downloadAndInstallUpdate();
-      setUpdateNotice(`已下载 ${result.releaseVersion}，正在启动安装程序。客户端会自动退出。`);
+      const result = await window.qiuDesktop.downloadDesktopUpdate();
+      setDownloadedUpdate(result);
+      setUpdateDownloadProgress({
+        releaseVersion: result.releaseVersion,
+        status: 'completed',
+        receivedBytes: result.fileSizeBytes,
+        totalBytes: result.fileSizeBytes,
+        percent: 100,
+        installerPath: result.installerPath,
+        installerDirectoryPath: result.installerDirectoryPath,
+        updatedAt: result.downloadedAt
+      });
+      setUpdateNotice(`已下载 ${result.releaseVersion}，安装包已保存到本机，可稍后安装。`);
+      message.success('新版安装包已下载。');
     } catch (error) {
-      setUpdateNotice(`自动更新失败：${error instanceof Error ? error.message : 'unknown error'}`);
+      setUpdateNotice(`下载安装包失败：${error instanceof Error ? error.message : 'unknown error'}`);
     } finally {
-      setIsInstallingUpdate(false);
+      setIsDownloadingUpdate(false);
     }
+  }
+
+  async function installDownloadedUpdate() {
+    if (!downloadedUpdate || !window.qiuDesktop) {
+      message.warning('请先下载安装包。');
+      return;
+    }
+
+    if (hasUpdateBlockingTask()) {
+      message.warning('当前还有任务正在运行或等待确认，请任务结束后再安装新版。');
+      return;
+    }
+
+    Modal.confirm({
+      title: '安装新版客户端',
+      content: '点击确认后，QiuAI WorkOS 会退出，并在几秒后启动安装程序。请先保存正在编辑的内容。',
+      okText: '退出并安装',
+      cancelText: '稍后安装',
+      onOk: async () => {
+        setIsInstallingUpdate(true);
+        setUpdateNotice('');
+        try {
+          const result = await window.qiuDesktop?.installDesktopUpdate({
+            installerPath: downloadedUpdate.installerPath,
+            releaseVersion: downloadedUpdate.releaseVersion
+          });
+          if (result?.willQuit) {
+            setUpdateNotice('正在退出客户端并启动安装程序。');
+          } else {
+            setUpdateNotice('安装包已打开，请按提示完成更新。');
+            setIsInstallingUpdate(false);
+          }
+        } catch (error) {
+          setUpdateNotice(`启动安装程序失败：${error instanceof Error ? error.message : 'unknown error'}`);
+          setIsInstallingUpdate(false);
+        }
+      }
+    });
   }
 
   function stageComposerFiles(fileList: FileList | File[]) {
@@ -3563,6 +3820,7 @@ export default function App() {
     setModelTestNotice('');
     setModelTestResult(null);
     setLatestPulledModelCatalog(null);
+    setModelApiKeyClearRequested(false);
   }, [modelForm, selectedModelDefaultCredential, selectedModelProfile]);
 
   useEffect(() => {
@@ -4543,7 +4801,31 @@ export default function App() {
               <Descriptions.Item label="更新策略">
                 {updateCheckResult?.forceUpdate ? <Tag color="red">强制更新</Tag> : <Tag>常规更新</Tag>}
               </Descriptions.Item>
+              {downloadedUpdate ? (
+                <Descriptions.Item label="已下载到">
+                  <Typography.Text copyable ellipsis>
+                    {downloadedUpdate.installerPath}
+                  </Typography.Text>
+                </Descriptions.Item>
+              ) : null}
             </Descriptions>
+            {updateDownloadProgress ? (
+              <div className="account-update-download">
+                <Progress
+                  percent={updateDownloadProgress.percent ?? 0}
+                  status={updateDownloadProgress.status === 'completed' ? 'success' : 'active'}
+                />
+                <Typography.Text type="secondary">
+                  {updateDownloadProgress.status === 'completed'
+                    ? `下载完成 · ${formatFileSize(updateDownloadProgress.receivedBytes)}`
+                    : `正在下载 · ${formatFileSize(updateDownloadProgress.receivedBytes)}${
+                        updateDownloadProgress.totalBytes
+                          ? ` / ${formatFileSize(updateDownloadProgress.totalBytes)}`
+                          : ''
+                      }`}
+                </Typography.Text>
+              </div>
+            ) : null}
             {updateNotice ? <Typography.Text type="secondary">{updateNotice}</Typography.Text> : null}
             <Space wrap>
               <Button
@@ -4555,12 +4837,34 @@ export default function App() {
               </Button>
               <Button
                 type="primary"
-                loading={isInstallingUpdate}
-                disabled={!updateCheckResult?.updateAvailable || !latestRelease || isCheckingForUpdates}
-                onClick={() => void downloadAndInstallUpdate()}
+                loading={isDownloadingUpdate}
+                disabled={
+                  !updateCheckResult?.updateAvailable ||
+                  !latestRelease ||
+                  isCheckingForUpdates ||
+                  isInstallingUpdate
+                }
+                onClick={() => void downloadUpdateInstaller()}
               >
-                下载并安装新版
+                下载安装包
               </Button>
+              <Button
+                type="primary"
+                ghost
+                loading={isInstallingUpdate}
+                disabled={!downloadedUpdate || isDownloadingUpdate || isCheckingForUpdates}
+                onClick={() => void installDownloadedUpdate()}
+              >
+                安装新版
+              </Button>
+              {downloadedUpdate ? (
+                <Button
+                  icon={<FolderOpenOutlined />}
+                  onClick={() => void openLocalPath(downloadedUpdate.installerDirectoryPath)}
+                >
+                  打开下载位置
+                </Button>
+              ) : null}
             </Space>
           </Space>
         ) : null}
@@ -6538,8 +6842,8 @@ export default function App() {
                             <Typography.Text strong>参数设置</Typography.Text>
                             <Typography.Text type="secondary">只保留本次运行需要调整的参数。</Typography.Text>
                           </Space>
-                          <Button size="small" onClick={() => resetFactoryRunFormForRole(selectedFactoryCode)}>
-                            重置
+                          <Button size="small" onClick={() => clearFactoryRunFormForRole(selectedFactoryCode)}>
+                            清空
                           </Button>
                         </Flex>
                         <Form.Item
@@ -8550,6 +8854,9 @@ export default function App() {
       latestPulledModelCatalog && latestPulledModelCatalog.profileId === selectedModelProfile?.id
         ? latestPulledModelCatalog.catalog
         : selectedModelCatalog;
+    const selectedProviderApiKeyUrl = selectedModelProfile
+      ? modelProviderApiKeyUrls[selectedModelProfile.providerId]
+      : undefined;
 
     return (
       <>
@@ -8769,13 +9076,41 @@ export default function App() {
           cancelText="关闭"
           width={760}
           destroyOnHidden
+          confirmLoading={isSavingModelProfile}
           onCancel={() => setModelConfigOpen(false)}
           onOk={() => modelForm.submit()}
         >
           {selectedModelProfile ? (
             <Form<ModelFormValues> form={modelForm} layout="vertical" onFinish={saveModelProfile}>
-              <Form.Item name="apiKey" label="API Key">
-                <Input.Password placeholder="作为该供应商默认 Key，只保存在本机" />
+              <Form.Item label="API Key">
+                <Space.Compact style={{ width: '100%' }}>
+                  <Form.Item name="apiKey" noStyle>
+                    <Input.Password
+                      placeholder="作为该供应商默认 Key，只保存在本机"
+                      onChange={() => setModelApiKeyClearRequested(false)}
+                    />
+                  </Form.Item>
+                  {selectedModelDefaultCredential ? (
+                    <Button
+                      danger
+                      onClick={() => {
+                        modelForm.setFieldValue('apiKey', '');
+                        setModelApiKeyClearRequested(true);
+                        setModelTestNotice('已标记清空默认 API Key，点击保存后生效。');
+                      }}
+                    >
+                      清空 Key
+                    </Button>
+                  ) : null}
+                  {selectedProviderApiKeyUrl ? (
+                    <Button
+                      icon={<GlobalOutlined />}
+                      onClick={() => void openLocalPath(selectedProviderApiKeyUrl)}
+                    >
+                      获取 API Key
+                    </Button>
+                  ) : null}
+                </Space.Compact>
               </Form.Item>
               <div className="inline-form-grid">
                 <Form.Item name="providerName" label="供应商" rules={[{ required: true }]}>
@@ -9873,15 +10208,25 @@ export default function App() {
     };
   }
 
-  function resetFactoryRunFormForRole(roleCode: string) {
+  function clearFactoryRunFormForRole(roleCode: string) {
     const defaultValues = buildFactoryRunDefaultValues(roleCode);
     if (!defaultValues) {
       message.warning('未找到这个数字工厂。');
       return false;
     }
 
-    factoryRunForm.setFieldsValue(defaultValues);
+    removeFactoryRunParameterMemory(roleCode);
+    removeFactoryPackageSelection(roleCode);
+    factoryRunForm.resetFields();
+    factoryRunForm.setFieldsValue({
+      roleCode,
+      packageDefinitions: defaultValues.packageDefinitions ?? [],
+      packageKeys: [],
+      useKnowledge: false,
+      instruction: ''
+    });
     setFactoryAttachments([]);
+    message.success('已清空当前工厂的参数和上传文件。');
     return true;
   }
 
@@ -9895,6 +10240,14 @@ export default function App() {
       values.packageKeys ?? [],
       packageDefinitions.map((item) => item.key)
     );
+  }
+
+  function rememberFactoryRunParameters(values: FactoryRunFormValues, factory: DigitalFactoryManifest) {
+    rememberFactoryRunPackageSelection(values, factory);
+    writeFactoryRunParameterMemory(values.roleCode, {
+      ...values,
+      packageDefinitions: undefined
+    });
   }
 
   function readFactoryManifestForRoleCode(roleCode: string) {
@@ -10277,7 +10630,8 @@ export default function App() {
         useKnowledge: values.useKnowledge === true
       });
       if (created) {
-        resetFactoryRunFormForRole(values.roleCode);
+        rememberFactoryRunParameters(values, factory);
+        setFactoryAttachments([]);
         setSelectedFactoryRoleCode(values.roleCode);
         navigateToSection('factories');
       }
@@ -10313,7 +10667,6 @@ export default function App() {
         message.warning('请至少选择一个产物包。');
         return;
       }
-      rememberFactoryRunPackageSelection(ecommerceVideoValues, factory);
       const optionalVisionModelProfileIds =
         ecommerceVideoValues.qualityCheckMode === 'smart'
           ? findReadyImageUnderstandingModelProfileIds(runtimeState, values.roleCode)
@@ -10342,7 +10695,8 @@ export default function App() {
         useKnowledge: ecommerceVideoValues.useKnowledge === true
       });
       if (created) {
-        resetFactoryRunFormForRole(values.roleCode);
+        rememberFactoryRunParameters(ecommerceVideoValues, factory);
+        setFactoryAttachments([]);
         setSelectedFactoryRoleCode(values.roleCode);
         navigateToSection('factories');
       }
@@ -10374,7 +10728,6 @@ export default function App() {
         message.warning('请至少选择一个产物包。');
         return;
       }
-      rememberFactoryRunPackageSelection(operationFactoryValues, factory);
       const hasUserContext = [
         operationFactoryValues.targetAudience,
         operationFactoryValues.sourceUrls,
@@ -10412,7 +10765,8 @@ export default function App() {
         useKnowledge: operationFactoryValues.useKnowledge === true
       });
       if (created) {
-        resetFactoryRunFormForRole(values.roleCode);
+        rememberFactoryRunParameters(operationFactoryValues, factory);
+        setFactoryAttachments([]);
         setSelectedFactoryRoleCode(values.roleCode);
         navigateToSection('factories');
       }
@@ -10446,7 +10800,6 @@ export default function App() {
       message.warning('请至少选择一个产物包。');
       return;
     }
-    rememberFactoryRunPackageSelection(imageFactoryValues, factory);
     const optionalVisionModelProfileIds =
       imageFactoryValues.enableImageUnderstanding === true || imageFactoryValues.qualityCheckMode === 'smart'
         ? findReadyImageUnderstandingModelProfileIds(runtimeState, values.roleCode)
@@ -10478,7 +10831,8 @@ export default function App() {
       useKnowledge: values.useKnowledge === true
     });
     if (created) {
-      resetFactoryRunFormForRole(values.roleCode);
+      rememberFactoryRunParameters(imageFactoryValues, factory);
+      setFactoryAttachments([]);
       setSelectedFactoryRoleCode(values.roleCode);
       navigateToSection('factories');
     }
@@ -10667,10 +11021,13 @@ export default function App() {
     message.success(`已删除模型配置：${label}`);
   }
 
-  function saveModelProfile(values: ModelFormValues) {
+  async function saveModelProfile(values: ModelFormValues) {
     if (!selectedModelProfile) {
       return;
     }
+
+    setIsSavingModelProfile(true);
+    setModelTestNotice('');
 
     const capabilities = normalizeModelCapabilities(
       values.capabilities,
@@ -10715,27 +11072,59 @@ export default function App() {
       fallbackProfileId: values.fallbackProfileId || undefined
     };
 
-    setRuntimeState((current) => ({
-      ...current,
-      modelProfiles: current.modelProfiles.map((profile) =>
-        profile.id === selectedModelProfile.id
-          ? updatedProfile
-          : profile
-      ),
-      localRuntime: {
-        ...current.localRuntime,
-        enabledModelProfileIds: mergeUniqueStrings(
-          current.localRuntime.enabledModelProfileIds,
-          [updatedProfile.id]
-        )
-      },
-      modelCredentials: upsertDefaultModelCredential({
-        credentials: current.modelCredentials,
-        profile: updatedProfile,
-        apiKey: values.apiKey,
-        apiBaseUrl: values.apiBaseUrl
-      })
-    }));
+    try {
+      const currentState = runtimeStateRef.current;
+      const apiKey = values.apiKey?.trim();
+      const existingDefaultCredential = findDefaultModelCredential(
+        currentState.modelCredentials,
+        updatedProfile.providerId
+      );
+      const nextModelCredentials = apiKey
+        ? upsertDefaultModelCredential({
+            credentials: currentState.modelCredentials,
+            profile: updatedProfile,
+            apiKey,
+            apiBaseUrl: values.apiBaseUrl
+          })
+        : modelApiKeyClearRequested && existingDefaultCredential
+          ? currentState.modelCredentials.filter((credential) => credential.id !== existingDefaultCredential.id)
+          : currentState.modelCredentials;
+      const nextModelProfiles = currentState.modelProfiles.some((profile) => profile.id === selectedModelProfile.id)
+        ? currentState.modelProfiles.map((profile) =>
+            profile.id === selectedModelProfile.id
+              ? updatedProfile
+              : profile
+          )
+        : [...currentState.modelProfiles, updatedProfile];
+      const nextState: DesktopRuntimeState = {
+        ...currentState,
+        modelProfiles: nextModelProfiles,
+        localRuntime: {
+          ...currentState.localRuntime,
+          enabledModelProfileIds: mergeUniqueStrings(
+            currentState.localRuntime.enabledModelProfileIds,
+            [updatedProfile.id]
+          )
+        },
+        modelCredentials: nextModelCredentials
+      };
+
+      if (window.qiuDesktop) {
+        await window.qiuDesktop.saveRuntimeState(nextState);
+      }
+
+      runtimeStateRef.current = nextState;
+      setRuntimeState(nextState);
+      setModelApiKeyClearRequested(false);
+      setModelConfigOpen(false);
+      message.success('模型配置已保存。');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'unknown error';
+      setModelTestNotice(`保存模型配置失败：${errorMessage}`);
+      message.error('模型配置保存失败，请重试。');
+    } finally {
+      setIsSavingModelProfile(false);
+    }
   }
 
   function applyModelProviderPreset(

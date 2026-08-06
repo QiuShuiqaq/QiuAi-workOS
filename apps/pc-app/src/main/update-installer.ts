@@ -9,7 +9,11 @@ import type { ReadableStream } from 'node:stream/web';
 import { pipeline } from 'node:stream/promises';
 
 import type {
+  DesktopUpdateDownloadProgress,
+  DesktopUpdateDownloadResult,
   DesktopUpdateInstallResult,
+  DesktopUpdateLaunchRequest,
+  DesktopUpdateLaunchResult,
   DesktopUpdateReleaseSummary
 } from '../shared/desktop-api.js';
 import { checkForDesktopUpdates, getDesktopAppInfo } from './runtime-state.js';
@@ -18,6 +22,8 @@ const electronApi = (electron as typeof electron & { default?: typeof electron }
 const { app, shell } = electronApi;
 
 const allowedInstallerExtensions = new Set(['.exe', '.msi', '.zip']);
+
+type DesktopUpdateDownloadProgressCallback = (progress: DesktopUpdateDownloadProgress) => void;
 
 function resolveDownloadUrl(downloadUrl: string, serverBaseUrl: string) {
   if (/^https?:\/\//i.test(downloadUrl)) {
@@ -54,15 +60,46 @@ function inferInstallerFileName(downloadUrl: string, version: string) {
   return allowedInstallerExtensions.has(extension) ? safeName : fallback;
 }
 
-function createHashingTransform() {
+function createHashingTransform(options: {
+  releaseVersion: string;
+  totalBytes?: number;
+  onProgress?: DesktopUpdateDownloadProgressCallback;
+}) {
   const hash = createHash('sha256');
   let bytesWritten = 0;
+  let lastProgressAt = 0;
+
+  const emitProgress = (status: DesktopUpdateDownloadProgress['status']) => {
+    if (!options.onProgress) {
+      return;
+    }
+
+    const now = Date.now();
+    if (status === 'downloading' && now - lastProgressAt < 180) {
+      return;
+    }
+
+    lastProgressAt = now;
+    const percent =
+      options.totalBytes && options.totalBytes > 0
+        ? Math.min(99, Math.max(0, Math.floor((bytesWritten / options.totalBytes) * 100)))
+        : undefined;
+    options.onProgress({
+      releaseVersion: options.releaseVersion,
+      status,
+      receivedBytes: bytesWritten,
+      totalBytes: options.totalBytes,
+      percent,
+      updatedAt: new Date().toISOString()
+    });
+  };
 
   const stream = new Transform({
     transform(chunk: Buffer, _encoding, callback) {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       bytesWritten += buffer.length;
       hash.update(buffer);
+      emitProgress('downloading');
       callback(null, buffer);
     }
   });
@@ -74,7 +111,10 @@ function createHashingTransform() {
   };
 }
 
-async function downloadReleaseInstaller(release: DesktopUpdateReleaseSummary) {
+async function downloadReleaseInstaller(
+  release: DesktopUpdateReleaseSummary,
+  onProgress?: DesktopUpdateDownloadProgressCallback
+) {
   const appInfo = getDesktopAppInfo();
   const downloadUrl = resolveDownloadUrl(release.downloadUrl, appInfo.serverBaseUrl);
   const response = await fetch(downloadUrl, {
@@ -97,7 +137,24 @@ async function downloadReleaseInstaller(release: DesktopUpdateReleaseSummary) {
   const fileName = inferInstallerFileName(downloadUrl, release.version);
   const installerPath = path.join(updateDir, fileName);
   const temporaryPath = `${installerPath}.download`;
-  const hashing = createHashingTransform();
+  const contentLength = Number.parseInt(response.headers.get('content-length') ?? '', 10);
+  const totalBytes = Number.isFinite(contentLength) && contentLength > 0
+    ? contentLength
+    : release.fileSizeBytes;
+  const hashing = createHashingTransform({
+    releaseVersion: release.version,
+    totalBytes,
+    onProgress
+  });
+
+  onProgress?.({
+    releaseVersion: release.version,
+    status: 'started',
+    receivedBytes: 0,
+    totalBytes,
+    percent: totalBytes ? 0 : undefined,
+    updatedAt: new Date().toISOString()
+  });
 
   try {
     await unlink(temporaryPath);
@@ -126,17 +183,38 @@ async function downloadReleaseInstaller(release: DesktopUpdateReleaseSummary) {
 
   await rename(temporaryPath, installerPath);
   const fileStat = await stat(installerPath);
+  const installerDirectoryPath = path.dirname(installerPath);
+
+  onProgress?.({
+    releaseVersion: release.version,
+    status: 'completed',
+    receivedBytes: fileStat.size,
+    totalBytes: totalBytes ?? fileStat.size,
+    percent: 100,
+    installerPath,
+    installerDirectoryPath,
+    updatedAt: new Date().toISOString()
+  });
 
   return {
     downloadUrl,
     installerPath,
+    installerDirectoryPath,
     fileSizeBytes: fileStat.size,
     checksumSha256: digest
   };
 }
 
-async function launchInstaller(installerPath: string) {
+async function launchInstaller(installerPath: string, options: { quitBeforeLaunch?: boolean } = {}) {
   const extension = path.extname(installerPath).toLowerCase();
+
+  if (options.quitBeforeLaunch && (extension === '.exe' || extension === '.msi')) {
+    scheduleInstallerLaunchAfterQuit(installerPath, extension);
+    setTimeout(() => {
+      app.quit();
+    }, 250);
+    return true;
+  }
 
   if (extension === '.msi') {
     const child = spawn('msiexec.exe', ['/i', installerPath], {
@@ -163,6 +241,92 @@ async function launchInstaller(installerPath: string) {
   return true;
 }
 
+function scheduleInstallerLaunchAfterQuit(installerPath: string, extension: string) {
+  const escapedInstallerPath = JSON.stringify(installerPath);
+  const command =
+    extension === '.msi'
+      ? [
+          `$installerPath = ${escapedInstallerPath};`,
+          'Start-Sleep -Milliseconds 2500;',
+          "Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', $installerPath)"
+        ].join(' ')
+      : [
+          `$installerPath = ${escapedInstallerPath};`,
+          'Start-Sleep -Milliseconds 2500;',
+          'Start-Process -FilePath $installerPath'
+        ].join(' ');
+  const child = spawn('powershell.exe', [
+    '-NoProfile',
+    '-WindowStyle',
+    'Hidden',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    command
+  ], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true
+  });
+  child.unref();
+}
+
+async function validateDownloadedInstallerPath(installerPath: string) {
+  const appInfo = getDesktopAppInfo();
+  const updateDir = path.resolve(appInfo.userDataPath, 'updates');
+  const resolvedInstallerPath = path.resolve(installerPath);
+  const relativePath = path.relative(updateDir, resolvedInstallerPath);
+
+  if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    throw new Error('Installer path is outside the trusted update directory.');
+  }
+
+  const extension = path.extname(resolvedInstallerPath).toLowerCase();
+  if (!allowedInstallerExtensions.has(extension)) {
+    throw new Error('Unsupported installer file type.');
+  }
+
+  await stat(resolvedInstallerPath);
+  return resolvedInstallerPath;
+}
+
+export async function downloadDesktopUpdateInstaller(
+  onProgress?: DesktopUpdateDownloadProgressCallback
+): Promise<DesktopUpdateDownloadResult> {
+  const update = await checkForDesktopUpdates();
+  const release = update.latestRelease;
+
+  if (!update.updateAvailable || !release) {
+    throw new Error('No desktop update is available.');
+  }
+
+  const installer = await downloadReleaseInstaller(release, onProgress);
+
+  return {
+    releaseVersion: release.version,
+    installerPath: installer.installerPath,
+    installerDirectoryPath: installer.installerDirectoryPath,
+    downloadUrl: installer.downloadUrl,
+    fileSizeBytes: installer.fileSizeBytes,
+    checksumSha256: installer.checksumSha256,
+    downloadedAt: new Date().toISOString()
+  };
+}
+
+export async function installDownloadedDesktopUpdate(
+  request: DesktopUpdateLaunchRequest
+): Promise<DesktopUpdateLaunchResult> {
+  const installerPath = await validateDownloadedInstallerPath(request.installerPath);
+  const shouldQuit = await launchInstaller(installerPath, { quitBeforeLaunch: true });
+
+  return {
+    releaseVersion: request.releaseVersion,
+    installerPath,
+    launchedAt: new Date().toISOString(),
+    willQuit: shouldQuit
+  };
+}
+
 export async function downloadAndInstallDesktopUpdate(): Promise<DesktopUpdateInstallResult> {
   const update = await checkForDesktopUpdates();
   const release = update.latestRelease;
@@ -172,17 +336,12 @@ export async function downloadAndInstallDesktopUpdate(): Promise<DesktopUpdateIn
   }
 
   const installer = await downloadReleaseInstaller(release);
-  const shouldQuit = await launchInstaller(installer.installerPath);
-
-  if (shouldQuit) {
-    setTimeout(() => {
-      app.quit();
-    }, 1200);
-  }
+  const shouldQuit = await launchInstaller(installer.installerPath, { quitBeforeLaunch: true });
 
   return {
     releaseVersion: release.version,
     installerPath: installer.installerPath,
+    installerDirectoryPath: installer.installerDirectoryPath,
     downloadUrl: installer.downloadUrl,
     fileSizeBytes: installer.fileSizeBytes,
     checksumSha256: installer.checksumSha256,

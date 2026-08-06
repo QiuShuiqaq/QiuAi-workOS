@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -61,6 +62,8 @@ const schemaStatements = [
   'CREATE TABLE IF NOT EXISTS tool_registry (workspace_id TEXT NOT NULL, tool_id TEXT NOT NULL, tool_json TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, last_used_at TEXT, updated_at TEXT NOT NULL, PRIMARY KEY (workspace_id, tool_id))',
   'INSERT OR IGNORE INTO meta (key, value) VALUES (\'schema_version\', \'1\')'
 ];
+
+const databaseBackupExtension = '.bak';
 
 export function getWorkspaceDatabasePath(layout: DesktopStorageLayout): string {
   return layout.workspaceDatabasePath;
@@ -213,9 +216,7 @@ async function openWorkspaceDatabase(layout: DesktopStorageLayout): Promise<{
 
   const sqlJs = await loadSqlJs();
   const filePath = getWorkspaceDatabasePath(layout);
-  const db = existsSync(filePath)
-    ? new sqlJs.Database(readFileSync(filePath))
-    : new sqlJs.Database();
+  const db = openSqlJsDatabase(sqlJs, filePath);
 
   for (const statement of schemaStatements) {
     db.exec(statement);
@@ -225,6 +226,23 @@ async function openWorkspaceDatabase(layout: DesktopStorageLayout): Promise<{
     db,
     filePath
   };
+}
+
+function openSqlJsDatabase(sqlJs: SqlJsModule, filePath: string): SqlJsDatabase {
+  if (!existsSync(filePath)) {
+    return new sqlJs.Database();
+  }
+
+  try {
+    return new sqlJs.Database(readFileSync(filePath));
+  } catch (error) {
+    const backupPath = getDatabaseBackupPath(filePath);
+    if (existsSync(backupPath)) {
+      return new sqlJs.Database(readFileSync(backupPath));
+    }
+
+    throw error;
+  }
 }
 
 async function loadSqlJs(): Promise<SqlJsModule> {
@@ -360,11 +378,24 @@ function persistDatabaseFile(db: SqlJsDatabase, filePath: string): void {
   mkdirSync(path.dirname(filePath), { recursive: true });
 
   const tempPath = `${filePath}.tmp`;
+  const backupPath = getDatabaseBackupPath(filePath);
   writeFileSync(tempPath, Buffer.from(db.export()));
 
   if (existsSync(filePath)) {
+    copyFileSync(filePath, backupPath);
     unlinkSync(filePath);
   }
 
-  renameSync(tempPath, filePath);
+  try {
+    renameSync(tempPath, filePath);
+  } catch (error) {
+    if (existsSync(backupPath) && !existsSync(filePath)) {
+      copyFileSync(backupPath, filePath);
+    }
+    throw error;
+  }
+}
+
+function getDatabaseBackupPath(filePath: string): string {
+  return `${filePath}${databaseBackupExtension}`;
 }

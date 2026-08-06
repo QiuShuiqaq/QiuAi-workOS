@@ -70,9 +70,43 @@ export interface DesktopUpdateCheckResult {
 export interface DesktopUpdateInstallResult {
   releaseVersion: string;
   installerPath: string;
+  installerDirectoryPath?: string;
   downloadUrl: string;
   fileSizeBytes: number;
   checksumSha256: string;
+  launchedAt: string;
+  willQuit: boolean;
+}
+
+export interface DesktopUpdateDownloadProgress {
+  releaseVersion: string;
+  status: 'started' | 'downloading' | 'completed';
+  receivedBytes: number;
+  totalBytes?: number;
+  percent?: number;
+  installerPath?: string;
+  installerDirectoryPath?: string;
+  updatedAt: string;
+}
+
+export interface DesktopUpdateDownloadResult {
+  releaseVersion: string;
+  installerPath: string;
+  installerDirectoryPath: string;
+  downloadUrl: string;
+  fileSizeBytes: number;
+  checksumSha256: string;
+  downloadedAt: string;
+}
+
+export interface DesktopUpdateLaunchRequest {
+  installerPath: string;
+  releaseVersion?: string;
+}
+
+export interface DesktopUpdateLaunchResult {
+  releaseVersion?: string;
+  installerPath: string;
   launchedAt: string;
   willQuit: boolean;
 }
@@ -495,7 +529,10 @@ export interface QiuDesktopBridge {
   unbindDesktopDevice(): Promise<DesktopRuntimeState>;
   checkServerConnection(): Promise<DesktopServerConnectionStatus>;
   checkForUpdates(): Promise<DesktopUpdateCheckResult>;
+  downloadDesktopUpdate(): Promise<DesktopUpdateDownloadResult>;
+  installDesktopUpdate(request: DesktopUpdateLaunchRequest): Promise<DesktopUpdateLaunchResult>;
   downloadAndInstallUpdate(): Promise<DesktopUpdateInstallResult>;
+  onUpdateDownloadProgress(listener: (progress: DesktopUpdateDownloadProgress) => void): () => void;
   listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRoleTemplateCatalog>;
   syncRuntimeState(state: DesktopRuntimeState): Promise<DesktopRuntimeSyncResponse>;
   saveRuntimeState(state: DesktopRuntimeState): Promise<void>;

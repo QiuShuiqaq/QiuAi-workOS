@@ -59,8 +59,16 @@ initialState.watchRuns = [
 const layout = getDesktopStorageLayout(tempDir, initialState.localRuntime.workspaceId);
 
 await saveDesktopRuntimeState(tempDir, initialState);
+await saveDesktopRuntimeState(tempDir, {
+  ...initialState,
+  localRuntime: {
+    ...initialState.localRuntime,
+    lastSyncedAt: '2026-07-20T02:00:00.000Z'
+  }
+});
 
 assert.ok(existsSync(layout.workspaceDatabasePath));
+assert.ok(existsSync(`${layout.workspaceDatabasePath}.bak`));
 const storedBundle = await readWorkspaceSnapshotBundle(
   layout,
   initialState.localRuntime.workspaceId
@@ -87,7 +95,7 @@ assert.equal(
   toolRegistry.find((tool) => tool.toolId === 'office-document'),
   undefined
 );
-assert.equal(loadedState?.localRuntime.lastSyncedAt, '2026-07-20T01:00:00.000Z');
+assert.equal(loadedState?.localRuntime.lastSyncedAt, '2026-07-20T02:00:00.000Z');
 assert.equal(loadedState?.runtimeSnapshot.tasks.length, initialState.runtimeSnapshot.tasks.length);
 assert.equal(loadedState?.rolePackages.length, initialState.rolePackages.length);
 assert.equal(loadedState?.modelProfiles[0].apiBaseUrl, 'https://api.example.com/v1');
