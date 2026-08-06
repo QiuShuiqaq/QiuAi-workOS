@@ -1,9 +1,17 @@
-import { access, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import process from 'node:process';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+
+import {
+  copyRuntimePackages,
+  ensureExists,
+  ensureRuntimePackageSources,
+  getRuntimePackageDependencies,
+  getRuntimePackageFileGlobs
+} from './runtime-dependencies.mjs';
 
 const require = createRequire(import.meta.url);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -23,13 +31,7 @@ const stageInstallerIncludePath = path.join(stageDir, 'installer.nsh');
 const electronBuilderCliPath = require.resolve('electron-builder/cli.js');
 const electronPackageJsonPath = require.resolve('electron/package.json');
 const electronDistDir = path.join(path.dirname(electronPackageJsonPath), 'dist');
-const sqlJsEntryPath = require.resolve('sql.js/dist/sql-wasm.js');
-const sqlJsPackageDir = path.dirname(path.dirname(sqlJsEntryPath));
-const runtimePackageDescriptors = [
-  { name: 'sql.js', packageDir: sqlJsPackageDir },
-  { name: 'jszip', packageDir: resolvePackageDir('jszip') },
-  { name: 'pdf-parse', packageDir: resolvePackageDir('pdf-parse') }
-];
+const runtimePackageFileGlobs = getRuntimePackageFileGlobs();
 
 await ensureExists(distDir, 'build output directory');
 await ensureExists(path.join(resourcesDir, 'icon.png'), 'desktop window icon');
@@ -37,29 +39,20 @@ await ensureExists(path.join(resourcesDir, 'icon.ico'), 'Windows app icon');
 await ensureExists(installerIncludeSourcePath, 'Windows installer process guard include');
 await ensureExists(electronDistDir, 'Electron runtime directory');
 await ensureExists(electronBuilderCliPath, 'electron-builder CLI');
-for (const runtimePackage of runtimePackageDescriptors) {
-  await ensureExists(runtimePackage.packageDir, `${runtimePackage.name} package directory`);
-}
+await ensureRuntimePackageSources();
 
 const appPackageJson = JSON.parse(await readFile(appPackageJsonPath, 'utf8'));
 const electronVersion = normalizePackageVersion(
   appPackageJson.devDependencies?.electron ?? appPackageJson.dependencies?.electron
 );
-const runtimeDependencies = Object.fromEntries(
-  runtimePackageDescriptors.map((runtimePackage) => [
-    runtimePackage.name,
-    appPackageJson.dependencies?.[runtimePackage.name] ?? readPackageVersion(runtimePackage.packageDir)
-  ])
-);
+const runtimeDependencies = await getRuntimePackageDependencies(appPackageJsonPath);
 
 await rm(stageDir, { recursive: true, force: true });
-await mkdir(stageNodeModulesDir, { recursive: true });
+await mkdir(stageDir, { recursive: true });
 await cp(distDir, path.join(stageDir, 'dist'), { recursive: true });
 await cp(resourcesDir, path.join(stageDir, 'resources'), { recursive: true });
 await cp(installerIncludeSourcePath, stageInstallerIncludePath);
-for (const runtimePackage of runtimePackageDescriptors) {
-  await cp(runtimePackage.packageDir, path.join(stageNodeModulesDir, runtimePackage.name), { recursive: true });
-}
+await copyRuntimePackages(stageNodeModulesDir);
 
 await writeFile(
   stagePackageJsonPath,
@@ -98,9 +91,7 @@ await writeFile(
     '  files: [',
     "    'dist/**/*',",
     "    'resources/**/*',",
-    "    'node_modules/sql.js/**/*',",
-    "    'node_modules/jszip/**/*',",
-    "    'node_modules/pdf-parse/**/*',",
+    ...runtimePackageFileGlobs.map((glob) => `    ${JSON.stringify(glob)},`),
     "    'package.json'",
     '  ],',
     '  win: {',
@@ -142,14 +133,6 @@ await run(process.execPath, [
 
 console.log(`Packaged Windows installer at ${outputDir}`);
 
-async function ensureExists(target, label) {
-  try {
-    await access(target);
-  } catch {
-    throw new Error(`Missing ${label}: ${target}`);
-  }
-}
-
 function run(command, args) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -181,13 +164,4 @@ function normalizePackageVersion(version) {
   }
 
   return normalizedVersion;
-}
-
-function resolvePackageDir(packageName) {
-  return path.dirname(require.resolve(`${packageName}/package.json`));
-}
-
-function readPackageVersion(packageDir) {
-  const packageJson = require(path.join(packageDir, 'package.json'));
-  return packageJson.version;
 }

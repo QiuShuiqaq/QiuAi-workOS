@@ -5295,6 +5295,19 @@ async function runFactoryVideoScreeningItem(input: {
     return rejectFactoryVideo(input.video, metrics, '视频规格', probeResult.message ?? '视频基础信息读取失败');
   }
   Object.assign(metrics, normalizeFactoryVideoProbeMetrics(probeResult.output));
+  if (metrics.probeAvailable === false) {
+    return errorFactoryVideo(
+      input.video,
+      metrics,
+      videoSpecGate?.name ?? '视频规格',
+      '视频基础信息读取失败，无法判断横竖屏、时长和音轨',
+      undefined,
+      [
+        readWorkflowRuntimeString(metrics.probeWarning) ??
+          '请重新安装包含视频处理工具的最新版客户端，或检查本机 FFmpeg/FFprobe 是否可用。'
+      ]
+    );
+  }
   const videoSpecFailure = videoSpecGate ? evaluateFactoryVideoGate(videoSpecGate, metrics) : undefined;
   if (videoSpecFailure) {
     return rejectFactoryVideo(input.video, metrics, videoSpecGate?.name ?? '视频规格', videoSpecFailure);
@@ -5434,7 +5447,7 @@ function normalizeFactoryVideoProbeMetrics(output: Record<string, unknown> | und
   const width = readFactoryRuntimeNumber(output?.width);
   const height = readFactoryRuntimeNumber(output?.height);
   return {
-    probeAvailable: output?.probeAvailable === true,
+    probeAvailable: output?.probeAvailable === true ? true : output?.probeAvailable === false ? false : undefined,
     width,
     height,
     durationSeconds: readFactoryRuntimeNumber(output?.durationSeconds),

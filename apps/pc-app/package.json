@@ -1,6 +1,6 @@
 {
   "name": "@qiuai/pc-app",
-  "version": "1.0.6",
+  "version": "1.0.8",
   "private": true,
   "type": "module",
   "description": "QiuAI WorkOS desktop client",
@@ -13,14 +13,17 @@
     "build:electron": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.electron.json",
     "build:renderer": "npm exec -- vite build",
     "start": "electron .",
-    "package": "npm run build && node scripts/package.mjs",
-    "package:installer": "npm run build && node scripts/package-installer.mjs",
+    "package": "npm run build && node scripts/package.mjs && node scripts/check-runtime-dependencies.mjs --portable",
+    "package:installer": "npm run build && node scripts/package-installer.mjs && node scripts/check-runtime-dependencies.mjs --installer",
+    "check:runtime-dependencies": "node scripts/check-runtime-dependencies.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "lint": "node -e \"console.log('Electron lint placeholder.')\"",
     "test": "node --import tsx --test src/shared/desktop-state.test.ts src/shared/workflow-runtime.test.ts src/shared/desktop-model-presets.test.ts src/shared/desktop-model-credentials.test.ts src/shared/desktop-role-requirements.test.ts src/shared/desktop-task-runner.test.ts src/main/artifact-store.test.ts src/main/desktop-tool.test.ts src/main/model-chat.test.ts src/main/runtime-store.test.ts src/main/storage-paths.test.ts src/main/workspace-backup.test.ts"
   },
   "dependencies": {
     "@ant-design/icons": "^5.0.0",
+    "@ffmpeg-installer/ffmpeg": "1.1.0",
+    "@ffprobe-installer/ffprobe": "2.1.2",
     "@qiuai/api-contract": "1.0.0",
     "@qiuai/design-tokens": "1.0.0",
     "@qiuai/domain": "1.0.0",

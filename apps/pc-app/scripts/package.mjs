@@ -1,7 +1,13 @@
-import { mkdir, cp, rm, writeFile, access } from 'node:fs/promises';
+import { mkdir, cp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import process from 'node:process';
+
+import {
+  copyRuntimePackages,
+  ensureExists,
+  ensureRuntimePackageSources
+} from './runtime-dependencies.mjs';
 
 const require = createRequire(import.meta.url);
 const appDir = path.resolve(process.cwd());
@@ -11,21 +17,12 @@ const resourcesDir = path.join(appDir, 'resources');
 const packageJsonPath = path.join(appDir, 'package.json');
 const electronPackageJsonPath = require.resolve('electron/package.json');
 const electronDistDir = path.join(path.dirname(electronPackageJsonPath), 'dist');
-const sqlJsEntryPath = require.resolve('sql.js/dist/sql-wasm.js');
-const sqlJsPackageDir = path.dirname(path.dirname(sqlJsEntryPath));
-const runtimePackageDescriptors = [
-  { name: 'sql.js', packageDir: sqlJsPackageDir },
-  { name: 'jszip', packageDir: resolvePackageDir('jszip') },
-  { name: 'pdf-parse', packageDir: resolvePackageDir('pdf-parse') }
-];
 
 await ensureExists(distDir, 'build output directory');
 await ensureExists(path.join(resourcesDir, 'icon.png'), 'desktop window icon');
 await ensureExists(path.join(resourcesDir, 'icon.ico'), 'Windows app icon');
 await ensureExists(electronDistDir, 'Electron runtime directory');
-for (const runtimePackage of runtimePackageDescriptors) {
-  await ensureExists(runtimePackage.packageDir, `${runtimePackage.name} package directory`);
-}
+await ensureRuntimePackageSources();
 
 await rm(releaseDir, { recursive: true, force: true });
 await mkdir(releaseDir, { recursive: true });
@@ -33,11 +30,7 @@ await mkdir(path.join(releaseDir, 'node_modules'), { recursive: true });
 await cp(distDir, path.join(releaseDir, 'dist'), { recursive: true });
 await cp(resourcesDir, path.join(releaseDir, 'resources'), { recursive: true });
 await cp(electronDistDir, path.join(releaseDir, 'electron'), { recursive: true });
-for (const runtimePackage of runtimePackageDescriptors) {
-  await cp(runtimePackage.packageDir, path.join(releaseDir, 'node_modules', runtimePackage.name), {
-    recursive: true
-  });
-}
+await copyRuntimePackages(path.join(releaseDir, 'node_modules'));
 await cp(packageJsonPath, path.join(releaseDir, 'package.json'));
 
 await writeFile(
@@ -57,15 +50,3 @@ await writeFile(
 );
 
 console.log(`Packaged desktop bundle at ${releaseDir}`);
-
-async function ensureExists(target, label) {
-  try {
-    await access(target);
-  } catch {
-    throw new Error(`Missing ${label}: ${target}`);
-  }
-}
-
-function resolvePackageDir(packageName) {
-  return path.dirname(require.resolve(`${packageName}/package.json`));
-}

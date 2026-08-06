@@ -10,6 +10,7 @@ import {
   writeFileSync
 } from 'node:fs';
 import { execFile } from 'node:child_process';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -48,6 +49,7 @@ const builtInWebSearchBingEndpoint = 'https://cn.bing.com/search';
 const builtInWebSearchHtmlEndpoint = 'https://html.duckduckgo.com/html/';
 const builtInWebSearchInstantEndpoint = 'https://api.duckduckgo.com/';
 const execFileAsync = promisify(execFile);
+const require = createRequire(import.meta.url);
 
 export async function invokeDesktopTool(
   userDataPath: string,
@@ -448,7 +450,7 @@ async function extractVideoAudio(
   }
 
   const audioFormat = readAudioOutputFormat(request.input.audioFormat);
-  const ffmpegPath = readString(request.input.ffmpegPath, process.env.QIUAI_FFMPEG_PATH?.trim() || 'ffmpeg');
+  const ffmpegPath = resolveFfmpegPath(request.input.ffmpegPath);
   const layout = getDesktopStorageLayout(userDataPath, request.workspaceId);
   ensureDesktopStorageLayout(layout);
   const folder = readString(request.input.folder, 'audios');
@@ -524,7 +526,7 @@ async function probeVideo(request: DesktopToolInvocationRequest): Promise<Deskto
     sizeBytes: stats.size,
     modifiedAt: stats.mtime.toISOString()
   };
-  const ffprobePath = readString(request.input.ffprobePath, process.env.QIUAI_FFPROBE_PATH?.trim() || 'ffprobe');
+  const ffprobePath = resolveFfprobePath(request.input.ffprobePath);
 
   try {
     const { stdout } = await execFileAsync(
@@ -621,6 +623,34 @@ function readOptionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
+function resolveFfmpegPath(value: unknown): string {
+  return readString(
+    value,
+    process.env.QIUAI_FFMPEG_PATH?.trim() ||
+      resolveInstallerBinaryPath('@ffmpeg-installer/ffmpeg') ||
+      'ffmpeg'
+  );
+}
+
+function resolveFfprobePath(value: unknown): string {
+  return readString(
+    value,
+    process.env.QIUAI_FFPROBE_PATH?.trim() ||
+      resolveInstallerBinaryPath('@ffprobe-installer/ffprobe') ||
+      'ffprobe'
+  );
+}
+
+function resolveInstallerBinaryPath(packageName: string): string | undefined {
+  try {
+    const packageExports = require(packageName) as unknown;
+    const binaryPath = isRecord(packageExports) ? readString(packageExports.path, '') : '';
+    return binaryPath && existsSync(binaryPath) ? binaryPath : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function composeVideoClips(
   userDataPath: string,
   request: DesktopToolInvocationRequest
@@ -636,7 +666,7 @@ async function composeVideoClips(
     return fail(request, 'Video cut plan must contain at least one segment with start and end seconds.');
   }
 
-  const ffmpegPath = readString(request.input.ffmpegPath, process.env.QIUAI_FFMPEG_PATH?.trim() || 'ffmpeg');
+  const ffmpegPath = resolveFfmpegPath(request.input.ffmpegPath);
   const layout = getDesktopStorageLayout(userDataPath, request.workspaceId);
   ensureDesktopStorageLayout(layout);
   const folder = readString(request.input.folder, 'videos');
@@ -726,7 +756,7 @@ async function extractVideoFrames(
     return fail(request, `Unsupported video extension: ${extension || 'unknown'}.`);
   }
 
-  const ffmpegPath = readString(request.input.ffmpegPath, process.env.QIUAI_FFMPEG_PATH?.trim() || 'ffmpeg');
+  const ffmpegPath = resolveFfmpegPath(request.input.ffmpegPath);
   const frameIntervalSeconds = readOptionalPositiveNumber(request.input.frameIntervalSeconds, 5);
   const maxFrames = Math.min(readOptionalPositiveInteger(request.input.maxFrames, 12), 60);
   const layout = getDesktopStorageLayout(userDataPath, request.workspaceId);
