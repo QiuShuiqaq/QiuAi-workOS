@@ -3083,6 +3083,13 @@ async function invokeWorkflowRuntimeModelNode(input: {
     });
   }
 
+  if (input.node.type === 'output') {
+    const factoryOutputResult = completeWorkflowRuntimeFactoryOutputNode(input);
+    if (factoryOutputResult) {
+      return factoryOutputResult;
+    }
+  }
+
   let profile: ModelProfile;
   try {
     profile = selectWorkflowRuntimeModelProfile(
@@ -3110,12 +3117,6 @@ async function invokeWorkflowRuntimeModelNode(input: {
     }
 
     throw error;
-  }
-  if (input.node.type === 'output') {
-    const factoryOutputResult = completeWorkflowRuntimeFactoryOutputNode(input);
-    if (factoryOutputResult) {
-      return factoryOutputResult;
-    }
   }
 
   if (readWorkflowRuntimeString(input.node.config?.llmTaskType) === 'video_screening_batch') {
@@ -4406,6 +4407,69 @@ function completeWorkflowRuntimeFactoryOutputNode(input: {
 } | undefined {
   const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
   const factoryKind = readWorkflowRuntimeString(factoryRequest?.factoryKind);
+  if (factoryKind === 'cross_border_product_image_factory') {
+    const generatedImages = input.pool.get('factory_generated_images');
+    if (generatedImages === undefined) {
+      return undefined;
+    }
+
+    const items = Array.isArray(generatedImages)
+      ? generatedImages
+      : isWorkflowRuntimeRecord(generatedImages) && Array.isArray(generatedImages.items)
+        ? generatedImages.items
+        : [];
+    const completed = items.filter(
+      (item) => isWorkflowRuntimeRecord(item) && readWorkflowRuntimeString(item.status) === 'completed'
+    ).length;
+    const failed = items.filter(
+      (item) => isWorkflowRuntimeRecord(item) && readWorkflowRuntimeString(item.status) === 'failed'
+    ).length;
+    const qualityReport = input.pool.get('quality_report');
+    const summary = [
+      `AI电商图片工厂已完成：${completed}/${items.length} 张图片`,
+      `失败：${failed}`,
+      qualityReport !== undefined ? '质检结果已生成。' : undefined
+    ].filter(Boolean).join('\n');
+    const outputVariables = writeWorkflowNodeOutputs({
+      pool: input.pool,
+      node: input.node,
+      text: summary,
+      result: generatedImages,
+      outputValue: summary
+    });
+    input.pool.set('runtime.previous_text', summary);
+
+    return {
+      response: mergeWorkflowRuntimeResponses(input.currentResponse, {
+        provider: input.primaryProfile.providerName,
+        modelName: input.primaryProfile.modelName,
+        content: summary
+      }),
+      primaryProfile: input.primaryProfile,
+      logs: [
+        createLog(
+          input.task.taskId,
+          'info',
+          'WORKFLOW_RUNTIME_FACTORY_OUTPUT_COMPLETED',
+          'Ecommerce image factory output returned without an extra model call.',
+          input.createdAt,
+          sanitizeLogSuffix(input.node.id),
+          {
+            completed,
+            failed,
+            total: items.length,
+            qualityReportIncluded: qualityReport !== undefined
+          }
+        )
+      ],
+      usedToolIds: [],
+      generatedArtifacts: [],
+      inputVariables: input.node.inputVariables ?? ['factory_generated_images', 'quality_report'],
+      outputVariables,
+      message: 'Ecommerce image factory output returned without an extra model call.'
+    };
+  }
+
   if (factoryKind === 'operation_video_factory') {
     const operationSummary = readWorkflowRuntimeString(input.pool.get('operation_summary'));
     const videoGenerationSummary = readWorkflowRuntimeString(input.pool.get('operation_video_generation_summary'));
