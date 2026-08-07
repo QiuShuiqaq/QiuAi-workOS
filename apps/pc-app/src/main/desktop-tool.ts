@@ -884,7 +884,7 @@ function writeTextFile(
   const content = readString(request.input.content, '');
   const folder = readString(request.input.folder, 'general');
   const outputFolderPath = path.join(layout.assetsPath, 'tools', normalizePathSegment(folder));
-  const outputPath = path.join(outputFolderPath, `${normalizePathSegment(fileName)}.md`);
+  const outputPath = path.join(outputFolderPath, normalizeOutputFileName(fileName, 'md'));
 
   mkdirSync(outputFolderPath, { recursive: true });
   writeFileSync(outputPath, content, { encoding: 'utf8' });
@@ -1551,7 +1551,7 @@ function writeToolAssetFile(
   );
   const outputPath = path.join(
     outputFolderPath,
-    `${normalizePathSegment(input.fileName)}.${input.extension}`
+    normalizeOutputFileName(input.fileName, input.extension)
   );
 
   mkdirSync(outputFolderPath, { recursive: true });
@@ -1590,7 +1590,7 @@ function writeToolAssetBinaryFile(
   );
   const outputPath = path.join(
     outputFolderPath,
-    `${normalizePathSegment(input.fileName)}.${input.extension}`
+    normalizeOutputFileName(input.fileName, input.extension)
   );
 
   mkdirSync(outputFolderPath, { recursive: true });
@@ -1605,6 +1605,18 @@ function writeToolAssetBinaryFile(
       bytes: input.content.byteLength
     }
   };
+}
+
+function normalizeOutputFileName(fileName: string, extension: string): string {
+  const normalizedFileName = normalizePathSegment(fileName);
+  const normalizedExtension = extension.replace(/^\.+/, '').trim().toLowerCase();
+  if (!normalizedExtension) {
+    return normalizedFileName;
+  }
+
+  return normalizedFileName.toLowerCase().endsWith(`.${normalizedExtension}`)
+    ? normalizedFileName
+    : `${normalizedFileName}.${normalizedExtension}`;
 }
 
 interface OfficeDocumentPayload {

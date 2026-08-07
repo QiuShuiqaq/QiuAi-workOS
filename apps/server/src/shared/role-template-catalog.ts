@@ -1242,6 +1242,18 @@ const medicalCaseVideoScreeningGates = [
   }
 ];
 
+const academicDemoSectionTypes = [
+  'cover',
+  'research_background',
+  'method_model',
+  'formula_reference',
+  'dataset_overview',
+  'data_analysis',
+  'experiment_comparison',
+  'interactive_visualization',
+  'conclusion_value'
+] as const;
+
 function buildCrossBorderImageFactoryManifest() {
   return {
     kind: 'cross_border_product_image_factory',
@@ -1959,6 +1971,240 @@ function buildMedicalCaseVideoScreeningFactoryWorkflowGraph(): ServerRoleWorkflo
     ],
     runtimePolicy: {
       maxNodeExecutions: 180,
+      maxLoopIterations: 50,
+      requireApprovalBeforeTools: false
+    }
+  };
+}
+
+function buildAcademicProjectDemoFactoryManifest() {
+  return {
+    kind: 'academic_project_demo_factory',
+    version: '1.0.0',
+    title: 'AI学术Demo工厂',
+    batch: {
+      maxItems: 50,
+      itemUnit: 'project_material',
+      itemSource: 'project_materials',
+      inputFileKinds: ['document', 'pdf', 'spreadsheet', 'csv'],
+      documentExtensions: ['docx', 'pdf'],
+      tableExtensions: ['xlsx', 'csv']
+    },
+    demo: {
+      schemaVersion: '1.0.0',
+      sectionTypes: academicDemoSectionTypes,
+      defaultSectionOrder: academicDemoSectionTypes,
+      editable: true,
+      launchMode: 'electron_demo_window',
+      packageFormat: 'zip',
+      keepLatestOnly: true
+    },
+    controls: {
+      projectTypes: [
+        { key: 'academic_research', label: '学术研究' },
+        { key: 'algorithm_competition', label: '算法竞赛' },
+        { key: 'innovation_competition', label: '创新创业比赛' },
+        { key: 'technology_transfer', label: '技术成果转化' },
+        { key: 'other', label: '其他' }
+      ],
+      audiences: [
+        { key: 'judges', label: '评审专家' },
+        { key: 'academic_reviewers', label: '学术评审' },
+        { key: 'enterprise_clients', label: '企业客户' },
+        { key: 'students', label: '学生观众' },
+        { key: 'mixed', label: '综合观众' }
+      ],
+      durationMinuteOptions: [3, 5, 8, 10, 15],
+      visualStyles: [
+        { key: 'academic_clean', label: '学术简洁' },
+        { key: 'tech_competition', label: '科技竞赛' },
+        { key: 'lab_system', label: '实验室系统' },
+        { key: 'enterprise_research', label: '企业科研' }
+      ],
+      maxFormulaCount: 8,
+      maxChartCount: 8,
+      maxExperimentComparisonCount: 6,
+      languages: [
+        { key: 'zh-CN', label: '中文' },
+        { key: 'en-US', label: 'English' }
+      ]
+    },
+    output: {
+      cacheDays: 30,
+      folder: 'academic-demo',
+      packageFormat: 'zip',
+      configFile: 'demo-config.json'
+    },
+    requiredCapabilities: ['text', 'document_extract', 'spreadsheet_read', 'local_file_write'],
+    optionalCapabilities: [],
+    ui: {
+      primaryActionLabel: '生成Demo',
+      uploadHint: '上传 Word、PDF、Excel 或 CSV 项目资料，单批最多 30 个文件；原始文件只在本机处理。',
+      demoLaunchLabel: '启动演示'
+    }
+  };
+}
+
+function buildAcademicProjectDemoFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
+  const nodes: ServerRoleWorkflowGraphNode[] = [
+    {
+      id: 'start',
+      type: 'start',
+      name: '开始',
+      description: '工作流入口。'
+    },
+    {
+      id: 'factory_input',
+      type: 'input',
+      name: '接收项目资料',
+      instruction: '接收 Word、PDF、Excel、CSV 项目资料和 Demo 参数；单批最多 50 个文件，原始资料只在 PC 本地处理。',
+      inputVariables: ['start.text', 'start.files', 'start.documents', 'start.spreadsheets'],
+      outputVariables: ['task_brief'],
+      config: {
+        acceptedFileKinds: ['document', 'pdf', 'spreadsheet', 'csv'],
+        maxItems: 50,
+        source: 'digital_factory'
+      }
+    },
+    {
+      id: 'gather_academic_context',
+      type: 'knowledge',
+      name: '读取企业知识',
+      instruction: '读取企业知识库中与项目单位、研究方向、术语口径、展示规范和比赛要求相关的内容；用户未启用知识库时跳过。',
+      inputVariables: ['task_brief', 'factory_request'],
+      outputVariables: ['knowledge_context']
+    },
+    {
+      id: 'prepare_academic_materials',
+      type: 'data',
+      name: '整理本地资料',
+      instruction: '把用户上传的文档和表格整理为 PC 本地可执行的资料清单，并保留用户设置的 Demo 参数。',
+      inputVariables: ['factory_request', 'start.files', 'knowledge_context'],
+      outputVariables: ['factory_request', 'academic_materials', 'demo_parameters'],
+      config: {
+        dataMode: 'code',
+        outputVariable: 'academic_materials',
+        timeoutMs: 2_000,
+        code:
+          'const request = input.factory_request && typeof input.factory_request === "object" ? input.factory_request : {};\n' +
+          'const files = Array.isArray(input["start.files"]) ? input["start.files"] : [];\n' +
+          'const supported = new Set(["docx", "pdf", "xlsx", "csv"]);\n' +
+          'const materials = files.filter((file) => {\n' +
+          '  const name = String(file && file.name || "");\n' +
+          '  const extension = name.split(".").pop().toLowerCase();\n' +
+          '  return supported.has(extension);\n' +
+          '}).slice(0, 50).map((file, index) => ({ order: index + 1, name: file.name || `material-${index + 1}`, localPath: file.localPath || file.path || "", kind: file.kind || "document", file }));\n' +
+          'return { factory_request: request, academic_materials: materials, demo_parameters: request.demoParameters || {} };'
+      }
+    },
+    {
+      id: 'extract_academic_sections',
+      type: 'llm',
+      name: '提取项目结构',
+      instruction: '根据本地提取的项目资料文本、表格概况和知识库上下文，保守提取 Demo 结构化内容。只能写入有明确来源的内容；证据不足的内容放入 unresolvedItems，不允许编造数据、公式、结论或引用。',
+      modelProfileId: 'qiu-general-default',
+      inputVariables: ['academic_materials', 'demo_parameters', 'knowledge_context'],
+      outputVariables: ['academic_extraction'],
+      config: {
+        llmTaskType: 'structured_extraction',
+        outputMode: 'json',
+        timeoutMs: 120_000,
+        schema: {
+          project: {
+            name: 'string',
+            researchDirection: 'string',
+            keywords: ['string'],
+            organization: 'string',
+            team: 'string',
+            coreConclusion: 'string'
+          },
+          sections: [
+            {
+              type: 'cover',
+              title: 'string',
+              confidence: 'high | medium | low',
+              blocks: [{ type: 'text', title: 'string', body: 'string', sourceFileName: 'string' }]
+            }
+          ],
+          formulas: [{ latex: 'string', title: 'string', explanation: 'string', sourceFileName: 'string' }],
+          unresolvedItems: [{ targetSectionType: 'cover', reason: 'needs_manual_input', suggestion: 'string' }]
+        }
+      }
+    },
+    {
+      id: 'build_demo_config',
+      type: 'llm',
+      name: '生成Demo草稿',
+      instruction: '把结构化提取结果整理为 demo-config.json 草稿。保持九个板块的固定结构，低置信度内容必须进入待补充清单；图表数据只能引用本地表格分析结果，不要臆造。',
+      modelProfileId: 'qiu-general-default',
+      inputVariables: ['academic_extraction', 'demo_parameters', 'academic_materials'],
+      outputVariables: ['academic_demo_config', 'academic_demo_summary'],
+      config: {
+        llmTaskType: 'text',
+        outputMode: 'json',
+        timeoutMs: 120_000,
+        schema: {
+          schemaVersion: '1.0.0',
+          project: { name: 'string', keywords: ['string'] },
+          sections: [{ id: 'string', type: 'cover', title: 'string', enabled: true, order: 1, blocks: [] }],
+          charts: [],
+          formulas: [],
+          unresolvedItems: []
+        }
+      }
+    },
+    {
+      id: 'write_demo_package',
+      type: 'tool',
+      name: '写入本地演示包',
+      toolId: 'local-filesystem',
+      instruction: '在 PC 本地写入 demo-config.json、识别报告、待补充内容和演示包 ZIP；原始项目文件不上传服务端。',
+      inputVariables: ['academic_demo_config', 'academic_demo_summary'],
+      outputVariables: ['academic_demo_package'],
+      config: {
+        action: 'filesystem.package_zip',
+        requiredToolActions: [
+          { toolId: 'office-document', action: 'document.extract_text' },
+          { toolId: 'office-document', action: 'spreadsheet.write_xlsx' },
+          { toolId: 'local-filesystem', action: 'filesystem.write_text_file' },
+          { toolId: 'local-filesystem', action: 'filesystem.package_zip' }
+        ]
+      }
+    },
+    {
+      id: 'factory_output',
+      type: 'output',
+      name: '返回结果',
+      instruction: '返回 Demo 草稿、识别报告、图表与公式清单、待补充内容和本地演示包，支持用户从输出队列启动演示。',
+      inputVariables: ['academic_demo_config', 'academic_demo_package', 'academic_demo_summary'],
+      outputVariables: ['final_answer']
+    }
+  ];
+
+  return {
+    version: '1.0.0',
+    entryNodeId: 'start',
+    nodes,
+    edges: [
+      { id: 'start__factory_input', sourceNodeId: 'start', targetNodeId: 'factory_input', condition: { type: 'always' } },
+      { id: 'factory_input__gather_academic_context', sourceNodeId: 'factory_input', targetNodeId: 'gather_academic_context', condition: { type: 'always' } },
+      { id: 'gather_academic_context__prepare_academic_materials', sourceNodeId: 'gather_academic_context', targetNodeId: 'prepare_academic_materials', condition: { type: 'always' } },
+      { id: 'prepare_academic_materials__extract_academic_sections', sourceNodeId: 'prepare_academic_materials', targetNodeId: 'extract_academic_sections', condition: { type: 'always' } },
+      { id: 'extract_academic_sections__build_demo_config', sourceNodeId: 'extract_academic_sections', targetNodeId: 'build_demo_config', condition: { type: 'always' } },
+      { id: 'build_demo_config__write_demo_package', sourceNodeId: 'build_demo_config', targetNodeId: 'write_demo_package', condition: { type: 'always' } },
+      { id: 'write_demo_package__factory_output', sourceNodeId: 'write_demo_package', targetNodeId: 'factory_output', condition: { type: 'always' } }
+    ],
+    variables: [
+      { name: 'factory_request', type: 'json', description: '工厂面板提交的学术 Demo 参数。', required: true },
+      { name: 'academic_materials', type: 'json', description: '本地项目资料清单，支持 docx/pdf/xlsx/csv。', required: true },
+      { name: 'demo_parameters', type: 'json', description: '演示时长、风格、板块、公式和图表数量等参数。', required: true },
+      { name: 'academic_extraction', type: 'json', description: '保守结构化提取结果。', required: true },
+      { name: 'academic_demo_config', type: 'json', description: 'demo-config.json 草稿。', required: true },
+      { name: 'academic_demo_summary', type: 'text', description: '本次 Demo 生成摘要。' },
+      { name: 'academic_demo_package', type: 'artifact', description: '本地演示包 ZIP 与相关文件。', required: true }
+    ],
+    runtimePolicy: {
+      maxNodeExecutions: 160,
       maxLoopIterations: 50,
       requireApprovalBeforeTools: false
     }
@@ -4092,6 +4338,86 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     outputFormat: '选题计划表 + 脚本分镜 Markdown + 发布文案表 + 本地视频制作包 ZIP + 生成视频 URL + 每条视频方案复核状态。',
     allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_PRO_MONTHLY'),
     approvalPolicy: '本工厂只生成内容方案和制作包，不自动发布；对外发布前必须由企业运营负责人确认事实、版权、平台规则和品牌口径。'
+  },
+  {
+    templateId: 'factory_academic_project_demo_v1',
+    applicationType: 'DIGITAL_FACTORY',
+    version: DESIGNED_ROLE_TEMPLATE_VERSION,
+    name: 'AI学术Demo工厂',
+    industry: '科研项目 / 竞赛路演',
+    scenario: '根据 Word、PDF、Excel、CSV 项目资料快速生成可本地启动的学术项目软件演示 Demo',
+    description: '面向学术项目、算法竞赛、创新创业比赛和科研成果路演，把项目文档与数据表保守整理为 Demo 草稿、图表建议、公式清单和本地演示包。',
+    recommendedPlanCode: 'ENTERPRISE_PRO_MONTHLY',
+    businessGoal: '把学术项目演示从一次性手工搭建降低为可复用的工厂流程，让用户快速获得可投屏展示、可人工编辑、可本地打包的项目 Demo。',
+    knowledgeSources: ['企业知识库', '项目申报资料', '比赛规则', '研究团队介绍', '历史路演材料'],
+    tools: ['office-document', 'local-filesystem'],
+    skills: [
+      skill('academic_material_extraction', '资料保守提取', '从 Word、PDF、Excel 和 CSV 中提取明确可归类的信息，并保留来源依据。'),
+      skill('demo_structure_generation', 'Demo 结构生成', '按项目首页、研究背景、方法模型、公式、数据、实验、交互和结论生成固定结构草稿。'),
+      skill('local_demo_packaging', '本地演示打包', '把 demo-config、识别报告、图表与公式清单写入本地演示包，支持后续启动展示。')
+    ],
+    workflowSteps: [
+      {
+        id: 'factory_input',
+        order: 1,
+        type: 'input',
+        name: '接收项目资料',
+        instruction: '接收 Word、PDF、Excel、CSV 项目资料和 Demo 参数；原始资料只在 PC 本地处理。'
+      },
+      {
+        id: 'gather_academic_context',
+        order: 2,
+        type: 'knowledge',
+        name: '读取企业知识',
+        instruction: '读取企业知识库中与项目单位、研究方向、术语口径、展示规范和比赛要求相关的内容。'
+      },
+      {
+        id: 'prepare_academic_materials',
+        order: 3,
+        type: 'tool',
+        name: '整理本地资料',
+        instruction: '用本地工具提取文档文本、读取表格概要，并形成可追溯的资料清单。',
+        toolIds: ['office-document', 'local-filesystem']
+      },
+      {
+        id: 'extract_academic_sections',
+        order: 4,
+        type: 'llm',
+        name: '提取项目结构',
+        instruction: '调用文本模型保守提取项目名称、背景、方法、公式、数据、实验、结论和待补充内容，不编造来源不足的信息。'
+      },
+      {
+        id: 'build_demo_config',
+        order: 5,
+        type: 'llm',
+        name: '生成Demo草稿',
+        instruction: '生成 demo-config.json 草稿、识别报告、图表建议、公式清单和待补充内容。'
+      },
+      {
+        id: 'write_demo_package',
+        order: 6,
+        type: 'tool',
+        name: '写入本地演示包',
+        instruction: '把 Demo 草稿与报告写入 PC 本地，并打包为 ZIP。',
+        toolIds: ['local-filesystem', 'office-document']
+      },
+      {
+        id: 'factory_output',
+        order: 7,
+        type: 'output',
+        name: '返回结果',
+        instruction: '返回 Demo 草稿、识别报告、图表与公式清单、待补充内容和本地演示包。'
+      }
+    ],
+    workflowGraph: buildAcademicProjectDemoFactoryWorkflowGraph(),
+    dependencyManifestFactory: buildAcademicProjectDemoFactoryManifest(),
+    sampleInputs: [
+      '请根据这批项目资料生成一个适合 5 分钟现场投屏的学术项目 Demo。',
+      '请读取项目文档和数据表，生成可编辑的研究展示 Demo 草稿，并列出需要人工补充的内容。'
+    ],
+    outputFormat: '本地学术 Demo 包，包含 demo-config.json、识别报告、数据分析摘要、公式清单、待补充内容和演示包 ZIP。',
+    allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_PRO_MONTHLY'),
+    approvalPolicy: '本工厂只生成演示草稿和本地展示包；项目结论、数据真实性、公式和引用来源必须由用户人工确认后再公开展示。'
   }
 ];
 

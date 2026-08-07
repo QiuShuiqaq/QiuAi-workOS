@@ -293,6 +293,17 @@ interface FactoryRunFormValues {
   targetAudience?: string;
   sourceUrls?: string;
   brandTone?: string;
+  projectName?: string;
+  projectType?: string;
+  audience?: string;
+  demoDurationMinutes?: number;
+  visualStyle?: string;
+  enableLoadingAnimation?: boolean;
+  enableInteractiveSimulation?: boolean;
+  maxFormulaCount?: number;
+  maxChartCount?: number;
+  maxExperimentComparisonCount?: number;
+  language?: 'zh-CN' | 'en-US';
   instruction?: string;
 }
 
@@ -2282,6 +2293,17 @@ const factoryRunRememberedFieldKeys: Array<keyof FactoryRunFormValues> = [
   'targetAudience',
   'sourceUrls',
   'brandTone',
+  'projectName',
+  'projectType',
+  'audience',
+  'demoDurationMinutes',
+  'visualStyle',
+  'enableLoadingAnimation',
+  'enableInteractiveSimulation',
+  'maxFormulaCount',
+  'maxChartCount',
+  'maxExperimentComparisonCount',
+  'language',
   'instruction'
 ];
 
@@ -2366,7 +2388,11 @@ function normalizeFactoryRunParameterMemory(value: unknown): Partial<FactoryRunF
     if (
       key === 'editTargetSeconds' ||
       key === 'videoCount' ||
-      key === 'videoDurationSeconds'
+      key === 'videoDurationSeconds' ||
+      key === 'demoDurationMinutes' ||
+      key === 'maxFormulaCount' ||
+      key === 'maxChartCount' ||
+      key === 'maxExperimentComparisonCount'
     ) {
       if (typeof item === 'number' && Number.isFinite(item)) {
         (normalized as Record<string, unknown>)[key] = item;
@@ -2377,7 +2403,9 @@ function normalizeFactoryRunParameterMemory(value: unknown): Partial<FactoryRunF
     if (
       key === 'useKnowledge' ||
       key === 'enableImageUnderstanding' ||
-      key === 'editEnabled'
+      key === 'editEnabled' ||
+      key === 'enableLoadingAnimation' ||
+      key === 'enableInteractiveSimulation'
     ) {
       if (typeof item === 'boolean') {
         (normalized as Record<string, unknown>)[key] = item;
@@ -6758,6 +6786,7 @@ export default function App() {
     const isMedicalVideoFactory = isMedicalCaseVideoFactory(selectedFactoryManifest);
     const isEcommerceVideoFactory = isEcommerceProductVideoFactory(selectedFactoryManifest);
     const isOperationFactory = isOperationVideoFactory(selectedFactoryManifest);
+    const isAcademicDemoFactoryType = isAcademicDemoFactory(selectedFactoryManifest);
     const packageOptions = readFactoryPackageOptions(selectedFactoryManifest);
     const platformOptions = readFactoryPlatformOptions(selectedFactoryManifest);
     const qualityModes = readFactoryQualityModes(selectedFactoryManifest);
@@ -6794,11 +6823,15 @@ export default function App() {
       : [15, 30, 45];
     const acceptedFactoryFileTypes = isMedicalVideoFactory
       ? '.mp4,.mov,.mkv,.avi,.webm,.m4v'
+      : isAcademicDemoFactoryType
+        ? '.docx,.pdf,.xlsx,.csv'
       : isOperationFactory
         ? '.png,.jpg,.jpeg,.webp,.xlsx,.csv,.pdf,.doc,.docx,.ppt,.pptx,.txt,.md'
         : '.png,.jpg,.jpeg,.webp,.xlsx,.csv';
     const validFactoryAttachments = isMedicalVideoFactory
       ? factoryAttachments.filter((attachment) => isFactoryVideoAttachment(attachment))
+      : isAcademicDemoFactoryType
+        ? factoryAttachments.filter((attachment) => isFactoryAcademicDemoAttachment(attachment))
       : isOperationFactory
         ? factoryAttachments.filter((attachment) => isFactoryOperationAttachment(attachment))
         : factoryAttachments.filter((attachment) => isFactoryImageAttachment(attachment));
@@ -7043,6 +7076,8 @@ export default function App() {
                           ? '视频质检'
                           : isEcommerceVideoFactory
                             ? '电商视频批处理'
+                            : isAcademicDemoFactoryType
+                              ? '学术Demo生成'
                             : isOperationFactory
                               ? '运营内容批处理'
                               : '图片批处理'}
@@ -7104,6 +7139,8 @@ export default function App() {
                               ? `上传待质检视频，单批最多 ${maxItems} 个。`
                               : isEcommerceVideoFactory
                                 ? `上传商品参考图或表格，单批最多 ${maxItems} 个商品。`
+                                : isAcademicDemoFactoryType
+                                  ? `上传 Word、PDF、Excel 或 CSV 项目资料，单批最多 ${maxItems} 个文件。`
                                 : isOperationFactory
                                 ? '上传产品资料、案例素材或参考文件，也可以只填写参数。'
                                   : `上传商品图或表格，单批最多 ${maxItems} 个。`}
@@ -7121,6 +7158,8 @@ export default function App() {
                         <span>
                           {isMedicalVideoFactory
                             ? '添加视频或拖拽到这里'
+                            : isAcademicDemoFactoryType
+                              ? '添加项目资料或拖拽到这里'
                             : isOperationFactory
                               ? '添加资料/图片/表格或拖拽到这里'
                               : '添加图片/表格或拖拽到这里'}
@@ -7128,6 +7167,8 @@ export default function App() {
                         <small>
                           {isMedicalVideoFactory
                             ? 'mp4、mov、mkv、avi、webm、m4v'
+                            : isAcademicDemoFactoryType
+                              ? 'docx、pdf、xlsx、csv'
                             : isOperationFactory
                               ? 'pdf、docx、pptx、图片、xlsx、csv、txt'
                               : 'png、jpg、webp、xlsx、csv'}
@@ -7153,13 +7194,27 @@ export default function App() {
                           {factoryAttachments.map((attachment) => {
                             const valid = isMedicalVideoFactory
                               ? isFactoryVideoAttachment(attachment)
+                              : isAcademicDemoFactoryType
+                                ? isFactoryAcademicDemoAttachment(attachment)
                               : isOperationFactory
                                 ? isFactoryOperationAttachment(attachment)
                               : isFactoryImageAttachment(attachment);
                             return (
                               <div key={attachment.id} className={valid ? 'factory-attachment-item' : 'factory-attachment-item invalid'}>
                                 <Space size={8}>
-                                  {isMedicalVideoFactory ? <VideoCameraOutlined /> : isFactoryImageAttachment(attachment) ? <FileImageOutlined /> : isFactoryTableAttachment(attachment) ? <FileExcelOutlined /> : <FileTextOutlined />}
+                                  {isMedicalVideoFactory ? (
+                                    <VideoCameraOutlined />
+                                  ) : isFactoryImageAttachment(attachment) ? (
+                                    <FileImageOutlined />
+                                  ) : isFactoryTableAttachment(attachment) ? (
+                                    <FileExcelOutlined />
+                                  ) : attachment.name.toLowerCase().endsWith('.pdf') ? (
+                                    <FilePdfOutlined />
+                                  ) : attachment.name.toLowerCase().endsWith('.docx') ? (
+                                    <FileWordOutlined />
+                                  ) : (
+                                    <FileTextOutlined />
+                                  )}
                                   <span>{attachment.name}</span>
                                   <Typography.Text type="secondary">{formatFileSize(attachment.size)}</Typography.Text>
                                   {!valid ? <Tag color="red">不适用</Tag> : null}
@@ -7177,6 +7232,8 @@ export default function App() {
                           description={
                             isMedicalVideoFactory
                               ? '请添加案例视频'
+                              : isAcademicDemoFactoryType
+                                ? '请添加项目资料'
                               : isOperationFactory
                                 ? '可添加资料，也可以直接填写参数'
                                 : isEcommerceVideoFactory
@@ -7195,7 +7252,17 @@ export default function App() {
                           <div className="factory-input-file-list">
                             {focusedFactoryInputFiles.slice(0, 6).map((filePath) => (
                               <div key={filePath} className="factory-input-file-item">
-                                  {isMedicalVideoFactory ? <VideoCameraOutlined /> : isEcommerceVideoFactory ? <FileImageOutlined /> : isOperationFactory ? <FileTextOutlined /> : <PaperClipOutlined />}
+                                  {isMedicalVideoFactory ? (
+                                    <VideoCameraOutlined />
+                                  ) : isEcommerceVideoFactory ? (
+                                    <FileImageOutlined />
+                                  ) : isAcademicDemoFactoryType ? (
+                                    <FileTextOutlined />
+                                  ) : isOperationFactory ? (
+                                    <FileTextOutlined />
+                                  ) : (
+                                    <PaperClipOutlined />
+                                  )}
                                 <Typography.Text ellipsis title={filePath}>
                                   {getPathFileName(filePath)}
                                 </Typography.Text>
@@ -7514,6 +7581,88 @@ export default function App() {
                               <Input.TextArea
                                 rows={3}
                                 placeholder="例如：围绕 QiuAI-workOS 做企业 AI 升级宣传，避免承诺自动涨粉；输出适合人工复核和发布的内容包。"
+                              />
+                            </Form.Item>
+                          </>
+                        ) : isAcademicDemoFactoryType ? (
+                          <>
+                            <Form.Item name="projectName" label="项目名称">
+                              <Input size="large" placeholder="可不填，系统会从资料中保守识别；不确定时留空。" />
+                            </Form.Item>
+                            <div className="factory-inline-form-grid">
+                              <Form.Item name="projectType" label="项目类型" rules={[{ required: true }]}>
+                                <Select
+                                  size="large"
+                                  options={academicDemoProjectTypeOptions.map((item) => ({
+                                    value: item.key,
+                                    label: item.label
+                                  }))}
+                                />
+                              </Form.Item>
+                              <Form.Item name="audience" label="目标观众" rules={[{ required: true }]}>
+                                <Select
+                                  size="large"
+                                  options={academicDemoAudienceOptions.map((item) => ({
+                                    value: item.key,
+                                    label: item.label
+                                  }))}
+                                />
+                              </Form.Item>
+                            </div>
+                            <div className="factory-inline-form-grid">
+                              <Form.Item name="demoDurationMinutes" label="演示时长" rules={[{ required: true }]}>
+                                <Select
+                                  size="large"
+                                  options={academicDemoDurationOptions.map((minutes) => ({
+                                    value: minutes,
+                                    label: `${minutes} 分钟`
+                                  }))}
+                                />
+                              </Form.Item>
+                              <Form.Item name="visualStyle" label="视觉风格" rules={[{ required: true }]}>
+                                <Select
+                                  size="large"
+                                  options={academicDemoVisualStyleOptions.map((item) => ({
+                                    value: item.key,
+                                    label: item.label
+                                  }))}
+                                />
+                              </Form.Item>
+                            </div>
+                            <div className="factory-inline-form-grid compact">
+                              <Form.Item name="language" label="展示语言" rules={[{ required: true }]}>
+                                <Select
+                                  size="large"
+                                  options={academicDemoLanguageOptions.map((item) => ({
+                                    value: item.key,
+                                    label: item.label
+                                  }))}
+                                />
+                              </Form.Item>
+                              <Form.Item name="maxFormulaCount" label="公式上限" rules={[{ required: true }]}>
+                                <InputNumber size="large" min={0} max={20} precision={0} style={{ width: '100%' }} />
+                              </Form.Item>
+                            </div>
+                            <div className="factory-inline-form-grid compact">
+                              <Form.Item name="maxChartCount" label="图表上限" rules={[{ required: true }]}>
+                                <InputNumber size="large" min={0} max={20} precision={0} style={{ width: '100%' }} />
+                              </Form.Item>
+                              <Form.Item name="maxExperimentComparisonCount" label="实验对比上限" rules={[{ required: true }]}>
+                                <InputNumber size="large" min={0} max={20} precision={0} style={{ width: '100%' }} />
+                              </Form.Item>
+                            </div>
+                            <div className="factory-inline-form-grid compact">
+                              <Form.Item name="enableLoadingAnimation" label="加载动画" valuePropName="checked">
+                                <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+                              </Form.Item>
+                              <Form.Item name="enableInteractiveSimulation" label="可视化交互" valuePropName="checked">
+                                <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+                              </Form.Item>
+                            </div>
+                            <Form.Item name="instruction" label="补充要求">
+                              <Input.TextArea
+                                rows={3}
+                                placeholder="例如：重点展示数据分析和实验对比；没有明确来源的结论不要写入正式 Demo。"
                               />
                             </Form.Item>
                           </>
@@ -10577,6 +10726,25 @@ export default function App() {
       };
     }
 
+    if (isAcademicDemoFactory(factory)) {
+      return {
+        roleCode,
+        useKnowledge: true,
+        projectName: '',
+        projectType: 'academic_research',
+        audience: 'judges',
+        demoDurationMinutes: 5,
+        visualStyle: 'academic_clean',
+        enableLoadingAnimation: true,
+        enableInteractiveSimulation: true,
+        maxFormulaCount: 8,
+        maxChartCount: 8,
+        maxExperimentComparisonCount: 6,
+        language: 'zh-CN',
+        instruction: ''
+      };
+    }
+
     const packageOptions = readFactoryPackageOptions(factory);
     const packageDefinitions = readFactoryPackagePreset(roleCode, packageOptions);
     const platformOptions = readFactoryPlatformOptions(factory);
@@ -11157,6 +11325,58 @@ export default function App() {
       });
       if (created) {
         rememberFactoryRunParameters(operationFactoryValues, factory);
+        setFactoryAttachments([]);
+        setSelectedFactoryRoleCode(values.roleCode);
+        navigateToSection('factories');
+      }
+      return;
+    }
+
+    if (isAcademicDemoFactory(factory)) {
+      const academicAttachments = factoryAttachments.filter((attachment) => isFactoryAcademicDemoAttachment(attachment));
+      const invalidAcademicAttachments = factoryAttachments.filter(
+        (attachment) => !isFactoryAcademicDemoAttachment(attachment)
+      );
+      if (academicAttachments.length === 0) {
+        message.warning('请至少上传一个 Word、PDF、Excel 或 CSV 项目资料。');
+        return;
+      }
+      if (invalidAcademicAttachments.length > 0) {
+        message.warning('当前工厂只支持 Word、PDF、Excel 和 CSV，请移除不适用文件后再运行。');
+        return;
+      }
+      if (academicAttachments.length > maxItems) {
+        message.warning(`单批最多处理 ${maxItems} 个项目资料，请拆分批次。`);
+        return;
+      }
+      if (academicAttachments.some((attachment) => !attachment.localPath)) {
+        message.warning('当前运行环境没有暴露文件本地路径，无法读取项目资料。');
+        return;
+      }
+
+      const academicFactoryValues: FactoryRunFormValues = {
+        ...values,
+        demoDurationMinutes: Number(values.demoDurationMinutes) || 5,
+        maxFormulaCount: Number(values.maxFormulaCount ?? 8),
+        maxChartCount: Number(values.maxChartCount ?? 8),
+        maxExperimentComparisonCount: Number(values.maxExperimentComparisonCount ?? 6)
+      };
+      const title = `${template.name} - ${academicAttachments.length} 个项目资料`;
+      const input = buildAcademicDemoFactoryTaskInput({
+        template,
+        factory,
+        values: academicFactoryValues,
+        attachments: academicAttachments
+      });
+      const created = createTask({
+        roleCode: values.roleCode,
+        title,
+        input,
+        attachments: academicAttachments,
+        useKnowledge: academicFactoryValues.useKnowledge === true
+      });
+      if (created) {
+        rememberFactoryRunParameters(academicFactoryValues, factory);
         setFactoryAttachments([]);
         setSelectedFactoryRoleCode(values.roleCode);
         navigateToSection('factories');
@@ -14688,6 +14908,36 @@ const defaultFactoryOperationRatios = [
   { key: '1:1', label: '方形 1:1' }
 ];
 
+const academicDemoProjectTypeOptions = [
+  { key: 'academic_research', label: '学术研究' },
+  { key: 'algorithm_competition', label: '算法竞赛' },
+  { key: 'innovation_competition', label: '创新创业比赛' },
+  { key: 'technology_transfer', label: '技术成果转化' },
+  { key: 'other', label: '其他' }
+];
+
+const academicDemoAudienceOptions = [
+  { key: 'judges', label: '评审专家' },
+  { key: 'academic_reviewers', label: '学术评审' },
+  { key: 'enterprise_clients', label: '企业客户' },
+  { key: 'students', label: '学生观众' },
+  { key: 'mixed', label: '综合观众' }
+];
+
+const academicDemoVisualStyleOptions = [
+  { key: 'academic_clean', label: '学术简洁' },
+  { key: 'tech_competition', label: '科技竞赛' },
+  { key: 'lab_system', label: '实验室系统' },
+  { key: 'enterprise_research', label: '企业科研' }
+];
+
+const academicDemoDurationOptions = [3, 5, 8, 10, 15];
+
+const academicDemoLanguageOptions = [
+  { key: 'zh-CN', label: '中文' },
+  { key: 'en-US', label: 'English' }
+];
+
 const defaultFactoryPromptControlFields: DigitalFactoryPromptControlField[] = [
   {
     key: 'promptLanguage',
@@ -14724,6 +14974,7 @@ const defaultFactoryPromptControlFields: DigitalFactoryPromptControlField[] = [
 const factoryImageExtensions = new Set(['png', 'jpg', 'jpeg', 'webp']);
 const factoryTableExtensions = new Set(['xlsx', 'csv']);
 const factoryVideoExtensions = new Set(['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v']);
+const factoryAcademicDemoAttachmentExtensions = new Set(['docx', 'pdf', 'xlsx', 'csv']);
 const factoryOperationAttachmentExtensions = new Set([
   'png',
   'jpg',
@@ -14999,6 +15250,11 @@ function isFactoryOperationAttachment(attachment: ComposerAttachment) {
   return factoryOperationAttachmentExtensions.has(extension);
 }
 
+function isFactoryAcademicDemoAttachment(attachment: ComposerAttachment) {
+  const extension = attachment.name.split('.').pop()?.trim().toLowerCase() ?? '';
+  return factoryAcademicDemoAttachmentExtensions.has(extension);
+}
+
 function readFactoryKind(factory: DigitalFactoryManifest) {
   return factory.kind ?? 'cross_border_product_image_factory';
 }
@@ -15013,6 +15269,10 @@ function isOperationVideoFactory(factory: DigitalFactoryManifest) {
 
 function isEcommerceProductVideoFactory(factory: DigitalFactoryManifest) {
   return readFactoryKind(factory) === 'ecommerce_product_video_factory';
+}
+
+function isAcademicDemoFactory(factory: DigitalFactoryManifest) {
+  return readFactoryKind(factory) === 'academic_project_demo_factory';
 }
 
 function buildFactoryPromptControls(values: FactoryRunFormValues) {
@@ -15389,6 +15649,78 @@ function buildOperationVideoFactoryTaskInput({
         '每条视频都必须包含钩子、口播脚本、镜头分段、素材建议、标题、简介、话题标签和人工复核项。',
         '必须结合 factory_request.contentGoal、contentStyle、targetAudience、brandTone 和 sourceUrls；不要编造具体数据。',
         '对外发布前必须人工确认事实、版权、平台规则和品牌口径。'
+      ]
+    },
+    null,
+    2
+  );
+}
+
+function buildAcademicDemoFactoryTaskInput({
+  template,
+  factory,
+  values,
+  attachments
+}: {
+  template: DesktopRoleTemplate;
+  factory: DigitalFactoryManifest;
+  values: FactoryRunFormValues;
+  attachments: ComposerAttachment[];
+}) {
+  const materialAttachments = attachments.filter((attachment) => isFactoryAcademicDemoAttachment(attachment));
+  const demoParameters = {
+    projectName: values.projectName?.trim() || undefined,
+    projectType: values.projectType ?? 'academic_research',
+    audience: values.audience ?? 'judges',
+    demoDurationMinutes: Number(values.demoDurationMinutes) || 5,
+    visualStyle: values.visualStyle ?? 'academic_clean',
+    enableLoadingAnimation: values.enableLoadingAnimation !== false,
+    enableInteractiveSimulation: values.enableInteractiveSimulation !== false,
+    maxFormulaCount: Number(values.maxFormulaCount ?? 8),
+    maxChartCount: Number(values.maxChartCount ?? 8),
+    maxExperimentComparisonCount: Number(values.maxExperimentComparisonCount ?? 6),
+    language: values.language === 'en-US' ? 'en-US' : 'zh-CN'
+  };
+  const factoryRequest = {
+    applicationType: 'digital_factory',
+    factoryKind: 'academic_project_demo_factory',
+    factoryName: template.name,
+    itemCount: materialAttachments.length,
+    maxItems: readFactoryMaxItems(factory),
+    demoParameters,
+    output: {
+      folder: factory.output?.folder ?? 'academic-demo',
+      packageFormat: factory.output?.packageFormat ?? 'zip',
+      configFile: 'demo-config.json'
+    },
+    attachments: materialAttachments.map((attachment, index) => {
+      const extension = attachment.name.split('.').pop()?.trim().toLowerCase() ?? '';
+      return {
+        id: attachment.id,
+        name: attachment.name,
+        size: attachment.size,
+        type: attachment.type,
+        localPath: attachment.localPath,
+        order: index + 1,
+        kind: extension === 'xlsx' || extension === 'csv' ? 'project_table' : 'project_document'
+      };
+    }),
+    instruction: values.instruction?.trim() || undefined
+  };
+  const taskBrief = `请运行「${template.name}」，根据 ${materialAttachments.length} 个项目资料生成本地学术 Demo 演示包。`;
+
+  return JSON.stringify(
+    {
+      taskBrief,
+      factory_request: factoryRequest,
+      demoParameters,
+      materialCount: materialAttachments.length,
+      instructions: [
+        '只处理 Word、PDF、Excel 和 CSV 项目资料；原始资料只在 PC 本地读取。',
+        '保守提取项目首页、研究背景、方法模型、公式引用、数据集说明、数据分析、实验对比、可视化演示、结论与价值。',
+        'Excel/CSV 的数值统计由本地程序完成，模型只负责归类、解释和演示叙事草稿。',
+        '识别不到或证据不足的内容必须进入待补充内容，不要编造数据、公式、实验结果、引用来源或团队信息。',
+        '最终输出本地 Demo 页面、demo-config.json、识别报告、待补充内容、数据分析摘要和 ZIP 演示包。'
       ]
     },
     null,

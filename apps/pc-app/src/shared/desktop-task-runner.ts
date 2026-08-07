@@ -57,6 +57,19 @@ import {
   type WorkflowRuntimeValue,
   type WorkflowRuntimeVariableSnapshot
 } from './workflow-runtime.js';
+import {
+  buildAcademicDemoConfig,
+  normalizeAcademicDemoParameters,
+  renderAcademicDemoHtml,
+  renderAcademicDemoReport,
+  renderAcademicDemoUnresolvedMarkdown,
+  type AcademicDemoConfig,
+  type AcademicDemoSource
+} from './academic-demo-config.js';
+import {
+  buildAcademicDataProfileRows,
+  profileAcademicDemoTables
+} from './academic-demo-data-analysis.js';
 
 export type DesktopModelInvoker = (
   request: DesktopModelChatRequest
@@ -307,6 +320,18 @@ interface DesktopToolCallInstruction {
   toolId: string;
   action: DesktopToolInvocationAction;
   input: Record<string, unknown>;
+}
+
+interface WorkflowRuntimeNodeResult {
+  response: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  logs: DesktopExecutionLogEntry[];
+  usedToolIds: string[];
+  generatedArtifacts: DesktopArtifactSummary[];
+  factoryOutputs?: FactoryOutputItem[];
+  inputVariables: string[];
+  outputVariables: string[];
+  message: string;
 }
 
 interface AttachmentContextPreparation {
@@ -3119,6 +3144,21 @@ async function invokeWorkflowRuntimeModelNode(input: {
     throw error;
   }
 
+  if (readWorkflowRuntimeString(input.node.config?.llmTaskType) === 'structured_extraction') {
+    const academicDemoResult = await invokeWorkflowRuntimeAcademicDemoExtractionNode({
+      ...input,
+      profile
+    });
+    if (academicDemoResult) {
+      return academicDemoResult;
+    }
+  }
+
+  const academicDemoPreparedResult = completeWorkflowRuntimeAcademicDemoPreparedNode(input);
+  if (academicDemoPreparedResult) {
+    return academicDemoPreparedResult;
+  }
+
   if (readWorkflowRuntimeString(input.node.config?.llmTaskType) === 'video_screening_batch') {
     const videoFactoryResult = await invokeWorkflowRuntimeFactoryVideoScreeningNode({
       ...input,
@@ -4407,6 +4447,51 @@ function completeWorkflowRuntimeFactoryOutputNode(input: {
 } | undefined {
   const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
   const factoryKind = readWorkflowRuntimeString(factoryRequest?.factoryKind);
+  if (factoryKind === 'academic_project_demo_factory') {
+    const summary = readWorkflowRuntimeString(input.pool.get('academic_demo_summary'));
+    const config = input.pool.get('academic_demo_config');
+    const demoPackage = input.pool.get('academic_demo_package');
+    if (!summary || config === undefined) {
+      return undefined;
+    }
+
+    const outputVariables = writeWorkflowNodeOutputs({
+      pool: input.pool,
+      node: input.node,
+      text: summary,
+      result: {
+        config,
+        package: demoPackage
+      } as WorkflowRuntimeValue,
+      outputValue: summary
+    });
+    input.pool.set('runtime.previous_text', summary);
+
+    return {
+      response: mergeWorkflowRuntimeResponses(input.currentResponse, {
+        provider: input.primaryProfile.providerName,
+        modelName: input.primaryProfile.modelName,
+        content: summary
+      }),
+      primaryProfile: input.primaryProfile,
+      logs: [
+        createLog(
+          input.task.taskId,
+          'info',
+          'WORKFLOW_RUNTIME_FACTORY_OUTPUT_COMPLETED',
+          'Academic demo factory output returned without an extra model call.',
+          input.createdAt,
+          sanitizeLogSuffix(input.node.id)
+        )
+      ],
+      usedToolIds: [],
+      generatedArtifacts: [],
+      inputVariables: input.node.inputVariables ?? ['academic_demo_config', 'academic_demo_package', 'academic_demo_summary'],
+      outputVariables,
+      message: 'Academic demo factory output returned without an extra model call.'
+    };
+  }
+
   if (factoryKind === 'cross_border_product_image_factory') {
     const generatedImages = input.pool.get('factory_generated_images');
     if (generatedImages === undefined) {
@@ -4600,6 +4685,817 @@ function completeWorkflowRuntimeFactoryOutputNode(input: {
     outputVariables,
     message: 'Video factory output returned without an extra model call.'
   };
+}
+
+async function invokeWorkflowRuntimeAcademicDemoExtractionNode(input: {
+  task: DesktopTaskDetail;
+  node: WorkflowGraphNode;
+  pool: WorkflowVariablePool;
+  binding: ResolvedRuntimeBinding;
+  rolePackage?: RolePackageManifest;
+  profiles: ModelProfile[];
+  modelInvoker: DesktopModelInvoker;
+  desktopToolInvoker?: DesktopToolInvoker;
+  workspaceId?: string;
+  createdAt: string;
+  currentResponse: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  profile: ModelProfile;
+}): Promise<WorkflowRuntimeNodeResult | undefined> {
+  const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
+  if (readWorkflowRuntimeString(factoryRequest?.factoryKind) !== 'academic_project_demo_factory') {
+    return undefined;
+  }
+  if (input.node.id !== 'extract_academic_sections') {
+    return undefined;
+  }
+
+  const parameters = normalizeAcademicDemoParameters(factoryRequest?.demoParameters ?? factoryRequest);
+  const materialFiles = readAcademicDemoRuntimeFiles(factoryRequest, input.pool.get('start.files')).slice(0, 50);
+  const startedLog = createLog(
+    input.task.taskId,
+    'info',
+    'WORKFLOW_RUNTIME_ACADEMIC_DEMO_STARTED',
+    `Academic demo factory started: ${materialFiles.length} material file(s).`,
+    input.createdAt,
+    sanitizeLogSuffix(input.node.id)
+  );
+  const sourceResult = await extractAcademicDemoSources({
+    task: input.task,
+    files: materialFiles,
+    binding: input.binding,
+    desktopToolInvoker: input.desktopToolInvoker,
+    workspaceId: input.workspaceId,
+    createdAt: input.createdAt,
+    nodeId: input.node.id
+  });
+  const dataAnalysis = profileAcademicDemoTables({
+    sources: sourceResult.sources,
+    maxChartCount: parameters.maxChartCount
+  });
+  const modelResult = await runAcademicDemoStructuredExtractionModel({
+    task: input.task,
+    node: input.node,
+    profile: input.profile,
+    modelInvoker: input.modelInvoker,
+    sources: sourceResult.sources,
+    dataProfiles: dataAnalysis.dataProfiles,
+    charts: dataAnalysis.charts,
+    parameters,
+    knowledgeSources: input.binding.availableKnowledgeSources,
+    createdAt: input.createdAt
+  });
+  const demoId = `${input.task.taskId}-academic-demo`;
+  const config = buildAcademicDemoConfig({
+    demoId,
+    generatedAt: input.createdAt,
+    taskTitle: input.task.title,
+    parameters,
+    extraction: modelResult.extraction,
+    sources: sourceResult.sources,
+    dataProfiles: dataAnalysis.dataProfiles,
+    charts: dataAnalysis.charts
+  });
+  const packageResult = await writeAcademicDemoPackageArtifacts({
+    task: input.task,
+    config,
+    binding: input.binding,
+    desktopToolInvoker: input.desktopToolInvoker,
+    workspaceId: input.workspaceId,
+    createdAt: input.createdAt
+  });
+  const summaryContent = [
+    `AI学术Demo工厂完成：${config.project.name}`,
+    `资料：${sourceResult.sources.length} 个`,
+    `板块：${config.sections.length} 个`,
+    `图表：${config.charts.length} 个`,
+    `公式：${config.formulas.length} 条`,
+    `待补充：${config.unresolvedItems.length} 项`,
+    packageResult.htmlPath ? `演示页面：${packageResult.htmlPath}` : undefined,
+    packageResult.zipPath ? `演示包：${packageResult.zipPath}` : undefined,
+    modelResult.fallbackReason ? `模型提取提示：${modelResult.fallbackReason}` : undefined
+  ].filter(Boolean).join('\n');
+  const outputVariables = writeWorkflowNodeOutputs({
+    pool: input.pool,
+    node: input.node,
+    text: JSON.stringify(modelResult.extraction ?? {}, null, 2),
+    json: modelResult.extraction as WorkflowRuntimeValue,
+    result: modelResult.extraction as WorkflowRuntimeValue,
+    outputValue: modelResult.extraction as WorkflowRuntimeValue
+  });
+  input.pool.set('runtime.previous_text', summaryContent);
+  input.pool.set('runtime.last_model_node', input.node.id);
+  input.pool.set('academic_materials', materialFiles as unknown as WorkflowRuntimeValue);
+  input.pool.set('academic_sources', sourceResult.sources as unknown as WorkflowRuntimeValue);
+  input.pool.set('academic_data_profiles', dataAnalysis.dataProfiles as unknown as WorkflowRuntimeValue);
+  input.pool.set('academic_chart_specs', dataAnalysis.charts as unknown as WorkflowRuntimeValue);
+  input.pool.set('academic_extraction', (modelResult.extraction ?? {}) as WorkflowRuntimeValue);
+  input.pool.set('academic_demo_config', config as unknown as WorkflowRuntimeValue);
+  input.pool.set('academic_demo_summary', summaryContent);
+  input.pool.set('academic_demo_package', packageResult.packageValue as unknown as WorkflowRuntimeValue);
+
+  const factoryOutputs = buildAcademicDemoFactoryOutputItems({
+    taskId: input.task.taskId,
+    config,
+    htmlPath: packageResult.htmlPath,
+    configPath: packageResult.configPath,
+    reportPath: packageResult.reportPath,
+    unresolvedPath: packageResult.unresolvedPath,
+    dataSummaryPath: packageResult.dataSummaryPath,
+    zipPath: packageResult.zipPath,
+    createdAt: input.createdAt
+  });
+
+  return {
+    response: mergeWorkflowRuntimeResponses(input.currentResponse, {
+      provider: input.profile.providerName,
+      modelName: input.profile.modelName,
+      content: summaryContent
+    }),
+    primaryProfile: input.profile,
+    logs: [
+      startedLog,
+      ...sourceResult.logs,
+      ...modelResult.logs,
+      ...packageResult.logs,
+      createLog(
+        input.task.taskId,
+        'info',
+        'WORKFLOW_RUNTIME_ACADEMIC_DEMO_COMPLETED',
+        `Academic demo factory completed: sources=${config.sources.length}, sections=${config.sections.length}, charts=${config.charts.length}, formulas=${config.formulas.length}.`,
+        input.createdAt,
+        sanitizeLogSuffix(`${input.node.id}-academic-demo`),
+        {
+          sources: config.sources.length,
+          sections: config.sections.length,
+          charts: config.charts.length,
+          formulas: config.formulas.length,
+          unresolvedItems: config.unresolvedItems.length,
+          htmlPath: packageResult.htmlPath,
+          zipPath: packageResult.zipPath
+        }
+      )
+    ],
+    usedToolIds: [...new Set([...sourceResult.usedToolIds, ...packageResult.usedToolIds])],
+    generatedArtifacts: packageResult.generatedArtifacts,
+    factoryOutputs,
+    inputVariables: ['factory_request', 'start.files', 'knowledge_context'],
+    outputVariables: [
+      ...new Set([
+        ...outputVariables,
+        'academic_materials',
+        'academic_sources',
+        'academic_data_profiles',
+        'academic_chart_specs',
+        'academic_demo_config',
+        'academic_demo_summary',
+        'academic_demo_package'
+      ])
+    ],
+    message: `Academic demo factory finished: sources=${config.sources.length}, artifacts=${packageResult.generatedArtifacts.length}.`
+  };
+}
+
+function completeWorkflowRuntimeAcademicDemoPreparedNode(input: {
+  task: DesktopTaskDetail;
+  node: WorkflowGraphNode;
+  pool: WorkflowVariablePool;
+  createdAt: string;
+  currentResponse: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+}): WorkflowRuntimeNodeResult | undefined {
+  const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
+  if (readWorkflowRuntimeString(factoryRequest?.factoryKind) !== 'academic_project_demo_factory') {
+    return undefined;
+  }
+  if (input.node.id !== 'build_demo_config' && input.node.id !== 'write_demo_package') {
+    return undefined;
+  }
+
+  const summary = readWorkflowRuntimeString(input.pool.get('academic_demo_summary'));
+  const config = input.pool.get('academic_demo_config');
+  const packageValue = input.pool.get('academic_demo_package');
+  if (!summary || config === undefined) {
+    return undefined;
+  }
+
+  const outputValue = input.node.id === 'write_demo_package' ? packageValue ?? config : config;
+  const outputVariables = writeWorkflowNodeOutputs({
+    pool: input.pool,
+    node: input.node,
+    text: summary,
+    json: outputValue as WorkflowRuntimeValue,
+    result: outputValue as WorkflowRuntimeValue,
+    outputValue: outputValue as WorkflowRuntimeValue
+  });
+  input.pool.set('runtime.previous_text', summary);
+  input.pool.set('runtime.last_model_node', input.node.id);
+
+  return {
+    response: {
+      ...input.currentResponse,
+      content: input.currentResponse.content || summary
+    },
+    primaryProfile: input.primaryProfile,
+    logs: [
+      createLog(
+        input.task.taskId,
+        'info',
+        'WORKFLOW_RUNTIME_ACADEMIC_DEMO_PREPARED_NODE_COMPLETED',
+        `Academic demo prepared node completed without extra ${input.node.type === 'tool' ? 'tool' : 'model'} invocation.`,
+        input.createdAt,
+        sanitizeLogSuffix(input.node.id)
+      )
+    ],
+    usedToolIds: [],
+    generatedArtifacts: [],
+    inputVariables: input.node.inputVariables ?? [],
+    outputVariables,
+    message: 'Academic demo prepared result reused.'
+  };
+}
+
+interface AcademicDemoRuntimeFile {
+  id: string;
+  order: number;
+  name: string;
+  localPath: string;
+  fileType: AcademicDemoSource['fileType'];
+  size?: number;
+}
+
+function readAcademicDemoRuntimeFiles(
+  factoryRequest: Record<string, unknown> | undefined,
+  startFiles: WorkflowRuntimeValue | undefined
+): AcademicDemoRuntimeFile[] {
+  const requestAttachments = Array.isArray(factoryRequest?.attachments) ? factoryRequest.attachments : [];
+  const rawFiles = requestAttachments.length > 0 ? requestAttachments : readWorkflowRuntimeFiles(startFiles);
+  return rawFiles.flatMap((item, index) => {
+    if (!isWorkflowRuntimeRecord(item) && !isWorkflowFileValue(item)) {
+      return [];
+    }
+
+    const record = item as Record<string, unknown>;
+    const localPath = readWorkflowRuntimeString(record.localPath)
+      ?? readWorkflowRuntimeString(record.path)
+      ?? readWorkflowRuntimeString(record.filePath);
+    if (!localPath) {
+      return [];
+    }
+
+    const name = readWorkflowRuntimeString(record.name)
+      ?? getPathFileName(localPath)
+      ?? `material-${index + 1}`;
+    const fileType = readAcademicDemoFileType(name);
+    if (!fileType) {
+      return [];
+    }
+
+    return [{
+      id: readWorkflowRuntimeString(record.id) ?? `academic-demo-source-${index + 1}`,
+      order: index + 1,
+      name,
+      localPath,
+      fileType,
+      size: readFactoryRuntimeNumber(record.size ?? record.sizeBytes)
+    }];
+  });
+}
+
+function readAcademicDemoFileType(nameOrPath: string): AcademicDemoSource['fileType'] | undefined {
+  const extension = nameOrPath.split('.').at(-1)?.trim().toLowerCase();
+  if (extension === 'docx') return 'docx';
+  if (extension === 'pdf') return 'pdf';
+  if (extension === 'xlsx') return 'xlsx';
+  if (extension === 'csv') return 'csv';
+  return undefined;
+}
+
+async function extractAcademicDemoSources(input: {
+  task: DesktopTaskDetail;
+  files: AcademicDemoRuntimeFile[];
+  binding: ResolvedRuntimeBinding;
+  desktopToolInvoker?: DesktopToolInvoker;
+  workspaceId?: string;
+  createdAt: string;
+  nodeId: string;
+}): Promise<{
+  sources: AcademicDemoSource[];
+  logs: DesktopExecutionLogEntry[];
+  usedToolIds: string[];
+}> {
+  const logs: DesktopExecutionLogEntry[] = [];
+  const usedToolIds = new Set<string>();
+  const canExtract =
+    input.desktopToolInvoker &&
+    input.workspaceId &&
+    hasFactoryToolAction(input.binding, 'office-document', 'document.extract_text');
+
+  if (!canExtract && input.files.length > 0) {
+    logs.push(
+      createLog(
+        input.task.taskId,
+        'warning',
+        'WORKFLOW_RUNTIME_ACADEMIC_DEMO_EXTRACT_UNAVAILABLE',
+        'Academic demo source extraction skipped because office-document/document.extract_text is unavailable.',
+        input.createdAt,
+        sanitizeLogSuffix(`${input.nodeId}-extract-unavailable`)
+      )
+    );
+  }
+
+  const sources: AcademicDemoSource[] = [];
+  for (const file of input.files) {
+    let text: string | undefined;
+    let truncated = false;
+    if (canExtract && input.desktopToolInvoker && input.workspaceId) {
+      const result = await input.desktopToolInvoker({
+        workspaceId: input.workspaceId,
+        toolId: 'office-document',
+        action: 'document.extract_text',
+        input: {
+          path: file.localPath,
+          maxChars: file.fileType === 'xlsx' || file.fileType === 'csv' ? 80_000 : 24_000
+        },
+        allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+      });
+      usedToolIds.add('office-document');
+      if (result.ok) {
+        text = readToolTextOutput(result.output);
+        truncated = result.output?.truncated === true;
+      } else {
+        logs.push(
+          createLog(
+            input.task.taskId,
+            'warning',
+            'WORKFLOW_RUNTIME_ACADEMIC_DEMO_SOURCE_EXTRACT_FAILED',
+            `Academic demo source extraction failed for ${file.name}: ${result.message ?? 'unknown error'}.`,
+            input.createdAt,
+            sanitizeLogSuffix(`${input.nodeId}-source-${file.order}`)
+          )
+        );
+      }
+    }
+
+    sources.push({
+      id: file.id,
+      fileName: file.name,
+      fileType: file.fileType,
+      localPath: file.localPath,
+      text,
+      truncated,
+      sizeBytes: file.size
+    });
+  }
+
+  return {
+    sources,
+    logs,
+    usedToolIds: [...usedToolIds]
+  };
+}
+
+async function runAcademicDemoStructuredExtractionModel(input: {
+  task: DesktopTaskDetail;
+  node: WorkflowGraphNode;
+  profile: ModelProfile;
+  modelInvoker: DesktopModelInvoker;
+  sources: AcademicDemoSource[];
+  dataProfiles: ReturnType<typeof profileAcademicDemoTables>['dataProfiles'];
+  charts: ReturnType<typeof profileAcademicDemoTables>['charts'];
+  parameters: ReturnType<typeof normalizeAcademicDemoParameters>;
+  knowledgeSources: DesktopKnowledgeSourceSummary[];
+  createdAt: string;
+}): Promise<{
+  extraction: unknown;
+  logs: DesktopExecutionLogEntry[];
+  fallbackReason?: string;
+}> {
+  const sourceText = input.sources
+    .map((source) => [
+      `File: ${source.fileName}`,
+      `Type: ${source.fileType}`,
+      source.text ? truncateForPrompt(source.text, 8_000) : 'No extracted text.'
+    ].join('\n'))
+    .join('\n\n---\n\n')
+    .slice(0, 40_000);
+  const tableProfileText = JSON.stringify(input.dataProfiles.slice(0, 8), null, 2).slice(0, 16_000);
+  const knowledgeContext = input.knowledgeSources
+    .map((source) => formatKnowledgeSourceForPrompt(source))
+    .join('\n---\n')
+    .slice(0, 16_000);
+  const messages: DesktopModelChatMessage[] = [
+    {
+      role: 'system',
+      content: [
+        'You are the structured extraction node for QiuAI WorkOS AI学术Demo工厂.',
+        'Return valid JSON only. Do not add markdown fences.',
+        'Be conservative: only extract claims, formulas, datasets, metrics, conclusions, teams, and organizations that have clear evidence in the provided sources.',
+        'If a section is unclear, put it into unresolvedItems. Never invent data, formulas, citations, organizations, methods, or experiment results.'
+      ].join('\n')
+    },
+    {
+      role: 'user',
+      content: [
+        `Task title: ${input.task.title}`,
+        `Parameters: ${JSON.stringify(input.parameters, null, 2)}`,
+        `Knowledge context:\n${knowledgeContext || 'none'}`,
+        `Table profiles:\n${tableProfileText || 'none'}`,
+        `Source text:\n${sourceText || 'none'}`,
+        'Expected JSON shape:',
+        JSON.stringify(input.node.config?.schema ?? {}, null, 2)
+      ].join('\n\n')
+    }
+  ];
+
+  try {
+    const response = await input.modelInvoker({
+      profile: input.profile,
+      messages,
+      timeoutMs: readWorkflowRuntimeModelTimeoutMs(input.node.config?.timeoutMs)
+    });
+    const parsed = parseWorkflowRuntimeJson(response.content);
+    if (parsed === undefined) {
+      return {
+        extraction: {},
+        fallbackReason: '模型返回内容不是可解析 JSON，已生成保守空草稿。',
+        logs: [
+          createLog(
+            input.task.taskId,
+            'warning',
+            'WORKFLOW_RUNTIME_ACADEMIC_DEMO_MODEL_JSON_FALLBACK',
+            'Academic demo extraction model did not return parseable JSON; fallback config will be used.',
+            input.createdAt,
+            sanitizeLogSuffix(`${input.node.id}-model-json-fallback`)
+          )
+        ]
+      };
+    }
+
+    return {
+      extraction: parsed,
+      logs: [
+        createLog(
+          input.task.taskId,
+          'info',
+          'WORKFLOW_RUNTIME_ACADEMIC_DEMO_MODEL_INVOKED',
+          `Academic demo extraction model invoked via ${input.profile.providerName}/${input.profile.modelName}.`,
+          input.createdAt,
+          sanitizeLogSuffix(`${input.node.id}-model`)
+        )
+      ]
+    };
+  } catch (error) {
+    const fallbackReason = readErrorMessage(error);
+    return {
+      extraction: {},
+      fallbackReason,
+      logs: [
+        createLog(
+          input.task.taskId,
+          'warning',
+          'WORKFLOW_RUNTIME_ACADEMIC_DEMO_MODEL_FAILED_FALLBACK',
+          `Academic demo extraction model failed; fallback config will be used: ${fallbackReason}`,
+          input.createdAt,
+          sanitizeLogSuffix(`${input.node.id}-model-failed`)
+        )
+      ]
+    };
+  }
+}
+
+async function writeAcademicDemoPackageArtifacts(input: {
+  task: DesktopTaskDetail;
+  config: AcademicDemoConfig;
+  binding: ResolvedRuntimeBinding;
+  desktopToolInvoker?: DesktopToolInvoker;
+  workspaceId?: string;
+  createdAt: string;
+}): Promise<{
+  generatedArtifacts: DesktopArtifactSummary[];
+  logs: DesktopExecutionLogEntry[];
+  usedToolIds: string[];
+  packageValue: Record<string, unknown>;
+  configPath?: string;
+  htmlPath?: string;
+  reportPath?: string;
+  unresolvedPath?: string;
+  dataSummaryPath?: string;
+  zipPath?: string;
+}> {
+  const generatedArtifacts: DesktopArtifactSummary[] = [];
+  const logs: DesktopExecutionLogEntry[] = [];
+  const usedToolIds = new Set<string>();
+  const packageFiles: Array<{ localPath: string; archivePath?: string }> = [];
+  const packageValue: Record<string, unknown> = {
+    demoId: input.config.demoId,
+    factoryKind: 'academic_project_demo_factory',
+    createdAt: input.createdAt
+  };
+  let sequence = 1;
+
+  const pushArtifact = (
+    toolId: string,
+    action: DesktopToolInvocationAction,
+    output: Record<string, unknown> | undefined,
+    title: string,
+    archivePath?: string
+  ) => {
+    const artifact = buildGeneratedArtifactFromToolResult({
+      taskId: input.task.taskId,
+      toolId,
+      action,
+      output,
+      createdAt: input.createdAt,
+      sequence
+    });
+    sequence += 1;
+    if (!artifact) {
+      return undefined;
+    }
+    const titledArtifact = { ...artifact, title };
+    generatedArtifacts.push(titledArtifact);
+    if (artifact.localPath) {
+      packageFiles.push({ localPath: artifact.localPath, archivePath: archivePath ?? title });
+    }
+    return titledArtifact.localPath;
+  };
+
+  const canWriteText =
+    input.desktopToolInvoker &&
+    input.workspaceId &&
+    hasFactoryToolAction(input.binding, 'local-filesystem', 'filesystem.write_text_file');
+  if (canWriteText && input.desktopToolInvoker && input.workspaceId) {
+    const baseName = buildWorkflowArtifactFileName(input.task.title, 'academic-demo');
+    const configResult = await input.desktopToolInvoker({
+      workspaceId: input.workspaceId,
+      toolId: 'local-filesystem',
+      action: 'filesystem.write_text_file',
+      input: {
+        folder: 'academic-demo',
+        fileName: `${baseName}-demo-config.json`,
+        content: JSON.stringify(input.config, null, 2)
+      },
+      allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+    });
+    usedToolIds.add('local-filesystem');
+    if (configResult.ok) {
+      packageValue.configPath = pushArtifact('local-filesystem', 'filesystem.write_text_file', configResult.output, 'demo-config.json', 'demo-config.json');
+    } else {
+      logs.push(createLog(input.task.taskId, 'warning', 'WORKFLOW_RUNTIME_ACADEMIC_DEMO_CONFIG_WRITE_FAILED', configResult.message ?? 'demo-config write failed.', input.createdAt));
+    }
+
+    const htmlResult = await input.desktopToolInvoker({
+      workspaceId: input.workspaceId,
+      toolId: 'local-filesystem',
+      action: 'filesystem.write_text_file',
+      input: {
+        folder: 'academic-demo',
+        fileName: `${baseName}-demo.html`,
+        content: renderAcademicDemoHtml(input.config)
+      },
+      allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+    });
+    if (htmlResult.ok) {
+      packageValue.htmlPath = pushArtifact('local-filesystem', 'filesystem.write_text_file', htmlResult.output, 'Demo演示页面.html', 'demo.html');
+    } else {
+      logs.push(createLog(input.task.taskId, 'warning', 'WORKFLOW_RUNTIME_ACADEMIC_DEMO_HTML_WRITE_FAILED', htmlResult.message ?? 'demo html write failed.', input.createdAt));
+    }
+
+    const reportResult = await input.desktopToolInvoker({
+      workspaceId: input.workspaceId,
+      toolId: 'local-filesystem',
+      action: 'filesystem.write_text_file',
+      input: {
+        folder: 'academic-demo',
+        fileName: `${baseName}-识别报告`,
+        content: renderAcademicDemoReport(input.config)
+      },
+      allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+    });
+    if (reportResult.ok) {
+      packageValue.reportPath = pushArtifact('local-filesystem', 'filesystem.write_text_file', reportResult.output, '识别报告.md', 'reports/识别报告.md');
+    }
+
+    const unresolvedResult = await input.desktopToolInvoker({
+      workspaceId: input.workspaceId,
+      toolId: 'local-filesystem',
+      action: 'filesystem.write_text_file',
+      input: {
+        folder: 'academic-demo',
+        fileName: `${baseName}-待补充内容`,
+        content: renderAcademicDemoUnresolvedMarkdown(input.config)
+      },
+      allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+    });
+    if (unresolvedResult.ok) {
+      packageValue.unresolvedPath = pushArtifact('local-filesystem', 'filesystem.write_text_file', unresolvedResult.output, '待补充内容.md', 'reports/待补充内容.md');
+    }
+  } else {
+    logs.push(
+      createLog(
+        input.task.taskId,
+        'warning',
+        'WORKFLOW_RUNTIME_ACADEMIC_DEMO_TEXT_WRITE_UNAVAILABLE',
+        'Academic demo local text artifacts were not written because local-filesystem/filesystem.write_text_file is unavailable.',
+        input.createdAt
+      )
+    );
+  }
+
+  if (
+    input.desktopToolInvoker &&
+    input.workspaceId &&
+    hasFactoryToolAction(input.binding, 'office-document', 'spreadsheet.write_xlsx') &&
+    input.config.dataProfiles.length > 0
+  ) {
+    const dataSummaryResult = await input.desktopToolInvoker({
+      workspaceId: input.workspaceId,
+      toolId: 'office-document',
+      action: 'spreadsheet.write_xlsx',
+      input: {
+        title: '学术Demo数据分析摘要',
+        folder: 'academic-demo',
+        fileName: buildWorkflowArtifactFileName(input.task.title, '数据分析摘要'),
+        sheets: [
+          {
+            name: '数据概况',
+            rows: buildAcademicDataProfileRows(input.config.dataProfiles)
+          }
+        ]
+      },
+      allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+    });
+    usedToolIds.add('office-document');
+    if (dataSummaryResult.ok) {
+      packageValue.dataSummaryPath = pushArtifact('office-document', 'spreadsheet.write_xlsx', dataSummaryResult.output, '数据分析摘要.xlsx', 'spreadsheets/数据分析摘要.xlsx');
+    } else {
+      logs.push(createLog(input.task.taskId, 'warning', 'WORKFLOW_RUNTIME_ACADEMIC_DEMO_DATA_XLSX_FAILED', dataSummaryResult.message ?? 'data summary xlsx write failed.', input.createdAt));
+    }
+  }
+
+  if (
+    input.desktopToolInvoker &&
+    input.workspaceId &&
+    hasFactoryToolAction(input.binding, 'local-filesystem', 'filesystem.package_zip') &&
+    packageFiles.length > 0
+  ) {
+    const zipResult = await input.desktopToolInvoker({
+      workspaceId: input.workspaceId,
+      toolId: 'local-filesystem',
+      action: 'filesystem.package_zip',
+      input: {
+        folder: 'academic-demo',
+        fileName: buildWorkflowArtifactFileName(input.task.title, '学术Demo演示包'),
+        files: packageFiles,
+        manifest: {
+          title: input.config.project.name,
+          factoryKind: 'academic_project_demo_factory',
+          demoId: input.config.demoId,
+          createdAt: input.createdAt,
+          sectionCount: input.config.sections.length,
+          chartCount: input.config.charts.length,
+          formulaCount: input.config.formulas.length,
+          unresolvedItemCount: input.config.unresolvedItems.length
+        }
+      },
+      allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+    });
+    usedToolIds.add('local-filesystem');
+    if (zipResult.ok) {
+      packageValue.zipPath = pushArtifact('local-filesystem', 'filesystem.package_zip', zipResult.output, '学术Demo演示包.zip', '学术Demo演示包.zip');
+    } else {
+      logs.push(createLog(input.task.taskId, 'warning', 'WORKFLOW_RUNTIME_ACADEMIC_DEMO_ZIP_FAILED', zipResult.message ?? 'academic demo zip write failed.', input.createdAt));
+    }
+  }
+
+  return {
+    generatedArtifacts,
+    logs,
+    usedToolIds: [...usedToolIds],
+    packageValue,
+    configPath: readWorkflowRuntimeString(packageValue.configPath),
+    htmlPath: readWorkflowRuntimeString(packageValue.htmlPath),
+    reportPath: readWorkflowRuntimeString(packageValue.reportPath),
+    unresolvedPath: readWorkflowRuntimeString(packageValue.unresolvedPath),
+    dataSummaryPath: readWorkflowRuntimeString(packageValue.dataSummaryPath),
+    zipPath: readWorkflowRuntimeString(packageValue.zipPath)
+  };
+}
+
+function buildAcademicDemoFactoryOutputItems(input: {
+  taskId: string;
+  config: AcademicDemoConfig;
+  htmlPath?: string;
+  configPath?: string;
+  reportPath?: string;
+  unresolvedPath?: string;
+  dataSummaryPath?: string;
+  zipPath?: string;
+  createdAt: string;
+}): FactoryOutputItem[] {
+  const items: FactoryOutputItem[] = [];
+  const push = (item: Omit<FactoryOutputItem, 'factoryKind' | 'originalStatus' | 'auditTrail' | 'createdAt' | 'updatedAt'>) => {
+    items.push({
+      factoryKind: 'academic_project_demo_factory',
+      originalStatus: item.status,
+      auditTrail: [],
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+      ...item
+    });
+  };
+
+  push({
+    id: `${input.taskId}-academic-demo-entry`,
+    kind: 'artifact',
+    title: 'Demo演示页面',
+    status: input.htmlPath ? 'qualified' : 'processing_error',
+    outputPath: input.htmlPath,
+    summary: input.htmlPath ? '点击预览可启动本地 Demo 页面。' : '演示页面未写入，请检查本地文件工具。',
+    metadata: { order: 1, action: 'launch_demo', configPath: input.configPath, packagePath: input.zipPath }
+  });
+  if (input.zipPath) {
+    push({
+      id: `${input.taskId}-academic-demo-zip`,
+      kind: 'artifact',
+      title: '本地演示包 ZIP',
+      status: 'qualified',
+      outputPath: input.zipPath,
+      summary: '包含 demo-config、HTML 演示页、报告和数据摘要。',
+      metadata: { order: 2 }
+    });
+  }
+  if (input.reportPath) {
+    push({
+      id: `${input.taskId}-academic-demo-report`,
+      kind: 'document',
+      title: '识别报告',
+      status: 'review_required',
+      outputPath: input.reportPath,
+      summary: '用于人工检查资料提取结果。',
+      metadata: { order: 3 }
+    });
+  }
+  if (input.unresolvedPath) {
+    push({
+      id: `${input.taskId}-academic-demo-unresolved`,
+      kind: 'document',
+      title: '待补充内容',
+      status: input.config.unresolvedItems.length > 0 ? 'review_required' : 'qualified',
+      outputPath: input.unresolvedPath,
+      summary: `待补充 ${input.config.unresolvedItems.length} 项。`,
+      metadata: { order: 4 }
+    });
+  }
+  if (input.dataSummaryPath) {
+    push({
+      id: `${input.taskId}-academic-demo-data-summary`,
+      kind: 'table',
+      title: '数据分析摘要',
+      status: 'review_required',
+      outputPath: input.dataSummaryPath,
+      summary: `分析 ${input.config.dataProfiles.length} 个表格。`,
+      metadata: { order: 5 }
+    });
+  }
+
+  for (const [index, section] of input.config.sections.entries()) {
+    push({
+      id: `${input.taskId}-academic-section-${section.type}`,
+      kind: 'record',
+      title: `${section.order}. ${section.title}`,
+      status: section.blocks.length > 0 ? 'review_required' : 'processing_error',
+      outputPath: input.configPath,
+      summary: `${section.blocks.length} 个内容块`,
+      reason: section.blocks.length > 0 ? undefined : '未识别到明确内容，需人工补充。',
+      metadata: { order: 20 + index, sectionType: section.type, blockCount: section.blocks.length }
+    });
+  }
+  for (const [index, chart] of input.config.charts.entries()) {
+    push({
+      id: `${input.taskId}-academic-chart-${chart.id}`,
+      kind: 'record',
+      title: `图表：${chart.title}`,
+      status: 'review_required',
+      outputPath: input.configPath,
+      summary: `${chart.type} / ${chart.dataSourceId}`,
+      metadata: { order: 100 + index, chartId: chart.id, chartType: chart.type }
+    });
+  }
+  for (const [index, formula] of input.config.formulas.entries()) {
+    push({
+      id: `${input.taskId}-academic-formula-${formula.id}`,
+      kind: 'record',
+      title: `公式：${formula.title ?? formula.id}`,
+      status: 'review_required',
+      outputPath: input.configPath,
+      summary: formula.latex,
+      metadata: { order: 130 + index, formulaId: formula.id }
+    });
+  }
+
+  return items;
 }
 
 async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
@@ -8185,10 +9081,16 @@ async function invokeWorkflowRuntimeToolNode(input: {
   logs: DesktopExecutionLogEntry[];
   usedToolIds: string[];
   generatedArtifacts: DesktopArtifactSummary[];
+  factoryOutputs?: FactoryOutputItem[];
   inputVariables: string[];
   outputVariables: string[];
   message: string;
 }> {
+  const academicDemoPreparedResult = completeWorkflowRuntimeAcademicDemoPreparedNode(input);
+  if (academicDemoPreparedResult) {
+    return academicDemoPreparedResult;
+  }
+
   const toolRequest = buildWorkflowRuntimeToolRequest(input.node, input.pool);
   const inputVariables = input.node.inputVariables ?? getWorkflowRuntimeFallbackInputRefs(input.pool);
 
