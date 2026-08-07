@@ -64,20 +64,21 @@ export function RegisterPageClient({ nextPath }: RegisterPageClientProps) {
             <Typography.Title level={2} style={{ marginBottom: 8 }}>
               注册 QiuAI WorkOS
             </Typography.Title>
-            <Typography.Text type="secondary">创建免费企业工作空间，后续可在套餐与购买中升级。</Typography.Text>
+            <Typography.Text type="secondary">创建免费工作空间，后续可在套餐与购买中升级。</Typography.Text>
           </div>
           {errorMessage ? <Alert type="error" showIcon message={errorMessage} /> : null}
           <Form<RegisterFormValues> layout="vertical" onFinish={handleSubmit}>
             <Form.Item
               name="workspaceName"
-              label="企业或团队名称"
+              label="组织名称"
+              extra="有企业请填写企业名称，无企业可填写工作室、团队或个人品牌名称。"
               rules={[
-                { required: true, message: '请输入企业或团队名称' },
+                { required: true, message: '请输入组织名称' },
                 { min: 2, message: '名称至少 2 个字符' },
                 { max: 80, message: '名称最多 80 个字符' }
               ]}
             >
-              <Input prefix={<ShopOutlined />} placeholder="例如：秋 AI 科技" autoComplete="organization" />
+              <Input prefix={<ShopOutlined />} placeholder="例如：秋 AI 科技 / 秋 AI 工作室 / 个人品牌名称" autoComplete="organization" />
             </Form.Item>
             <Form.Item
               name="email"
