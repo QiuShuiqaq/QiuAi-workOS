@@ -2542,8 +2542,7 @@ function allowedPlanCodesFrom(planCode: string): string[] {
         'ENTERPRISE_STANDARD_MONTHLY',
         'ENTERPRISE_STANDARD_ANNUAL',
         'ENTERPRISE_PRO_MONTHLY',
-        'ENTERPRISE_PRO_ANNUAL',
-        'ENTERPRISE_CUSTOM'
+        'ENTERPRISE_PRO_ANNUAL'
       ];
     case 'ENTERPRISE_BASIC_MONTHLY':
     case 'ENTERPRISE_BASIC_ANNUAL':
@@ -2553,8 +2552,7 @@ function allowedPlanCodesFrom(planCode: string): string[] {
         'ENTERPRISE_STANDARD_MONTHLY',
         'ENTERPRISE_STANDARD_ANNUAL',
         'ENTERPRISE_PRO_MONTHLY',
-        'ENTERPRISE_PRO_ANNUAL',
-        'ENTERPRISE_CUSTOM'
+        'ENTERPRISE_PRO_ANNUAL'
       ];
     case 'ENTERPRISE_STANDARD_MONTHLY':
     case 'ENTERPRISE_STANDARD_ANNUAL':
@@ -2562,12 +2560,11 @@ function allowedPlanCodesFrom(planCode: string): string[] {
         'ENTERPRISE_STANDARD_MONTHLY',
         'ENTERPRISE_STANDARD_ANNUAL',
         'ENTERPRISE_PRO_MONTHLY',
-        'ENTERPRISE_PRO_ANNUAL',
-        'ENTERPRISE_CUSTOM'
+        'ENTERPRISE_PRO_ANNUAL'
       ];
     case 'ENTERPRISE_PRO_MONTHLY':
     case 'ENTERPRISE_PRO_ANNUAL':
-      return ['ENTERPRISE_PRO_MONTHLY', 'ENTERPRISE_PRO_ANNUAL', 'ENTERPRISE_CUSTOM'];
+      return ['ENTERPRISE_PRO_MONTHLY', 'ENTERPRISE_PRO_ANNUAL'];
     default:
       return [planCode];
   }

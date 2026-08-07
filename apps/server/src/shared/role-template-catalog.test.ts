@@ -347,6 +347,10 @@ test('server role template catalog is focused and production-oriented', () => {
         `${template.templateId} enterprise template must not be visible to free users`
       );
       assert.ok(
+        !template.allowedPlanCodes.includes('ENTERPRISE_CUSTOM'),
+        `${template.templateId} enterprise template must not show custom plan in default visibility`
+      );
+      assert.ok(
         template.knowledgeSources.some((source) => source.includes('企业知识库')),
         `${template.templateId} enterprise template must bind enterprise knowledge by default`
       );

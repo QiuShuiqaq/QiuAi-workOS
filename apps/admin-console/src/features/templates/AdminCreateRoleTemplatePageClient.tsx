@@ -5711,7 +5711,7 @@ export function AdminCreateRoleTemplatePageClient({
   );
 
   const activeEnterprisePlans = useMemo(
-    () => activePlans.filter((plan) => plan.billingCycle !== 'FREE'),
+    () => activePlans.filter((plan) => plan.billingCycle !== 'FREE' && plan.billingCycle !== 'CUSTOM'),
     [activePlans]
   );
   const defaultPlanCode = activeEnterprisePlans[0]?.code ?? activePlans[0]?.code ?? '';

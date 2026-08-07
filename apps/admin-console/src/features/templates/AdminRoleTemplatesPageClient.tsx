@@ -273,10 +273,9 @@ export function AdminRoleTemplatesPageClient({
 
     return (
       <Space size={[4, 4]} wrap>
-        {values.slice(0, 3).map((code) => (
+        {values.map((code) => (
           <Tag key={code}>{planNameByCode.get(code) ?? code}</Tag>
         ))}
-        {values.length > 3 ? <Tag>+{values.length - 3}</Tag> : null}
       </Space>
     );
   }
