@@ -160,11 +160,24 @@ test('server role template catalog is focused and production-oriented', () => {
     'operation_video_factory',
     'academic_project_demo_factory'
   ]);
+  const enterpriseFactoryAllowedPlanCodes = [
+    'ENTERPRISE_BASIC_MONTHLY',
+    'ENTERPRISE_BASIC_ANNUAL',
+    'ENTERPRISE_STANDARD_MONTHLY',
+    'ENTERPRISE_STANDARD_ANNUAL',
+    'ENTERPRISE_PRO_MONTHLY',
+    'ENTERPRISE_PRO_ANNUAL'
+  ];
 
   for (const templateId of factoryTemplateIds) {
     const template = templateById.get(templateId);
     assert.ok(template, `${templateId} must exist`);
     assert.equal(template.applicationType, 'DIGITAL_FACTORY', `${templateId} must be listed as a digital factory`);
+    assert.deepEqual(
+      template.allowedPlanCodes,
+      enterpriseFactoryAllowedPlanCodes,
+      `${templateId} must default to the three enterprise plan tiers`
+    );
     assert.deepEqual(findUnreachableNodeIds(template.workflowGraph), [], `${templateId} must not define detached nodes`);
   }
 

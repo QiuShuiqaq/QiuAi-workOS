@@ -4126,7 +4126,7 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
       '请按 Temu 风格批量生成商品图，保留主体一致，开启基础质检。'
     ],
     outputFormat: '图片批次结果，包含各 SKU 的产物包、远程图片 URL、本地缩略图、失败原因和质检摘要。',
-    allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_PRO_MONTHLY'),
+    allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_BASIC_MONTHLY'),
     approvalPolicy: '生成前由用户选择产物包和目标平台；对外发布前需人工复核平台规则、品牌合规和图片真实性。'
   },
   {
@@ -4197,7 +4197,7 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
       '请按 Temu 风格生成 8 秒商品视频，突出价格感和核心卖点，不要夸张变形。'
     ],
     outputFormat: '视频批次结果，包含各 SKU 的产物包、远程视频 URL、缩略图、失败原因和质检摘要。',
-    allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_PRO_MONTHLY'),
+    allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_BASIC_MONTHLY'),
     approvalPolicy: '生成前由用户选择产物包、目标平台、时长和画幅；对外发布前需人工复核平台规则、品牌合规、素材版权和视频真实性。'
   },
   {
@@ -4261,7 +4261,7 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
       '请按医疗案例素材标准筛选视频，通过评分高的视频生成 30 秒以内初剪。'
     ],
     outputFormat: '合格视频地址清单 + 可选初剪视频合集文件夹 + Excel 筛选评分明细表。',
-    allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_PRO_MONTHLY'),
+    allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_BASIC_MONTHLY'),
     approvalPolicy: '只评价素材质量和表达质量，不做医疗诊断或疗效真实性判断；医疗相关内容发布前必须人工复核。'
   },
   {
@@ -4333,7 +4333,7 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
       '请把这批参考素材整理成视频号可发布的运营视频内容包，风格稳重、少夸张表达。'
     ],
     outputFormat: '选题计划表 + 脚本分镜 Markdown + 发布文案表 + 本地视频制作包 ZIP + 生成视频 URL + 每条视频方案复核状态。',
-    allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_PRO_MONTHLY'),
+    allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_BASIC_MONTHLY'),
     approvalPolicy: '本工厂只生成内容方案和制作包，不自动发布；对外发布前必须由企业运营负责人确认事实、版权、平台规则和品牌口径。'
   },
   {
@@ -4413,7 +4413,7 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
       '请读取项目文档和数据表，生成可编辑的研究展示 Demo 草稿，并列出需要人工补充的内容。'
     ],
     outputFormat: '本地学术 Demo 包，包含 demo-config.json、识别报告、数据分析摘要、公式清单、待补充内容和演示包 ZIP。',
-    allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_PRO_MONTHLY'),
+    allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_BASIC_MONTHLY'),
     approvalPolicy: '本工厂只生成演示草稿和本地展示包；项目结论、数据真实性、公式和引用来源必须由用户人工确认后再公开展示。'
   }
 ];
