@@ -1,5 +1,6 @@
 import { StudioProjectsPage } from "@/components/studio/studio-pages";
 import { resolveSiteLanguage } from "@/modules/site/i18n";
+import { fetchPublicPlans } from "@/modules/site/workos-plans";
 import { readStudioContent } from "@/modules/studio/store";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ export default async function ProjectsPage({
 }) {
   const params = await searchParams;
   const lang = resolveSiteLanguage(params.lang);
-  const content = await readStudioContent();
+  const [content, plans] = await Promise.all([readStudioContent(), fetchPublicPlans()]);
 
-  return <StudioProjectsPage projects={content.projects} lang={lang} />;
+  return <StudioProjectsPage projects={content.projects} plans={plans} lang={lang} />;
 }

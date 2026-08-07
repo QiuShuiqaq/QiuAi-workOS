@@ -71,7 +71,8 @@
     "check:local-tooling": "node tools/check-local-tooling.mjs",
     "db:generate": "npm run prisma:generate -w @qiuai/server",
     "db:migrate:deploy": "npm run prisma:migrate:deploy -w @qiuai/server",
-    "db:seed": "npm run prisma:seed -w @qiuai/server"
+    "db:seed": "npm run prisma:seed -w @qiuai/server",
+    "db:sync:catalogs": "npm run prisma:sync:catalogs -w @qiuai/server"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.0.0",

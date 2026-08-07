@@ -9,6 +9,7 @@ import {
 } from '../src/shared/role-template-catalog';
 
 const prisma = new PrismaClient();
+const syncManagedCatalogsOnly = process.argv.includes('--managed-catalogs-only');
 
 const ids = {
   accounts: {
@@ -794,6 +795,12 @@ async function seedAssetDefinitions() {
 }
 
 async function main() {
+  if (syncManagedCatalogsOnly) {
+    await seedAssetDefinitions();
+    await seedRoleTemplates();
+    return;
+  }
+
   await seedAccounts();
   await seedTenantsAndWorkspaces();
   await seedPlans();
@@ -807,7 +814,11 @@ async function main() {
 main()
   .then(async () => {
     await prisma.$disconnect();
-    console.log('QiuAI WorkOS platform kernel seed completed.');
+    console.log(
+      syncManagedCatalogsOnly
+        ? 'QiuAI WorkOS managed catalog sync completed.'
+        : 'QiuAI WorkOS platform kernel seed completed.'
+    );
   })
   .catch(async (error) => {
     console.error(error);

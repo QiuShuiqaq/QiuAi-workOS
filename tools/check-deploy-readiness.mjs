@@ -237,64 +237,29 @@ async function checkDatabase() {
     const { qiuaiPlanCatalog } = await import(
       pathToFileURL(path.resolve(root, 'packages/api-contract/dist/plan-catalog.js')).href
     );
-    const expectedPaidPlans = new Map(
-      qiuaiPlanCatalog
-        .filter((plan) => plan.code.startsWith('ENTERPRISE_'))
-        .filter((plan) => plan.billingCycle === 'MONTHLY' || plan.billingCycle === 'ANNUAL')
-        .filter((plan) => typeof plan.priceCents === 'number')
-        .map((plan) => [plan.code, plan.priceCents])
-    );
+    const requiredPlanCodes = qiuaiPlanCatalog.map((plan) => plan.code);
 
-    const [planCount, workspaceCount, enterprisePlans] = await Promise.all([
+    const [planCount, workspaceCount, plans] = await Promise.all([
       prisma.plan.count(),
       prisma.workspace.count(),
       prisma.plan.findMany({
         where: {
           code: {
-            in: [...expectedPaidPlans.keys()]
+            in: requiredPlanCodes
           }
         },
         select: {
-          code: true,
-          priceCents: true,
-          currency: true,
-          status: true
+          code: true
         }
       })
     ]);
 
-    if (enterprisePlans.length !== expectedPaidPlans.size) {
+    const existingPlanCodes = new Set(plans.map((plan) => plan.code));
+    const missingPlanCodes = requiredPlanCodes.filter((code) => !existingPlanCodes.has(code));
+    if (missingPlanCodes.length > 0) {
       fail(
-        'Enterprise paid plans are not fully seeded in the database.',
-        `Expected ${[...expectedPaidPlans.keys()].join(', ')}, received ${enterprisePlans.length}.`
-      );
-    }
-
-    const mispricedPlans = enterprisePlans.filter(
-      (plan) => plan.priceCents !== expectedPaidPlans.get(plan.code)
-    );
-    if (mispricedPlans.length > 0) {
-      fail(
-        'Enterprise paid plan prices do not match the production catalog.',
-        mispricedPlans
-          .map((plan) => `${plan.code}: ${plan.priceCents ?? 'null'} expected ${expectedPaidPlans.get(plan.code)}`)
-          .join('\n')
-      );
-    }
-
-    const nonCnyPlans = enterprisePlans.filter((plan) => plan.currency !== 'CNY');
-    if (nonCnyPlans.length > 0) {
-      fail(
-        'Enterprise paid plan currency must be CNY.',
-        nonCnyPlans.map((plan) => `${plan.code}: ${plan.currency ?? 'null'}`).join('\n')
-      );
-    }
-
-    const inactivePlans = enterprisePlans.filter((plan) => plan.status !== 'ACTIVE');
-    if (inactivePlans.length > 0) {
-      fail(
-        'Enterprise paid plans must be ACTIVE.',
-        inactivePlans.map((plan) => `${plan.code}: ${plan.status}`).join('\n')
+        'Required commercial plan records are missing from the database.',
+        `Missing: ${missingPlanCodes.join(', ')}. Run the full seed only for database bootstrap.`
       );
     }
 

@@ -1,7 +1,7 @@
 # ADR-015: Admin console owns digital-employee template authoring, testing, and publication
 
 ## Status
-Accepted
+Superseded in part by ADR-021
 
 ## Date
 2026-07-24

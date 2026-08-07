@@ -1,6 +1,9 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { ProductPricing } from "@/components/site/product-pricing";
+import { ProductShowcaseGallery } from "@/components/site/product-showcase-gallery";
+import type { PublicPlan } from "@/modules/site/workos-plans";
 import type { SiteLanguage } from "@/types/site";
 import type {
   StudioCaseStudy,
@@ -403,23 +406,74 @@ export function StudioHomePage({ content, lang }: { content: StudioContent; lang
   );
 }
 
-export function StudioProjectsPage({ projects, lang }: { projects: StudioProject[]; lang: SiteLanguage }) {
+export function StudioProjectsPage({
+  projects,
+  plans,
+  lang,
+}: {
+  projects: StudioProject[];
+  plans: PublicPlan[];
+  lang: SiteLanguage;
+}) {
   const isZh = lang === "zh";
+  const capabilityProjects = projects.filter((project) => project.slug !== "qiuai-workos");
 
   return (
-    <ListPageLayout
-      eyebrow="Product"
-      title={isZh ? "产品能力" : "Product capabilities"}
-      summary={isZh ? "围绕桌面端、数字员工、数字工厂、模型配置和知识库组织能力。" : "Capabilities around the desktop client, digital workers, digital factories, model setup, and knowledge bases."}
-    >
-      <LaunchSection>
-        <div className="launch-card-grid">
-          {projects.map((project) => (
-            <ProjectCard key={project.id} project={project} lang={lang} />
-          ))}
+    <main className="launch-page product-page">
+      <LaunchSection className="launch-hero product-page-hero">
+        <div className="product-page-hero__copy">
+          <span className="launch-badge">{isZh ? "企业 AI 工作系统" : "Enterprise AI Work System"}</span>
+          <h1>QiuAI WorkOS</h1>
+          <p>
+            {isZh
+              ? "用数字员工处理对话式办公任务，用数字工厂完成批量化生产，并统一管理模型、知识库、设备和产物。"
+              : "Use digital workers for conversational office tasks and digital factories for batch production, with unified models, knowledge, devices, and outputs."}
+          </p>
+          <div className="launch-actions">
+            <LaunchButton href={localizedHref("/downloads", lang)}>{isZh ? "下载 Windows 客户端" : "Download for Windows"}</LaunchButton>
+            <LaunchButton href={`${workosConsoleUrl}/register`} variant="secondary">
+              {isZh ? "免费注册" : "Register free"}
+            </LaunchButton>
+          </div>
         </div>
       </LaunchSection>
-    </ListPageLayout>
+
+      <section className="launch-section product-showcase-section">
+        <div className="launch-section__inner">
+          <ProductShowcaseGallery lang={lang} />
+        </div>
+      </section>
+
+      <section className="launch-section product-pricing-section">
+        <div className="launch-section__inner">
+          <ProductPricing plans={plans} lang={lang} consoleUrl={workosConsoleUrl} />
+        </div>
+      </section>
+
+      <section className="launch-section product-capabilities-section">
+        <div className="launch-section__inner">
+          <LaunchHeading
+            title={isZh ? "产品核心组成" : "Core product components"}
+            summary={
+              isZh
+                ? "桌面端负责真实任务执行，企业端负责知识、设备和套餐管理，服务端提供统一授权与模板同步。"
+                : "The desktop executes real work, the enterprise console manages knowledge, devices, and plans, and the server provides authorization and template sync."
+            }
+          />
+          <div className="launch-card-grid">
+            {capabilityProjects.map((project) => (
+              <ProjectCard key={project.id} project={project} lang={lang} />
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <LaunchSection className="launch-cta">
+        <h2>{isZh ? "下载桌面端，开始运行数字员工和数字工厂" : "Download the desktop client and start running workers and factories"}</h2>
+        <LaunchButton href={localizedHref("/downloads", lang)}>{isZh ? "下载 QiuAI WorkOS" : "Download QiuAI WorkOS"}</LaunchButton>
+        <div className="launch-glow" />
+      </LaunchSection>
+    </main>
   );
 }
 

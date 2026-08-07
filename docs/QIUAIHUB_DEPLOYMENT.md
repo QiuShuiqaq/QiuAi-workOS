@@ -92,11 +92,12 @@ Then update `/opt/qiuai-workos/.env`:
 NODE_ENV=production
 WORKOS_DEPLOY_TARGET=alicloud-ecs
 WORKOS_PERSISTENCE_MODE=database
+WORKOS_RUN_FULL_SEED=false
 DATABASE_URL=postgresql://qiu_workos:REPLACE_WITH_DB_PASSWORD@127.0.0.1:5432/qiuai_workos?schema=public
 WORKOS_BOOTSTRAP_ADMIN_PASSWORD=REPLACE_WITH_ADMIN_LOGIN_PASSWORD
 ```
 
-Apply schema migrations and seed the platform kernel:
+Apply schema migrations and run the full platform seed once during the initial database bootstrap:
 
 ```bash
 cd /opt/qiuai-workos
@@ -109,6 +110,8 @@ npm run db:seed
 npm run build
 npm run check:deploy
 ```
+
+Do not leave `WORKOS_RUN_FULL_SEED=true` in the production `.env`. The full seed owns bootstrap data and overwrites plans, entitlements, demo workspaces, subscriptions, and billing records. Normal deployments only synchronize code-managed default templates and asset definitions.
 
 Verify database-backed kernel status:
 
@@ -153,7 +156,7 @@ chmod +x deploy/alicloud-ecs/start-pm2.sh
 ./deploy/alicloud-ecs/start-pm2.sh
 ```
 
-`start-pm2.sh` loads `.env`, installs dependencies with `npm ci`, generates the Prisma client, runs migrations and seed when `WORKOS_PERSISTENCE_MODE=database`, builds the server deployment with `npm run build:deploy`, runs `npm run check:deploy`, and only then reloads PM2. Do not unset `DATABASE_URL` after switching to database mode.
+`start-pm2.sh` loads `.env`, installs dependencies with `npm ci`, generates the Prisma client, runs migrations, synchronizes code-managed default templates and asset definitions, builds the server deployment with `npm run build:deploy`, runs `npm run check:deploy`, and only then reloads PM2. The full bootstrap seed runs only when `WORKOS_RUN_FULL_SEED=true`; normal production updates must keep this value `false`. Do not unset `DATABASE_URL` after switching to database mode.
 
 Install Nginx config:
 

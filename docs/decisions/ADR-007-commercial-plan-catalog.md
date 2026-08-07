@@ -1,7 +1,7 @@
 # ADR-007: Commercial Plan Catalog
 
 ## Status
-Accepted
+Superseded in part by ADR-021
 
 ## Date
 2026-07-19
@@ -41,7 +41,7 @@ Only the six monthly and annual enterprise tier codes are accepted by automatic 
 Implementation service starts from ¥9,800 and industry custom starts from ¥29,800. These are service offers, not recurring subscription plans, and should be handled by future service-order or contract workflows rather than automatic subscription renewal.
 
 ## Consequences
-- Plan prices are seeded from code and verified by deployment readiness checks.
+- Initial plan records are created by the bootstrap seed. After bootstrap, plan names, prices, status, and entitlements are managed through the production database and admin console as defined by ADR-021.
 - Production `.env` no longer carries enterprise price variables.
 - Billing order creation only accepts active online paid plan codes and rejects mismatched client-submitted amounts.
 - Existing historical records using legacy plan codes remain readable.

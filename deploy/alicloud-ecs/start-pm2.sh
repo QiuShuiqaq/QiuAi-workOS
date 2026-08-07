@@ -26,8 +26,13 @@ if [[ "${WORKOS_PERSISTENCE_MODE:-mock}" == "database" ]]; then
   echo "==> Applying database migrations"
   npm run db:migrate:deploy
 
-  echo "==> Seeding database"
-  npm run db:seed
+  if [[ "${WORKOS_RUN_FULL_SEED:-false}" == "true" ]]; then
+    echo "==> Running full database seed (explicit bootstrap mode)"
+    npm run db:seed
+  else
+    echo "==> Syncing code-managed templates and asset definitions"
+    npm run db:sync:catalogs
+  fi
 fi
 
 echo "==> Building QiuAI WorkOS server deployment"
