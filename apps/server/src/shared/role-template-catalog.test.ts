@@ -5,6 +5,10 @@ import {
   retiredServerRoleTemplateIds,
   serverRoleTemplateCatalog
 } from './role-template-catalog';
+import {
+  allDigitalEmployeePlanCodes,
+  isDigitalEmployeeApplicationType
+} from './role-template-access-policy';
 import { buildRoleTemplateDependencyManifest } from './role-template-dependencies';
 import { normalizeWorkflowGraph } from './workflow-graph';
 
@@ -399,9 +403,15 @@ test('server role template catalog is focused and production-oriented', () => {
     assert.ok(template.outputFormat.trim(), `${template.templateId} must define an output format`);
     assert.ok(template.allowedPlanCodes.length >= 1, `${template.templateId} must define plan visibility`);
 
-    if (freeTemplateIds.includes(template.templateId)) {
-      assert.equal(template.recommendedPlanCode, 'PERSONAL_FREE', `${template.templateId} must be free`);
-      assert.ok(template.allowedPlanCodes.includes('PERSONAL_FREE'), `${template.templateId} must be installable for free`);
+    if (isDigitalEmployeeApplicationType(template.applicationType)) {
+      assert.deepEqual(
+        template.allowedPlanCodes,
+        [...allDigitalEmployeePlanCodes],
+        `${template.templateId} digital employee must be installable on every plan`
+      );
+      if (freeTemplateIds.includes(template.templateId)) {
+        assert.equal(template.recommendedPlanCode, 'PERSONAL_FREE', `${template.templateId} must be free`);
+      }
     } else {
       assert.ok(
         !template.allowedPlanCodes.includes('PERSONAL_FREE'),

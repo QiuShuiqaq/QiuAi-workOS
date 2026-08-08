@@ -593,6 +593,21 @@ test('admin role template factory governs publication and workspace visibility',
       }
     });
     assert.equal(createDeletableResponse.statusCode, 201);
+    assert.deepEqual(
+      JSON.parse(createDeletableResponse.body).data.allowedPlanCodes,
+      [
+        'PERSONAL_FREE',
+        'ENTERPRISE_BASIC_MONTHLY',
+        'ENTERPRISE_BASIC_ANNUAL',
+        'ENTERPRISE_STANDARD_MONTHLY',
+        'ENTERPRISE_STANDARD_ANNUAL',
+        'ENTERPRISE_PRO_MONTHLY',
+        'ENTERPRISE_PRO_ANNUAL',
+        'ENTERPRISE_MONTHLY',
+        'ENTERPRISE_ANNUAL',
+        'ENTERPRISE_CUSTOM'
+      ]
+    );
 
     const deleteDeletableResponse = await app.inject({
       method: 'DELETE',
@@ -895,7 +910,7 @@ test('admin role template factory governs publication and workspace visibility',
       JSON.parse(proOnlyTemplatesResponse.body).data.some(
         (template: { id: string }) => template.id === templateId
       ),
-      false
+      true
     );
 
     const desktopTemplatesWithoutTokenResponse = await app.inject({
@@ -953,8 +968,8 @@ test('admin role template factory governs publication and workspace visibility',
       (template: { id: string }) => template.id === templateId
     );
     assert.ok(proOnlyDesktopTemplate);
-    assert.equal(proOnlyDesktopTemplate.canInstall, false);
-    assert.deepEqual(proOnlyDesktopTemplate.allowedPlanCodes, ['ENTERPRISE_PRO_MONTHLY']);
+    assert.equal(proOnlyDesktopTemplate.canInstall, true);
+    assert.ok(proOnlyDesktopTemplate.allowedPlanCodes.includes('PERSONAL_FREE'));
 
     const proOnlyPublicFreeTemplatesResponse = await app.inject({
       method: 'GET',
@@ -965,7 +980,7 @@ test('admin role template factory governs publication and workspace visibility',
       (template: { id: string }) => template.id === templateId
     );
     assert.ok(proOnlyPublicTemplate);
-    assert.equal(proOnlyPublicTemplate.canInstall, false);
+    assert.equal(proOnlyPublicTemplate.canInstall, true);
 
     const privateFreeUpdateResponse = await app.inject({
       method: 'PATCH',
@@ -1011,7 +1026,8 @@ test('admin role template factory governs publication and workspace visibility',
     );
     assert.ok(publicFreeTemplate);
     assert.equal(publicFreeTemplate.canInstall, true);
-    assert.deepEqual(publicFreeTemplate.allowedPlanCodes, ['PERSONAL_FREE']);
+    assert.ok(publicFreeTemplate.allowedPlanCodes.includes('PERSONAL_FREE'));
+    assert.ok(publicFreeTemplate.allowedPlanCodes.includes('ENTERPRISE_PRO_MONTHLY'));
 
     const updateResponse = await app.inject({
       method: 'PATCH',
@@ -1181,7 +1197,7 @@ test('admin role template factory governs publication and workspace visibility',
       (template: { id: string }) => template.id === templateId
     );
     assert.ok(downgradedDesktopTemplate);
-    assert.equal(downgradedDesktopTemplate.canInstall, false);
+    assert.equal(downgradedDesktopTemplate.canInstall, true);
     assert.equal(
       downgradedDesktopTemplates.some(
         (template: { recommendedPlanCode: string }) =>
@@ -1236,11 +1252,11 @@ test('admin role template factory governs publication and workspace visibility',
     assert.ok(downgradedSnapshot);
     assert.equal(
       downgradedSnapshot.rolePackages.some((rolePackage) => rolePackage.templateId === templateId),
-      false
+      true
     );
     assert.equal(
       downgradedSnapshot.tasks.some((task) => task.taskId === 'task-downgraded-paid-role'),
-      false
+      true
     );
     assert.ok(
       store.updateSubscription('enterprise', {

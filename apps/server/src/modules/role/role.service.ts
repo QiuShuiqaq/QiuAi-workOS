@@ -4,6 +4,11 @@ import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import {
+  allDigitalEmployeePlanCodes,
+  isDigitalFactoryApplicationType,
+  isDigitalEmployeeApplicationType
+} from '../../shared/role-template-access-policy';
+import {
   normalizeWorkflowGraphOrFallback,
   type WorkflowStepLike
 } from '../../shared/workflow-graph';
@@ -466,6 +471,9 @@ export class RoleService {
     template: DatabaseRoleTemplate,
     access: TemplateAccessSummary = {}
   ) {
+    const applicationType = isDigitalFactoryApplicationType(template.applicationType)
+      ? 'digital_factory'
+      : 'digital_employee';
     const workflowSteps = this.toWorkflowSteps(template.workflowSteps);
     const knowledgeSources = this.toStringArray(template.knowledgeSources);
     const tools = this.toStringArray(template.tools);
@@ -482,14 +490,16 @@ export class RoleService {
 
     return {
       id: template.id,
-      applicationType: template.applicationType === 'DIGITAL_FACTORY' ? 'digital_factory' : 'digital_employee',
+      applicationType,
       version: template.version,
       name: template.name,
       industry: template.industry,
       scenario: template.scenario,
       description: template.description,
       recommendedPlanCode: template.recommendedPlanCode,
-      allowedPlanCodes: this.toStringArray(template.allowedPlanCodes),
+      allowedPlanCodes: isDigitalEmployeeApplicationType(template.applicationType)
+        ? [...allDigitalEmployeePlanCodes]
+        : this.toStringArray(template.allowedPlanCodes),
       canInstall: access.canInstall ?? true,
       accessLabel: access.accessLabel,
       accessReason: access.accessReason,
@@ -526,7 +536,9 @@ export class RoleService {
   }
 
   private toPublicDesktopTemplateSummary(template: DatabaseRoleTemplate) {
-    const canInstall = this.toStringArray(template.allowedPlanCodes).includes(freePlanCode);
+    const canInstall =
+      isDigitalEmployeeApplicationType(template.applicationType) ||
+      this.toStringArray(template.allowedPlanCodes).includes(freePlanCode);
 
     return this.toTemplateSummary(template, {
       canInstall,
@@ -676,6 +688,7 @@ export class RoleService {
   private canWorkspaceUseTemplate(
     template: {
       status: string;
+      applicationType?: string | null;
       allowedPlanCodes: unknown;
       visibleWorkspaceIds: unknown;
     },
@@ -689,6 +702,10 @@ export class RoleService {
 
     const visibleWorkspaceIds = this.toStringArray(template.visibleWorkspaceIds);
     if (options.includeWorkspaceVisibility !== false && visibleWorkspaceIds.includes(workspaceId)) {
+      return true;
+    }
+
+    if (isDigitalEmployeeApplicationType(template.applicationType)) {
       return true;
     }
 

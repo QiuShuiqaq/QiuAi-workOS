@@ -5715,6 +5715,14 @@ export function AdminCreateRoleTemplatePageClient({
     [activePlans]
   );
   const defaultPlanCode = activeEnterprisePlans[0]?.code ?? activePlans[0]?.code ?? '';
+  const allActivePlanCodes = useMemo(
+    () => activePlans.map((plan) => plan.code),
+    [activePlans]
+  );
+  const defaultFactoryAllowedPlanCodes = useMemo(
+    () => activeEnterprisePlans.map((plan) => plan.code),
+    [activeEnterprisePlans]
+  );
 
   const activePlanCodes = useMemo(
     () => new Set(activePlans.map((plan) => plan.code)),
@@ -5756,7 +5764,10 @@ export function AdminCreateRoleTemplatePageClient({
         tools: editingTemplate.tools,
         skills: editingTemplate.skills,
         sampleInputs: editingTemplate.sampleInputs,
-        allowedPlanCodes: editingTemplate.allowedPlanCodes.filter((code) => activePlanCodes.has(code)),
+        allowedPlanCodes:
+          editingTemplate.applicationType === 'digital_factory'
+            ? editingTemplate.allowedPlanCodes.filter((code) => activePlanCodes.has(code))
+            : allActivePlanCodes,
         visibleWorkspaceIds: editingTemplate.visibleWorkspaceIds
       };
     }
@@ -5767,7 +5778,10 @@ export function AdminCreateRoleTemplatePageClient({
       applicationType: initialApplicationType,
       workflowPreset: initialApplicationType === 'digital_factory' ? 'cross_border_image_factory' : 'standard',
       recommendedPlanCode: defaultPlanCode,
-      allowedPlanCodes: activeEnterprisePlans.map((plan) => plan.code),
+      allowedPlanCodes:
+        initialApplicationType === 'digital_factory'
+          ? defaultFactoryAllowedPlanCodes
+          : allActivePlanCodes,
       knowledgeSources: ['workspace_library', 'local_folder'],
       tools: ['office-document', 'local-filesystem'],
       skills: [
@@ -5777,7 +5791,14 @@ export function AdminCreateRoleTemplatePageClient({
       outputFormat: '对话摘要 + 可下载的业务文档/表格/演示稿。',
       approvalPolicy: '涉及对外发布、合同、财务、医疗、法律或重大经营决策时必须人工确认。'
     } as CreateRoleTemplateFormValues;
-  }, [activeEnterprisePlans, activePlanCodes, defaultPlanCode, editingTemplate, initialApplicationType]);
+  }, [
+    activePlanCodes,
+    allActivePlanCodes,
+    defaultFactoryAllowedPlanCodes,
+    defaultPlanCode,
+    editingTemplate,
+    initialApplicationType
+  ]);
 
   useEffect(() => {
     setEditableGraph(initialGraph);
@@ -6084,8 +6105,10 @@ export function AdminCreateRoleTemplatePageClient({
                     onChange={(applicationType) => {
                       if (applicationType === 'digital_factory') {
                         form.setFieldValue('workflowPreset', 'cross_border_image_factory');
+                        form.setFieldValue('allowedPlanCodes', defaultFactoryAllowedPlanCodes);
                       } else {
                         form.setFieldValue('workflowPreset', 'standard');
+                        form.setFieldValue('allowedPlanCodes', allActivePlanCodes);
                       }
                     }}
                   />
@@ -6147,9 +6170,19 @@ export function AdminCreateRoleTemplatePageClient({
                   <Form.Item
                     name="allowedPlanCodes"
                     label="允许套餐"
-                    tooltip="企业套餐命中这里时，PC 端可拉取和安装该员工。"
+                    tooltip={
+                      watchedApplicationType === 'digital_employee'
+                        ? '数字员工默认对免费版和企业版开放；安装数量仍受套餐额度限制。'
+                        : '企业套餐命中这里时，PC 端可拉取和安装该数字工厂。'
+                    }
                   >
-                    <Select mode="multiple" options={planOptions} showSearch optionFilterProp="label" />
+                    <Select
+                      mode="multiple"
+                      options={planOptions}
+                      showSearch
+                      optionFilterProp="label"
+                      disabled={watchedApplicationType === 'digital_employee'}
+                    />
                   </Form.Item>
                 </div>
                 <Form.Item
@@ -6269,8 +6302,22 @@ export function AdminCreateRoleTemplatePageClient({
                 >
                   <Select options={planOptions} showSearch optionFilterProp="label" />
                 </Form.Item>
-                <Form.Item name="allowedPlanCodes" label="允许套餐">
-                  <Select mode="multiple" options={planOptions} showSearch optionFilterProp="label" />
+                <Form.Item
+                  name="allowedPlanCodes"
+                  label="允许套餐"
+                  tooltip={
+                    watchedApplicationType === 'digital_employee'
+                      ? '数字员工默认对免费版和企业版开放；安装数量仍受套餐额度限制。'
+                      : '数字工厂按这里选择的企业套餐开放。'
+                  }
+                >
+                  <Select
+                    mode="multiple"
+                    options={planOptions}
+                    showSearch
+                    optionFilterProp="label"
+                    disabled={watchedApplicationType === 'digital_employee'}
+                  />
                 </Form.Item>
               </div>
               <Form.Item name="visibleWorkspaceIds" label="企业白名单">

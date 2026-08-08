@@ -2,6 +2,7 @@ import {
   buildRoleTemplateExecutionProfile,
   type ServerRoleTemplateExecutionProfile
 } from './role-template-execution-profile';
+import { allDigitalEmployeePlanCodes } from './role-template-access-policy';
 import type { ServerRoleWorkflowGraph, ServerRoleWorkflowGraphNode } from './workflow-graph';
 
 export interface ServerRoleSkill {
@@ -2597,7 +2598,10 @@ function completeCatalogEntry(
     outputFormat:
       template.outputFormat ??
       'Markdown report with summary, key findings, decisions needed, risks, next actions, and local artifact links.',
-    allowedPlanCodes: template.allowedPlanCodes ?? allowedPlanCodesFrom(template.recommendedPlanCode)
+    allowedPlanCodes:
+      applicationType === 'DIGITAL_EMPLOYEE'
+        ? [...allDigitalEmployeePlanCodes]
+        : template.allowedPlanCodes ?? allowedPlanCodesFrom(template.recommendedPlanCode)
   };
 }
 

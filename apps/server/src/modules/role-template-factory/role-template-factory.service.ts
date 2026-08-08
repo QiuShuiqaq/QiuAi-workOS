@@ -13,6 +13,10 @@ import { getDefaultAssetDefinitions } from '../../shared/asset-center-catalog';
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import {
+  allDigitalEmployeePlanCodes,
+  isDigitalEmployeeApplicationType
+} from '../../shared/role-template-access-policy';
+import {
   buildRoleTemplateDependencyManifest,
   type RoleTemplateDependencyAsset
 } from '../../shared/role-template-dependencies';
@@ -370,6 +374,12 @@ export class RoleTemplateFactoryService {
         );
       }
 
+      this.normalizeAllowedPlanCodesForApplicationType(
+        normalizedUpdate,
+        normalizedUpdate.applicationType ??
+          this.toDatabaseApplicationTypeFromRecord(current.applicationType)
+      );
+
       if ((normalizedUpdate.status ?? current.status) === 'PUBLISHED') {
         this.assertTemplatePublishable({
           ...current,
@@ -416,6 +426,12 @@ export class RoleTemplateFactoryService {
         normalizedUpdate.executionProfile ?? this.resolveTemplateExecutionProfile(nextTemplate)
       );
     }
+
+    this.normalizeAllowedPlanCodesForApplicationType(
+      normalizedUpdate,
+      normalizedUpdate.applicationType ??
+        this.toDatabaseApplicationTypeFromRecord(existing.applicationType)
+    );
 
     const updateData = this.toUpdateData(normalizedUpdate);
     if (Object.keys(updateData).length === 0) {
@@ -758,9 +774,11 @@ export class RoleTemplateFactoryService {
     const applicationType = this.toDatabaseApplicationType(input.applicationType);
     const recommendedPlanCode = this.requirePlanCode(input.recommendedPlanCode);
     const status = (input.status ?? 'DRAFT') as RoleTemplateStatus;
-    const allowedPlanCodes = input.allowedPlanCodes
-      ? this.normalizePlanCodes(input.allowedPlanCodes)
-      : this.expandDefaultAllowedPlanCodes(recommendedPlanCode);
+    const allowedPlanCodes = isDigitalEmployeeApplicationType(applicationType)
+      ? [...allDigitalEmployeePlanCodes]
+      : input.allowedPlanCodes
+        ? this.normalizePlanCodes(input.allowedPlanCodes)
+        : this.expandDefaultAllowedPlanCodes(recommendedPlanCode);
     const workflowSteps = this.normalizeWorkflowSteps(input.workflowSteps ?? []);
     const workflowGraph = this.normalizeWorkflowGraphInput(input.workflowGraph, workflowSteps);
     const factoryManifest = this.normalizeFactoryManifestInput(input.dependencyManifest, applicationType);
@@ -891,6 +909,15 @@ export class RoleTemplateFactoryService {
     return normalized;
   }
 
+  private normalizeAllowedPlanCodesForApplicationType(
+    input: Partial<NormalizedRoleTemplateInput>,
+    applicationType: DatabaseRoleTemplateApplicationType
+  ): void {
+    if (isDigitalEmployeeApplicationType(applicationType)) {
+      input.allowedPlanCodes = [...allDigitalEmployeePlanCodes];
+    }
+  }
+
   private toCreateData(input: NormalizedRoleTemplateInput) {
     const now = new Date();
     return {
@@ -987,7 +1014,9 @@ export class RoleTemplateFactoryService {
       outputFormat: template.outputFormat?.trim() || '',
       approvalPolicy: template.approvalPolicy,
       status: this.toRoleTemplateStatus(template.status),
-      allowedPlanCodes: this.toStringArray(template.allowedPlanCodes),
+      allowedPlanCodes: isDigitalEmployeeApplicationType(template.applicationType)
+        ? [...allDigitalEmployeePlanCodes]
+        : this.toStringArray(template.allowedPlanCodes),
       visibleWorkspaceIds: this.toStringArray(template.visibleWorkspaceIds),
       publishedAt: this.toIsoDateString(template.publishedAt),
       lastTestedAt: this.toIsoDateString(template.lastTestedAt),
