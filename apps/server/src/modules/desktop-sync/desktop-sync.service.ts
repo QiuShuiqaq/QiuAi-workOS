@@ -13,10 +13,7 @@ import { Prisma } from '@prisma/client';
 
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
 import { demoPlans } from '../../shared/mock/platform-seed';
-import {
-  isDatabasePersistenceEnabled,
-  isLocalDevelopmentEnvironment
-} from '../../shared/persistence/persistence-mode';
+import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { listServerToolActionCatalog } from '../../shared/tool-action-catalog';
 import { AuthService } from '../auth/auth.service';
@@ -859,16 +856,14 @@ export class DesktopSyncService {
       }
     });
     const requestedDeviceCount = existingDevice?.status === 'ACTIVE' ? activeDeviceCount : activeDeviceCount + 1;
-    if (!isLocalDevelopmentEnvironment()) {
-      await this.entitlementService.requireAllowed(
-        {
-          workspaceId: bindingCode.workspaceId,
-          featureKey: 'maxDesktopDevices',
-          requestedAmount: requestedDeviceCount
-        },
-        'Desktop device quota has been reached.'
-      );
-    }
+    await this.entitlementService.requireAllowed(
+      {
+        workspaceId: bindingCode.workspaceId,
+        featureKey: 'maxDesktopDevices',
+        requestedAmount: requestedDeviceCount
+      },
+      'Desktop device quota has been reached.'
+    );
 
     const device = await this.prismaService.$transaction(async (tx) => {
       const createdDevice = await tx.desktopDevice.upsert({
@@ -1126,10 +1121,6 @@ export class DesktopSyncService {
   }
 
   private async resolveDesktopDeviceCapacity(workspaceId: string): Promise<DesktopDeviceCapacitySummary | undefined> {
-    if (isLocalDevelopmentEnvironment()) {
-      return undefined;
-    }
-
     if (!isDatabasePersistenceEnabled()) {
       const subscription = this.store.getSubscription(workspaceId);
       const plan =
@@ -1177,10 +1168,6 @@ export class DesktopSyncService {
   }
 
   private async resolvePublicFreeDesktopDeviceCapacity(): Promise<DesktopDeviceCapacitySummary | undefined> {
-    if (isLocalDevelopmentEnvironment()) {
-      return undefined;
-    }
-
     if (!isDatabasePersistenceEnabled()) {
       return this.toDesktopDeviceCapacity(demoPlans.find((plan) => plan.code === freePlanCode));
     }

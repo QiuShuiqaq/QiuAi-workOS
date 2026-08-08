@@ -22,7 +22,6 @@ QiuAI WorkOS 是企业数字劳动力平台。任何产品、设计、架构和�
 - `ENTITLEMENT_MODEL.md`：套餐、订阅、权益和配额模型
 - `PROJECT_STRUCTURE.md`：Monorepo、应用、共享包和服务端模块结构
 - `FRONTEND_UI_ARCHITECTURE.md`：前端技术栈、Ant Design 生态和 QiuAI UI 组件规范
-- `LOCAL_DEVELOPMENT.md`：本地开发工具、缓存和环境约束
 - `CONTRIBUTING.md`：开发规范
 
 当修改以下内容时，必须同步更新相关文档：

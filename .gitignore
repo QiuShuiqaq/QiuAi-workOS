@@ -5,6 +5,7 @@ node_modules/
 
 # Local project-owned tool/cache directories
 .local/
+local-dev/
 apps/public-site/docs/
 apps/public-site/public/downloads/
 apps/public-site/src-legacy-qiuaihub/

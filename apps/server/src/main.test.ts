@@ -1559,7 +1559,7 @@ test('desktop release publishing drives public update checks', async () => {
   }
 });
 
-test('local development desktop catalog bypasses plan and capacity limits', async () => {
+test('local environment variables do not bypass desktop template authorization', async () => {
   const previousEnvironment = {
     persistenceMode: process.env.WORKOS_PERSISTENCE_MODE,
     deployTarget: process.env.WORKOS_DEPLOY_TARGET,
@@ -1584,22 +1584,12 @@ test('local development desktop catalog bypasses plan and capacity limits', asyn
     });
 
     assert.equal(response.statusCode, 200);
-    const body = JSON.parse(response.body) as {
-      data: Array<{
-        id: string;
-        canInstall?: boolean;
-        allowedPlanCodes?: string[];
-      }>;
-      deviceCapacity?: unknown;
-    };
-    const enterpriseFactory = body.data.find(
-      (template) => template.id === 'factory_cross_border_product_images_v1'
+    const enterpriseFactory = JSON.parse(response.body).data.find(
+      (template: { id: string }) => template.id === 'factory_cross_border_product_images_v1'
     );
 
     assert.ok(enterpriseFactory);
-    assert.equal(enterpriseFactory.canInstall, true);
-    assert.ok(enterpriseFactory.allowedPlanCodes?.some((planCode) => planCode.startsWith('ENTERPRISE_')));
-    assert.equal(body.deviceCapacity, undefined);
+    assert.equal(enterpriseFactory.canInstall, false);
   } finally {
     await app.close();
 

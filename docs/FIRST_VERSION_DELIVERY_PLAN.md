@@ -14,8 +14,8 @@
 - 可完成 `Workspace -> AI岗位 -> 任务创建 -> Mock执行 -> 产物/日志/成本展示` 闭环。
 - Personal Free 和 Enterprise 的套餐/权益概念在界面和接口中可见。
 - 本地验证命令通过：
-  - `.\tools\npm-local.cmd run typecheck`
-  - `.\tools\npm-local.cmd run build`
+  - `npm run typecheck`
+  - `npm run build`
   - 后端 API smoke test
   - 前端页面 HTML smoke test
 

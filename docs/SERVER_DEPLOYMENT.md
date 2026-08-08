@@ -63,7 +63,7 @@ docker compose -f infra/docker/compose.deploy.yml up -d --build
 或在本地 Windows 仓库中使用项目脚本：
 
 ```bat
-.\tools\npm-local.cmd run deploy:up
+npm run deploy:up
 ```
 
 ## 联通性检查
@@ -105,8 +105,8 @@ docker compose -f infra/docker/compose.deploy.yml down
 Windows 本地脚本：
 
 ```bat
-.\tools\npm-local.cmd run deploy:logs
-.\tools\npm-local.cmd run deploy:down
+npm run deploy:logs
+npm run deploy:down
 ```
 
 ## 重要环境变量
