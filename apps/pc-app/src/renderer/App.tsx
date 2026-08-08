@@ -34,6 +34,7 @@ import {
   ReloadOutlined,
   MessageOutlined,
   ToolOutlined,
+  UpOutlined,
   VideoCameraOutlined
 } from '@ant-design/icons';
 import { qiuAntTheme } from '@qiuai/design-tokens';
@@ -41,6 +42,7 @@ import AppProvider from 'antd/es/app';
 import Button from 'antd/es/button';
 import Card from 'antd/es/card';
 import Checkbox from 'antd/es/checkbox';
+import Collapse from 'antd/es/collapse';
 import ConfigProvider from 'antd/es/config-provider';
 import Descriptions from 'antd/es/descriptions';
 import Drawer from 'antd/es/drawer';
@@ -166,6 +168,13 @@ import {
   type WorkflowGraphArtifactType
 } from '../shared/desktop-workflow-graph';
 import {
+  academicDemoSectionTitles,
+  academicDemoSectionTypes,
+  type AcademicDataComparisonSettings,
+  type AcademicFormulaDraft,
+  type AcademicDemoSectionType
+} from '../shared/academic-demo-config';
+import {
   qiuaiUserAgreementDocument,
   qiuaiUserAgreementRequiredReadSeconds,
   type DesktopLegalDocument
@@ -268,6 +277,27 @@ interface TaskFormValues {
 
 type RoleApplicationType = 'digital_employee' | 'digital_factory';
 
+interface AcademicDemoSectionFormValue {
+  type: AcademicDemoSectionType;
+  enabled?: boolean;
+  title?: string;
+  depth?: 'short' | 'standard' | 'deep';
+  manualContent?: string;
+  contentFields?: Record<string, string>;
+  formulaDrafts?: AcademicFormulaDraft[];
+  dataComparison?: AcademicDataComparisonSettings;
+}
+
+interface AcademicSectionEditorFormValues extends AcademicDemoSectionFormValue {
+  formulaDrafts?: Array<AcademicFormulaDraft & { key?: string }>;
+  projectName?: string;
+  researchDirection?: string;
+  keywords?: string;
+  organization?: string;
+  team?: string;
+  coreConclusion?: string;
+}
+
 interface FactoryRunFormValues {
   roleCode: string;
   useKnowledge?: boolean;
@@ -294,6 +324,11 @@ interface FactoryRunFormValues {
   sourceUrls?: string;
   brandTone?: string;
   projectName?: string;
+  researchDirection?: string;
+  keywords?: string;
+  organization?: string;
+  team?: string;
+  coreConclusion?: string;
   projectType?: string;
   audience?: string;
   demoDurationMinutes?: number;
@@ -304,6 +339,7 @@ interface FactoryRunFormValues {
   maxChartCount?: number;
   maxExperimentComparisonCount?: number;
   language?: 'zh-CN' | 'en-US';
+  academicSections?: AcademicDemoSectionFormValue[];
   instruction?: string;
 }
 
@@ -2294,6 +2330,11 @@ const factoryRunRememberedFieldKeys: Array<keyof FactoryRunFormValues> = [
   'sourceUrls',
   'brandTone',
   'projectName',
+  'researchDirection',
+  'keywords',
+  'organization',
+  'team',
+  'coreConclusion',
   'projectType',
   'audience',
   'demoDurationMinutes',
@@ -2304,6 +2345,7 @@ const factoryRunRememberedFieldKeys: Array<keyof FactoryRunFormValues> = [
   'maxChartCount',
   'maxExperimentComparisonCount',
   'language',
+  'academicSections',
   'instruction'
 ];
 
@@ -2385,6 +2427,13 @@ function normalizeFactoryRunParameterMemory(value: unknown): Partial<FactoryRunF
       continue;
     }
 
+    if (key === 'academicSections') {
+      if (Array.isArray(item)) {
+        normalized.academicSections = normalizeAcademicDemoSectionFormValues(item);
+      }
+      continue;
+    }
+
     if (
       key === 'editTargetSeconds' ||
       key === 'videoCount' ||
@@ -2419,6 +2468,106 @@ function normalizeFactoryRunParameterMemory(value: unknown): Partial<FactoryRunF
   }
 
   return normalized;
+}
+
+function normalizeAcademicDemoSectionFormValues(value: unknown): AcademicDemoSectionFormValue[] {
+  if (!Array.isArray(value)) {
+    return buildDefaultAcademicDemoSections();
+  }
+
+  const entryByType = new Map<AcademicDemoSectionType, AcademicDemoSectionFormValue>();
+  for (const item of value) {
+    if (!isPlainObject(item)) {
+      continue;
+    }
+
+    const type = typeof item.type === 'string' && (academicDemoSectionTypes as readonly string[]).includes(item.type)
+      ? item.type as AcademicDemoSectionType
+      : undefined;
+    if (!type) {
+      continue;
+    }
+
+    entryByType.set(type, {
+      type,
+      enabled: typeof item.enabled === 'boolean' ? item.enabled : true,
+      title: typeof item.title === 'string' ? item.title : academicDemoSectionTitles[type],
+      depth: item.depth === 'short' || item.depth === 'deep' || item.depth === 'standard' ? item.depth : 'standard',
+      manualContent: typeof item.manualContent === 'string' ? item.manualContent : '',
+      contentFields: normalizeAcademicContentFields(item.contentFields),
+      formulaDrafts: normalizeAcademicFormulaDrafts(item.formulaDrafts),
+      dataComparison: normalizeAcademicDataComparison(item.dataComparison)
+    });
+  }
+
+  return buildDefaultAcademicDemoSections().map((entry) => ({
+    ...entry,
+    ...entryByType.get(entry.type),
+    title: entryByType.get(entry.type)?.title?.trim() || entry.title
+  }));
+}
+
+function normalizeAcademicFormulaDrafts(value: unknown): AcademicFormulaDraft[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item): AcademicFormulaDraft[] => {
+    if (!isPlainObject(item) || typeof item.latex !== 'string' || !item.latex.trim()) {
+      return [];
+    }
+
+    return [{
+      title: typeof item.title === 'string' ? item.title : '',
+      latex: item.latex.trim(),
+      explanation: typeof item.explanation === 'string' ? item.explanation : '',
+      variables: Array.isArray(item.variables)
+        ? item.variables.flatMap((variable) => {
+            if (!isPlainObject(variable) || typeof variable.symbol !== 'string' || typeof variable.meaning !== 'string') {
+              return [];
+            }
+            return [{
+              symbol: variable.symbol.trim(),
+              meaning: variable.meaning.trim(),
+              unit: typeof variable.unit === 'string' ? variable.unit.trim() : undefined
+            }];
+          })
+        : []
+    }];
+  }).slice(0, 20);
+}
+
+function normalizeAcademicContentFields(value: unknown): Record<string, string> {
+  if (!isPlainObject(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([key, item]) =>
+      typeof item === 'string' && item.trim() ? [[key, item]] : []
+    )
+  );
+}
+
+function normalizeAcademicDataComparison(value: unknown): AcademicDataComparisonSettings {
+  if (!isPlainObject(value)) {
+    return {
+      enabled: true,
+      chartType: 'auto',
+      showTable: true
+    };
+  }
+
+  return {
+    enabled: typeof value.enabled === 'boolean' ? value.enabled : true,
+    title: typeof value.title === 'string' ? value.title : '',
+    xColumn: typeof value.xColumn === 'string' ? value.xColumn : '',
+    yColumn: typeof value.yColumn === 'string' ? value.yColumn : '',
+    chartType: value.chartType === 'bar' || value.chartType === 'line' || value.chartType === 'table'
+      ? value.chartType
+      : 'auto',
+    showTable: typeof value.showTable === 'boolean' ? value.showTable : true
+  };
 }
 
 function applyFactoryRunParameterMemory(
@@ -2804,6 +2953,7 @@ export default function App() {
   const factoryFileInputRef = useRef<HTMLInputElement | null>(null);
   const [taskForm] = Form.useForm<TaskFormValues>();
   const [factoryRunForm] = Form.useForm<FactoryRunFormValues>();
+  const [academicSectionEditorForm] = Form.useForm<AcademicSectionEditorFormValues>();
   const [modelForm] = Form.useForm<ModelFormValues>();
   const [toolSettingsForm] = Form.useForm<ToolSettingsFormValues>();
   const [onboardingForm] = Form.useForm<OnboardingFormValues>();
@@ -2850,6 +3000,10 @@ export default function App() {
   const [selectedFactoryRoleCode, setSelectedFactoryRoleCode] = useState('');
   const [factoryAttachments, setFactoryAttachments] = useState<ComposerAttachment[]>([]);
   const [isFactoryDragOver, setIsFactoryDragOver] = useState(false);
+  const [academicDemoImportingSection, setAcademicDemoImportingSection] = useState('');
+  const [academicSectionEditorOpen, setAcademicSectionEditorOpen] = useState(false);
+  const [academicSectionEditorType, setAcademicSectionEditorType] =
+    useState<AcademicDemoSectionType>('cover');
   const [previewFactoryImage, setPreviewFactoryImage] = useState<FactoryArtifactPreviewItem | null>(null);
   const [factorySidePanelOpen, setFactorySidePanelOpen] = useState<'status' | 'logs' | null>(null);
   const [factoryPackageEditorOpen, setFactoryPackageEditorOpen] = useState(false);
@@ -3815,9 +3969,93 @@ export default function App() {
       return;
     }
 
-    const attachments = buildComposerAttachments(files);
+    const currentFactory = selectedFactoryRoleCode
+      ? readFactoryManifestForRoleCode(selectedFactoryRoleCode)
+      : {};
+    const maxItems = readFactoryMaxItems(currentFactory);
+    const remainingSlots = Math.max(0, maxItems - factoryAttachments.length);
+    if (remainingSlots === 0) {
+      message.warning(`当前数字工厂最多添加 ${maxItems} 个文件。`);
+      return;
+    }
+
+    const acceptedFiles = files.slice(0, remainingSlots);
+    if (acceptedFiles.length < files.length) {
+      message.warning(`当前数字工厂最多添加 ${maxItems} 个文件，已忽略超出部分。`);
+    }
+
+    const attachments = buildComposerAttachments(acceptedFiles);
     setFactoryAttachments((current) => [...current, ...attachments]);
     animateAttachmentReadiness(setFactoryAttachments, attachments);
+  }
+
+  async function importAcademicDemoSectionDraft(
+    sectionType: AcademicDemoSectionType,
+    sectionIndex: number,
+    attachments: ComposerAttachment[]
+  ): Promise<string | undefined> {
+    const importKey = `${selectedFactoryRoleCode}:${sectionType}`;
+    const sourceFiles = attachments
+      .filter((attachment) => isFactoryAcademicDemoAttachment(attachment) && attachment.localPath)
+      .slice(0, 5);
+
+    if (sourceFiles.length === 0) {
+      message.warning('请先在“输入”中上传 Word、PDF、Excel 或 CSV 文件。');
+      return undefined;
+    }
+    if (!window.qiuDesktop) {
+      message.warning('当前环境没有可用的本地文档工具。');
+      return undefined;
+    }
+
+    setAcademicDemoImportingSection(importKey);
+    try {
+      const drafts: string[] = [];
+      for (const attachment of sourceFiles) {
+        const result = await window.qiuDesktop.invokeDesktopTool({
+          workspaceId: runtimeState.localRuntime.workspaceId,
+          toolId: 'office-document',
+          action: 'document.extract_text',
+          input: {
+            path: attachment.localPath,
+            maxChars: attachment.name.toLowerCase().endsWith('.csv') || attachment.name.toLowerCase().endsWith('.xlsx')
+              ? 80_000
+              : 24_000
+          }
+        });
+        if (!result.ok) {
+          continue;
+        }
+
+        const sourceText = readRendererDesktopToolText(result.output);
+        const excerpt = extractAcademicDemoSectionDraft(sectionType, sourceText);
+        if (excerpt) {
+          drafts.push(`来源：${attachment.name}\n${excerpt}`);
+        }
+      }
+
+      const importedDraft = drafts.join('\n\n').slice(0, 6_000);
+      if (!importedDraft) {
+        message.warning('没有从已上传资料中找到可明确归入该板块的内容，已保留为空。');
+        return undefined;
+      }
+
+      const fieldPath: ['academicSections', number, 'manualContent'] = [
+        'academicSections',
+        sectionIndex,
+        'manualContent'
+      ];
+      const existingDraft = String(factoryRunForm.getFieldValue(fieldPath) ?? '').trim();
+      const nextDraft = [existingDraft, importedDraft].filter(Boolean).join('\n\n');
+      factoryRunForm.setFieldValue(fieldPath, nextDraft.slice(0, 8_000));
+      message.success(`${academicDemoSectionTitles[sectionType]}已导入可编辑草稿。`);
+      return nextDraft.slice(0, 8_000);
+    } catch (error) {
+      message.error(`导入板块草稿失败：${error instanceof Error ? error.message : '本地文档读取失败'}`);
+      return undefined;
+    } finally {
+      setAcademicDemoImportingSection('');
+    }
   }
 
   function buildComposerAttachments(files: File[]): ComposerAttachment[] {
@@ -5344,6 +5582,269 @@ export default function App() {
             </div>
           ) : null}
         </Space>
+      </Modal>
+    );
+  }
+
+  function renderAcademicSectionEditorModal() {
+    const sectionTitle = academicDemoSectionTitles[academicSectionEditorType];
+    const sourceFiles = factoryAttachments.filter((attachment) => isFactoryAcademicDemoAttachment(attachment));
+    const sectionIndex = academicDemoSectionTypes.indexOf(academicSectionEditorType);
+
+    return (
+      <Modal
+        title={`编辑：${sectionTitle}`}
+        open={academicSectionEditorOpen}
+        width={900}
+        destroyOnHidden
+        okText="保存板块"
+        cancelText="取消"
+        onCancel={() => setAcademicSectionEditorOpen(false)}
+        onOk={() => void applyAcademicSectionEditor()}
+      >
+        <Form<AcademicSectionEditorFormValues>
+          form={academicSectionEditorForm}
+          layout="vertical"
+          className="academic-section-editor-form"
+        >
+          <div className="academic-editor-toolbar">
+            <Form.Item name="enabled" label="板块状态" valuePropName="checked">
+              <Switch checkedChildren="展示" unCheckedChildren="跳过" />
+            </Form.Item>
+            <Form.Item name="depth" label="内容深度">
+              <Select
+                options={academicDemoSectionDepthOptions.map((item) => ({
+                  value: item.key,
+                  label: item.label
+                }))}
+              />
+            </Form.Item>
+            <Form.Item name="title" label="展示标题">
+              <Input placeholder={sectionTitle} />
+            </Form.Item>
+          </div>
+
+          {academicSectionEditorType === 'cover' ? (
+            <>
+              <div className="factory-inline-form-grid">
+                <Form.Item name="projectName" label="项目名称">
+                  <Input placeholder="不确定时留空，系统会从资料中保守识别。" />
+                </Form.Item>
+                <Form.Item name="researchDirection" label="研究方向">
+                  <Input placeholder="例如：智能制造、医学影像、材料建模" />
+                </Form.Item>
+              </div>
+              <div className="factory-inline-form-grid">
+                <Form.Item name="organization" label="单位 / 机构">
+                  <Input placeholder="例如：大学、研究院、企业或团队" />
+                </Form.Item>
+                <Form.Item name="team" label="团队">
+                  <Input placeholder="例如：课题组、项目组、参赛团队" />
+                </Form.Item>
+              </div>
+              <Form.Item name="keywords" label="关键词">
+                <Input placeholder="多个关键词用逗号或顿号分隔" />
+              </Form.Item>
+              <Form.Item name="coreConclusion" label="核心结论">
+                <Input.TextArea rows={3} placeholder="只填写已经确认、允许公开展示的结论。" />
+              </Form.Item>
+            </>
+          ) : null}
+
+          {academicSectionEditorType === 'research_background' ? (
+            <div className="academic-editor-field-grid">
+              <Form.Item name={['contentFields', 'problemSource']} label="问题来源">
+                <Input.TextArea rows={3} placeholder="问题从哪里产生，使用保守、可核对的表述。" />
+              </Form.Item>
+              <Form.Item name={['contentFields', 'industryPain']} label="行业痛点">
+                <Input.TextArea rows={3} placeholder="实际业务或行业中明确存在的痛点。" />
+              </Form.Item>
+              <Form.Item name={['contentFields', 'academicValue']} label="学术价值">
+                <Input.TextArea rows={3} placeholder="研究解决了什么知识或方法问题。" />
+              </Form.Item>
+            </div>
+          ) : null}
+
+          {academicSectionEditorType === 'method_model' ? (
+            <>
+              <div className="academic-editor-field-grid">
+                <Form.Item name={['contentFields', 'algorithmSummary']} label="算法思路">
+                  <Input.TextArea rows={3} placeholder="用几句话说明方法如何工作。" />
+                </Form.Item>
+                <Form.Item name={['contentFields', 'modelStructure']} label="模型结构">
+                  <Input.TextArea rows={3} placeholder="说明输入、核心模块和输出。" />
+                </Form.Item>
+                <Form.Item name={['contentFields', 'technicalRoute']} label="技术路线">
+                  <Input.TextArea rows={3} placeholder="按步骤填写关键流程。" />
+                </Form.Item>
+              </div>
+              <Divider orientation="left">公式</Divider>
+              <Typography.Paragraph type="secondary">
+                公式按独立卡片保存。第一版使用纯文本 LaTeX，保证任何电脑都能稳定打开；变量解释会单独展示。
+              </Typography.Paragraph>
+              <Form.List name="formulaDrafts">
+                {(fields, { add, remove, move }) => (
+                  <div className="academic-formula-editor-list">
+                    {fields.map((field, index) => (
+                      <div key={field.key} className="academic-formula-editor-item">
+                        <Flex align="center" justify="space-between" gap={8}>
+                          <Typography.Text strong>公式 {index + 1}</Typography.Text>
+                          <Space size={2}>
+                            <Button
+                              type="text"
+                              icon={<UpOutlined />}
+                              aria-label="公式上移"
+                              title="公式上移"
+                              disabled={index === 0}
+                              onClick={() => move(index, index - 1)}
+                            />
+                            <Button
+                              type="text"
+                              icon={<DownOutlined />}
+                              aria-label="公式下移"
+                              title="公式下移"
+                              disabled={index === fields.length - 1}
+                              onClick={() => move(index, index + 1)}
+                            />
+                            <Button
+                              danger
+                              type="text"
+                              icon={<DeleteOutlined />}
+                              aria-label="删除公式"
+                              title="删除公式"
+                              onClick={() => remove(field.name)}
+                            />
+                          </Space>
+                        </Flex>
+                        <Form.Item name={[field.name, 'title']} label="公式名称">
+                          <Input placeholder="例如：损失函数" />
+                        </Form.Item>
+                        <Form.Item
+                          name={[field.name, 'latex']}
+                          label="LaTeX 公式"
+                          rules={[{ required: true, message: '请输入公式内容' }]}
+                        >
+                          <Input.TextArea rows={2} placeholder="例如：L = -\\sum_i y_i \\log(\\hat{y}_i)" />
+                        </Form.Item>
+                        <Form.Item name={[field.name, 'explanation']} label="公式解释">
+                          <Input.TextArea rows={2} placeholder="解释公式用于什么环节。" />
+                        </Form.Item>
+                      </div>
+                    ))}
+                    <Button icon={<PlusOutlined />} onClick={() => add({ title: '', latex: '', explanation: '' })}>
+                      新增公式
+                    </Button>
+                  </div>
+                )}
+              </Form.List>
+            </>
+          ) : null}
+
+          {academicSectionEditorType === 'data_analysis' ? (
+            <>
+              <div className="academic-editor-field-grid">
+                <Form.Item name={['contentFields', 'datasetSource']} label="数据来源">
+                  <Input.TextArea rows={2} placeholder="数据来自哪里，未确认的来源不要自动补写。" />
+                </Form.Item>
+                <Form.Item name={['contentFields', 'sampleScale']} label="样本规模">
+                  <Input.TextArea rows={2} placeholder="样本数量、时间范围或数据规模。" />
+                </Form.Item>
+                <Form.Item name={['contentFields', 'variableFields']} label="变量字段">
+                  <Input.TextArea rows={2} placeholder="关键字段及其含义。" />
+                </Form.Item>
+                <Form.Item name={['contentFields', 'analysisNotes']} label="分析说明">
+                  <Input.TextArea rows={2} placeholder="补充数据分布、趋势或实验口径。" />
+                </Form.Item>
+              </div>
+              <Divider orientation="left">数据对比</Divider>
+              <Typography.Paragraph type="secondary">
+                上传 Excel / CSV 后，系统只使用真实表格列生成对比。选择列名时如果没有匹配到真实字段，会保留提示，不会编造结果。
+              </Typography.Paragraph>
+              <div className="academic-editor-field-grid">
+                <Form.Item name={['dataComparison', 'enabled']} label="启用对比" valuePropName="checked">
+                  <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+                </Form.Item>
+                <Form.Item name={['dataComparison', 'chartType']} label="对比形式">
+                  <Select
+                    options={[
+                      { value: 'auto', label: '自动选择' },
+                      { value: 'bar', label: '柱状对比' },
+                      { value: 'line', label: '趋势折线' },
+                      { value: 'table', label: '仅展示数据表' }
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item name={['dataComparison', 'xColumn']} label="分组 / 横轴列">
+                  <Input placeholder="例如：方法、日期、参数组" />
+                </Form.Item>
+                <Form.Item name={['dataComparison', 'yColumn']} label="指标 / 纵轴列">
+                  <Input placeholder="例如：准确率、得分、误差" />
+                </Form.Item>
+              </div>
+              <Form.Item name={['dataComparison', 'title']} label="对比标题">
+                <Input placeholder="例如：不同方法的准确率对比" />
+              </Form.Item>
+              <Form.Item name={['dataComparison', 'showTable']} label="同时展示数据表" valuePropName="checked">
+                <Switch checkedChildren="展示" unCheckedChildren="隐藏" />
+              </Form.Item>
+              {sourceFiles.length > 0 ? (
+                <div className="academic-editor-source-hint">
+                  <Typography.Text strong>当前可分析资料：</Typography.Text>
+                  <Typography.Text type="secondary">
+                    {sourceFiles.filter((item) => isFactoryTableAttachment(item)).map((item) => item.name).join('、') || '暂未上传 Excel / CSV'}
+                  </Typography.Text>
+                </div>
+              ) : null}
+            </>
+          ) : null}
+
+          {academicSectionEditorType === 'conclusion_value' ? (
+            <div className="academic-editor-field-grid">
+              <Form.Item name={['contentFields', 'experimentalConclusion']} label="实验结论">
+                <Input.TextArea rows={3} placeholder="只填写已有实验支持的结论。" />
+              </Form.Item>
+              <Form.Item name={['contentFields', 'innovationPoints']} label="创新点">
+                <Input.TextArea rows={3} placeholder="明确、可解释的创新点。" />
+              </Form.Item>
+              <Form.Item name={['contentFields', 'applicationValue']} label="应用价值">
+                <Input.TextArea rows={3} placeholder="能够落到实际场景的价值。" />
+              </Form.Item>
+              <Form.Item name={['contentFields', 'futureDirection']} label="后续方向">
+                <Input.TextArea rows={3} placeholder="下一步计划或可继续验证的方向。" />
+              </Form.Item>
+            </div>
+          ) : null}
+
+          <Divider orientation="left">补充草稿</Divider>
+          <Form.Item name="manualContent" label="板块补充内容">
+            <Input.TextArea
+              rows={4}
+              placeholder={`可留空，由系统从资料中保守提取。${academicSectionEditorType === 'data_analysis' ? '表格数据请上传 Excel / CSV，不要把大量数据粘贴到这里。' : ''}`}
+            />
+          </Form.Item>
+          <Flex align="center" justify="space-between" gap={12} wrap>
+            <Typography.Text type="secondary">
+              只允许把你确认过的内容写入正式 Demo。
+            </Typography.Text>
+            <Button
+              icon={<CloudDownloadOutlined />}
+              loading={academicDemoImportingSection === `${selectedFactoryRoleCode}:${academicSectionEditorType}`}
+              disabled={sourceFiles.length === 0 || sectionIndex < 0}
+              onClick={async () => {
+                const importedDraft = await importAcademicDemoSectionDraft(
+                  academicSectionEditorType,
+                  sectionIndex,
+                  sourceFiles
+                );
+                if (importedDraft) {
+                  academicSectionEditorForm.setFieldValue('manualContent', importedDraft);
+                }
+              }}
+            >
+              导入已上传资料
+            </Button>
+          </Flex>
+        </Form>
       </Modal>
     );
   }
@@ -7140,7 +7641,7 @@ export default function App() {
                               : isEcommerceVideoFactory
                                 ? `上传商品参考图或表格，单批最多 ${maxItems} 个商品。`
                                 : isAcademicDemoFactoryType
-                                  ? `上传 Word、PDF、Excel 或 CSV 项目资料，单批最多 ${maxItems} 个文件。`
+                                  ? `上传 Word、PDF、Excel 或 CSV 项目资料，每次最多 ${maxItems} 个文件。`
                                 : isOperationFactory
                                 ? '上传产品资料、案例素材或参考文件，也可以只填写参数。'
                                   : `上传商品图或表格，单批最多 ${maxItems} 个。`}
@@ -7586,9 +8087,6 @@ export default function App() {
                           </>
                         ) : isAcademicDemoFactoryType ? (
                           <>
-                            <Form.Item name="projectName" label="项目名称">
-                              <Input size="large" placeholder="可不填，系统会从资料中保守识别；不确定时留空。" />
-                            </Form.Item>
                             <div className="factory-inline-form-grid">
                               <Form.Item name="projectType" label="项目类型" rules={[{ required: true }]}>
                                 <Select
@@ -7659,9 +8157,65 @@ export default function App() {
                                 <Switch checkedChildren="开启" unCheckedChildren="关闭" />
                               </Form.Item>
                             </div>
+                            <div className="factory-academic-section-summary">
+                              <InlineHelpTitle help="五个板块只在这里展示摘要，点击右侧齿轮后在更宽的窗口中编辑。编辑形式会根据板块内容自动区分。">
+                                <Typography.Text strong>Demo 内容板块</Typography.Text>
+                              </InlineHelpTitle>
+                              <Form.Item shouldUpdate noStyle>
+                                {({ getFieldValue }) => {
+                                  const sections = normalizeAcademicDemoSectionFormValues(
+                                    getFieldValue('academicSections')
+                                  );
+                                  return (
+                                    <div className="factory-academic-section-card-list">
+                                      {sections.map((section, index) => {
+                                        const hasDraft = Boolean(
+                                          section.manualContent?.trim() ||
+                                            Object.values(section.contentFields ?? {}).some((value) => value.trim()) ||
+                                            section.formulaDrafts?.length ||
+                                            section.dataComparison?.xColumn ||
+                                            section.dataComparison?.yColumn
+                                        );
+                                        return (
+                                          <div key={section.type} className="factory-academic-section-card">
+                                            <div className="factory-academic-section-card-main">
+                                              <Space size={8} wrap>
+                                                <Typography.Text strong>
+                                                  {index + 1}. {section.title || academicDemoSectionTitles[section.type]}
+                                                </Typography.Text>
+                                                <Tag color={section.enabled === false ? 'default' : 'green'}>
+                                                  {section.enabled === false ? '跳过' : '展示'}
+                                                </Tag>
+                                                {hasDraft ? <Tag color="blue">已编辑</Tag> : <Tag>待整理</Tag>}
+                                              </Space>
+                                              <Typography.Text type="secondary" ellipsis>
+                                                {section.type === 'method_model'
+                                                  ? `${section.formulaDrafts?.length ?? 0} 条手动公式`
+                                                  : section.type === 'data_analysis'
+                                                    ? section.dataComparison?.xColumn || section.dataComparison?.yColumn
+                                                      ? '已设置数据对比列'
+                                                      : '上传表格后自动生成真实对比'
+                                                    : academicDemoSectionSummaryLabels[section.type]}
+                                              </Typography.Text>
+                                            </div>
+                                            <Button
+                                              type="text"
+                                              icon={<SettingOutlined />}
+                                              aria-label={`编辑${academicDemoSectionTitles[section.type]}`}
+                                              title={`编辑${academicDemoSectionTitles[section.type]}`}
+                                              onClick={() => openAcademicSectionEditor(section.type)}
+                                            />
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  );
+                                }}
+                              </Form.Item>
+                            </div>
                             <Form.Item name="instruction" label="补充要求">
                               <Input.TextArea
-                                rows={3}
+                                rows={2}
                                 placeholder="例如：重点展示数据分析和实验对比；没有明确来源的结论不要写入正式 Demo。"
                               />
                             </Form.Item>
@@ -7767,7 +8321,7 @@ export default function App() {
                             disabled={selectedFactoryDeleted}
                             onClick={() => factoryRunForm.setFieldsValue({ roleCode: selectedFactoryCode })}
                           >
-                            开始任务
+                            {isAcademicDemoFactoryType ? '生成 Demo 演示文件' : '开始任务'}
                           </Button>
                         </div>
                       </section>
@@ -7921,6 +8475,7 @@ export default function App() {
                   ? renderFactoryLogPanel('drawer')
                   : renderFactoryStatusPanel('drawer')}
               </Drawer>
+              {isAcademicDemoFactoryType ? renderAcademicSectionEditorModal() : null}
             </>
           ) : (
             <div className="factory-empty-state">
@@ -10731,6 +11286,11 @@ export default function App() {
         roleCode,
         useKnowledge: true,
         projectName: '',
+        researchDirection: '',
+        keywords: '',
+        organization: '',
+        team: '',
+        coreConclusion: '',
         projectType: 'academic_research',
         audience: 'judges',
         demoDurationMinutes: 5,
@@ -10741,6 +11301,7 @@ export default function App() {
         maxChartCount: 8,
         maxExperimentComparisonCount: 6,
         language: 'zh-CN',
+        academicSections: buildDefaultAcademicDemoSections(),
         instruction: ''
       };
     }
@@ -10787,6 +11348,76 @@ export default function App() {
     setFactoryAttachments([]);
     message.success('已清空当前工厂的参数和上传文件。');
     return true;
+  }
+
+  function openAcademicSectionEditor(sectionType: AcademicDemoSectionType) {
+    const sections = normalizeAcademicDemoSectionFormValues(factoryRunForm.getFieldValue('academicSections'));
+    const section = sections.find((item) => item.type === sectionType) ?? {
+      type: sectionType,
+      enabled: true,
+      title: academicDemoSectionTitles[sectionType],
+      depth: 'standard',
+      manualContent: '',
+      contentFields: {},
+      formulaDrafts: [],
+      dataComparison: normalizeAcademicDataComparison(undefined)
+    };
+
+    setAcademicSectionEditorType(sectionType);
+    const projectFields = factoryRunForm.getFieldsValue([
+      'projectName',
+      'researchDirection',
+      'keywords',
+      'organization',
+      'team',
+      'coreConclusion'
+    ]);
+    academicSectionEditorForm.resetFields();
+    academicSectionEditorForm.setFieldsValue({
+      ...section,
+      ...projectFields,
+      formulaDrafts: (section.formulaDrafts ?? []).map((item, index) => ({
+        ...item,
+        key: `${sectionType}-formula-${index + 1}`
+      })),
+      dataComparison: normalizeAcademicDataComparison(section.dataComparison)
+    });
+    setAcademicSectionEditorOpen(true);
+  }
+
+  async function applyAcademicSectionEditor() {
+    const values = await academicSectionEditorForm.validateFields();
+    const currentSections = normalizeAcademicDemoSectionFormValues(
+      factoryRunForm.getFieldValue('academicSections')
+    );
+    const nextSection: AcademicDemoSectionFormValue = {
+      type: academicSectionEditorType,
+      enabled: values.enabled !== false,
+      title: values.title?.trim() || academicDemoSectionTitles[academicSectionEditorType],
+      depth: values.depth ?? 'standard',
+      manualContent: values.manualContent?.trim() ?? '',
+      contentFields: normalizeAcademicContentFields(values.contentFields),
+      formulaDrafts: normalizeAcademicFormulaDrafts(values.formulaDrafts),
+      dataComparison: normalizeAcademicDataComparison(values.dataComparison)
+    };
+    const nextSections = currentSections.map((section) =>
+      section.type === academicSectionEditorType ? nextSection : section
+    );
+    factoryRunForm.setFieldsValue({
+      academicSections: nextSections,
+      ...(academicSectionEditorType === 'cover'
+        ? {
+            projectName: values.projectName?.trim() ?? '',
+            researchDirection: values.researchDirection?.trim() ?? '',
+            keywords: values.keywords?.trim() ?? '',
+            organization: values.organization?.trim() ?? '',
+            team: values.team?.trim() ?? '',
+            coreConclusion: values.coreConclusion?.trim() ?? ''
+          }
+        : {})
+    });
+    setAcademicSectionEditorOpen(false);
+    message.success(`${academicDemoSectionTitles[academicSectionEditorType]}已保存。`);
   }
 
   function rememberFactoryRunPackageSelection(values: FactoryRunFormValues, factory: DigitalFactoryManifest) {
@@ -11354,12 +11985,19 @@ export default function App() {
         return;
       }
 
+      const academicSections = normalizeAcademicDemoSectionFormValues(values.academicSections);
+      if (!academicSections.some((section) => section.enabled !== false)) {
+        message.warning('请至少启用一个 Demo 板块。');
+        return;
+      }
+
       const academicFactoryValues: FactoryRunFormValues = {
         ...values,
         demoDurationMinutes: Number(values.demoDurationMinutes) || 5,
         maxFormulaCount: Number(values.maxFormulaCount ?? 8),
         maxChartCount: Number(values.maxChartCount ?? 8),
-        maxExperimentComparisonCount: Number(values.maxExperimentComparisonCount ?? 6)
+        maxExperimentComparisonCount: Number(values.maxExperimentComparisonCount ?? 6),
+        academicSections
       };
       const title = `${template.name} - ${academicAttachments.length} 个项目资料`;
       const input = buildAcademicDemoFactoryTaskInput({
@@ -14938,6 +15576,103 @@ const academicDemoLanguageOptions = [
   { key: 'en-US', label: 'English' }
 ];
 
+const academicDemoSectionDepthOptions = [
+  { key: 'short', label: '简短' },
+  { key: 'standard', label: '标准' },
+  { key: 'deep', label: '深入' }
+];
+
+const academicDemoSectionHints: Record<AcademicDemoSectionType, string> = {
+  cover: '项目名称、研究方向、关键词、单位/团队、核心结论。',
+  research_background: '问题来源、行业痛点、学术价值。',
+  method_model: '算法思路、模型结构、技术路线、关键步骤和公式解释。',
+  data_analysis: '数据来源、样本规模、变量字段、统计指标、图表、实验对比和交互演示。',
+  conclusion_value: '实验结论、创新点、应用价值和后续方向。'
+};
+
+const academicDemoSectionSummaryLabels: Record<AcademicDemoSectionType, string> = {
+  cover: '项目基本信息',
+  research_background: '问题来源 / 行业痛点 / 学术价值',
+  method_model: '算法思路 / 模型结构 / 技术路线',
+  data_analysis: '真实表格 / 对比图 / 数据预览',
+  conclusion_value: '结论 / 创新点 / 应用价值'
+};
+
+function buildDefaultAcademicDemoSections(): AcademicDemoSectionFormValue[] {
+  return academicDemoSectionTypes.map((type) => ({
+    type,
+    enabled: true,
+    title: academicDemoSectionTitles[type],
+    depth: 'standard',
+    manualContent: ''
+  }));
+}
+
+const academicDemoSectionDraftKeywords: Record<AcademicDemoSectionType, string[]> = {
+  cover: ['项目名称', '研究方向', '关键词', '单位', '团队', '核心结论', '项目简介'],
+  research_background: ['研究背景', '问题来源', '行业痛点', '研究意义', '学术价值', '现状'],
+  method_model: ['方法', '模型', '算法', '技术路线', '研究步骤', '公式', '变量', '实验方法'],
+  data_analysis: [
+    '数据集',
+    '数据来源',
+    '样本',
+    '变量字段',
+    '数据分布',
+    '指标',
+    '趋势',
+    '图表',
+    '实验对比',
+    '准确率',
+    '可视化'
+  ],
+  conclusion_value: ['实验结论', '研究结论', '创新点', '应用价值', '应用场景', '后续方向', '展望']
+};
+
+function readRendererDesktopToolText(output: Record<string, unknown> | undefined): string {
+  if (!output) {
+    return '';
+  }
+
+  for (const key of ['text', 'content', 'markdown', 'value']) {
+    const value = output[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return '';
+}
+
+function extractAcademicDemoSectionDraft(sectionType: AcademicDemoSectionType, sourceText: string): string {
+  const normalized = sourceText
+    .replace(/\r/g, '\n')
+    .replace(/\u0000/g, '')
+    .replace(/([。！？；.!?;])/g, '$1\n');
+  const keywords = academicDemoSectionDraftKeywords[sectionType];
+  const candidates = normalized
+    .split(/\n+/)
+    .map((item) => item.replace(/\s+/g, ' ').trim())
+    .filter((item) => item.length >= 8 && item.length <= 800)
+    .map((item, index) => ({
+      text: item,
+      index,
+      score: keywords.reduce((score, keyword) => score + (item.includes(keyword) ? 1 : 0), 0)
+    }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .slice(0, 8)
+    .sort((left, right) => left.index - right.index);
+
+  if (candidates.length === 0) {
+    return '';
+  }
+
+  return candidates
+    .map((item) => item.text)
+    .join('\n')
+    .slice(0, 2_800);
+}
+
 const defaultFactoryPromptControlFields: DigitalFactoryPromptControlField[] = [
   {
     key: 'promptLanguage',
@@ -15668,14 +16403,39 @@ function buildAcademicDemoFactoryTaskInput({
   attachments: ComposerAttachment[];
 }) {
   const materialAttachments = attachments.filter((attachment) => isFactoryAcademicDemoAttachment(attachment));
+  const academicSections = normalizeAcademicDemoSectionFormValues(values.academicSections);
+  const enabledSections = academicSections.filter((section) => section.enabled !== false).map((section) => section.type);
+  const sectionDepth = Object.fromEntries(
+    academicSections.map((section) => [section.type, section.depth ?? 'standard'])
+  );
+  const sectionEntries = academicSections.map((section, index) => ({
+    type: section.type,
+    enabled: section.enabled !== false,
+    order: index + 1,
+    title: section.title?.trim() || academicDemoSectionTitles[section.type],
+    depth: section.depth ?? 'standard',
+    manualContent: section.manualContent?.trim() || undefined,
+    contentFields: normalizeAcademicContentFields(section.contentFields),
+    formulaDrafts: normalizeAcademicFormulaDrafts(section.formulaDrafts),
+    dataComparison: normalizeAcademicDataComparison(section.dataComparison)
+  }));
   const demoParameters = {
     projectName: values.projectName?.trim() || undefined,
+    researchDirection: values.researchDirection?.trim() || undefined,
+    keywords: splitAcademicDemoKeywords(values.keywords),
+    organization: values.organization?.trim() || undefined,
+    team: values.team?.trim() || undefined,
+    coreConclusion: values.coreConclusion?.trim() || undefined,
     projectType: values.projectType ?? 'academic_research',
     audience: values.audience ?? 'judges',
     demoDurationMinutes: Number(values.demoDurationMinutes) || 5,
     visualStyle: values.visualStyle ?? 'academic_clean',
     enableLoadingAnimation: values.enableLoadingAnimation !== false,
     enableInteractiveSimulation: values.enableInteractiveSimulation !== false,
+    enabledSections,
+    sectionOrder: academicSections.map((section) => section.type),
+    sectionDepth,
+    sectionEntries,
     maxFormulaCount: Number(values.maxFormulaCount ?? 8),
     maxChartCount: Number(values.maxChartCount ?? 8),
     maxExperimentComparisonCount: Number(values.maxExperimentComparisonCount ?? 6),
@@ -15684,6 +16444,8 @@ function buildAcademicDemoFactoryTaskInput({
   const factoryRequest = {
     applicationType: 'digital_factory',
     factoryKind: 'academic_project_demo_factory',
+    templateId: template.templateId,
+    roleCode: template.roleCode,
     factoryName: template.name,
     itemCount: materialAttachments.length,
     maxItems: readFactoryMaxItems(factory),
@@ -15716,16 +16478,25 @@ function buildAcademicDemoFactoryTaskInput({
       demoParameters,
       materialCount: materialAttachments.length,
       instructions: [
-        '只处理 Word、PDF、Excel 和 CSV 项目资料；原始资料只在 PC 本地读取。',
-        '保守提取项目首页、研究背景、方法模型、公式引用、数据集说明、数据分析、实验对比、可视化演示、结论与价值。',
+        '只处理 Word、PDF、Excel 和 CSV 项目资料，每次最多 5 个文件；原始资料只在 PC 本地读取。',
+        '保守提取项目首页、研究背景、方法模型、数据与验证、结论与价值五个板块；公式归入方法模型，数据集、图表、实验对比和交互演示归入数据与验证。',
+        '用户在板块草稿中填写的内容优先级最高；系统只能补空，不能覆盖用户手动确认的内容。',
         'Excel/CSV 的数值统计由本地程序完成，模型只负责归类、解释和演示叙事草稿。',
         '识别不到或证据不足的内容必须进入待补充内容，不要编造数据、公式、实验结果、引用来源或团队信息。',
-        '最终输出本地 Demo 页面、demo-config.json、识别报告、待补充内容、数据分析摘要和 ZIP 演示包。'
+        '最终主产物只展示 Demo 演示页面和本地演示包 ZIP；内部报告和待补充内容放入 ZIP。'
       ]
     },
     null,
     2
   );
+}
+
+function splitAcademicDemoKeywords(value: string | undefined): string[] | undefined {
+  const keywords = value
+    ?.split(/[，,、;；\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return keywords?.length ? keywords.slice(0, 12) : undefined;
 }
 
 function readFactoryPlatformOptionsFromValue(value: unknown): DigitalFactoryPlatformOption[] {

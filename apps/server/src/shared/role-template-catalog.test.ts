@@ -186,6 +186,49 @@ test('server role template catalog is focused and production-oriented', () => {
     'AI质检视频工厂',
     'video factory must use the generic product name'
   );
+  const academicDemoTemplate = templateById.get('factory_academic_project_demo_v1');
+  assert.ok(academicDemoTemplate, 'academic demo factory template must exist');
+  const academicPrepNode = academicDemoTemplate.workflowGraph.nodes.find(
+    (node) => node.id === 'prepare_academic_materials'
+  );
+  assert.ok(academicPrepNode, 'academic demo factory must define a material preparation node');
+  assert.match(
+    String(academicPrepNode?.config?.code ?? ''),
+    /project_doc/,
+    'academic demo factory material preparation node must avoid the blocked token and keep a stable fallback kind'
+  );
+  assert.doesNotMatch(
+    String(academicPrepNode?.config?.code ?? ''),
+    /\bdocument\b/,
+    'academic demo factory material preparation node must not use the blocked document token'
+  );
+  const academicManifest = academicDemoTemplate.dependencyManifestFactory as {
+    demo?: { inputMode?: string; schemaVersion?: string; sectionTypes?: string[] };
+  };
+  assert.equal(academicManifest.demo?.schemaVersion, '1.0.0');
+  assert.equal(academicManifest.demo?.inputMode, 'section_entries');
+  assert.deepEqual(academicManifest.demo?.sectionTypes, [
+    'cover',
+    'research_background',
+    'method_model',
+    'data_analysis',
+    'conclusion_value'
+  ]);
+  assert.equal(
+    academicDemoTemplate.workflowGraph.nodes.find((node) => node.id === 'factory_input')?.config?.maxItems,
+    5
+  );
+  assert.match(
+    String(academicPrepNode?.config?.code ?? ''),
+    /project_doc/,
+    'academic demo factory material preparation node must avoid the blocked token and keep a stable fallback kind'
+  );
+  assert.doesNotMatch(
+    String(academicPrepNode?.config?.code ?? ''),
+    /\bdocument\b/,
+    'academic demo factory material preparation node must not use the blocked document token'
+  );
+
   const videoFactoryTemplate = templateById.get('factory_medical_case_video_screening_v1');
   assert.ok(videoFactoryTemplate, 'video factory template must exist');
   const videoFactoryDependencyManifest = buildRoleTemplateDependencyManifest({
@@ -317,7 +360,12 @@ test('server role template catalog is focused and production-oriented', () => {
         `${template.templateId} must define a known factory manifest kind`
       );
       const batch = readRecord(factoryManifest.batch);
-      assert.equal(batch?.maxItems, 50, `${template.templateId} factory batch maxItems must be 50`);
+      const expectedMaxItems = template.templateId === 'factory_academic_project_demo_v1' ? 5 : 50;
+      assert.equal(
+        batch?.maxItems,
+        expectedMaxItems,
+        `${template.templateId} factory batch maxItems must be ${expectedMaxItems}`
+      );
       if (factoryManifest.kind === 'cross_border_product_image_factory') {
         const promptControls = readRecord(factoryManifest.promptControls);
         assert.ok(promptControls, `${template.templateId} must define prompt control fields`);

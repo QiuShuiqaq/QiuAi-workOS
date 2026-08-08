@@ -1567,6 +1567,109 @@ body,
   gap: 10px;
 }
 
+.factory-academic-section-editor {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fbfcff;
+}
+
+.factory-academic-section-editor .ant-collapse {
+  background: transparent;
+}
+
+.factory-academic-section-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.factory-academic-section-summary {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fbfcff;
+}
+
+.factory-academic-section-card-list {
+  display: grid;
+  gap: 8px;
+}
+
+.factory-academic-section-card {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.factory-academic-section-card-main {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.factory-academic-section-card-main .ant-typography {
+  max-width: 100%;
+}
+
+.academic-section-editor-form {
+  max-height: min(68vh, 720px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.academic-editor-toolbar {
+  display: grid;
+  grid-template-columns: 120px 140px minmax(0, 1fr);
+  gap: 12px;
+  align-items: end;
+}
+
+.academic-editor-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 14px;
+}
+
+.academic-editor-field-grid .ant-form-item:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.academic-formula-editor-list {
+  display: grid;
+  gap: 10px;
+}
+
+.academic-formula-editor-item {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fbfcff;
+}
+
+.academic-editor-source-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px dashed #bfd1e5;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
 .factory-console-upload {
   flex: 0 0 auto;
 }

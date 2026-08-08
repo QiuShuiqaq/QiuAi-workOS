@@ -57,3 +57,73 @@ Prisma CLI 固定在 6.x 线，匹配当前 Node 20 基线。
 ```bat
 .\tools\npm-local.cmd run infra:up
 ```
+
+## 一键启动本地 Dev
+
+首次初始化本地数据库时执行：
+
+```bat
+.\tools\start-local-dev.cmd -Bootstrap
+```
+
+日常启动执行：
+
+```bat
+.\tools\start-local-dev.cmd
+```
+
+也可以通过 npm 快捷命令启动：
+
+```bat
+.\tools\npm-local.cmd run dev:local
+```
+
+脚本会自动：
+
+- 检查 Docker Desktop；
+- 启动本地 PostgreSQL 和 Redis；
+- 执行未完成的 Prisma migration；
+- 启动 API、web-console 和 admin-console；
+- 将日志写入 `.local/dev-logs`。
+
+当前本地端口：
+
+- web-console：`http://127.0.0.1:3001`
+- admin-console：`http://127.0.0.1:3200`
+- API：`http://127.0.0.1:4000`
+
+需要同时启动 PC 桌面端时：
+
+```bat
+.\tools\start-local-dev.cmd -Desktop
+```
+
+或：
+
+```bat
+.\tools\npm-local.cmd run dev:local:pc
+```
+
+需要清空 PC 桌面端本地数据后再启动：
+
+```bat
+.\tools\start-local-dev.cmd -Desktop -ResetDesktopData
+```
+
+停止本地服务：
+
+```bat
+.\tools\stop-local-dev.cmd
+```
+
+或：
+
+```bat
+.\tools\npm-local.cmd run dev:local:stop
+```
+
+停止本地服务并关闭 Docker 容器：
+
+```bat
+.\tools\stop-local-dev.cmd -DownInfra
+```

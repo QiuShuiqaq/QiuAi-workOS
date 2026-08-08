@@ -1699,8 +1699,10 @@ async function executeWorkflowRuntimeNode(input: {
 }
 
 function completeWorkflowRuntimeDataNode(input: {
+  task: DesktopTaskDetail;
   node: WorkflowGraphNode;
   pool: WorkflowVariablePool;
+  createdAt: string;
   currentResponse: DesktopModelChatResponse;
   primaryProfile: ModelProfile;
 }): Promise<{
@@ -1714,6 +1716,11 @@ function completeWorkflowRuntimeDataNode(input: {
   outputVariables: string[];
   message: string;
 }> {
+  const academicDemoMaterialsResult = completeWorkflowRuntimeAcademicDemoMaterialsNode(input);
+  if (academicDemoMaterialsResult) {
+    return Promise.resolve(academicDemoMaterialsResult);
+  }
+
   const mode = readWorkflowRuntimeDataMode(input.node);
   if (mode === 'template') {
     return completeWorkflowRuntimeTemplateNode(input);
@@ -1722,6 +1729,72 @@ function completeWorkflowRuntimeDataNode(input: {
     return completeWorkflowRuntimeCodeNode(input);
   }
   return completeWorkflowRuntimeAssignNode(input);
+}
+
+function completeWorkflowRuntimeAcademicDemoMaterialsNode(input: {
+  task: DesktopTaskDetail;
+  node: WorkflowGraphNode;
+  pool: WorkflowVariablePool;
+  createdAt: string;
+  currentResponse: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+}): WorkflowRuntimeNodeResult | undefined {
+  const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
+  if (readWorkflowRuntimeString(factoryRequest?.factoryKind) !== 'academic_project_demo_factory') {
+    return undefined;
+  }
+  if (input.node.id !== 'prepare_academic_materials') {
+    return undefined;
+  }
+
+  const materials = readAcademicDemoRuntimeFiles(factoryRequest, input.pool.get('start.files'));
+  const demoParameters = isWorkflowRuntimeRecord(factoryRequest?.demoParameters)
+    ? (factoryRequest?.demoParameters as Record<string, unknown>)
+    : {};
+  const summary = `Academic demo materials prepared: ${materials.length} file(s).`;
+  const outputRefs: string[] = [];
+  const outputPayload = {
+    factory_request: factoryRequest ?? {},
+    academic_materials: materials,
+    demo_parameters: demoParameters
+  };
+
+  for (const [key, value] of Object.entries(outputPayload)) {
+    input.pool.set(key, value as WorkflowRuntimeValue);
+    outputRefs.push(key);
+    input.pool.set(`${input.node.id}.${key}`, value as WorkflowRuntimeValue);
+    outputRefs.push(`${input.node.id}.${key}`);
+  }
+  input.pool.set(`${input.node.id}.text`, summary);
+  input.pool.set(`${input.node.id}.result`, outputPayload as unknown as WorkflowRuntimeValue);
+  input.pool.set(`${input.node.id}.json`, outputPayload as unknown as WorkflowRuntimeValue);
+  input.pool.set('runtime.previous_text', summary);
+
+  return {
+    response: {
+      ...input.currentResponse,
+      content: input.currentResponse.content || summary
+    },
+    primaryProfile: input.primaryProfile,
+    logs: [
+      createLog(
+        input.task.taskId,
+        'info',
+        'WORKFLOW_RUNTIME_ACADEMIC_DEMO_MATERIALS_PREPARED',
+        summary,
+        input.createdAt,
+        sanitizeLogSuffix(input.node.id),
+        {
+          materials: materials.length
+        }
+      )
+    ],
+    usedToolIds: [],
+    generatedArtifacts: [],
+    inputVariables: input.node.inputVariables ?? ['factory_request', 'start.files', 'knowledge_context'],
+    outputVariables: [...new Set([...outputRefs, `${input.node.id}.text`, `${input.node.id}.result`, `${input.node.id}.json`])],
+    message: summary
+  };
 }
 
 function completeWorkflowRuntimeInputNode(input: {
@@ -4711,7 +4784,7 @@ async function invokeWorkflowRuntimeAcademicDemoExtractionNode(input: {
   }
 
   const parameters = normalizeAcademicDemoParameters(factoryRequest?.demoParameters ?? factoryRequest);
-  const materialFiles = readAcademicDemoRuntimeFiles(factoryRequest, input.pool.get('start.files')).slice(0, 50);
+  const materialFiles = readAcademicDemoRuntimeFiles(factoryRequest, input.pool.get('start.files')).slice(0, 5);
   const startedLog = createLog(
     input.task.taskId,
     'info',
@@ -4959,7 +5032,7 @@ function readAcademicDemoRuntimeFiles(
       fileType,
       size: readFactoryRuntimeNumber(record.size ?? record.sizeBytes)
     }];
-  });
+  }).slice(0, 5);
 }
 
 function readAcademicDemoFileType(nameOrPath: string): AcademicDemoSource['fileType'] | undefined {
@@ -5091,6 +5164,7 @@ async function runAcademicDemoStructuredExtractionModel(input: {
         'You are the structured extraction node for QiuAI WorkOS AI学术Demo工厂.',
         'Return valid JSON only. Do not add markdown fences.',
         'Be conservative: only extract claims, formulas, datasets, metrics, conclusions, teams, and organizations that have clear evidence in the provided sources.',
+        'Use exactly five section types: cover, research_background, method_model, data_analysis, conclusion_value. Put formulas under method_model. Put dataset details, charts, experiment comparisons, and interactive demo content under data_analysis.',
         'If a section is unclear, put it into unresolvedItems. Never invent data, formulas, citations, organizations, methods, or experiment results.'
       ].join('\n')
     },
@@ -5199,7 +5273,8 @@ async function writeAcademicDemoPackageArtifacts(input: {
     action: DesktopToolInvocationAction,
     output: Record<string, unknown> | undefined,
     title: string,
-    archivePath?: string
+    archivePath?: string,
+    options?: { expose?: boolean; includeInZip?: boolean }
   ) => {
     const artifact = buildGeneratedArtifactFromToolResult({
       taskId: input.task.taskId,
@@ -5214,8 +5289,10 @@ async function writeAcademicDemoPackageArtifacts(input: {
       return undefined;
     }
     const titledArtifact = { ...artifact, title };
-    generatedArtifacts.push(titledArtifact);
-    if (artifact.localPath) {
+    if (options?.expose !== false) {
+      generatedArtifacts.push(titledArtifact);
+    }
+    if (artifact.localPath && options?.includeInZip !== false) {
       packageFiles.push({ localPath: artifact.localPath, archivePath: archivePath ?? title });
     }
     return titledArtifact.localPath;
@@ -5240,7 +5317,14 @@ async function writeAcademicDemoPackageArtifacts(input: {
     });
     usedToolIds.add('local-filesystem');
     if (configResult.ok) {
-      packageValue.configPath = pushArtifact('local-filesystem', 'filesystem.write_text_file', configResult.output, 'demo-config.json', 'demo-config.json');
+      packageValue.configPath = pushArtifact(
+        'local-filesystem',
+        'filesystem.write_text_file',
+        configResult.output,
+        'demo-config.json',
+        'demo-config.json',
+        { expose: false }
+      );
     } else {
       logs.push(createLog(input.task.taskId, 'warning', 'WORKFLOW_RUNTIME_ACADEMIC_DEMO_CONFIG_WRITE_FAILED', configResult.message ?? 'demo-config write failed.', input.createdAt));
     }
@@ -5274,7 +5358,14 @@ async function writeAcademicDemoPackageArtifacts(input: {
       allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
     });
     if (reportResult.ok) {
-      packageValue.reportPath = pushArtifact('local-filesystem', 'filesystem.write_text_file', reportResult.output, '识别报告.md', 'reports/识别报告.md');
+      packageValue.reportPath = pushArtifact(
+        'local-filesystem',
+        'filesystem.write_text_file',
+        reportResult.output,
+        '识别报告.md',
+        'reports/识别报告.md',
+        { expose: false }
+      );
     }
 
     const unresolvedResult = await input.desktopToolInvoker({
@@ -5289,7 +5380,14 @@ async function writeAcademicDemoPackageArtifacts(input: {
       allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
     });
     if (unresolvedResult.ok) {
-      packageValue.unresolvedPath = pushArtifact('local-filesystem', 'filesystem.write_text_file', unresolvedResult.output, '待补充内容.md', 'reports/待补充内容.md');
+      packageValue.unresolvedPath = pushArtifact(
+        'local-filesystem',
+        'filesystem.write_text_file',
+        unresolvedResult.output,
+        '待补充内容.md',
+        'reports/待补充内容.md',
+        { expose: false }
+      );
     }
   } else {
     logs.push(
@@ -5328,7 +5426,14 @@ async function writeAcademicDemoPackageArtifacts(input: {
     });
     usedToolIds.add('office-document');
     if (dataSummaryResult.ok) {
-      packageValue.dataSummaryPath = pushArtifact('office-document', 'spreadsheet.write_xlsx', dataSummaryResult.output, '数据分析摘要.xlsx', 'spreadsheets/数据分析摘要.xlsx');
+      packageValue.dataSummaryPath = pushArtifact(
+        'office-document',
+        'spreadsheet.write_xlsx',
+        dataSummaryResult.output,
+        '数据分析摘要.xlsx',
+        'spreadsheets/数据分析摘要.xlsx',
+        { expose: false }
+      );
     } else {
       logs.push(createLog(input.task.taskId, 'warning', 'WORKFLOW_RUNTIME_ACADEMIC_DEMO_DATA_XLSX_FAILED', dataSummaryResult.message ?? 'data summary xlsx write failed.', input.createdAt));
     }
@@ -5363,7 +5468,14 @@ async function writeAcademicDemoPackageArtifacts(input: {
     });
     usedToolIds.add('local-filesystem');
     if (zipResult.ok) {
-      packageValue.zipPath = pushArtifact('local-filesystem', 'filesystem.package_zip', zipResult.output, '学术Demo演示包.zip', '学术Demo演示包.zip');
+      packageValue.zipPath = pushArtifact(
+        'local-filesystem',
+        'filesystem.package_zip',
+        zipResult.output,
+        '学术Demo演示包.zip',
+        '学术Demo演示包.zip',
+        { includeInZip: false }
+      );
     } else {
       logs.push(createLog(input.task.taskId, 'warning', 'WORKFLOW_RUNTIME_ACADEMIC_DEMO_ZIP_FAILED', zipResult.message ?? 'academic demo zip write failed.', input.createdAt));
     }
@@ -5422,76 +5534,8 @@ function buildAcademicDemoFactoryOutputItems(input: {
       title: '本地演示包 ZIP',
       status: 'qualified',
       outputPath: input.zipPath,
-      summary: '包含 demo-config、HTML 演示页、报告和数据摘要。',
+      summary: '包含 Demo 页面、demo-config、识别报告、待补充内容和数据摘要。',
       metadata: { order: 2 }
-    });
-  }
-  if (input.reportPath) {
-    push({
-      id: `${input.taskId}-academic-demo-report`,
-      kind: 'document',
-      title: '识别报告',
-      status: 'review_required',
-      outputPath: input.reportPath,
-      summary: '用于人工检查资料提取结果。',
-      metadata: { order: 3 }
-    });
-  }
-  if (input.unresolvedPath) {
-    push({
-      id: `${input.taskId}-academic-demo-unresolved`,
-      kind: 'document',
-      title: '待补充内容',
-      status: input.config.unresolvedItems.length > 0 ? 'review_required' : 'qualified',
-      outputPath: input.unresolvedPath,
-      summary: `待补充 ${input.config.unresolvedItems.length} 项。`,
-      metadata: { order: 4 }
-    });
-  }
-  if (input.dataSummaryPath) {
-    push({
-      id: `${input.taskId}-academic-demo-data-summary`,
-      kind: 'table',
-      title: '数据分析摘要',
-      status: 'review_required',
-      outputPath: input.dataSummaryPath,
-      summary: `分析 ${input.config.dataProfiles.length} 个表格。`,
-      metadata: { order: 5 }
-    });
-  }
-
-  for (const [index, section] of input.config.sections.entries()) {
-    push({
-      id: `${input.taskId}-academic-section-${section.type}`,
-      kind: 'record',
-      title: `${section.order}. ${section.title}`,
-      status: section.blocks.length > 0 ? 'review_required' : 'processing_error',
-      outputPath: input.configPath,
-      summary: `${section.blocks.length} 个内容块`,
-      reason: section.blocks.length > 0 ? undefined : '未识别到明确内容，需人工补充。',
-      metadata: { order: 20 + index, sectionType: section.type, blockCount: section.blocks.length }
-    });
-  }
-  for (const [index, chart] of input.config.charts.entries()) {
-    push({
-      id: `${input.taskId}-academic-chart-${chart.id}`,
-      kind: 'record',
-      title: `图表：${chart.title}`,
-      status: 'review_required',
-      outputPath: input.configPath,
-      summary: `${chart.type} / ${chart.dataSourceId}`,
-      metadata: { order: 100 + index, chartId: chart.id, chartType: chart.type }
-    });
-  }
-  for (const [index, formula] of input.config.formulas.entries()) {
-    push({
-      id: `${input.taskId}-academic-formula-${formula.id}`,
-      kind: 'record',
-      title: `公式：${formula.title ?? formula.id}`,
-      status: 'review_required',
-      outputPath: input.configPath,
-      summary: formula.latex,
-      metadata: { order: 130 + index, formulaId: formula.id }
     });
   }
 

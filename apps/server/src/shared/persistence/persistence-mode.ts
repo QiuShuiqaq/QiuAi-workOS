@@ -8,3 +8,10 @@ export function isDatabasePersistenceEnabled(): boolean {
   return getWorkosPersistenceMode() === 'database';
 }
 
+export function isLocalDevelopmentEnvironment(): boolean {
+  return (
+    process.env.WORKOS_DEPLOY_TARGET === 'local' &&
+    process.env.APP_ENV === 'local' &&
+    process.env.NODE_ENV !== 'production'
+  );
+}

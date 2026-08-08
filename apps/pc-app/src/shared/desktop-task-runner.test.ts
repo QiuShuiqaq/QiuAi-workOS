@@ -1983,6 +1983,294 @@ assert.ok(
   )
 );
 
+const academicDemoCompatibilityTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-academic-demo-compat-001',
+    roleCode: 'academic-demo-factory',
+    roleName: 'AI 学术 Demo 工厂',
+    title: 'Academic demo compatibility',
+    input: JSON.stringify({
+      factory_request: {
+        factoryKind: 'academic_project_demo_factory',
+        demoParameters: {
+          projectType: 'academic_research',
+          audience: 'judges'
+        }
+      }
+    }),
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0,
+    executionContext: {
+      modelProfileIds: ['qiu-general-default'],
+      toolIds: [],
+      knowledgeBindingIds: [],
+      attachmentPaths: ['C:\\QiuAI\\input\\academic-demo.docx']
+    }
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    roleCode: 'academic-demo-factory',
+    name: 'AI 学术 Demo 工厂',
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      runtimePolicy: {
+        maxNodeExecutions: 8,
+        maxLoopIterations: 4,
+        requireApprovalBeforeTools: false
+      },
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'prepare_academic_materials',
+          type: 'data',
+          name: 'Prepare materials',
+          inputVariables: ['factory_request', 'start.files', 'knowledge_context'],
+          outputVariables: ['factory_request', 'academic_materials', 'demo_parameters'],
+          config: {
+            dataMode: 'code',
+            outputVariable: 'academic_materials',
+            code:
+              'const request = input.factory_request && typeof input.factory_request === "object" ? input.factory_request : {};\n' +
+              'const files = Array.isArray(input["start.files"]) ? input["start.files"] : [];\n' +
+              'return { factory_request: request, academic_materials: files.map((file, index) => ({ order: index + 1, name: file.name || `material-${index + 1}`, localPath: file.localPath || file.path || "", kind: file.kind || "document", file })), demo_parameters: request.demoParameters || {} };'
+          }
+        }
+      ],
+      edges: [
+        { id: 'start-prepare', sourceNodeId: 'start', targetNodeId: 'prepare_academic_materials', condition: { type: 'always' } }
+      ]
+    }
+  },
+  workspaceId: 'workspace-academic-demo-compat',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: [],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => ({
+    provider: request.profile.providerName,
+    modelName: request.profile.modelName,
+    content: 'Academic demo compatibility response.'
+  }),
+  completedAt: '2026-07-20T10:00:06.500Z'
+});
+
+assert.equal(academicDemoCompatibilityTask.task.state, 'completed');
+assert.ok(
+  academicDemoCompatibilityTask.task.executionLogs.some(
+    (log) => log.eventType === 'WORKFLOW_RUNTIME_ACADEMIC_DEMO_MATERIALS_PREPARED'
+  )
+);
+assert.ok(
+  academicDemoCompatibilityTask.task.executionLogs.every(
+    (log) => !/blocked token: document/.test(log.message)
+  )
+);
+
+let academicDemoModelCallCount = 0;
+const academicDemoToolActions: string[] = [];
+const academicDemoTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-academic-demo-current-001',
+    roleCode: 'ai-factory-academic-project-demo-v1',
+    roleName: 'AI学术Demo工厂',
+    title: 'Academic demo current output',
+    input: JSON.stringify({
+      factory_request: {
+        applicationType: 'digital_factory',
+        factoryKind: 'academic_project_demo_factory',
+        demoParameters: {
+          projectName: '可控学术 Demo',
+          sectionEntries: [
+            {
+              type: 'cover',
+              enabled: true,
+              order: 1,
+              title: '项目首页',
+              manualContent: '用户确认的首页草稿。'
+            }
+          ]
+        },
+        attachments: [
+          {
+            id: 'source-1',
+            name: 'project.docx',
+            localPath: 'C:\\QiuAI\\input\\project.docx',
+            kind: 'project_document'
+          }
+        ]
+      }
+    }),
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0,
+    executionContext: {
+      modelProfileIds: ['qiu-general-default'],
+      toolIds: ['office-document', 'local-filesystem'],
+      knowledgeBindingIds: []
+    }
+  }),
+  rolePackage: {
+    ...workflowRolePackage,
+    roleCode: 'ai-factory-academic-project-demo-v1',
+    applicationType: 'digital_factory',
+    name: 'AI学术Demo工厂',
+    modelProfileIds: ['qiu-general-default'],
+    toolIds: ['office-document', 'local-filesystem'],
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      runtimePolicy: {
+        maxNodeExecutions: 16,
+        maxLoopIterations: 4,
+        requireApprovalBeforeTools: false
+      },
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'extract_academic_sections',
+          type: 'llm',
+          name: '提取项目结构',
+          modelProfileId: 'qiu-general-default',
+          inputVariables: ['factory_request', 'start.files', 'knowledge_context'],
+          outputVariables: ['academic_extraction'],
+          config: {
+            llmTaskType: 'structured_extraction',
+            outputMode: 'json',
+            timeoutMs: 120_000,
+            schema: {
+              project: { name: 'string' },
+              sections: [{ type: 'cover', blocks: [{ title: 'string', body: 'string' }] }],
+              formulas: [],
+              unresolvedItems: []
+            }
+          }
+        },
+        {
+          id: 'build_demo_config',
+          type: 'llm',
+          name: '生成Demo草稿',
+          inputVariables: ['academic_extraction'],
+          outputVariables: ['academic_demo_config'],
+          config: { llmTaskType: 'text', outputMode: 'json' }
+        },
+        {
+          id: 'write_demo_package',
+          type: 'tool',
+          name: '写入本地演示包',
+          toolId: 'local-filesystem',
+          inputVariables: ['academic_demo_config'],
+          outputVariables: ['academic_demo_package']
+        },
+        {
+          id: 'factory_output',
+          type: 'output',
+          name: '返回结果',
+          inputVariables: ['academic_demo_config', 'academic_demo_package'],
+          outputVariables: ['final_answer']
+        }
+      ],
+      edges: [
+        { id: 'start-extract', sourceNodeId: 'start', targetNodeId: 'extract_academic_sections', condition: { type: 'always' } },
+        { id: 'extract-build', sourceNodeId: 'extract_academic_sections', targetNodeId: 'build_demo_config', condition: { type: 'always' } },
+        { id: 'build-write', sourceNodeId: 'build_demo_config', targetNodeId: 'write_demo_package', condition: { type: 'always' } },
+        { id: 'write-output', sourceNodeId: 'write_demo_package', targetNodeId: 'factory_output', condition: { type: 'always' } }
+      ]
+    }
+  },
+  workspaceId: 'workspace-academic-demo-current',
+  modelProfiles,
+  tools,
+  enabledModelProfileIds: ['qiu-general-default'],
+  enabledToolIds: ['office-document', 'local-filesystem'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    academicDemoModelCallCount += 1;
+    const prompt = request.messages.map((message) => message.content).join('\n');
+    assert.match(prompt, /method_model/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: JSON.stringify({
+        project: { name: '可控学术 Demo' },
+        sections: [
+          {
+            type: 'cover',
+            blocks: [{ title: '模型草稿', body: '模型提取的首页内容。', confidence: 'high' }]
+          }
+        ],
+        formulas: [],
+        unresolvedItems: []
+      })
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    academicDemoToolActions.push(`${request.toolId}/${request.action}`);
+
+    if (request.action === 'document.extract_text') {
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          text: '项目资料中明确包含研究背景、方法模型和核心结论。'
+        }
+      };
+    }
+
+    if (request.action === 'filesystem.write_text_file') {
+      const fileName = String(request.input.fileName ?? '');
+      const localFileName = fileName.includes('demo-config')
+        ? 'demo-config.json'
+        : fileName.includes('-demo')
+          ? 'demo.html'
+          : fileName.includes('识别报告')
+            ? '识别报告.md'
+            : '待补充内容.md';
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          localPath: `C:\\QiuAI\\workspace\\academic-demo\\${localFileName}`
+        }
+      };
+    }
+
+    assert.equal(request.action, 'filesystem.package_zip');
+    assert.equal(request.toolId, 'local-filesystem');
+    assert.ok(Array.isArray(request.input.files));
+    assert.equal(request.input.files.length, 4);
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\academic-demo\\学术Demo演示包.zip'
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:07.000Z'
+});
+
+assert.equal(academicDemoModelCallCount, 1);
+assert.equal(academicDemoTask.task.state, 'completed');
+assert.deepEqual(
+  academicDemoTask.task.factoryOutputs?.map((item) => item.title),
+  ['Demo演示页面', '本地演示包 ZIP']
+);
+assert.deepEqual(
+  academicDemoTask.task.artifacts
+    .filter((artifact) => artifact.type !== 'report')
+    .map((artifact) => artifact.title),
+  ['Demo演示页面.html', '学术Demo演示包.zip']
+);
+assert.ok(academicDemoToolActions.includes('office-document/document.extract_text'));
+assert.equal(academicDemoToolActions.filter((item) => item === 'local-filesystem/filesystem.write_text_file').length, 4);
+assert.ok(academicDemoToolActions.includes('local-filesystem/filesystem.package_zip'));
+
 const timedOutCodeNodeTask = await runDesktopTask({
   task: createMockTaskDetail({
     taskId: 'task-runner-workflow-timed-out-code-001',

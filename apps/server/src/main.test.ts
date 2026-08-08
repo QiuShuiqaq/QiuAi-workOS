@@ -1558,3 +1558,73 @@ test('desktop release publishing drives public update checks', async () => {
     rmSync(uploadDir, { recursive: true, force: true });
   }
 });
+
+test('local development desktop catalog bypasses plan and capacity limits', async () => {
+  const previousEnvironment = {
+    persistenceMode: process.env.WORKOS_PERSISTENCE_MODE,
+    deployTarget: process.env.WORKOS_DEPLOY_TARGET,
+    appEnvironment: process.env.APP_ENV,
+    nodeEnvironment: process.env.NODE_ENV
+  };
+
+  process.env.WORKOS_PERSISTENCE_MODE = 'mock';
+  process.env.WORKOS_DEPLOY_TARGET = 'local';
+  process.env.APP_ENV = 'local';
+  process.env.NODE_ENV = 'test';
+
+  const app = await createApplication();
+  app.useLogger(false);
+
+  try {
+    await app.init();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/desktop/role-templates/free'
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body) as {
+      data: Array<{
+        id: string;
+        canInstall?: boolean;
+        allowedPlanCodes?: string[];
+      }>;
+      deviceCapacity?: unknown;
+    };
+    const enterpriseFactory = body.data.find(
+      (template) => template.id === 'factory_cross_border_product_images_v1'
+    );
+
+    assert.ok(enterpriseFactory);
+    assert.equal(enterpriseFactory.canInstall, true);
+    assert.ok(enterpriseFactory.allowedPlanCodes?.some((planCode) => planCode.startsWith('ENTERPRISE_')));
+    assert.equal(body.deviceCapacity, undefined);
+  } finally {
+    await app.close();
+
+    if (previousEnvironment.persistenceMode === undefined) {
+      delete process.env.WORKOS_PERSISTENCE_MODE;
+    } else {
+      process.env.WORKOS_PERSISTENCE_MODE = previousEnvironment.persistenceMode;
+    }
+
+    if (previousEnvironment.deployTarget === undefined) {
+      delete process.env.WORKOS_DEPLOY_TARGET;
+    } else {
+      process.env.WORKOS_DEPLOY_TARGET = previousEnvironment.deployTarget;
+    }
+
+    if (previousEnvironment.appEnvironment === undefined) {
+      delete process.env.APP_ENV;
+    } else {
+      process.env.APP_ENV = previousEnvironment.appEnvironment;
+    }
+
+    if (previousEnvironment.nodeEnvironment === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = previousEnvironment.nodeEnvironment;
+    }
+  }
+});

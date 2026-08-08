@@ -1,7 +1,10 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
-import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
+import {
+  isDatabasePersistenceEnabled,
+  isLocalDevelopmentEnvironment
+} from '../../shared/persistence/persistence-mode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import {
   normalizeWorkflowGraphOrFallback,
@@ -100,6 +103,30 @@ export class RoleService {
   ) {}
 
   async listTemplates(workspaceId: string) {
+    if (isLocalDevelopmentEnvironment()) {
+      if (!isDatabasePersistenceEnabled()) {
+        return {
+          data: this.store
+            .listRoleTemplates()
+            .filter((template) => template.status === 'PUBLISHED')
+            .map((template) => this.toTemplateSummary(template))
+        };
+      }
+
+      const templates = await this.prismaService.roleTemplate.findMany({
+        where: {
+          status: 'PUBLISHED'
+        },
+        orderBy: {
+          createdAt: 'asc'
+        }
+      });
+
+      return {
+        data: templates.map((template) => this.toTemplateSummary(template))
+      };
+    }
+
     const planCode = await this.resolveWorkspacePlanCode(workspaceId);
     if (!planCode) {
       return {
@@ -130,6 +157,35 @@ export class RoleService {
   }
 
   async listPublishedTemplatesForDesktop(workspaceId: string) {
+    if (isLocalDevelopmentEnvironment()) {
+      if (!isDatabasePersistenceEnabled()) {
+        return {
+          data: this.store
+            .listRoleTemplates()
+            .filter((template) => template.status === 'PUBLISHED')
+            .map((template) => this.toTemplateSummary(template, { canInstall: true }))
+        };
+      }
+
+      const templates = await this.prismaService.roleTemplate.findMany({
+        where: {
+          status: 'PUBLISHED'
+        },
+        orderBy: [
+          {
+            publishedAt: 'desc'
+          },
+          {
+            createdAt: 'asc'
+          }
+        ]
+      });
+
+      return {
+        data: templates.map((template) => this.toTemplateSummary(template, { canInstall: true }))
+      };
+    }
+
     const access = await this.resolveWorkspaceDesktopTemplateAccess(workspaceId);
     if (!access) {
       return {
@@ -177,6 +233,35 @@ export class RoleService {
   }
 
   async listPublicFreeTemplatesForDesktop() {
+    if (isLocalDevelopmentEnvironment()) {
+      if (!isDatabasePersistenceEnabled()) {
+        return {
+          data: this.store
+            .listRoleTemplates()
+            .filter((template) => template.status === 'PUBLISHED')
+            .map((template) => this.toTemplateSummary(template, { canInstall: true }))
+        };
+      }
+
+      const templates = await this.prismaService.roleTemplate.findMany({
+        where: {
+          status: 'PUBLISHED'
+        },
+        orderBy: [
+          {
+            publishedAt: 'desc'
+          },
+          {
+            createdAt: 'asc'
+          }
+        ]
+      });
+
+      return {
+        data: templates.map((template) => this.toTemplateSummary(template, { canInstall: true }))
+      };
+    }
+
     if (!isDatabasePersistenceEnabled()) {
       return {
         data: this.store
@@ -276,7 +361,9 @@ export class RoleService {
   }
 
   async installRole(workspaceId: string, input: InstallRoleInput) {
-    const planCode = await this.resolveWorkspacePlanCode(workspaceId);
+    const planCode = isLocalDevelopmentEnvironment()
+      ? 'LOCAL_DEVELOPMENT'
+      : await this.resolveWorkspacePlanCode(workspaceId);
     if (!planCode) {
       return undefined;
     }
@@ -687,6 +774,10 @@ export class RoleService {
       return false;
     }
 
+    if (isLocalDevelopmentEnvironment()) {
+      return true;
+    }
+
     const visibleWorkspaceIds = this.toStringArray(template.visibleWorkspaceIds);
     if (options.includeWorkspaceVisibility !== false && visibleWorkspaceIds.includes(workspaceId)) {
       return true;
@@ -705,6 +796,10 @@ export class RoleService {
   ): boolean {
     if (template.status !== 'PUBLISHED') {
       return false;
+    }
+
+    if (isLocalDevelopmentEnvironment()) {
+      return true;
     }
 
     const visibleWorkspaceIds = this.toStringArray(template.visibleWorkspaceIds);

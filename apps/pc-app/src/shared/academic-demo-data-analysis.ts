@@ -68,12 +68,16 @@ function profileTableSource(source: AcademicDemoSource): AcademicTableProfile[] 
   const headers = normalizeHeaders(rows[0], rows[1]?.length ?? rows[0].length);
   const records = rows.slice(1).filter((row) => row.some((cell) => cell.trim()));
   const columns = headers.map((header, index) => profileColumn(header, records.map((row) => row[index] ?? '')));
+  const previewRows = records.slice(0, 12).map((row) =>
+    Object.fromEntries(headers.map((header, index) => [header, row[index]?.trim() ?? '']))
+  );
   return [{
     dataSourceId: source.id,
     fileName: source.fileName,
     rowCount: records.length,
     columnCount: headers.length,
     columns,
+    previewRows,
     warnings: []
   }];
 }

@@ -1246,11 +1246,7 @@ const academicDemoSectionTypes = [
   'cover',
   'research_background',
   'method_model',
-  'formula_reference',
-  'dataset_overview',
   'data_analysis',
-  'experiment_comparison',
-  'interactive_visualization',
   'conclusion_value'
 ] as const;
 
@@ -1978,12 +1974,13 @@ function buildMedicalCaseVideoScreeningFactoryWorkflowGraph(): ServerRoleWorkflo
 }
 
 function buildAcademicProjectDemoFactoryManifest() {
+  const schemaVersion = '1.0.0';
   return {
     kind: 'academic_project_demo_factory',
-    version: '1.0.0',
+    version: schemaVersion,
     title: 'AI学术Demo工厂',
     batch: {
-      maxItems: 50,
+      maxItems: 5,
       itemUnit: 'project_material',
       itemSource: 'project_materials',
       inputFileKinds: ['document', 'pdf', 'spreadsheet', 'csv'],
@@ -1991,10 +1988,11 @@ function buildAcademicProjectDemoFactoryManifest() {
       tableExtensions: ['xlsx', 'csv']
     },
     demo: {
-      schemaVersion: '1.0.0',
+      schemaVersion,
       sectionTypes: academicDemoSectionTypes,
       defaultSectionOrder: academicDemoSectionTypes,
       editable: true,
+      inputMode: 'section_entries',
       launchMode: 'electron_demo_window',
       packageFormat: 'zip',
       keepLatestOnly: true
@@ -2038,8 +2036,8 @@ function buildAcademicProjectDemoFactoryManifest() {
     requiredCapabilities: ['text', 'document_extract', 'spreadsheet_read', 'local_file_write'],
     optionalCapabilities: [],
     ui: {
-      primaryActionLabel: '生成Demo',
-      uploadHint: '上传 Word、PDF、Excel 或 CSV 项目资料，单批最多 30 个文件；原始文件只在本机处理。',
+      primaryActionLabel: '生成 Demo 演示文件',
+      uploadHint: '上传 Word、PDF、Excel 或 CSV 项目资料，每次最多 5 个文件；原始文件只在本机处理。',
       demoLaunchLabel: '启动演示'
     }
   };
@@ -2057,12 +2055,12 @@ function buildAcademicProjectDemoFactoryWorkflowGraph(): ServerRoleWorkflowGraph
       id: 'factory_input',
       type: 'input',
       name: '接收项目资料',
-      instruction: '接收 Word、PDF、Excel、CSV 项目资料和 Demo 参数；单批最多 50 个文件，原始资料只在 PC 本地处理。',
+      instruction: '接收 Word、PDF、Excel、CSV 项目资料、全局参数和 5 个可编辑 Demo 板块；每次最多 5 个文件，原始资料只在 PC 本地处理。',
       inputVariables: ['start.text', 'start.files', 'start.documents', 'start.spreadsheets'],
       outputVariables: ['task_brief'],
       config: {
         acceptedFileKinds: ['document', 'pdf', 'spreadsheet', 'csv'],
-        maxItems: 50,
+        maxItems: 5,
         source: 'digital_factory'
       }
     },
@@ -2093,7 +2091,7 @@ function buildAcademicProjectDemoFactoryWorkflowGraph(): ServerRoleWorkflowGraph
           '  const name = String(file && file.name || "");\n' +
           '  const extension = name.split(".").pop().toLowerCase();\n' +
           '  return supported.has(extension);\n' +
-          '}).slice(0, 50).map((file, index) => ({ order: index + 1, name: file.name || `material-${index + 1}`, localPath: file.localPath || file.path || "", kind: file.kind || "document", file }));\n' +
+          '}).slice(0, 5).map((file, index) => ({ order: index + 1, name: file.name || `material-${index + 1}`, localPath: file.localPath || file.path || "", kind: file.kind || "project_doc", file }));\n' +
           'return { factory_request: request, academic_materials: materials, demo_parameters: request.demoParameters || {} };'
       }
     },
@@ -2101,7 +2099,7 @@ function buildAcademicProjectDemoFactoryWorkflowGraph(): ServerRoleWorkflowGraph
       id: 'extract_academic_sections',
       type: 'llm',
       name: '提取项目结构',
-      instruction: '根据本地提取的项目资料文本、表格概况和知识库上下文，保守提取 Demo 结构化内容。只能写入有明确来源的内容；证据不足的内容放入 unresolvedItems，不允许编造数据、公式、结论或引用。',
+      instruction: '根据本地提取的项目资料文本、表格概况、知识库上下文和用户板块草稿，保守提取项目首页、研究背景、方法模型、数据与验证、结论与价值五个板块。用户草稿优先，只能补空；证据不足的内容放入 unresolvedItems，不允许编造数据、公式、结论或引用。',
       modelProfileId: 'qiu-general-default',
       inputVariables: ['academic_materials', 'demo_parameters', 'knowledge_context'],
       outputVariables: ['academic_extraction'],
@@ -2118,14 +2116,12 @@ function buildAcademicProjectDemoFactoryWorkflowGraph(): ServerRoleWorkflowGraph
             team: 'string',
             coreConclusion: 'string'
           },
-          sections: [
-            {
-              type: 'cover',
-              title: 'string',
-              confidence: 'high | medium | low',
-              blocks: [{ type: 'text', title: 'string', body: 'string', sourceFileName: 'string' }]
-            }
-          ],
+          sections: academicDemoSectionTypes.map((type) => ({
+            type,
+            title: 'string',
+            confidence: 'high | medium | low',
+            blocks: [{ type: 'text', title: 'string', body: 'string', sourceFileName: 'string' }]
+          })),
           formulas: [{ latex: 'string', title: 'string', explanation: 'string', sourceFileName: 'string' }],
           unresolvedItems: [{ targetSectionType: 'cover', reason: 'needs_manual_input', suggestion: 'string' }]
         }
@@ -2135,7 +2131,7 @@ function buildAcademicProjectDemoFactoryWorkflowGraph(): ServerRoleWorkflowGraph
       id: 'build_demo_config',
       type: 'llm',
       name: '生成Demo草稿',
-      instruction: '把结构化提取结果整理为 demo-config.json 草稿。保持九个板块的固定结构，低置信度内容必须进入待补充清单；图表数据只能引用本地表格分析结果，不要臆造。',
+      instruction: '把结构化提取结果整理为 demo-config.json 草稿。保持五个板块的固定结构，低置信度内容必须进入待补充清单；图表和实验数据只能引用本地表格分析结果，不要臆造。',
       modelProfileId: 'qiu-general-default',
       inputVariables: ['academic_extraction', 'demo_parameters', 'academic_materials'],
       outputVariables: ['academic_demo_config', 'academic_demo_summary'],
@@ -2146,7 +2142,14 @@ function buildAcademicProjectDemoFactoryWorkflowGraph(): ServerRoleWorkflowGraph
         schema: {
           schemaVersion: '1.0.0',
           project: { name: 'string', keywords: ['string'] },
-          sections: [{ id: 'string', type: 'cover', title: 'string', enabled: true, order: 1, blocks: [] }],
+          sections: academicDemoSectionTypes.map((type, index) => ({
+            id: 'string',
+            type,
+            title: 'string',
+            enabled: true,
+            order: index + 1,
+            blocks: []
+          })),
           charts: [],
           formulas: [],
           unresolvedItems: []
@@ -2175,7 +2178,7 @@ function buildAcademicProjectDemoFactoryWorkflowGraph(): ServerRoleWorkflowGraph
       id: 'factory_output',
       type: 'output',
       name: '返回结果',
-      instruction: '返回 Demo 草稿、识别报告、图表与公式清单、待补充内容和本地演示包，支持用户从输出队列启动演示。',
+      instruction: '只返回 Demo 演示页面和本地演示包 ZIP 两个主产物；内部报告、待补充内容和数据摘要放入 ZIP。',
       inputVariables: ['academic_demo_config', 'academic_demo_package', 'academic_demo_summary'],
       outputVariables: ['final_answer']
     }
@@ -4350,8 +4353,8 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     tools: ['office-document', 'local-filesystem'],
     skills: [
       skill('academic_material_extraction', '资料保守提取', '从 Word、PDF、Excel 和 CSV 中提取明确可归类的信息，并保留来源依据。'),
-      skill('demo_structure_generation', 'Demo 结构生成', '按项目首页、研究背景、方法模型、公式、数据、实验、交互和结论生成固定结构草稿。'),
-      skill('local_demo_packaging', '本地演示打包', '把 demo-config、识别报告、图表与公式清单写入本地演示包，支持后续启动展示。')
+      skill('demo_structure_generation', 'Demo 结构生成', '按项目首页、研究背景、方法模型、数据与验证、结论与价值五个板块生成固定结构草稿。'),
+      skill('local_demo_packaging', '本地演示打包', '把 Demo 页面、demo-config 和内部审查资料写入本地演示包，支持后续启动展示。')
     ],
     workflowSteps: [
       {
@@ -4359,7 +4362,7 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
         order: 1,
         type: 'input',
         name: '接收项目资料',
-        instruction: '接收 Word、PDF、Excel、CSV 项目资料和 Demo 参数；原始资料只在 PC 本地处理。'
+        instruction: '接收 Word、PDF、Excel、CSV 项目资料、全局参数和五个可编辑 Demo 板块；每次最多 5 个文件，原始资料只在 PC 本地处理。'
       },
       {
         id: 'gather_academic_context',
@@ -4381,14 +4384,14 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
         order: 4,
         type: 'llm',
         name: '提取项目结构',
-        instruction: '调用文本模型保守提取项目名称、背景、方法、公式、数据、实验、结论和待补充内容，不编造来源不足的信息。'
+        instruction: '调用文本模型保守提取项目首页、研究背景、方法模型、数据与验证、结论与价值和待补充内容；公式归入方法模型，数据集、图表、实验对比和交互演示归入数据与验证，不编造来源不足的信息。'
       },
       {
         id: 'build_demo_config',
         order: 5,
         type: 'llm',
         name: '生成Demo草稿',
-        instruction: '生成 demo-config.json 草稿、识别报告、图表建议、公式清单和待补充内容。'
+        instruction: '生成五个板块的 demo-config.json 草稿；低置信度内容进入待补充清单，图表和实验数据只引用本地表格分析结果。'
       },
       {
         id: 'write_demo_package',
@@ -4403,7 +4406,7 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
         order: 7,
         type: 'output',
         name: '返回结果',
-        instruction: '返回 Demo 草稿、识别报告、图表与公式清单、待补充内容和本地演示包。'
+        instruction: '只返回 Demo 演示页面和本地演示包 ZIP 两个主产物；识别报告、待补充内容、图表和公式清单放入 ZIP。'
       }
     ],
     workflowGraph: buildAcademicProjectDemoFactoryWorkflowGraph(),
@@ -4412,10 +4415,10 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
       '请根据这批项目资料生成一个适合 5 分钟现场投屏的学术项目 Demo。',
       '请读取项目文档和数据表，生成可编辑的研究展示 Demo 草稿，并列出需要人工补充的内容。'
     ],
-    outputFormat: '本地学术 Demo 包，包含 demo-config.json、识别报告、数据分析摘要、公式清单、待补充内容和演示包 ZIP。',
+    outputFormat: 'Demo 演示页面 + 本地演示包 ZIP；ZIP 内包含 demo-config.json、识别报告、数据分析摘要、公式清单和待补充内容。',
     allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_BASIC_MONTHLY'),
     approvalPolicy: '本工厂只生成演示草稿和本地展示包；项目结论、数据真实性、公式和引用来源必须由用户人工确认后再公开展示。'
-  }
+  },
 ];
 
 const designedServerRoleTemplateCatalog: BaseServerRoleTemplateCatalogEntry[] = [
