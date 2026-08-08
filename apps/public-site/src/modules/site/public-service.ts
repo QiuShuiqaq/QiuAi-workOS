@@ -1863,7 +1863,7 @@ export async function getDownloadsPageData(lang: SiteLanguage): Promise<Download
   const workosWindowsItem = await buildWorkosWindowsDownloadItem(lang);
   const otherItems = (items.length ? items : defaultResourceItems)
     .map((item) => ("projectName" in item ? localizeManagedDownloadItem(item, lang) : localizeResource(item, lang)))
-    .filter((item) => item.slug !== workosWindowsItem.slug);
+    .filter((item) => item.slug !== workosWindowsItem.slug && !isLegacyDesktopDownloadItem(item));
 
   return {
     title: lang === "zh" ? "下载 QiuAI WorkOS" : "Download QiuAI WorkOS",
@@ -1882,6 +1882,19 @@ export async function getDownloadsPageData(lang: SiteLanguage): Promise<Download
           ],
     items: [workosWindowsItem, ...otherItems],
   };
+}
+
+const legacyDesktopDownloadSlugs = new Set(["qiuai-windows-client"]);
+
+function isLegacyDesktopDownloadItem(item: SiteResourceItem) {
+  const title = item.title.toLowerCase();
+  const fileName = item.fileName.toLowerCase();
+
+  return (
+    legacyDesktopDownloadSlugs.has(item.slug) ||
+    fileName === "qiuai-windows-client.exe" ||
+    (title.includes("qiuai windows") && !title.includes("workos"))
+  );
 }
 
 function buildWorkosGuideItems(): EditableDocItem[] {
