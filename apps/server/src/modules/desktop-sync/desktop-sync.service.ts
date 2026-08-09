@@ -13,6 +13,7 @@ import { Prisma } from '@prisma/client';
 
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
 import { demoPlans } from '../../shared/mock/platform-seed';
+import { isLocalDevelopmentUnlimitedEnabled } from '../../shared/local-development-mode';
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { listServerToolActionCatalog } from '../../shared/tool-action-catalog';
@@ -189,6 +190,20 @@ export class DesktopSyncService {
   ) {
     const deletedTemplateIds = await this.roleService.listDeletedTemplateIds(installedTemplateIds);
 
+    if (isLocalDevelopmentUnlimitedEnabled()) {
+      if (isDatabasePersistenceEnabled()) {
+        await this.requireDatabaseDeviceTokenForWorkspace(workspaceId, deviceToken);
+      } else {
+        this.assertMockWorkspace(workspaceId);
+        this.requireMockDeviceTokenForWorkspace(workspaceId, deviceToken, new Date());
+      }
+
+      return {
+        ...(await this.roleService.listAllPublishedTemplatesForLocalDevelopment()),
+        deletedTemplateIds
+      };
+    }
+
     if (isDatabasePersistenceEnabled()) {
       await this.requireDatabaseDeviceTokenForWorkspace(workspaceId, deviceToken);
       const [response, deviceCapacity] = await Promise.all([
@@ -226,6 +241,17 @@ export class DesktopSyncService {
   }
 
   async listPublicFreeRoleTemplates(installedTemplateIds: string[] = []) {
+    if (isLocalDevelopmentUnlimitedEnabled()) {
+      const [response, deletedTemplateIds] = await Promise.all([
+        this.roleService.listAllPublishedTemplatesForLocalDevelopment(),
+        this.roleService.listDeletedTemplateIds(installedTemplateIds)
+      ]);
+      return {
+        ...response,
+        deletedTemplateIds
+      };
+    }
+
     const [response, deletedTemplateIds, deviceCapacity] = await Promise.all([
       this.roleService.listPublicFreeTemplatesForDesktop(),
       this.roleService.listDeletedTemplateIds(installedTemplateIds),
@@ -1060,6 +1086,10 @@ export class DesktopSyncService {
     workspaceId: string,
     snapshot: DesktopRuntimeSnapshot
   ): Promise<DesktopRuntimeSnapshot> {
+    if (isLocalDevelopmentUnlimitedEnabled()) {
+      return snapshot;
+    }
+
     const [authorizedTemplates, deviceCapacity] = await Promise.all([
       this.roleService.listPublishedTemplatesForDesktop(workspaceId),
       this.resolveDesktopDeviceCapacity(workspaceId)

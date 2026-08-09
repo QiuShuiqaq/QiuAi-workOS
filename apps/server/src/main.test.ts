@@ -1575,18 +1575,22 @@ test('desktop release publishing drives public update checks', async () => {
   }
 });
 
-test('local environment variables do not bypass desktop template authorization', async () => {
+test('desktop template authorization requires an explicit loopback local-development switch', async () => {
   const previousEnvironment = {
     persistenceMode: process.env.WORKOS_PERSISTENCE_MODE,
     deployTarget: process.env.WORKOS_DEPLOY_TARGET,
     appEnvironment: process.env.APP_ENV,
-    nodeEnvironment: process.env.NODE_ENV
+    nodeEnvironment: process.env.NODE_ENV,
+    serverHost: process.env.SERVER_HOST,
+    localUnlimited: process.env.WORKOS_LOCAL_DEV_UNLIMITED
   };
 
   process.env.WORKOS_PERSISTENCE_MODE = 'mock';
   process.env.WORKOS_DEPLOY_TARGET = 'local';
   process.env.APP_ENV = 'local';
-  process.env.NODE_ENV = 'test';
+  process.env.NODE_ENV = 'development';
+  process.env.SERVER_HOST = '127.0.0.1';
+  delete process.env.WORKOS_LOCAL_DEV_UNLIMITED;
 
   const app = await createApplication();
   app.useLogger(false);
@@ -1606,6 +1610,117 @@ test('local environment variables do not bypass desktop template authorization',
 
     assert.ok(enterpriseFactory);
     assert.equal(enterpriseFactory.canInstall, false);
+
+    process.env.WORKOS_LOCAL_DEV_UNLIMITED = 'true';
+    process.env.SERVER_HOST = '0.0.0.0';
+    const nonLoopbackResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/desktop/role-templates/free'
+    });
+    assert.equal(nonLoopbackResponse.statusCode, 200);
+    assert.equal(
+      JSON.parse(nonLoopbackResponse.body).data.find(
+        (template: { id: string }) => template.id === 'factory_cross_border_product_images_v1'
+      )?.canInstall,
+      false
+    );
+
+    process.env.SERVER_HOST = '127.0.0.1';
+    const unlimitedResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/desktop/role-templates/free'
+    });
+    assert.equal(unlimitedResponse.statusCode, 200);
+    const unlimitedCatalog = JSON.parse(unlimitedResponse.body) as {
+      data: Array<{ id: string; canInstall?: boolean }>;
+      deviceCapacity?: unknown;
+    };
+    assert.equal(
+      unlimitedCatalog.data.find(
+        (template) => template.id === 'factory_cross_border_product_images_v1'
+      )?.canInstall,
+      true
+    );
+    assert.equal(unlimitedCatalog.deviceCapacity, undefined);
+
+    const localBindingCodeResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/workspaces/enterprise/desktop/binding-codes',
+      headers: {
+        cookie: 'mock-session=enterprise'
+      },
+      payload: {}
+    });
+    assert.equal(localBindingCodeResponse.statusCode, 201);
+    const localBindingCode = JSON.parse(localBindingCodeResponse.body).data.bindingCode as string;
+
+    const localRedeemResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/desktop/bindings/redeem',
+      payload: {
+        bindingCode: localBindingCode,
+        runtimeId: 'local-unlimited-runtime',
+        deviceId: 'local-unlimited-device',
+        deviceName: 'Local Unlimited Desktop',
+        platform: 'windows',
+        appVersion: '1.1.0'
+      }
+    });
+    assert.equal(localRedeemResponse.statusCode, 201);
+    const localDeviceToken = JSON.parse(localRedeemResponse.body).data.deviceToken as string;
+
+    const localSyncResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/workspaces/enterprise/desktop/runtimes/sync',
+      headers: {
+        'content-type': 'application/json',
+        'x-qiuai-device-token': localDeviceToken
+      },
+      payload: {
+        data: {
+          runtimeId: 'local-unlimited-runtime',
+          deviceId: 'local-unlimited-device',
+          deviceName: 'Local Unlimited Desktop',
+          platform: 'windows',
+          workspaceId: 'enterprise',
+          appVersion: '1.1.0',
+          rolePackages: [
+            {
+              roleCode: 'local-factory-a',
+              templateId: 'factory_cross_border_product_images_v1',
+              version: '1.0.0',
+              state: 'running',
+              installedAt: '2026-08-10T00:00:00.000Z',
+              taskCount: 0
+            },
+            {
+              roleCode: 'local-factory-b',
+              templateId: 'factory_medical_case_video_screening_v1',
+              version: '1.0.0',
+              state: 'running',
+              installedAt: '2026-08-10T00:00:00.000Z',
+              taskCount: 0
+            }
+          ],
+          tools: [],
+          tasks: []
+        }
+      }
+    });
+    assert.equal(localSyncResponse.statusCode, 201);
+
+    process.env.NODE_ENV = 'production';
+    const productionResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/desktop/role-templates/free'
+    });
+    assert.equal(productionResponse.statusCode, 200);
+    assert.equal(
+      JSON.parse(productionResponse.body).data.find(
+        (template: { id: string }) => template.id === 'factory_cross_border_product_images_v1'
+      )?.canInstall,
+      false
+    );
   } finally {
     await app.close();
 
@@ -1631,6 +1746,18 @@ test('local environment variables do not bypass desktop template authorization',
       delete process.env.NODE_ENV;
     } else {
       process.env.NODE_ENV = previousEnvironment.nodeEnvironment;
+    }
+
+    if (previousEnvironment.serverHost === undefined) {
+      delete process.env.SERVER_HOST;
+    } else {
+      process.env.SERVER_HOST = previousEnvironment.serverHost;
+    }
+
+    if (previousEnvironment.localUnlimited === undefined) {
+      delete process.env.WORKOS_LOCAL_DEV_UNLIMITED;
+    } else {
+      process.env.WORKOS_LOCAL_DEV_UNLIMITED = previousEnvironment.localUnlimited;
     }
   }
 });

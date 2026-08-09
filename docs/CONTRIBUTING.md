@@ -174,6 +174,12 @@ AI 相关能力还需要记录：
 5. 检查权限、审计、成本和日志影响。
 6. 提交代码评审。
 
+## 开发与发布边界
+
+日常开发固定在 `dev` 分支完成；`main` 只保留已通过本地验证、允许部署到真实服务器的版本。生产服务器只能拉取 `main`，Windows 正式安装包也只能从对应的 `main` 提交构建。
+
+本地开发的数据库、缓存、日志、桌面端用户数据和 `.env` 必须与生产隔离，并且不得提交。详细启动、验证和发布步骤见 `docs/DEVELOPMENT_RELEASE_WORKFLOW.md` 与 `docs/decisions/ADR-023-local-development-and-release-branches.md`。
+
 ## PR 检查清单
 
 提交前确认：

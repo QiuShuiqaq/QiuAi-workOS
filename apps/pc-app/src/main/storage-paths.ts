@@ -18,8 +18,10 @@ export function resolveDesktopStoragePathInfo(input: {
   appDataPath?: string;
 }): DesktopStoragePathInfo {
   if (!input.isPackaged) {
+    const devDataPath = process.env.QIUAI_PC_DEV_USER_DATA_DIR?.trim();
+
     return {
-      dataPath: path.resolve(process.cwd(), '.local', 'user-data'),
+      dataPath: devDataPath ? path.resolve(devDataPath) : path.resolve(process.cwd(), '.local', 'user-data'),
       storageMode: 'fallback_user_dir'
     };
   }

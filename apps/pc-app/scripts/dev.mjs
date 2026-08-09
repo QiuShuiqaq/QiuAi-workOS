@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 const require = createRequire(import.meta.url);
 
@@ -101,11 +101,17 @@ if (process.env.QIUAI_PC_DEV_DRY_RUN === '1') {
 }
 
 if (process.env.QIUAI_PC_RESET_USER_DATA === '1') {
-  const localDir = join(process.cwd(), '.local');
-  const userDataDir = join(localDir, 'user-data');
+  const configuredUserDataDir = process.env.QIUAI_PC_DEV_USER_DATA_DIR?.trim();
+  const userDataDir = configuredUserDataDir
+    ? resolve(configuredUserDataDir)
+    : join(process.cwd(), '.local', 'user-data');
+  const userDataParentDir = dirname(userDataDir);
   if (existsSync(userDataDir)) {
-    mkdirSync(localDir, { recursive: true });
-    const backupDir = join(localDir, `user-data.bak-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+    mkdirSync(userDataParentDir, { recursive: true });
+    const backupDir = join(
+      userDataParentDir,
+      `${basename(userDataDir)}.bak-${new Date().toISOString().replace(/[:.]/g, '-')}`
+    );
     renameSync(userDataDir, backupDir);
     console.log(`Moved stale Electron user data to ${backupDir}`);
   }

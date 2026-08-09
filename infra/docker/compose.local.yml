@@ -10,7 +10,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ../../.local/docker/postgres:/var/lib/postgresql/data
+      - ${QIUAI_LOCAL_RUNTIME_DIR:-../../.local/docker}/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U qiuai -d qiuai_workos"]
       interval: 10s
@@ -24,7 +24,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - ../../.local/docker/redis:/data
+      - ${QIUAI_LOCAL_RUNTIME_DIR:-../../.local/docker}/redis:/data
     command: ["redis-server", "--appendonly", "yes"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]

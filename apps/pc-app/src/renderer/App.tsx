@@ -30,6 +30,7 @@ import {
   RobotOutlined,
   SafetyCertificateOutlined,
   SettingOutlined,
+  SnippetsOutlined,
   RollbackOutlined,
   ReloadOutlined,
   MessageOutlined,
@@ -192,8 +193,18 @@ import siliconcloudLogoUrl from './assets/model-providers/siliconcloud-color.svg
 import tencentcloudLogoUrl from './assets/model-providers/tencentcloud-color.svg';
 import volcengineLogoUrl from './assets/model-providers/volcengine-color.svg';
 import zhipuLogoUrl from './assets/model-providers/zhipu-color.svg';
+import { PromptSnippetBoard } from './PromptSnippetBoard';
 
-type SectionKey = 'workbench' | 'factories' | 'roles' | 'logs' | 'models' | 'tools' | 'knowledge' | 'settings';
+type SectionKey =
+  | 'workbench'
+  | 'factories'
+  | 'roles'
+  | 'logs'
+  | 'snippets'
+  | 'models'
+  | 'tools'
+  | 'knowledge'
+  | 'settings';
 type AccountModalKey = 'enterprise' | 'help' | 'release' | 'download' | 'logout';
 type DesktopThemePreference = 'light' | 'system';
 type DesktopDensityPreference = 'comfortable' | 'compact';
@@ -488,6 +499,7 @@ const sectionItems: Array<{ key: SectionKey; icon: ReactNode; label: string }> =
   { key: 'factories', icon: <BankOutlined />, label: '数字工厂' },
   { key: 'roles', icon: <AppstoreOutlined />, label: '数字市场' },
   { key: 'logs', icon: <FileTextOutlined />, label: '日志' },
+  { key: 'snippets', icon: <SnippetsOutlined />, label: '标签库' },
   { key: 'models', icon: <ApiOutlined />, label: '模型' },
   { key: 'tools', icon: <ToolOutlined />, label: '工具' },
   { key: 'knowledge', icon: <DatabaseOutlined />, label: '知识库' },
@@ -4780,6 +4792,7 @@ export default function App() {
                   {selectedSection === 'factories' ? renderFactories() : null}
                   {selectedSection === 'roles' ? renderRoles() : null}
                   {selectedSection === 'logs' ? renderLogs() : null}
+                  {selectedSection === 'snippets' ? <PromptSnippetBoard /> : null}
                   {selectedSection === 'models' ? renderModels() : null}
                   {selectedSection === 'tools' ? renderTools() : null}
                   {selectedSection === 'knowledge' ? renderKnowledge() : null}
@@ -14031,6 +14044,10 @@ function sectionMeta(section: SectionKey) {
     logs: {
       title: '日志',
       description: '查看任务执行细节和排错信息。'
+    },
+    snippets: {
+      title: '标签库',
+      description: '保存常用提示词和文本，方便以后快速复制使用。'
     },
     models: {
       title: '模型',

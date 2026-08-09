@@ -208,7 +208,36 @@ export class RoleService {
     return {
       data: templates
         .filter((template) => this.isPublicDesktopTemplate(template))
-        .map((template) => this.toPublicDesktopTemplateSummary(template))
+      .map((template) => this.toPublicDesktopTemplateSummary(template))
+    };
+  }
+
+  async listAllPublishedTemplatesForLocalDevelopment() {
+    if (!isDatabasePersistenceEnabled()) {
+      return {
+        data: this.store
+          .listRoleTemplates()
+          .filter((template) => template.status === 'PUBLISHED')
+          .map((template) => this.toTemplateSummary(template, { canInstall: true }))
+      };
+    }
+
+    const templates = await this.prismaService.roleTemplate.findMany({
+      where: {
+        status: 'PUBLISHED'
+      },
+      orderBy: [
+        {
+          publishedAt: 'desc'
+        },
+        {
+          createdAt: 'asc'
+        }
+      ]
+    });
+
+    return {
+      data: templates.map((template) => this.toTemplateSummary(template, { canInstall: true }))
     };
   }
 
