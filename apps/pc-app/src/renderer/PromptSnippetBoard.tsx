@@ -1,12 +1,17 @@
 import {
+  CloudOutlined,
   CopyOutlined,
   DeleteOutlined,
   EditOutlined,
+  FireOutlined,
+  HeartOutlined,
   MoonOutlined,
   PlusOutlined,
   SearchOutlined,
   SnippetsOutlined,
-  StarOutlined
+  StarOutlined,
+  SunOutlined,
+  ThunderboltOutlined
 } from '@ant-design/icons';
 import Button from 'antd/es/button';
 import Empty from 'antd/es/empty';
@@ -46,7 +51,29 @@ interface PromptSnippetFormValues {
 }
 
 const promptSnippetStorageKey = 'qiuai.pc.prompt-snippets.v1';
-const promptSnippetDecorationVariants = ['star', 'moon', 'line', 'star-line'] as const;
+const promptSnippetDecorationVariants = ['star', 'moon', 'sun', 'cloud', 'bolt', 'fire', 'heart'] as const;
+type PromptSnippetDecoration = (typeof promptSnippetDecorationVariants)[number];
+
+function renderPromptSnippetDecoration(decoration: PromptSnippetDecoration) {
+  switch (decoration) {
+    case 'star':
+      return <StarOutlined />;
+    case 'moon':
+      return <MoonOutlined />;
+    case 'sun':
+      return <SunOutlined />;
+    case 'cloud':
+      return <CloudOutlined />;
+    case 'bolt':
+      return <ThunderboltOutlined />;
+    case 'fire':
+      return <FireOutlined />;
+    case 'heart':
+      return <HeartOutlined />;
+    default:
+      return null;
+  }
+}
 
 function createPromptSnippetId() {
   return `snippet_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -316,11 +343,7 @@ export function PromptSnippetBoard() {
             return (
               <article key={snippet.id} className={`prompt-snippet-card prompt-snippet-card-${decoration}`}>
                 <div className="prompt-snippet-decoration" aria-hidden="true">
-                  {decoration === 'star' || decoration === 'star-line' ? <StarOutlined /> : null}
-                  {decoration === 'moon' ? <MoonOutlined /> : null}
-                  {decoration === 'line' || decoration === 'star-line' ? (
-                    <span className="prompt-snippet-decoration-line" />
-                  ) : null}
+                  {renderPromptSnippetDecoration(decoration)}
                 </div>
                 <div className="prompt-snippet-card-header">
                   <div className="prompt-snippet-card-title-row">

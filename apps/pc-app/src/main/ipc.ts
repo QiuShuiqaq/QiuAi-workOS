@@ -35,6 +35,7 @@ import {
   writeTaskArtifactFile
 } from './artifact-store.js';
 import { invokeDesktopTool } from './desktop-tool.js';
+import { createArtifactPreviewUrl } from './artifact-preview.js';
 import {
   createWorkspaceBackupBundle,
   listWorkspaceBackupBundles,
@@ -73,6 +74,7 @@ const channels = {
   exportLocalFiles: 'qiuai:desktop:export-local-files',
   saveRemoteFileAs: 'qiuai:desktop:save-remote-file-as',
   invokeDesktopTool: 'qiuai:desktop:invoke-desktop-tool',
+  getArtifactPreviewUrl: 'qiuai:desktop:get-artifact-preview-url',
   openLocalPath: 'qiuai:desktop:open-local-path',
   openExternalUrl: 'qiuai:desktop:open-external-url',
   controlWindow: 'qiuai:desktop:control-window'
@@ -212,6 +214,9 @@ export function registerDesktopIpc() {
   });
   ipcMain.handle(channels.invokeDesktopTool, async (_, request) => {
     return invokeDesktopTool(getDesktopAppInfo().userDataPath, request);
+  });
+  ipcMain.handle(channels.getArtifactPreviewUrl, async (_, targetPath: string) => {
+    return createArtifactPreviewUrl(targetPath);
   });
   ipcMain.handle(channels.openLocalPath, async (_, targetPath: string) => {
     const normalizedPath = typeof targetPath === 'string' ? targetPath.trim() : '';

@@ -347,6 +347,26 @@ assert.equal(xlsxExtractResult.ok, true);
 assert.match(String(xlsxExtractResult.output?.text), /Acme/);
 assert.match(String(xlsxExtractResult.output?.text), /92/);
 
+const xlsxStructuredResult = await invokeDesktopTool(tempDir, {
+  workspaceId,
+  toolId: 'office-document',
+  action: 'spreadsheet.read_xlsx',
+  input: {
+    path: String(xlsxResult.output?.localPath)
+  }
+});
+
+assert.equal(xlsxStructuredResult.ok, true);
+assert.deepEqual(xlsxStructuredResult.output?.sheets, [
+  {
+    name: 'Sheet1',
+    rows: [
+      ['name', 'score'],
+      ['Acme', '92']
+    ]
+  }
+]);
+
 const markdownTableXlsxResult = await invokeDesktopTool(tempDir, {
   workspaceId,
   toolId: 'office-document',

@@ -165,6 +165,11 @@ export interface DesktopArtifactSummary {
   createdAt: string;
   remoteUrl?: string;
   localPath?: string;
+  format?: string;
+  mimeType?: string;
+  editable?: boolean;
+  sourcePayloadPath?: string;
+  revision?: number;
   factoryPreview?: FactoryArtifactPreview;
 }
 

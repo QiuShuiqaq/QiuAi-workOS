@@ -138,6 +138,8 @@ async function invokeOfficeDocumentTool(
   switch (request.action) {
     case 'document.extract_text':
       return extractDocumentText(request);
+    case 'spreadsheet.read_xlsx':
+      return await readSpreadsheetXlsx(request);
     case 'office.write_markdown_document':
       return writeOfficeMarkdownDocument(userDataPath, request);
     case 'office.write_docx_document':
@@ -869,6 +871,28 @@ async function extractDocumentText(request: DesktopToolInvocationRequest): Promi
       modifiedAt: stats.mtime.toISOString(),
       text: truncatedText,
       truncated: normalizedText.length > truncatedText.length
+    }
+  };
+}
+
+async function readSpreadsheetXlsx(request: DesktopToolInvocationRequest): Promise<DesktopToolInvocationResult> {
+  const filePath = readRequiredString(request.input.path, 'path');
+  assertReadPathAllowed(request, filePath);
+  const stats = statSync(filePath);
+
+  if (!stats.isFile() || path.extname(filePath).toLowerCase() !== '.xlsx') {
+    return fail(request, `Path is not an XLSX file: ${filePath}`);
+  }
+
+  const sheets = await extractXlsxSheets(filePath);
+  return {
+    toolId: request.toolId,
+    action: request.action,
+    ok: true,
+    output: {
+      path: filePath,
+      fileName: path.basename(filePath),
+      sheets
     }
   };
 }
@@ -2659,19 +2683,89 @@ async function extractPptxText(filePath: string): Promise<string> {
 }
 
 async function extractXlsxText(filePath: string): Promise<string> {
-  const zip = await JSZip.loadAsync(readFileSync(filePath));
-  const sharedStrings = await readZipXmlFiles(zip, /^xl\/sharedStrings\.xml$/);
-  const worksheets = await readZipXmlFiles(zip, /^xl\/worksheets\/sheet\d+\.xml$/);
-  const sharedText = sharedStrings.map(extractTextFromXml).filter(Boolean).join('\n');
-  const worksheetText = worksheets
-    .map((xml, index) => {
-      const text = extractTextFromXml(xml);
-      return text ? `Sheet ${index + 1}\n${text}` : '';
+  const sheets = await extractXlsxSheets(filePath);
+  return sheets
+    .map((sheet) => {
+      const rows = sheet.rows.map((row) => row.join(' | ')).join('\n');
+      return rows ? `${sheet.name}\n${rows}` : '';
     })
     .filter(Boolean)
     .join('\n\n');
+}
 
-  return [sharedText, worksheetText].filter(Boolean).join('\n\n');
+async function extractXlsxSheets(filePath: string): Promise<SpreadsheetWorkbookSheet[]> {
+  const zip = await JSZip.loadAsync(readFileSync(filePath));
+  const sharedStringXml = zip.file('xl/sharedStrings.xml');
+  const sharedStrings = sharedStringXml
+    ? parseXlsxSharedStrings(await sharedStringXml.async('string'))
+    : [];
+  const worksheetEntries = Object.values(zip.files)
+    .filter((file) => !file.dir && /^xl\/worksheets\/sheet\d+\.xml$/.test(file.name))
+    .sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true }));
+  const workbookXml = zip.file('xl/workbook.xml');
+  const sheetNames = workbookXml
+    ? parseXlsxSheetNames(await workbookXml.async('string'))
+    : [];
+
+  const sheets = await Promise.all(
+    worksheetEntries.map(async (file, index) => ({
+      name: sheetNames[index] ?? `Sheet ${index + 1}`,
+      rows: parseXlsxWorksheetRows(await file.async('string'), sharedStrings)
+    }))
+  );
+
+  return sheets.length > 0
+    ? sheets
+    : [{ name: 'Sheet1', rows: [['Content'], ['']] }];
+}
+
+function parseXlsxSharedStrings(xml: string): string[] {
+  return [...xml.matchAll(/<si>([\s\S]*?)<\/si>/g)].map((match) =>
+    decodeHtmlEntities(
+      [...(match[1] ?? '').matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)]
+        .map((textMatch) => textMatch[1] ?? '')
+        .join('')
+        .replace(/<[^>]+>/g, '')
+    )
+  );
+}
+
+function parseXlsxSheetNames(xml: string): string[] {
+  return [...xml.matchAll(/<sheet\b[^>]*\bname="([^"]+)"/g)].map((match) =>
+    decodeHtmlEntities(match[1] ?? '')
+  );
+}
+
+function parseXlsxWorksheetRows(xml: string, sharedStrings: string[]): string[][] {
+  const rows = [...xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)].map((rowMatch) => {
+    const cells = new Map<number, string>();
+
+    for (const cellMatch of (rowMatch[1] ?? '').matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)) {
+      const attributes = cellMatch[1] ?? '';
+      const body = cellMatch[2] ?? '';
+      const reference = attributes.match(/\br="([A-Z]+)\d+"/)?.[1];
+      const columnIndex = reference ? spreadsheetColumnIndex(reference) : cells.size;
+      const type = attributes.match(/\bt="([^"]+)"/)?.[1];
+      const value = body.match(/<v[^>]*>([\s\S]*?)<\/v>/)?.[1]
+        ?? body.match(/<t[^>]*>([\s\S]*?)<\/t>/)?.[1]
+        ?? '';
+
+      if (type === 's') {
+        cells.set(columnIndex, sharedStrings[Number(value)] ?? '');
+      } else {
+        cells.set(columnIndex, decodeHtmlEntities(value));
+      }
+    }
+
+    const width = cells.size > 0 ? Math.max(...cells.keys()) + 1 : 0;
+    return Array.from({ length: width }, (_, index) => cells.get(index) ?? '');
+  });
+
+  return rows.length > 0 ? rows : [['Content'], ['']];
+}
+
+function spreadsheetColumnIndex(columnName: string): number {
+  return [...columnName].reduce((result, character) => result * 26 + character.charCodeAt(0) - 64, 0) - 1;
 }
 
 async function extractPdfText(filePath: string): Promise<string> {

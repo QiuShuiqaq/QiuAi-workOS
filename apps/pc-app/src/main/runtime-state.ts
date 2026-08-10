@@ -22,6 +22,7 @@ import {
 import type {
   DesktopAppInfo,
   DesktopAuthorizedRoleTemplateCatalog,
+  DesktopAuthorizedRoleTemplateSummary,
   DesktopRuntimeState,
   DesktopServerConnectionStatus,
   DesktopIssueReportSubmitRequest,
@@ -378,6 +379,36 @@ function buildEnterpriseKnowledgeRuntimeSummary(input: {
   return [header.join('\n'), input.contextText].filter(Boolean).join('\n\n');
 }
 
+function readAuthorizedRoleTemplateApplicationType(
+  template: DesktopAuthorizedRoleTemplateSummary
+): 'digital_employee' | 'digital_factory' {
+  const applicationType = template.applicationType ?? template.dependencyManifest?.applicationType;
+  return applicationType === 'digital_factory' ? 'digital_factory' : 'digital_employee';
+}
+
+function formatAuthorizedRoleTemplateSyncMessage(
+  templates: DesktopAuthorizedRoleTemplateSummary[]
+): string {
+  const counts = templates.reduce(
+    (result, template) => {
+      result[readAuthorizedRoleTemplateApplicationType(template)] += 1;
+      return result;
+    },
+    {
+      digital_employee: 0,
+      digital_factory: 0
+    }
+  );
+  const segments = [
+    counts.digital_employee ? `${counts.digital_employee} 个数字员工` : '',
+    counts.digital_factory ? `${counts.digital_factory} 个数字工厂` : ''
+  ].filter(Boolean);
+
+  return segments.length > 0
+    ? `已同步 ${segments.join('、')}。`
+    : '暂未同步到可用的数字员工或数字工厂。';
+}
+
 export async function listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRoleTemplateCatalog> {
   const appInfo = getDesktopAppInfo();
   const identity = loadRuntimeIdentity(appInfo.userDataPath);
@@ -395,7 +426,7 @@ export async function listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRo
         templates: response.data,
         deviceCapacity: response.deviceCapacity,
         deletedTemplateIds: response.deletedTemplateIds,
-        message: `已同步 ${response.data.length} 个免费数字员工。`
+        message: formatAuthorizedRoleTemplateSyncMessage(response.data)
       };
     } catch (error) {
       return {

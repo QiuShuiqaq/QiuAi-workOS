@@ -482,6 +482,7 @@ export type DesktopToolInvocationAction =
   | 'filesystem.download_remote_file'
   | 'filesystem.package_zip'
   | 'document.extract_text'
+  | 'spreadsheet.read_xlsx'
   | 'web.fetch_url'
   | 'web.search'
   | 'browser.open_url'
@@ -548,6 +549,7 @@ export interface QiuDesktopBridge {
   exportLocalFiles(request: DesktopLocalFileExportRequest): Promise<DesktopLocalFileExportResult>;
   saveRemoteFileAs(request: DesktopRemoteFileSaveAsRequest): Promise<DesktopRemoteFileSaveAsResult>;
   invokeDesktopTool(request: DesktopToolInvocationRequest): Promise<DesktopToolInvocationResult>;
+  getArtifactPreviewUrl(path: string): Promise<string>;
   getPathForFile(file: unknown): string | undefined;
   openLocalPath(path: string): Promise<void>;
   openExternalUrl(url: string): Promise<void>;

@@ -8,6 +8,7 @@ import type { Response as InjectResponse } from 'light-my-request';
 
 import { createApplication } from './main';
 import { MockPlatformStore } from './shared/mock/mock-platform-store.service';
+import { retiredServerRoleTemplateIds } from './shared/role-template-catalog';
 
 type ProtectedRequest = {
   method: 'GET' | 'POST';
@@ -1597,6 +1598,23 @@ test('desktop template authorization requires an explicit loopback local-develop
 
   try {
     await app.init();
+    const store = app.get(MockPlatformStore);
+    const retiredTemplateId = retiredServerRoleTemplateIds[0];
+    assert.ok(retiredTemplateId);
+    const legacyTemplateSource = store.listRoleTemplates()[0];
+    assert.ok(legacyTemplateSource);
+    assert.ok(
+      store.createRoleTemplate({
+        ...legacyTemplateSource,
+        id: retiredTemplateId,
+        name: '退役测试数字员工',
+        status: 'PUBLISHED',
+        applicationType: 'DIGITAL_EMPLOYEE',
+        allowedPlanCodes: ['PERSONAL_FREE'],
+        visibleWorkspaceIds: [],
+        publishedAt: new Date().toISOString()
+      })
+    );
 
     const response = await app.inject({
       method: 'GET',
@@ -1604,7 +1622,21 @@ test('desktop template authorization requires an explicit loopback local-develop
     });
 
     assert.equal(response.statusCode, 200);
-    const enterpriseFactory = JSON.parse(response.body).data.find(
+    const freeCatalog = JSON.parse(response.body) as {
+      data: Array<{ id: string; canInstall?: boolean }>;
+    };
+    assert.equal(freeCatalog.data.some((template) => template.id === retiredTemplateId), false);
+    const retiredDeletedIdsResponse = await app.inject({
+      method: 'GET',
+      url: `/api/v1/desktop/role-templates/free?installedTemplateIds=${encodeURIComponent(retiredTemplateId)}`
+    });
+    assert.equal(retiredDeletedIdsResponse.statusCode, 200);
+    assert.ok(
+      (JSON.parse(retiredDeletedIdsResponse.body).deletedTemplateIds as string[]).includes(
+        retiredTemplateId
+      )
+    );
+    const enterpriseFactory = freeCatalog.data.find(
       (template: { id: string }) => template.id === 'factory_cross_border_product_images_v1'
     );
 
@@ -1618,6 +1650,12 @@ test('desktop template authorization requires an explicit loopback local-develop
       url: '/api/v1/desktop/role-templates/free'
     });
     assert.equal(nonLoopbackResponse.statusCode, 200);
+    assert.equal(
+      (JSON.parse(nonLoopbackResponse.body).data as Array<{ id: string }>).some(
+        (template) => template.id === retiredTemplateId
+      ),
+      false
+    );
     assert.equal(
       JSON.parse(nonLoopbackResponse.body).data.find(
         (template: { id: string }) => template.id === 'factory_cross_border_product_images_v1'
@@ -1635,6 +1673,7 @@ test('desktop template authorization requires an explicit loopback local-develop
       data: Array<{ id: string; canInstall?: boolean }>;
       deviceCapacity?: unknown;
     };
+    assert.equal(unlimitedCatalog.data.some((template) => template.id === retiredTemplateId), true);
     assert.equal(
       unlimitedCatalog.data.find(
         (template) => template.id === 'factory_cross_border_product_images_v1'

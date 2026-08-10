@@ -10,6 +10,7 @@ import {
   DeleteOutlined,
   CompassOutlined,
   DownOutlined,
+  EyeOutlined,
   ExclamationCircleOutlined,
   FileAddOutlined,
   FileExcelOutlined,
@@ -193,6 +194,9 @@ import siliconcloudLogoUrl from './assets/model-providers/siliconcloud-color.svg
 import tencentcloudLogoUrl from './assets/model-providers/tencentcloud-color.svg';
 import volcengineLogoUrl from './assets/model-providers/volcengine-color.svg';
 import zhipuLogoUrl from './assets/model-providers/zhipu-color.svg';
+import ArtifactWorkspace, {
+  type ArtifactRevisionDraft
+} from './ArtifactWorkspace';
 import { PromptSnippetBoard } from './PromptSnippetBoard';
 
 type SectionKey =
@@ -284,6 +288,26 @@ interface TaskFormValues {
   title: string;
   input?: string;
   useKnowledge?: boolean;
+}
+
+interface DocumentAssistantConfigFormValues {
+  scenarioKey: string;
+  outputContentType: string;
+  promptTemplate: string;
+}
+
+interface DocumentAssistantPreferences {
+  scenarioKey: string;
+  outputContentType: string;
+  promptTemplate: string;
+}
+
+interface DocumentAssistantScenarioPreset {
+  key: string;
+  label: string;
+  description: string;
+  outputContentType: string;
+  promptTemplate: string;
 }
 
 type RoleApplicationType = 'digital_employee' | 'digital_factory';
@@ -512,6 +536,258 @@ const factoryPackagePresetStorageKey = 'qiuai.pc.factory.package.presets.v1';
 const factoryPackageSelectionStorageKey = 'qiuai.pc.factory.package.selections.v1';
 const factoryRunParameterStorageKey = 'qiuai.pc.factory.run.parameters.v1';
 const factoryScreeningProfileStorageKey = 'qiuai.pc.factory.screening.profiles.v1';
+const documentAssistantPreferencesStorageKey = 'qiuai.pc.document-assistant.preferences.v1';
+const documentAssistantScenarioPresetsStorageKey = 'qiuai.pc.document-assistant.scenario-presets.v1';
+const documentAssistantRoleCode = 'ai-document-assistant';
+const documentAssistantOutputOptions = [
+  { value: '.docx', label: '.docx Word 文档' },
+  { value: '.xlsx', label: '.xlsx Excel 表格' },
+  { value: '.md', label: '.md Markdown 文档' },
+  { value: '.txt', label: '.txt 纯文本' }
+] as const;
+const documentAssistantOutputFormatValues = new Set<string>(
+  documentAssistantOutputOptions.map((option) => option.value)
+);
+const documentAssistantLegacyOutputTypeMap = new Map<string, string>([
+  ['正式文档', '.docx'],
+  ['分析报告', '.docx'],
+  ['结构化清单', '.xlsx'],
+  ['会议纪要', '.docx'],
+  ['方案草稿', '.docx'],
+  ['自定义', '.docx']
+]);
+const documentAssistantBuiltinScenarioPresets: DocumentAssistantScenarioPreset[] = [
+  {
+    key: 'general_document',
+    label: '通用文档整理',
+    description: '提取资料重点，整理成清晰、正式、可复核的文档。',
+    outputContentType: '.docx',
+    promptTemplate: '保留原始资料中的明确事实，删除重复和无关内容，按标题、摘要、正文、清单和待确认事项整理。'
+  },
+  {
+    key: 'recruiting',
+    label: '招聘简历筛选',
+    description: '根据岗位要求整理候选人事实、匹配点、风险和面试建议。',
+    outputContentType: '.xlsx',
+    promptTemplate: '只依据岗位 JD 和简历中的明确内容进行比较，不使用性别、年龄、婚育等敏感信息做判断。'
+  },
+  {
+    key: 'finance',
+    label: '财务单据整理',
+    description: '提取费用、票据、异常和待补材料，形成财务初筛结果。',
+    outputContentType: '.xlsx',
+    promptTemplate: '区分原始金额、费用科目、票据状态、异常项和待补材料，不直接批准付款或报销。'
+  },
+  {
+    key: 'administration',
+    label: '行政制度文档',
+    description: '生成制度、通知、公告、SOP 和流程说明。',
+    outputContentType: '.docx',
+    promptTemplate: '明确适用范围、规则、流程、责任和执行注意事项；没有企业依据的处罚、薪酬和劳动关系内容标记为待确认。'
+  },
+  {
+    key: 'contract_review',
+    label: '合同初审',
+    description: '提取合同条款、风险依据、修改建议和法务待确认事项。',
+    outputContentType: '.docx',
+    promptTemplate: '重点检查付款、交付、违约、保密、终止和争议解决条款；只做初审提示，不输出最终法律意见。'
+  },
+  {
+    key: 'meeting_minutes',
+    label: '会议纪要',
+    description: '从会议记录中提取结论、决议、待办、责任人和截止时间。',
+    outputContentType: '.docx',
+    promptTemplate: '严格区分讨论意见、已决议事项、待办事项和待确认问题，没有明确责任人或日期时不要擅自补充。'
+  },
+  {
+    key: 'research_report',
+    label: '调研报告',
+    description: '整理调研资料、来源、关键事实、机会、风险和下一步动作。',
+    outputContentType: '.docx',
+    promptTemplate: '为每个重要事实保留来源或原文依据，不确定内容标记为待验证，不把推测写成结论。'
+  },
+  {
+    key: 'sales_followup',
+    label: '销售跟进',
+    description: '整理客户背景、需求、异议、匹配卖点和下一步跟进动作。',
+    outputContentType: '.docx',
+    promptTemplate: '结合企业产品资料生成可直接使用的跟进内容；价格、交付周期和效果承诺没有依据时列为待确认。'
+  },
+  {
+    key: 'project_proposal',
+    label: '项目方案',
+    description: '把客户需求整理为目标、方案、范围、里程碑、交付物和验收标准。',
+    outputContentType: '.docx',
+    promptTemplate: '明确范围边界、交付物、验收标准、风险和依赖；工期、价格和资源承诺没有依据时不得写成确定结论。'
+  }
+];
+const documentAssistantBuiltinScenarioKeys = new Set(
+  documentAssistantBuiltinScenarioPresets.map((preset) => preset.key)
+);
+
+function readDocumentAssistantCustomScenarioPresets(): DocumentAssistantScenarioPreset[] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(documentAssistantScenarioPresetsStorageKey);
+    if (!rawValue) {
+      return [];
+    }
+
+    const parsed = JSON.parse(rawValue) as Partial<DocumentAssistantScenarioPreset>[];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .map((item) => ({
+        key: typeof item?.key === 'string' ? item.key : '',
+        label: typeof item?.label === 'string' ? item.label.trim() : '',
+        description: typeof item?.description === 'string' ? item.description.trim() : '',
+        outputContentType: normalizeDocumentAssistantOutputContentType(
+          typeof item?.outputContentType === 'string' ? item.outputContentType : undefined,
+          '.docx'
+        ),
+        promptTemplate: typeof item?.promptTemplate === 'string' ? item.promptTemplate.trim() : ''
+      }))
+      .filter((item) => item.key && item.label && item.promptTemplate)
+      .filter((item) => !documentAssistantBuiltinScenarioKeys.has(item.key));
+  } catch {
+    return [];
+  }
+}
+
+function writeDocumentAssistantCustomScenarioPresets(presets: DocumentAssistantScenarioPreset[]) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(documentAssistantScenarioPresetsStorageKey, JSON.stringify(presets));
+  } catch {
+    // Custom presets are optional local preferences.
+  }
+}
+
+function readDocumentAssistantScenarioCatalog(): DocumentAssistantScenarioPreset[] {
+  return [...documentAssistantBuiltinScenarioPresets, ...readDocumentAssistantCustomScenarioPresets()];
+}
+
+function isDocumentAssistantBuiltinScenarioKey(scenarioKey: string) {
+  return documentAssistantBuiltinScenarioKeys.has(scenarioKey);
+}
+
+function createDocumentAssistantCustomScenarioKey(label: string) {
+  const safeLabel = label
+    .trim()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-zA-Z0-9_\-\u4e00-\u9fa5]/g, '')
+    .slice(0, 12);
+  return `custom_${Date.now().toString(36)}_${safeLabel || 'template'}_${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+}
+
+function normalizeDocumentAssistantOutputContentType(value: string | undefined, fallback: string) {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+  if (documentAssistantOutputFormatValues.has(trimmed)) {
+    return trimmed;
+  }
+  return documentAssistantLegacyOutputTypeMap.get(trimmed) ?? fallback;
+}
+
+function getDocumentAssistantScenarioPreset(
+  scenarioKey: string | undefined
+): DocumentAssistantScenarioPreset {
+  const scenarioCatalog = readDocumentAssistantScenarioCatalog();
+  return scenarioCatalog.find((preset) => preset.key === scenarioKey) ?? scenarioCatalog[0];
+}
+
+function createDefaultDocumentAssistantPreferences(): DocumentAssistantPreferences {
+  const preset = getDocumentAssistantScenarioPreset('general_document');
+  return {
+    scenarioKey: preset.key,
+    outputContentType: preset.outputContentType,
+    promptTemplate: preset.promptTemplate
+  };
+}
+
+function readDocumentAssistantPreferences(): DocumentAssistantPreferences {
+  const fallback = createDefaultDocumentAssistantPreferences();
+  if (typeof window === 'undefined') {
+    return fallback;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(documentAssistantPreferencesStorageKey);
+    if (!rawValue) {
+      return fallback;
+    }
+
+    const parsed = JSON.parse(rawValue) as Partial<DocumentAssistantPreferences>;
+    const preset = getDocumentAssistantScenarioPreset(parsed.scenarioKey);
+    const outputContentType = normalizeDocumentAssistantOutputContentType(
+      parsed.outputContentType,
+      preset.outputContentType
+    );
+    const promptTemplate =
+      typeof parsed.promptTemplate === 'string' && parsed.promptTemplate.trim()
+        ? parsed.promptTemplate.trim()
+        : preset.promptTemplate;
+
+    return {
+      scenarioKey: preset.key,
+      outputContentType,
+      promptTemplate
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function writeDocumentAssistantPreferences(preferences: DocumentAssistantPreferences) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      documentAssistantPreferencesStorageKey,
+      JSON.stringify(preferences)
+    );
+  } catch {
+    // User preferences are non-critical; keep the assistant usable if storage is unavailable.
+  }
+}
+
+function buildDocumentAssistantTaskInput(
+  preferences: DocumentAssistantPreferences,
+  userInput: string
+): string {
+  const preset = getDocumentAssistantScenarioPreset(preferences.scenarioKey);
+  const outputContentType = normalizeDocumentAssistantOutputContentType(
+    preferences.outputContentType,
+    preset.outputContentType
+  );
+  const promptTemplate = preferences.promptTemplate.trim() || preset.promptTemplate;
+  const normalizedUserInput = userInput.trim() || '请读取上传附件，并按以上配置生成文档产物。';
+
+  return [
+    '文档助手配置：',
+    `场景模板：${preset.label}`,
+    `文件格式：${outputContentType}`,
+    `提示词模板：${promptTemplate}`,
+    '',
+    '用户任务：',
+    normalizedUserInput
+  ].join('\n');
+}
+
 const defaultDesktopClientPreferences: DesktopClientPreferences = {
   theme: 'light',
   density: 'comfortable',
@@ -1598,8 +1874,9 @@ function toDesktopRoleTemplate(summary: DesktopAuthorizedRoleTemplateSummary): D
   const executionProfile = cloneJsonValue(
     summary.executionProfile ?? dependencyManifest?.executionProfile
   ) as DesktopRoleTemplate['executionProfile'];
-  const manifestModelProfileIds = readDependencyManifestModelProfileIds(dependencyManifest);
   const manifestToolIds = readDependencyManifestToolIds(dependencyManifest);
+  const workflowModelProfileIds = inferDesktopModelProfileIds(workflowGraph);
+  const templateModelProfileIds = workflowModelProfileIds;
 
   return {
     templateId: summary.id,
@@ -1630,10 +1907,7 @@ function toDesktopRoleTemplate(summary: DesktopAuthorizedRoleTemplateSummary): D
     executionProfile,
     sampleInputs: [...(summary.sampleInputs ?? [])],
     outputFormat: summary.outputFormat ?? '',
-    modelProfileIds:
-      manifestModelProfileIds.length > 0
-        ? manifestModelProfileIds
-        : inferDesktopModelProfileIds(workflowGraph),
+    modelProfileIds: templateModelProfileIds,
     toolIds:
       manifestToolIds.length > 0
         ? manifestToolIds
@@ -1673,21 +1947,6 @@ function isRoleTemplateDependencyManifest(value: unknown): value is RoleTemplate
   );
 }
 
-function readDependencyManifestModelProfileIds(
-  manifest: RoleTemplateDependencyManifest | undefined
-): string[] {
-  if (!manifest) {
-    return [];
-  }
-
-  return mergeUniqueStrings(
-    manifest.modelAssets
-      .map((asset) => asset.modelProfileId || asset.modelId || asset.key)
-      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
-    []
-  );
-}
-
 function readDependencyManifestToolIds(
   manifest: RoleTemplateDependencyManifest | undefined
 ): string[] {
@@ -1704,8 +1963,12 @@ function readDependencyManifestToolIds(
 }
 
 function inferDesktopModelProfileIds(workflowGraph: DesktopRoleTemplate['workflowGraph']): string[] {
+  if (!parseWorkflowGraph(workflowGraph)) {
+    return [];
+  }
+
   const workflowModelProfileIds = readWorkflowRequiredModelProfileIds(workflowGraph);
-  return workflowModelProfileIds.length > 0 ? workflowModelProfileIds : ['qiu-general-default'];
+  return workflowModelProfileIds;
 }
 
 function createRoleCodeFromTemplateId(templateId: string): string {
@@ -2916,6 +3179,7 @@ export default function App() {
     useState<ProviderModelCapabilityFilter>('all');
   const [providerModelCompatibilityOnly, setProviderModelCompatibilityOnly] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string>('');
+  const [selectedConversationArtifactId, setSelectedConversationArtifactId] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isBindingDevice, setIsBindingDevice] = useState(false);
@@ -2973,10 +3237,21 @@ export default function App() {
   const [runtimeModelQuickSwitchForm] = Form.useForm<RuntimeModelQuickSwitchFormValues>();
   const [watchConfigForm] = Form.useForm<WatchConfigFormValues>();
   const [issueFeedbackForm] = Form.useForm<IssueFeedbackFormValues>();
+  const [documentAssistantConfigForm] = Form.useForm<DocumentAssistantConfigFormValues>();
+  const [documentAssistantConfig, setDocumentAssistantConfig] =
+    useState<DocumentAssistantPreferences>(() => readDocumentAssistantPreferences());
+  const [documentAssistantCustomScenarioPresets, setDocumentAssistantCustomScenarioPresets] = useState<
+    DocumentAssistantScenarioPreset[]
+  >(() => readDocumentAssistantCustomScenarioPresets());
+  const documentAssistantScenarioPresets = useMemo(
+    () => [...documentAssistantBuiltinScenarioPresets, ...documentAssistantCustomScenarioPresets],
+    [documentAssistantCustomScenarioPresets]
+  );
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [roleConfigModalOpen, setRoleConfigModalOpen] = useState(false);
   const [roleConfigMode, setRoleConfigMode] = useState<'install' | 'configure'>('install');
   const [roleConfigRoleCode, setRoleConfigRoleCode] = useState('');
+  const [documentAssistantConfigOpen, setDocumentAssistantConfigOpen] = useState(false);
   const [runtimeModelQuickSwitchOpen, setRuntimeModelQuickSwitchOpen] = useState(false);
   const [runtimeModelQuickSwitchRoleCode, setRuntimeModelQuickSwitchRoleCode] = useState('');
   const [watchConfigModalOpen, setWatchConfigModalOpen] = useState(false);
@@ -3159,14 +3434,22 @@ export default function App() {
     }
   }, [runtimeState.runtimeSnapshot.tasks, selectedTaskId]);
 
+  useEffect(() => {
+    setSelectedConversationArtifactId('');
+  }, [selectedTaskId]);
+
   const desktopRoleTemplates = useMemo(() => {
     return authorizedRoleTemplateCatalog.templates.map(toDesktopRoleTemplate);
   }, [authorizedRoleTemplateCatalog.source, authorizedRoleTemplateCatalog.templates]);
 
   const desktopRoleTemplateByRoleCode = useMemo(() => {
-    const authorizedByRoleCode = new Map(
-      desktopRoleTemplates.map((template) => [template.roleCode, template] as const)
-    );
+    const authorizedByRoleCode = new Map<string, DesktopRoleTemplate>();
+    for (const template of desktopRoleTemplates) {
+      authorizedByRoleCode.set(template.roleCode, template);
+      if (template.templateId) {
+        authorizedByRoleCode.set(template.templateId, template);
+      }
+    }
 
     return authorizedByRoleCode;
   }, [desktopRoleTemplates]);
@@ -3529,9 +3812,9 @@ export default function App() {
     setIsLoadingRoleTemplates(true);
     try {
       const catalog = await window.qiuDesktop.listAuthorizedRoleTemplates();
+      const authorizedTemplates = catalog.templates.map(toDesktopRoleTemplate);
       setAuthorizedRoleTemplateCatalog(catalog);
       if (catalog.source === 'server') {
-        const authorizedTemplates = catalog.templates.map(toDesktopRoleTemplate);
         setRuntimeState((current) =>
           pruneUnauthorizedRolePackages(
             current,
@@ -3544,7 +3827,7 @@ export default function App() {
       setRoleTemplateNotice(
         catalog.message ??
           (catalog.source === 'server'
-            ? `已同步 ${catalog.templates.length} 个市场应用`
+            ? formatRoleApplicationSyncNotice(countRoleApplications(authorizedTemplates))
             : '暂未同步到数字市场，请检查网络或服务端配置。')
       );
     } catch (error) {
@@ -4562,6 +4845,212 @@ export default function App() {
     return taskDetails.find((task) => task.taskId === selectedTaskId) ?? taskDetails[0];
   }, [selectedTaskId, taskDetails]);
 
+  async function saveConversationArtifactRevision(
+    task: DesktopTaskDetail,
+    sourceArtifact: DesktopTaskDetail['artifacts'][number],
+    draft: ArtifactRevisionDraft
+  ) {
+    if (!window.qiuDesktop) {
+      throw new Error('当前桌面环境无法保存产物。');
+    }
+
+    const originalFileName = getArtifactFileName(sourceArtifact);
+    const baseFileName =
+      originalFileName
+        .replace(/\.[^.]+$/, '')
+        .replace(/(?:-修订\d+)+$/u, '') || '产物';
+    const revision =
+      Math.max(
+        1,
+        ...task.artifacts
+          .filter((artifact) => {
+            const artifactBaseFileName = getArtifactFileName(artifact)
+              .replace(/\.[^.]+$/, '')
+              .replace(/(?:-修订\d+)+$/u, '');
+            return artifactBaseFileName.toLocaleLowerCase() === baseFileName.toLocaleLowerCase();
+          })
+          .map((artifact) => artifact.revision ?? 1)
+      ) + 1;
+    const fileName = `${baseFileName}-修订${revision}`;
+    const commonInput = {
+      title: draft.title || baseFileName,
+      folder: 'edited-artifacts',
+      fileName
+    };
+    const request =
+      draft.format === 'docx'
+        ? {
+            workspaceId: runtimeState.localRuntime.workspaceId,
+            toolId: 'office-document',
+            action: 'office.write_docx_document' as const,
+            input: { ...commonInput, content: draft.content ?? '' }
+          }
+        : draft.format === 'xlsx'
+          ? {
+              workspaceId: runtimeState.localRuntime.workspaceId,
+              toolId: 'office-document',
+              action: 'spreadsheet.write_xlsx' as const,
+              input: { ...commonInput, sheets: draft.sheets ?? [] }
+            }
+          : draft.format === 'csv'
+            ? {
+                workspaceId: runtimeState.localRuntime.workspaceId,
+                toolId: 'office-document',
+                action: 'spreadsheet.write_csv' as const,
+                input: { ...commonInput, rows: draft.sheets?.[0]?.rows ?? [] }
+              }
+            : {
+                workspaceId: runtimeState.localRuntime.workspaceId,
+                toolId: 'office-document',
+                action: 'office.write_markdown_document' as const,
+                input: { ...commonInput, content: draft.content ?? '' }
+              };
+    const result = await window.qiuDesktop.invokeDesktopTool(request);
+    const localPath = typeof result.output?.localPath === 'string' ? result.output.localPath : '';
+    if (!result.ok || !localPath) {
+      throw new Error(result.message ?? '产物修订文件生成失败。');
+    }
+
+    const updatedAt = new Date().toISOString();
+    const revisedArtifact: DesktopTaskDetail['artifacts'][number] = {
+      ...sourceArtifact,
+      id: `${sourceArtifact.id}-revision-${revision}-${Date.parse(updatedAt) || Date.now()}`,
+      title: getPathFileName(localPath) || `${fileName}.${draft.format === 'text' ? 'md' : draft.format}`,
+      content: draft.content ?? JSON.stringify({ sheets: draft.sheets ?? [] }),
+      createdAt: updatedAt,
+      localPath,
+      remoteUrl: undefined,
+      format: draft.format === 'text' ? 'markdown' : draft.format,
+      editable: true,
+      revision
+    };
+    const updatedTaskWithArtifact: DesktopTaskDetail = {
+      ...task,
+      updatedAt,
+      artifacts: [...task.artifacts, revisedArtifact]
+    };
+    const updatedTask = appendTaskExecutionLog(
+      {
+        ...updatedTaskWithArtifact,
+        artifactCount: countUserDeliverableArtifacts(updatedTaskWithArtifact)
+      },
+      createTaskExecutionLog(
+        task.taskId,
+        'info',
+        'ARTIFACT_REVISION_SAVED',
+        `已保存产物修订版本：${revisedArtifact.title}`,
+        updatedAt
+      )
+    );
+    const nextState = upsertTaskDetailInRuntimeState(
+      runtimeStateRef.current,
+      updatedTask,
+      ['office-document'],
+      updatedAt
+    );
+
+    runtimeStateRef.current = nextState;
+    setRuntimeState(nextState);
+    await window.qiuDesktop.saveRuntimeState(nextState);
+    setSelectedConversationArtifactId(revisedArtifact.id);
+    message.success('产物修订版本已保存。');
+  }
+
+  async function rewriteConversationArtifactSelection(
+    rolePackage: RolePackageManifest,
+    input: {
+      selectedText: string;
+      instruction: string;
+      context: string;
+    }
+  ): Promise<string> {
+    if (!window.qiuDesktop) {
+      throw new Error('当前桌面环境无法调用模型。');
+    }
+
+    const requirements = getRoleModelRuntimeRequirementStatuses(
+      runtimeState.modelProfiles,
+      runtimeState.localRuntime.enabledModelProfileIds,
+      rolePackage,
+      {
+        roleCode: rolePackage.roleCode,
+        credentials: runtimeState.modelCredentials,
+        roleBindings: runtimeState.roleModelCredentialBindings
+      }
+    );
+    const readyTextRequirement =
+      requirements.find(
+        (requirement) =>
+          requirement.ready &&
+          requirement.profile.id === 'qiu-general-default'
+      ) ??
+      requirements.find((requirement) => {
+        if (!requirement.ready) {
+          return false;
+        }
+        const profile = getRuntimeRequirementEffectiveProfile(requirement);
+        const capabilities = new Set(readModelProfileCapabilities(profile));
+        return (
+          capabilities.has('text') &&
+          !capabilities.has('image_generation') &&
+          !capabilities.has('video_generation') &&
+          !capabilities.has('audio_to_text')
+        );
+      });
+
+    if (!readyTextRequirement) {
+      throw new Error('当前数字员工没有可用的文本模型，请先在“当前调用模型”中配置。');
+    }
+
+    const runtimeProfile = getRuntimeRequirementEffectiveProfile(readyTextRequirement);
+    const resolved = resolveModelProfileCredential({
+      profile: runtimeProfile,
+      roleCode: rolePackage.roleCode,
+      credentials: runtimeState.modelCredentials,
+      roleBindings: runtimeState.roleModelCredentialBindings
+    });
+    if (!resolved.configured) {
+      throw new Error('当前文本模型没有可用的 API Key。');
+    }
+
+    const selectedIndex = input.context.indexOf(input.selectedText);
+    const contextStart = Math.max(0, selectedIndex - 1200);
+    const contextEnd = Math.min(
+      input.context.length,
+      Math.max(0, selectedIndex) + input.selectedText.length + 1200
+    );
+    const response = await window.qiuDesktop.invokeModelChat({
+      profile: resolved.profile,
+      timeoutMs: 60_000,
+      messages: [
+        {
+          role: 'system',
+          content: '你是文档编辑助手。只返回重写后的正文，不解释过程，不添加标题，不使用代码块。不得编造原文没有的事实。'
+        },
+        {
+          role: 'user',
+          content: [
+            `修改要求：${input.instruction}`,
+            '',
+            '待修改内容：',
+            input.selectedText,
+            '',
+            '上下文，仅用于保持语义一致：',
+            input.context.slice(contextStart, contextEnd)
+          ].join('\n')
+        }
+      ]
+    });
+    const rewritten = response.content
+      .replace(/^```(?:text|markdown)?\s*/i, '')
+      .replace(/\s*```$/, '')
+      .trim();
+    if (!rewritten) {
+      throw new Error('模型没有返回可替换的内容。');
+    }
+    return rewritten;
+  }
+
   const issueFeedbackTask = useMemo(
     () => taskDetails.find((task) => task.taskId === issueFeedbackTaskId),
     [issueFeedbackTaskId, taskDetails]
@@ -4810,6 +5299,7 @@ export default function App() {
         {renderRuntimeModelQuickSwitchModal()}
         {renderWatchConfigModal()}
         {renderRoleConfigModal()}
+        {renderDocumentAssistantConfigModal()}
         {renderFactoryPackageEditorModal()}
         {renderFactoryScreeningProfileEditorModal()}
         {renderFactoryImagePreviewModal()}
@@ -6360,7 +6850,7 @@ export default function App() {
               <div className="runtime-model-quick-note">
                 <InfoCircleOutlined />
                 <Typography.Text type="secondary">
-                  这里只切换当前应用各模型槽位实际调用的模型。API Key、工具、知识库请在“模型与工具”里配置。
+                  这里只切换当前应用各模型槽位实际调用的模型。API Key、工具、知识库请在对应数字员工或数字工厂的专属设置里配置。
                 </Typography.Text>
               </div>
 
@@ -6372,9 +6862,11 @@ export default function App() {
                       item.modelProfileId === requirement.profile.id
                   );
                   const runtimeModelProfileId =
-                    requirement.runtimeProfileId ?? binding?.runtimeModelProfileId ?? requirement.profile.id;
+                    requirement.issue === 'incompatible'
+                      ? requirement.profile.id
+                      : requirement.runtimeProfileId ?? binding?.runtimeModelProfileId ?? requirement.profile.id;
                   const runtimeProfile =
-                    requirement.runtimeProfile ??
+                    getRuntimeRequirementEffectiveProfile(requirement) ??
                     runtimeState.modelProfiles.find((profile) => profile.id === runtimeModelProfileId) ??
                     requirement.profile;
                   const runtimeReady = requirement.ready;
@@ -6533,7 +7025,7 @@ export default function App() {
       const runtimeProfile = runtimeModelProfileId
         ? runtimeState.modelProfiles.find((profile) => profile.id === runtimeModelProfileId)
         : undefined;
-      const displayProfile = requirement.runtimeProfile ?? runtimeProfile ?? requirement.profile;
+      const displayProfile = getRuntimeRequirementEffectiveProfile(requirement);
 
       return {
         key: requirement.profile.id,
@@ -6682,24 +7174,29 @@ export default function App() {
     const conversationRole =
       refreshedInstalledRolePackageByRoleCode.get(activeRoleCode) ??
       activeRolePackage;
-    const openConversationConfig = () => {
-      if (!conversationRole) {
-        return;
-      }
-      setSelectedRoleApplicationType('digital_employee');
-      setSelectedRoleCategory('全部');
-      openRoleConfig(conversationRole.roleCode, 'configure');
-    };
     const openConversationRuntimeModelQuickSwitch = () => {
       if (!conversationRole) {
         return;
       }
       openRuntimeModelQuickSwitch(conversationRole.roleCode);
     };
+    const openConversationDocumentAssistantConfig = () => {
+      if (conversationRole?.roleCode !== documentAssistantRoleCode) {
+        return;
+      }
+      openDocumentAssistantConfig();
+    };
+    const isDocumentAssistantConversation = conversationRole?.roleCode === documentAssistantRoleCode;
+    const documentAssistantScenario = getDocumentAssistantScenarioPreset(
+      documentAssistantConfig.scenarioKey
+    );
     const conversationFinalAnswer = conversationTask ? readConversationFinalAnswer(conversationTask) : '';
     const conversationArtifacts = conversationTask
       ? conversationTask.artifacts.filter(isUserDeliverableArtifact)
       : [];
+    const selectedConversationArtifact = selectedConversationArtifactId
+      ? conversationArtifacts.find((artifact) => artifact.id === selectedConversationArtifactId)
+      : undefined;
     const canRunConversationTask =
       conversationTask &&
       !activeRoleDeleted &&
@@ -6824,6 +7321,12 @@ export default function App() {
           </div>
         </aside>
 
+        <div
+          className={[
+            'conversation-workspace-split',
+            selectedConversationArtifact ? 'with-artifact-preview' : ''
+          ].filter(Boolean).join(' ')}
+        >
         <section className="chat-workspace">
           <header className="chat-workspace-header">
             <Space size={12}>
@@ -6860,22 +7363,29 @@ export default function App() {
               </Space>
             </Space>
 
-            <Space wrap>
+            <Flex align="center" justify="flex-end" gap={8} wrap="wrap" style={{ marginLeft: 'auto' }}>
               <Tag color="geekblue">运行中 {runningTaskCount}</Tag>
               <Tag color="gold">待处理 {waitingTaskCount}</Tag>
               <Tag color="green">已完成 {completedTaskCount}</Tag>
-              <Button size="small" disabled={activeRoleDeleted} onClick={startNewConversationTask}>
-                新任务
-              </Button>
-              <Button
-                size="small"
-                icon={<SettingOutlined />}
-                disabled={!conversationRole}
-                onClick={openConversationConfig}
-              >
-                模型与工具
-              </Button>
-            </Space>
+              {isDocumentAssistantConversation ? (
+                <Tag color="blue">{documentAssistantScenario.label}</Tag>
+              ) : null}
+              <Space size={8} wrap>
+                <Button size="small" disabled={activeRoleDeleted} onClick={startNewConversationTask}>
+                  新任务
+                </Button>
+                {isDocumentAssistantConversation ? (
+                  <Button
+                    size="small"
+                    icon={<SettingOutlined />}
+                    disabled={activeRoleDeleted}
+                    onClick={openConversationDocumentAssistantConfig}
+                  >
+                    文档助手设置
+                  </Button>
+                ) : null}
+              </Space>
+            </Flex>
           </header>
 
           {conversationRole && isWatchRolePackage(conversationRole)
@@ -7048,7 +7558,13 @@ export default function App() {
 
                           const fileName = getArtifactFileName(artifact);
                           return (
-                          <div key={artifact.id} className="chat-artifact-card">
+                          <div
+                            key={artifact.id}
+                            className={[
+                              'chat-artifact-card',
+                              selectedConversationArtifact?.id === artifact.id ? 'selected' : ''
+                            ].filter(Boolean).join(' ')}
+                          >
                             <div className={`artifact-file-icon ${getArtifactToneClass(artifact)}`}>
                               {renderArtifactFileIcon(artifact)}
                             </div>
@@ -7063,19 +7579,29 @@ export default function App() {
                                 {formatArtifactMeta(artifact)}
                               </Typography.Text>
                             </div>
-                            {artifact.localPath ? (
+                            <Space size={4}>
                               <Button
                                 size="small"
                                 className="artifact-download-button"
-                                icon={<DownloadOutlined />}
-                                loading={savingArtifactId === artifact.id}
-                                title="Save file"
-                                aria-label="Save file"
-                                onClick={() => void saveArtifactAs(artifact)}
+                                icon={<EyeOutlined />}
+                                title="预览产物"
+                                aria-label="预览产物"
+                                onClick={() => setSelectedConversationArtifactId(artifact.id)}
                               />
-                            ) : (
-                              <Tag color="warning">缓存已过期</Tag>
-                            )}
+                              {artifact.localPath ? (
+                                <Button
+                                  size="small"
+                                  className="artifact-download-button"
+                                  icon={<DownloadOutlined />}
+                                  loading={savingArtifactId === artifact.id}
+                                  title="另存文件"
+                                  aria-label="另存文件"
+                                  onClick={() => void saveArtifactAs(artifact)}
+                                />
+                              ) : (
+                                <Tag color="warning">缓存已过期</Tag>
+                              )}
+                            </Space>
                           </div>
                           );
                         })}
@@ -7148,10 +7674,18 @@ export default function App() {
                 return;
               }
 
-              const taskInput = buildTaskInputWithAttachments(input, composerAttachments);
+              const configuredInput =
+                activeRoleCode === documentAssistantRoleCode
+                  ? buildDocumentAssistantTaskInput(documentAssistantConfig, input)
+                  : input;
+              const taskInput = buildTaskInputWithAttachments(configuredInput, composerAttachments);
+              const taskTitle =
+                activeRoleCode === documentAssistantRoleCode
+                  ? input || `文档助手：${getDocumentAssistantScenarioPreset(documentAssistantConfig.scenarioKey).label}`
+                  : taskInput;
               createTask({
                 roleCode: activeRoleCode,
-                title: createChatTaskTitle(taskInput),
+                title: createChatTaskTitle(taskTitle),
                 input: taskInput,
                 attachments: composerAttachments,
                 useKnowledge: values.useKnowledge === true
@@ -7256,6 +7790,28 @@ export default function App() {
             </Flex>
           </Form>
         </section>
+        {selectedConversationArtifact && conversationTask && conversationRole ? (
+          <ArtifactWorkspace
+            artifact={selectedConversationArtifact}
+            workspaceId={runtimeState.localRuntime.workspaceId}
+            desktopToolInvoker={window.qiuDesktop?.invokeDesktopTool}
+            getPreviewUrl={window.qiuDesktop?.getArtifactPreviewUrl}
+            onClose={() => setSelectedConversationArtifactId('')}
+            onOpenLocal={(targetPath) => void openLocalPath(targetPath)}
+            onSaveAs={() => void saveArtifactAs(selectedConversationArtifact)}
+            onSaveRevision={(draft) =>
+              saveConversationArtifactRevision(
+                conversationTask,
+                selectedConversationArtifact,
+                draft
+              )
+            }
+            onAiRewrite={(input) =>
+              rewriteConversationArtifactSelection(conversationRole, input)
+            }
+          />
+        ) : null}
+        </div>
       </div>
     );
   }
@@ -7381,7 +7937,7 @@ export default function App() {
         ? `缺少模型配置：${missingFactoryModel.profile.modelName}`
         : missingFactoryToolId
           ? `缺少工具配置：${resolveToolLabel(runtimeState.tools, missingFactoryToolId)}`
-          : '请检查模型和工具配置';
+          : '请检查当前配置';
     const renderFactoryStatusPanel = (variant: 'default' | 'drawer' = 'default') => (
       <section className={`factory-panel factory-status-panel ${variant === 'drawer' ? 'factory-drawer-panel' : ''}`}>
         <Flex align="center" justify="space-between" gap={12}>
@@ -9075,11 +9631,11 @@ export default function App() {
         open={roleConfigModalOpen}
         title={
           roleConfigDisplayName
-            ? `${roleConfigMode === 'install' ? '安装' : '模型与工具'}：${roleConfigDisplayName}`
+            ? `${roleConfigMode === 'install' ? '安装' : '配置'}：${roleConfigDisplayName}`
             : roleConfigMode === 'install'
               ? `安装${roleConfigApplicationLabel}`
-              : `${roleConfigApplicationLabel}模型与工具`
-        }
+              : `${roleConfigApplicationLabel}配置`
+          }
         okText={roleConfigMode === 'install' ? '安装' : '保存'}
         onCancel={closeRoleConfig}
         onOk={() => roleConfigForm.submit()}
@@ -9131,7 +9687,7 @@ export default function App() {
                   dataSource={roleConfigModelRequirements}
                   locale={{ emptyText: `当前${roleConfigApplicationLabel}没有声明模型需求` }}
                   renderItem={(requirement) => {
-                    const displayProfile = requirement.runtimeProfile ?? requirement.profile;
+                    const displayProfile = getRuntimeRequirementEffectiveProfile(requirement);
                     const isRuntimeOverride = displayProfile.id !== requirement.profile.id;
 
                     return (
@@ -9269,6 +9825,85 @@ export default function App() {
         ) : (
           <Empty description={`未找到${roleConfigApplicationLabel}`} />
         )}
+      </Modal>
+    );
+  }
+
+  function renderDocumentAssistantConfigModal() {
+    return (
+      <Modal
+        open={documentAssistantConfigOpen}
+        title="文档助手设置"
+        okText="保存"
+        cancelText="取消"
+        onCancel={closeDocumentAssistantConfig}
+        onOk={() => documentAssistantConfigForm.submit()}
+        width={720}
+        destroyOnHidden
+      >
+        <Form<DocumentAssistantConfigFormValues>
+          form={documentAssistantConfigForm}
+          layout="vertical"
+          onFinish={saveDocumentAssistantConfig}
+        >
+          <Form.Item
+            name="scenarioKey"
+            label="场景模板"
+            rules={[{ required: true, message: '请选择场景模板' }]}
+          >
+            <Select
+              options={documentAssistantScenarioPresets.map((preset) => ({
+                value: preset.key,
+                label: <Typography.Text>{preset.label}</Typography.Text>
+              }))}
+              onChange={(scenarioKey) => {
+                const preset = getDocumentAssistantScenarioPreset(scenarioKey);
+                documentAssistantConfigForm.setFieldsValue({
+                  outputContentType: preset.outputContentType,
+                  promptTemplate: preset.promptTemplate
+                });
+              }}
+            />
+          </Form.Item>
+          <Space size={8} wrap style={{ marginBottom: 12 }}>
+            <Button icon={<PlusOutlined />} onClick={() => void createDocumentAssistantScenarioPreset()}>
+              新建模板
+            </Button>
+            {!isDocumentAssistantBuiltinScenarioKey(documentAssistantConfigForm.getFieldValue('scenarioKey')) ? (
+              <Popconfirm
+                title="删除这个自定义模板？"
+                description="删除后不会影响已经保存的任务记录。"
+                okText="删除"
+                okButtonProps={{ danger: true }}
+                onConfirm={() => void deleteDocumentAssistantScenarioPreset(documentAssistantConfigForm.getFieldValue('scenarioKey'))}
+              >
+                <Button danger icon={<DeleteOutlined />}>
+                  删除模板
+                </Button>
+              </Popconfirm>
+            ) : null}
+          </Space>
+          <Form.Item
+            name="outputContentType"
+            label="文件格式"
+            rules={[{ required: true, message: '请选择文件格式' }]}
+          >
+            <Select options={[...documentAssistantOutputOptions]} />
+          </Form.Item>
+          <Form.Item
+            name="promptTemplate"
+            label="提示词模板"
+            rules={[{ required: true, message: '请填写提示词模板' }]}
+          >
+            <Input.TextArea
+              autoSize={{ minRows: 6, maxRows: 12 }}
+              placeholder="描述文档结构、重点、禁止事项和人工确认边界"
+            />
+          </Form.Item>
+          <Typography.Text type="secondary">
+            保存后，这些设置会自动加入 AI 文档助手的下一次任务；上传文件仍通过下方对话框添加。
+          </Typography.Text>
+        </Form>
       </Modal>
     );
   }
@@ -10405,14 +11040,20 @@ export default function App() {
             getFieldValue(runtimeModelPath).trim()
               ? getFieldValue(runtimeModelPath).trim()
               : profile.id;
+          const selectedRuntimeProfile =
+            runtimeState.modelProfiles.find((item) => item.id === runtimeModelProfileId) ?? profile;
+          const runtimeProfile = modelProfileSupportsRequiredCapabilities(
+            selectedRuntimeProfile,
+            readRequiredCapabilitiesForRuntimeRequirementProfile(profile)
+          )
+            ? selectedRuntimeProfile
+            : profile;
           const compatibleRuntimeModelOptions = buildCompatibleRuntimeModelOptions(
             runtimeState,
             profile,
             roleConfigRoleCode,
-            runtimeModelProfileId
+            runtimeProfile.id
           );
-          const runtimeProfile =
-            runtimeState.modelProfiles.find((item) => item.id === runtimeModelProfileId) ?? profile;
           const defaultCredential = findDefaultModelCredential(
             runtimeState.modelCredentials,
             runtimeProfile.providerId
@@ -12799,6 +13440,142 @@ export default function App() {
     roleConfigForm.resetFields();
   }
 
+  function openDocumentAssistantConfig() {
+    const preset = getDocumentAssistantScenarioPreset(documentAssistantConfig.scenarioKey);
+    documentAssistantConfigForm.setFieldsValue({
+      scenarioKey: preset.key,
+      outputContentType: documentAssistantConfig.outputContentType || preset.outputContentType,
+      promptTemplate: documentAssistantConfig.promptTemplate || preset.promptTemplate
+    });
+    setDocumentAssistantConfigOpen(true);
+  }
+
+  function closeDocumentAssistantConfig() {
+    setDocumentAssistantConfigOpen(false);
+    documentAssistantConfigForm.resetFields();
+  }
+
+  function saveDocumentAssistantConfig(values: DocumentAssistantConfigFormValues) {
+    const preset = getDocumentAssistantScenarioPreset(values.scenarioKey);
+    const nextPreferences: DocumentAssistantPreferences = {
+      scenarioKey: preset.key,
+      outputContentType: normalizeDocumentAssistantOutputContentType(
+        values.outputContentType,
+        preset.outputContentType
+      ),
+      promptTemplate: values.promptTemplate?.trim() || preset.promptTemplate
+    };
+
+    setDocumentAssistantConfig(nextPreferences);
+    writeDocumentAssistantPreferences(nextPreferences);
+    closeDocumentAssistantConfig();
+    message.success('文档助手配置已保存');
+  }
+
+  function createDocumentAssistantScenarioPreset() {
+    const currentValues = documentAssistantConfigForm.getFieldsValue(true) as DocumentAssistantConfigFormValues;
+    const currentPreset = getDocumentAssistantScenarioPreset(currentValues.scenarioKey);
+    let nextLabel = `${currentPreset.label} 副本`;
+
+    Modal.confirm({
+      title: '新建场景模板',
+      content: (
+        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          <Typography.Text type="secondary">
+            当前模板内容会复制为新模板，输入一个不重复的名称即可。
+          </Typography.Text>
+          <Input
+            defaultValue={nextLabel}
+            onChange={(event) => {
+              nextLabel = event.target.value;
+            }}
+            placeholder="模板名称"
+          />
+        </Space>
+      ),
+      okText: '创建',
+      cancelText: '取消',
+      onOk: () => {
+        const label = nextLabel.trim();
+        if (!label) {
+          message.warning('请输入模板名称');
+          return Promise.reject(new Error('missing scenario label'));
+        }
+        if (documentAssistantScenarioPresets.some((preset) => preset.label === label)) {
+          message.warning('模板名称已存在');
+          return Promise.reject(new Error('duplicate scenario label'));
+        }
+
+        const nextPreset: DocumentAssistantScenarioPreset = {
+          key: createDocumentAssistantCustomScenarioKey(label),
+          label,
+          description: currentPreset.description,
+          outputContentType: normalizeDocumentAssistantOutputContentType(
+            currentValues.outputContentType,
+            currentPreset.outputContentType
+          ),
+          promptTemplate: currentValues.promptTemplate?.trim() || currentPreset.promptTemplate
+        };
+        const nextCustomScenarioPresets = [...documentAssistantCustomScenarioPresets, nextPreset];
+        const nextPreferences: DocumentAssistantPreferences = {
+          scenarioKey: nextPreset.key,
+          outputContentType: nextPreset.outputContentType,
+          promptTemplate: nextPreset.promptTemplate
+        };
+
+        writeDocumentAssistantCustomScenarioPresets(nextCustomScenarioPresets);
+        setDocumentAssistantCustomScenarioPresets(nextCustomScenarioPresets);
+        setDocumentAssistantConfig(nextPreferences);
+        writeDocumentAssistantPreferences(nextPreferences);
+        documentAssistantConfigForm.setFieldsValue({
+          scenarioKey: nextPreset.key,
+          outputContentType: nextPreset.outputContentType,
+          promptTemplate: nextPreset.promptTemplate
+        });
+        message.success('已创建场景模板');
+      }
+    });
+  }
+
+  function deleteDocumentAssistantScenarioPreset(scenarioKey: string) {
+    if (!scenarioKey || isDocumentAssistantBuiltinScenarioKey(scenarioKey)) {
+      return;
+    }
+
+    const preset = getDocumentAssistantScenarioPreset(scenarioKey);
+    Modal.confirm({
+      title: '删除场景模板',
+      content: `确定删除模板“${preset.label}”吗？`,
+      okText: '删除',
+      okButtonProps: { danger: true },
+      onOk: () => {
+        const nextCustomScenarioPresets = documentAssistantCustomScenarioPresets.filter(
+          (item) => item.key !== scenarioKey
+        );
+        writeDocumentAssistantCustomScenarioPresets(nextCustomScenarioPresets);
+        setDocumentAssistantCustomScenarioPresets(nextCustomScenarioPresets);
+
+        if (documentAssistantConfig.scenarioKey === scenarioKey) {
+          const fallbackPreset = getDocumentAssistantScenarioPreset('general_document');
+          const nextPreferences: DocumentAssistantPreferences = {
+            scenarioKey: fallbackPreset.key,
+            outputContentType: fallbackPreset.outputContentType,
+            promptTemplate: fallbackPreset.promptTemplate
+          };
+          setDocumentAssistantConfig(nextPreferences);
+          writeDocumentAssistantPreferences(nextPreferences);
+          documentAssistantConfigForm.setFieldsValue({
+            scenarioKey: fallbackPreset.key,
+            outputContentType: fallbackPreset.outputContentType,
+            promptTemplate: fallbackPreset.promptTemplate
+          });
+        }
+
+        message.success('场景模板已删除');
+      }
+    });
+  }
+
   function submitRoleConfig(values: RoleConfigFormValues) {
     const template = desktopRoleTemplateByRoleCode.get(roleConfigRoleCode);
     if (!template) {
@@ -12907,7 +13684,7 @@ export default function App() {
 
     if (firstUnreadyModel) {
       setRuntimeState(preparedState);
-      setSelectedModelId(firstUnreadyModel.runtimeProfileId ?? firstUnreadyModel.profile.id);
+      setSelectedModelId(getRuntimeRequirementEffectiveProfile(firstUnreadyModel).id);
       setModelConfigOpen(true);
       setModelTestNotice(
         firstUnreadyModel.issue === 'disabled'
@@ -12978,7 +13755,7 @@ export default function App() {
     if (firstUnreadyModel) {
       if (notifyUser) {
         setRuntimeState(preparedState);
-        setSelectedModelId(firstUnreadyModel.runtimeProfileId ?? firstUnreadyModel.profile.id);
+      setSelectedModelId(getRuntimeRequirementEffectiveProfile(firstUnreadyModel).id);
         setModelConfigOpen(true);
         setModelTestNotice('值守数字员工需要先完成模型配置。');
         navigateToSection('models');
@@ -13901,6 +14678,10 @@ function findReadyImageUnderstandingModelProfileIds(
 }
 
 function roleTemplateCategory(template: DesktopRoleTemplate): string {
+  if (template.templateId === 'template_document_assistant' || template.roleCode === documentAssistantRoleCode) {
+    return '通用';
+  }
+
   const text = [template.name, template.industry, template.scenario, template.summary, template.businessGoal].join(' ');
   if (includesAny(text, ['教育', '课程', '培训', '学习'])) return '教育';
   if (includesAny(text, ['医疗', '健康', '医生', '医药', '康复'])) return '医疗';
@@ -15292,7 +16073,7 @@ function readMessageDetails(message: string) {
 }
 
 function toInstalledRolePackage(template: DesktopRoleTemplate): RolePackageManifest {
-  return {
+  const rolePackage: RolePackageManifest = {
     roleCode: template.roleCode,
     applicationType: template.applicationType ?? 'digital_employee',
     name: template.name,
@@ -15315,6 +16096,11 @@ function toInstalledRolePackage(template: DesktopRoleTemplate): RolePackageManif
     requiredKnowledgeSources: [...template.requiredKnowledgeSources],
     defaultTaskTypes: [...template.defaultTaskTypes],
     syncPolicy: template.syncPolicy
+  };
+
+  return {
+    ...rolePackage,
+    modelProfileIds: readRequiredModelProfileIdsForRolePackage(rolePackage)
   };
 }
 
@@ -15818,6 +16604,17 @@ function countRoleApplications(templates: DesktopRoleTemplate[]): Record<RoleApp
       digital_factory: 0
     }
   );
+}
+
+function formatRoleApplicationSyncNotice(counts: Record<RoleApplicationType, number>): string {
+  const segments = [
+    counts.digital_employee ? `${counts.digital_employee} 个数字员工` : '',
+    counts.digital_factory ? `${counts.digital_factory} 个数字工厂` : ''
+  ].filter(Boolean);
+
+  return segments.length > 0
+    ? `已同步 ${segments.join('、')}`
+    : '暂未同步到可用的数字员工或数字工厂';
 }
 
 function readFactoryManifest(manifest: RoleTemplateDependencyManifest | undefined): DigitalFactoryManifest {
@@ -17487,17 +18284,10 @@ function uninstallRolePackageFromRuntimeState(
   };
 }
 
-function isRolePackageTemplateDeleted(
-  rolePackage: RolePackageManifest,
-  deletedTemplateIds: Set<string>
-): boolean {
-  return Boolean(rolePackage.templateId && deletedTemplateIds.has(rolePackage.templateId));
-}
-
 function pruneUnauthorizedRolePackages(
   state: DesktopRuntimeState,
   authorizedTemplates: DesktopRoleTemplate[],
-  deletedTemplateIds: string[] = [],
+  _deletedTemplateIds: string[] = [],
   deviceCapacity?: DesktopDeviceCapacitySummary
 ): DesktopRuntimeState {
   const authorizedRoleCodes = new Set(
@@ -17505,30 +18295,21 @@ function pruneUnauthorizedRolePackages(
       .filter((template) => canInstallRoleTemplate(template))
       .map((template) => template.roleCode)
   );
-  const deletedTemplateIdSet = new Set(deletedTemplateIds);
   const rolePackages = restrictInstalledRolePackagesByDeviceCapacity(
-    state.rolePackages.filter((rolePackage) =>
-      authorizedRoleCodes.has(rolePackage.roleCode) ||
-      isRolePackageTemplateDeleted(rolePackage, deletedTemplateIdSet)
-    ),
+    state.rolePackages.filter((rolePackage) => authorizedRoleCodes.has(rolePackage.roleCode)),
     deviceCapacity
   );
-  const deletedRoleCodes = new Set(
-    rolePackages
-      .filter((rolePackage) => isRolePackageTemplateDeleted(rolePackage, deletedTemplateIdSet))
-      .map((rolePackage) => rolePackage.roleCode)
+  const keptRoleCodes = new Set(rolePackages.map((rolePackage) => rolePackage.roleCode));
+  const roleModelCredentialBindings = state.roleModelCredentialBindings.filter((binding) =>
+    keptRoleCodes.has(binding.roleCode)
   );
   const activeRoleIsAvailable =
     Boolean(state.localRuntime.activeRoleCode) &&
-    rolePackages.some(
-      (rolePackage) =>
-        rolePackage.roleCode === state.localRuntime.activeRoleCode &&
-        !deletedRoleCodes.has(rolePackage.roleCode)
-    );
+    rolePackages.some((rolePackage) => rolePackage.roleCode === state.localRuntime.activeRoleCode);
 
   if (
     rolePackages.length === state.rolePackages.length &&
-    deletedRoleCodes.size === 0 &&
+    roleModelCredentialBindings.length === state.roleModelCredentialBindings.length &&
     (!state.localRuntime.activeRoleCode || activeRoleIsAvailable)
   ) {
     return state;
@@ -17537,24 +18318,18 @@ function pruneUnauthorizedRolePackages(
   const activeRoleCode =
     state.localRuntime.activeRoleCode && activeRoleIsAvailable
       ? state.localRuntime.activeRoleCode
-      : rolePackages.find((rolePackage) => !deletedRoleCodes.has(rolePackage.roleCode))?.roleCode;
+      : rolePackages[0]?.roleCode;
   const rolePackageSummaries = rebuildRoleSummaries(
     rolePackages,
     state.runtimeSnapshot.tasks,
     state.runtimeSnapshot.rolePackages,
     activeRoleCode
-  ).map((summary) =>
-    deletedRoleCodes.has(summary.roleCode)
-      ? {
-          ...summary,
-          state: 'deleted' as const
-        }
-      : summary
   );
 
   return {
     ...state,
     rolePackages,
+    roleModelCredentialBindings,
     localRuntime: {
       ...state.localRuntime,
       installedRoleCodes: rolePackages.map((rolePackage) => rolePackage.roleCode),
@@ -17870,7 +18645,15 @@ function resolveModelProfileLabel(modelProfiles: ModelProfile[], profileId: stri
 function getRuntimeRequirementEffectiveProfile(
   requirement: RoleModelRuntimeRequirementStatus
 ): ModelProfile {
-  return requirement.runtimeProfile ?? requirement.profile;
+  const runtimeProfile = requirement.runtimeProfile;
+  if (!runtimeProfile) {
+    return requirement.profile;
+  }
+
+  const requiredCapabilities = readRequiredCapabilitiesForRuntimeRequirementProfile(requirement.profile);
+  return modelProfileSupportsRequiredCapabilities(runtimeProfile, requiredCapabilities)
+    ? runtimeProfile
+    : requirement.profile;
 }
 
 function findIncompatibleRuntimeModelSelection(input: {

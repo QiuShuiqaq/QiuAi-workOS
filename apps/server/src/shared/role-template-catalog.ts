@@ -3391,6 +3391,7 @@ type DesignedOfficeRoleTemplateInput = {
   businessGoal: string;
   knowledgeSources: string[];
   tools?: string[];
+  executionProfile?: ServerRoleTemplateExecutionProfile;
   skills: ServerRoleSkill[];
   sampleInputs: string[];
   outputFormat: string;
@@ -3440,6 +3441,7 @@ function createOfficeRoleTemplate(input: DesignedOfficeRoleTemplateInput): BaseS
     businessGoal: input.businessGoal,
     knowledgeSources: input.knowledgeSources,
     tools,
+    ...(input.executionProfile ? { executionProfile: input.executionProfile } : {}),
     skills: input.skills,
     workflowSteps: buildOfficeProductionWorkflowSteps({
       artifactType,
@@ -3482,6 +3484,59 @@ function createOfficeRoleTemplate(input: DesignedOfficeRoleTemplateInput): BaseS
 }
 
 const freeBasicRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
+  createOfficeRoleTemplate({
+    templateId: 'template_document_assistant',
+    name: '文档助手',
+    industry: '通用办公 / 企业文档',
+    scenario: '上传文件、选择业务场景、整理内容并生成可交付文档',
+    description: '一个统一的 AI 文档助手，支持招聘、财务、行政、合同、会议、调研和项目等通用文档场景，通过场景模板与提示词生成结构清晰的 Word 产物。',
+    plan: 'PERSONAL_FREE',
+    businessGoal: '用一个稳定的文档处理入口替代重复的岗位型数字员工，降低安装、配置和维护成本。',
+    knowledgeSources: ['用户上传文件', '本地知识库', '企业知识库', '场景模板'],
+    tools: ['office-document', 'local-filesystem'],
+    executionProfile: {
+      mode: 'conversation',
+      summary: '对话式数字员工：由用户上传资料并发起任务，读取文件和知识库后输出正式文档产物。',
+      triggerModes: ['manual'],
+      inputSources: ['chat', 'uploaded_files', 'enterprise_knowledge', 'local_folder'],
+      toolCapabilities: ['llm', 'knowledge', 'office', 'local_files', 'approval_queue'],
+      outputTargets: ['chat_response', 'artifact', 'approval_queue'],
+      approval: {
+        required: true,
+        requiredActions: ['关键结论确认', '正式对外使用前复核']
+      },
+      dataBoundary: 'local_first',
+      rolloutPhase: 'ready',
+      notes: ['当前版本以用户主动发起对话任务为主，不启用平台值守或网页 RPA。']
+    },
+    skills: [
+      additionalSkills.documentExtraction,
+      skills.draftGeneration,
+      additionalSkills.qualityRuleCheck
+    ],
+    sampleInputs: [
+      '请使用“招聘简历筛选”场景，读取我上传的岗位 JD 和简历，生成候选人筛选报告。',
+      '请使用“行政制度文档”场景，根据上传资料生成一份结构清晰、可人工确认的 Word 文档。',
+      '请使用“财务单据整理”场景，提取上传材料中的字段、异常和待补充信息，形成结构化报告。'
+    ],
+    outputFormat: '本地 Word 文档，按照用户选择的场景输出正式正文、结构化清单、表格内容、风险提示和待确认事项。',
+    parameterSchema: {
+      assistantScenario: '用户选择的文档助手场景，例如招聘简历筛选、财务单据整理、行政制度文档、合同初审、会议纪要、调研报告、销售跟进或项目方案',
+      outputContentType: '用户希望产出的内容形式，例如正式文档、分析报告、结构化清单、会议纪要或方案草稿',
+      promptTemplate: '用户为本次场景配置的额外提示词模板',
+      outputAudience: '产物面向的读者或使用对象',
+      constraints: '篇幅、格式、语言、必须保留、禁止出现和人工确认要求'
+    },
+    analysisInstruction:
+      '你是统一的 AI 文档助手。先识别 assistantScenario、outputContentType、promptTemplate 和用户任务要求，再读取附件、企业知识库和本地知识。必须区分原文事实、合理整理、用户要求和待确认内容；不能因为场景名称就臆造岗位规则、财务制度、合同结论或企业数据。附件无法读取、内容不完整或字段不明确时，明确列出缺失项。',
+    draftInstruction:
+      '根据用户选择的文档场景和 outputContentType 生成一份可直接交付的 Word 文档。文档结构必须清晰，优先使用标题、分级小节、表格和清单。招聘场景应包含岗位要求、候选人事实、匹配分析、风险与面试建议；财务场景应包含明细、异常、汇总和待补材料；行政/制度场景应包含适用范围、规则、流程、责任和待确认项；合同场景只能做初审摘要、条款依据和风险提示，不得替代法律意见；会议场景应区分事实、决议、待办和待确认；调研和项目场景应保留来源、依据、边界和下一步动作。promptTemplate 只作为用户约束，不能覆盖系统的事实依据、隐私、合规和人工确认要求。没有依据的信息写“待确认”，不要编造。',
+    qualityInstruction:
+      '检查最终文档是否与用户选择的场景和产物内容类型一致，是否遗漏附件中的关键事实，是否把推断写成确定结论，是否存在重复、空泛扩写、敏感信息滥用、财务/法律/招聘越权判断或没有依据的承诺。修订后保持简洁、有序、可编辑、可复核。',
+    finalInstruction:
+      '返回本地 Word 文件位置、使用的场景、产物内容类型、核心结果、发现的异常和需要人工确认的事项。不要重复展示节点输入输出，不要把未验证内容表述为已完成事实。',
+    approvalPolicy: '招聘录用、财务付款或报销、合同法律结论、制度正式发布、对外承诺和敏感个人信息处理必须人工确认。'
+  }),
   createOfficeRoleTemplate({
     templateId: 'basic_document_organizer_v1',
     name: '文档整理专员',
@@ -4437,7 +4492,14 @@ const allServerRoleTemplateCatalogCandidates: BaseServerRoleTemplateCatalogEntry
   ...designedServerRoleTemplateCatalog
 ];
 
-const productionRoleTemplateIds = designedServerRoleTemplateCatalog.map((template) => template.templateId);
+export const productionRoleTemplateIds = [
+  'template_document_assistant',
+  'factory_cross_border_product_images_v1',
+  'factory_ecommerce_product_videos_v1',
+  'factory_medical_case_video_screening_v1',
+  'factory_operation_video_v1',
+  'factory_academic_project_demo_v1'
+] as const;
 
 const productionRoleTemplateIdSet = new Set<string>(productionRoleTemplateIds);
 
@@ -4451,6 +4513,7 @@ function requireBaseRoleTemplate(templateId: string): BaseServerRoleTemplateCata
 
 export const retiredServerRoleTemplateIds = baseServerRoleTemplateCatalog
   .map((template) => template.templateId)
+  .concat(designedServerRoleTemplateCatalog.map((template) => template.templateId))
   .filter((templateId) => !productionRoleTemplateIdSet.has(templateId));
 
 export const serverRoleTemplateCatalog: ServerRoleTemplateCatalogEntry[] =
