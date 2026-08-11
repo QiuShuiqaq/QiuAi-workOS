@@ -1090,21 +1090,14 @@ export class DesktopSyncService {
       return snapshot;
     }
 
-    const [authorizedTemplates, deviceCapacity] = await Promise.all([
-      this.roleService.listPublishedTemplatesForDesktop(workspaceId),
-      this.resolveDesktopDeviceCapacity(workspaceId)
-    ]);
+    const authorizedTemplates = await this.roleService.listPublishedTemplatesForDesktop(workspaceId);
     const authorizedTemplateById = new Map(
       authorizedTemplates.data
         .filter((template) => template.canInstall !== false)
         .map((template) => [template.id, template] as const)
     );
-    const rolePackages = this.restrictRolePackagesByDeviceCapacity(
-      snapshot.rolePackages.filter(
-        (rolePackage) => rolePackage.templateId && authorizedTemplateById.has(rolePackage.templateId)
-      ),
-      authorizedTemplateById,
-      deviceCapacity
+    const rolePackages = snapshot.rolePackages.filter(
+      (rolePackage) => rolePackage.templateId && authorizedTemplateById.has(rolePackage.templateId)
     );
 
     if (rolePackages.length === snapshot.rolePackages.length) {
@@ -1117,37 +1110,6 @@ export class DesktopSyncService {
       rolePackages,
       tasks: snapshot.tasks.filter((task) => authorizedRoleCodes.has(task.roleCode))
     };
-  }
-
-  private restrictRolePackagesByDeviceCapacity(
-    rolePackages: DesktopRuntimeSnapshot['rolePackages'],
-    authorizedTemplateById: Map<string, { applicationType?: string }>,
-    deviceCapacity?: DesktopDeviceCapacitySummary
-  ): DesktopRuntimeSnapshot['rolePackages'] {
-    const limits: Record<DesktopApplicationType, number | undefined> = {
-      digital_employee: deviceCapacity?.maxRoleInstances,
-      digital_factory: deviceCapacity?.maxDigitalFactories
-    };
-    const used: Record<DesktopApplicationType, number> = {
-      digital_employee: 0,
-      digital_factory: 0
-    };
-
-    return rolePackages.filter((rolePackage) => {
-      if (rolePackage.state === 'deleted') {
-        return true;
-      }
-
-      const template = rolePackage.templateId ? authorizedTemplateById.get(rolePackage.templateId) : undefined;
-      const applicationType = this.toDesktopApplicationType(template?.applicationType);
-      const limit = limits[applicationType];
-      if (limit !== undefined && used[applicationType] >= limit) {
-        return false;
-      }
-
-      used[applicationType] += 1;
-      return true;
-    });
   }
 
   private async resolveDesktopDeviceCapacity(workspaceId: string): Promise<DesktopDeviceCapacitySummary | undefined> {

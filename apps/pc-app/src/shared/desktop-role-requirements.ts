@@ -86,9 +86,14 @@ export function getRoleModelRequirementStatuses(
   const nodeIdsByModelId = readModelNodeIdsByModelProfileId(rolePackage);
 
   return readRequiredModelProfileIdsForRolePackage(rolePackage).map((profileId) => {
-    const profile = knownProfilesById.get(profileId);
-    const normalizedProfile = profile ?? createPlaceholderModelProfile(profileId);
-    const configured = hasConfiguredModelApi(normalizedProfile, {
+    const configuredProfile = knownProfilesById.get(profileId);
+    const requirementProfile = createPlaceholderModelProfile(profileId);
+    const directProfile = configuredProfile ?? requirementProfile;
+    const requiredCapabilities = getRequiredCapabilitiesForSemanticProfileId(requirementProfile.id);
+    const directCompatible =
+      requiredCapabilities.length === 0 ||
+      modelProfileSupportsAnyCapability(directProfile, requiredCapabilities);
+    const configured = directCompatible && hasConfiguredModelApi(directProfile, {
       roleCode: credentialContext.roleCode ?? rolePackage.roleCode,
       credentials: credentialContext.credentials,
       roleBindings: credentialContext.roleBindings
@@ -101,10 +106,10 @@ export function getRoleModelRequirementStatuses(
           roleBindings: credentialContext.roleBindings
         });
     return {
-      profile: normalizedProfile,
+      profile: requirementProfile,
       requiredByNodeIds: nodeIdsByModelId.get(profileId) ?? [],
       configured: configured || Boolean(compatibleConfiguredProfile),
-      known: Boolean(profile || compatibleConfiguredProfile)
+      known: Boolean(configuredProfile || compatibleConfiguredProfile || isSemanticModelProfileId(profileId))
     };
   });
 }
@@ -116,6 +121,7 @@ export function getRoleModelRuntimeRequirementStatuses(
   credentialContext: RoleModelCredentialContext = {}
 ): RoleModelRuntimeRequirementStatus[] {
   const enabledIds = new Set(enabledModelProfileIds);
+  const modelProfileById = new Map(modelProfiles.map((profile) => [profile.id, profile]));
 
   return getRoleModelRequirementStatuses(modelProfiles, rolePackage, credentialContext).map((requirement) => {
     const runtimeProfileId = findRuntimeModelProfileIdForRequirement(
@@ -123,26 +129,36 @@ export function getRoleModelRuntimeRequirementStatuses(
       credentialContext.roleCode ?? rolePackage.roleCode,
       requirement.profile.id
     );
-    const runtimeProfile = runtimeProfileId
-      ? modelProfiles.find((profile) => profile.id === runtimeProfileId)
-      : undefined;
+    const directRuntimeProfile = runtimeProfileId
+      ? modelProfileById.get(runtimeProfileId)
+      : modelProfileById.get(requirement.profile.id);
     const runtimeOverrideSelected = Boolean(
       runtimeProfileId &&
       runtimeProfileId !== requirement.profile.id
     );
     const requiredCapabilities = getRequiredCapabilitiesForSemanticProfileId(requirement.profile.id);
-    const selectedRuntimeProfile = runtimeOverrideSelected ? runtimeProfile : requirement.profile;
+    const directRuntimeCompatible =
+      !directRuntimeProfile ||
+      requiredCapabilities.length === 0 ||
+      modelProfileSupportsAnyCapability(directRuntimeProfile, requiredCapabilities);
+    const directRuntimeConfigured = directRuntimeProfile
+      ? hasConfiguredModelApi(directRuntimeProfile, credentialContext)
+      : false;
+    const compatibleConfiguredRuntimeProfile =
+      runtimeOverrideSelected || (directRuntimeCompatible && directRuntimeConfigured)
+        ? undefined
+        : findConfiguredCompatibleModelProfile(modelProfiles, requirement.profile.id, credentialContext);
+    const runtimeProfile = compatibleConfiguredRuntimeProfile ?? directRuntimeProfile;
+    const selectedRuntimeProfile = runtimeProfile ?? requirement.profile;
     const runtimeCompatible =
       !selectedRuntimeProfile ||
       requiredCapabilities.length === 0 ||
       modelProfileSupportsAnyCapability(selectedRuntimeProfile, requiredCapabilities);
     const known = runtimeOverrideSelected ? Boolean(runtimeProfile) : requirement.known;
-    const configured = runtimeOverrideSelected && runtimeProfile
+    const configured = runtimeProfile
       ? hasConfiguredModelApi(runtimeProfile, credentialContext)
       : requirement.configured;
-    const enabledProfileId = runtimeOverrideSelected
-      ? runtimeProfile?.id
-      : requirement.profile.id;
+    const enabledProfileId = runtimeProfile?.id ?? requirement.profile.id;
     const enabled = known && Boolean(enabledProfileId && enabledIds.has(enabledProfileId));
     const ready = known && runtimeCompatible && enabled && configured;
 
@@ -165,6 +181,20 @@ export function getRoleModelRuntimeRequirementStatuses(
             : 'unconfigured'
     };
   });
+}
+
+function isSemanticModelProfileId(profileId: string): boolean {
+  return [
+    'qiu-general-default',
+    'qiu-reasoning-default',
+    'qiu-vision-default',
+    'qiu-image-generation-default',
+    'qiu-image-editing-default',
+    'qiu-video-generation-default',
+    'qiu-asr-default',
+    'qiu-embedding-default',
+    'qiu-rerank-default'
+  ].includes(profileId.trim());
 }
 
 export function findFirstUnconfiguredRequiredModelProfileId(

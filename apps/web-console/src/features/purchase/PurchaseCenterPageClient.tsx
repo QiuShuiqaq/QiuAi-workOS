@@ -91,6 +91,15 @@ function entitlementText(plan: PlanDetail | undefined, featureKey: string, fallb
   return `${entitlement.limitValue.toLocaleString('zh-CN')} ${entitlement.limitUnit ?? ''}`.trim();
 }
 
+function digitalFactoryAccessText(planGroupKey: string) {
+  return {
+    FREE: '暂不开放',
+    BASIC: '基础开放',
+    STANDARD: '标准开放',
+    PRO: '全量开放'
+  }[planGroupKey] ?? '按套餐开放';
+}
+
 function getPlanPaymentDisabledReason(
   plan: PlanDetail,
   options: {
@@ -311,8 +320,8 @@ export function PurchaseCenterPageClient({
                           </Typography.Title>
                           <Space direction="vertical" size={4}>
                             <Typography.Text>绑定设备：{entitlementText(basePlan, 'maxDesktopDevices')}</Typography.Text>
-                            <Typography.Text>每台设备数字员工：{entitlementText(basePlan, 'maxRoleInstances')}</Typography.Text>
-                            <Typography.Text>每台设备数字工厂：{entitlementText(basePlan, 'maxDigitalFactories')}</Typography.Text>
+                            <Typography.Text>数字员工：全部开放</Typography.Text>
+                            <Typography.Text>数字工厂：{digitalFactoryAccessText(group.key)}</Typography.Text>
                           </Space>
                           <Space wrap>
                             {[group.monthly, group.annual].filter(Boolean).map((plan) => {

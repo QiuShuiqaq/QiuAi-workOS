@@ -236,6 +236,78 @@ assert.equal(
   ).some((status) => status.profile.id === 'qiu-video-generation-default'),
   false
 );
+const pollutedReasoningProfile: ModelProfile = {
+  id: 'qiu-reasoning-default',
+  providerId: 'minimax',
+  providerName: 'MiniMax',
+  modelName: 'MiniMax-Hailuo-2.3-Fast',
+  purpose: 'vision',
+  capabilities: ['video_generation', 'image_to_video'],
+  apiBaseUrl: 'https://api.minimaxi.com/v1'
+};
+const pollutedReasoningStatuses = getRoleModelRuntimeRequirementStatuses(
+  [
+    createPlaceholderModelProfile('qiu-general-default'),
+    pollutedReasoningProfile
+  ],
+  ['qiu-general-default', 'qiu-reasoning-default'],
+  explicitTextWorkflowWithStaleVideoManifestRolePackage
+);
+const pollutedReasoningRequirement = pollutedReasoningStatuses.find(
+  (status) => status.profile.id === 'qiu-reasoning-default'
+);
+assert.ok(pollutedReasoningRequirement);
+assert.deepEqual(pollutedReasoningRequirement.profile.capabilities, [
+  'reasoning_text'
+]);
+assert.equal(
+  pollutedReasoningRequirement.profile.capabilities?.includes('video_generation'),
+  false
+);
+assert.equal(pollutedReasoningRequirement.runtimeProfile?.id, 'qiu-reasoning-default');
+assert.equal(pollutedReasoningRequirement.issue, 'incompatible');
+const compatibleTextRuntimeProfile: ModelProfile = {
+  id: 'deepseek-v4-flash',
+  providerId: 'deepseek',
+  providerName: 'DeepSeek',
+  modelName: 'deepseek-v4-flash',
+  purpose: 'general',
+  capabilities: ['text'],
+  apiBaseUrl: 'https://api.deepseek.com'
+};
+const fallbackReasoningStatuses = getRoleModelRuntimeRequirementStatuses(
+  [
+    createPlaceholderModelProfile('qiu-general-default'),
+    pollutedReasoningProfile,
+    compatibleTextRuntimeProfile
+  ],
+  ['qiu-general-default', 'qiu-reasoning-default', compatibleTextRuntimeProfile.id],
+  explicitTextWorkflowWithStaleVideoManifestRolePackage,
+  {
+    credentials: [
+      {
+        id: 'credential-default-deepseek',
+        providerId: 'deepseek',
+        providerName: 'DeepSeek',
+        label: 'DeepSeek default',
+        apiBaseUrl: 'https://api.deepseek.com',
+        apiKey: 'deepseek-key',
+        isDefault: true,
+        createdAt: '2026-08-10T00:00:00.000Z',
+        updatedAt: '2026-08-10T00:00:00.000Z'
+      }
+    ]
+  }
+);
+const fallbackReasoningRequirement = fallbackReasoningStatuses.find(
+  (status) => status.profile.id === 'qiu-reasoning-default'
+);
+assert.ok(fallbackReasoningRequirement);
+assert.deepEqual(fallbackReasoningRequirement.profile.capabilities, [
+  'reasoning_text'
+]);
+assert.equal(fallbackReasoningRequirement.runtimeProfile?.id, compatibleTextRuntimeProfile.id);
+assert.equal(fallbackReasoningRequirement.ready, true);
 
 const manifestDrivenRolePackage: RolePackageManifest = {
   ...rolePackage,

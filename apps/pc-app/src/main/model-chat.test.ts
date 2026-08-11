@@ -45,7 +45,7 @@ try {
   assert.equal(catalog.models.length, 4);
   assert.deepEqual(
     catalog.models.find((model) => model.id === 'deepseek-v4-pro')?.capabilities,
-    ['reasoning_text', 'text']
+    ['reasoning_text']
   );
   assert.deepEqual(
     catalog.models.find((model) => model.id === 'text-embedding-3-large')?.capabilities,

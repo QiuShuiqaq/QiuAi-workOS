@@ -1,5 +1,6 @@
 import {
   ApiOutlined,
+  ApartmentOutlined,
   AppstoreOutlined,
   BankOutlined,
   BorderOutlined,
@@ -77,7 +78,6 @@ import type {
   DesktopAuthorizedRoleTemplateCatalog,
   DesktopAuthorizedRoleTemplateSummary,
   DesktopBackupSummary,
-  DesktopDeviceCapacitySummary,
   DesktopIssueCategory,
   DesktopIssueReportSubmitRequest,
   DesktopIssueSeverity,
@@ -115,15 +115,15 @@ import type {
 import {
   createModelCapabilityMetadata,
   explicitModelCapabilitySummary,
-  modelCapabilityOptions,
   modelCapabilityConfidenceLabel,
   modelCapabilityLabel,
   modelCapabilityMetadataSourceLabel,
   modelCapabilitySummary,
   modelProfileSupportsRequiredCapabilities,
-  normalizeModelCapabilities,
+  normalizePrimaryModelCapabilities,
   normalizeExplicitModelCapabilities,
   purposeForModelCapabilities,
+  primaryModelCapabilityOptions,
   readModelCatalogEntryEffectiveCapabilities,
   readModelProfileCapabilities
 } from '../shared/desktop-model-capabilities';
@@ -202,6 +202,7 @@ import { PromptSnippetBoard } from './PromptSnippetBoard';
 type SectionKey =
   | 'workbench'
   | 'factories'
+  | 'studio'
   | 'roles'
   | 'logs'
   | 'snippets'
@@ -311,6 +312,9 @@ interface DocumentAssistantScenarioPreset {
 }
 
 type RoleApplicationType = 'digital_employee' | 'digital_factory';
+type StudioApplicationFilter = 'all' | RoleApplicationType;
+type StudioStatusFilter = 'all' | 'active' | 'completed' | 'failed' | 'idle';
+type StudioRuntimeStatus = DesktopTaskState | 'idle' | 'deleted';
 
 interface AcademicDemoSectionFormValue {
   type: AcademicDemoSectionType;
@@ -448,7 +452,7 @@ interface ModelFormValues {
   providerName: string;
   modelName: string;
   purpose?: ModelProfile['purpose'];
-  capabilities?: ModelCapability[];
+  capabilities?: ModelCapability | ModelCapability[];
   apiBaseUrl?: string;
   apiKey?: string;
   temperature?: number;
@@ -521,6 +525,7 @@ interface AccountHelpSection {
 const sectionItems: Array<{ key: SectionKey; icon: ReactNode; label: string }> = [
   { key: 'workbench', icon: <MessageOutlined />, label: '数字员工' },
   { key: 'factories', icon: <BankOutlined />, label: '数字工厂' },
+  { key: 'studio', icon: <ApartmentOutlined />, label: '工作室' },
   { key: 'roles', icon: <AppstoreOutlined />, label: '数字市场' },
   { key: 'logs', icon: <FileTextOutlined />, label: '日志' },
   { key: 'snippets', icon: <SnippetsOutlined />, label: '标签库' },
@@ -529,6 +534,9 @@ const sectionItems: Array<{ key: SectionKey; icon: ReactNode; label: string }> =
   { key: 'knowledge', icon: <DatabaseOutlined />, label: '知识库' },
   { key: 'settings', icon: <SettingOutlined />, label: '设置' }
 ];
+
+const studioEmployeeAvatarSkins = ['cat', 'fox', 'bear', 'rabbit', 'panda', 'dog', 'koala'] as const;
+const studioFactoryAvatarSkins = ['blue', 'green', 'amber', 'rose', 'slate'] as const;
 
 const desktopClientPreferenceStorageKey = 'qiuai.pc.client.preferences.v1';
 const desktopOnboardingTutorialStorageKey = 'qiuai.pc.tutorial.digital-employee.v1';
@@ -2166,42 +2174,14 @@ function roleExecutionOutputTargetLabel(value: string): string {
   return labels[value] ?? value;
 }
 
-type RoleApplicationUsage = Record<RoleApplicationType, number>;
-
 interface RoleInstallAvailability {
   canInstall: boolean;
   label: string;
   reason: string;
-  usedValue?: number;
-  limitValue?: number;
-}
-
-function countInstalledRoleApplications(rolePackages: RolePackageManifest[]): RoleApplicationUsage {
-  return rolePackages.reduce<RoleApplicationUsage>(
-    (counts, rolePackage) => {
-      counts[readRoleApplicationType(rolePackage)] += 1;
-      return counts;
-    },
-    {
-      digital_employee: 0,
-      digital_factory: 0
-    }
-  );
-}
-
-function roleApplicationCapacityLimit(
-  applicationType: RoleApplicationType,
-  deviceCapacity: DesktopDeviceCapacitySummary | undefined
-): number | undefined {
-  return applicationType === 'digital_factory'
-    ? deviceCapacity?.maxDigitalFactories
-    : deviceCapacity?.maxRoleInstances;
 }
 
 function resolveRoleInstallAvailability(
-  template: DesktopRoleTemplate,
-  installedUsage: RoleApplicationUsage,
-  deviceCapacity: DesktopDeviceCapacitySummary | undefined
+  template: DesktopRoleTemplate
 ): RoleInstallAvailability {
   if (!canInstallRoleTemplate(template)) {
     return {
@@ -2211,65 +2191,11 @@ function resolveRoleInstallAvailability(
     };
   }
 
-  const applicationType = readRoleApplicationType(template);
-  const limitValue = roleApplicationCapacityLimit(applicationType, deviceCapacity);
-  const usedValue = installedUsage[applicationType];
-  if (limitValue !== undefined && usedValue >= limitValue) {
-    const applicationLabel = roleApplicationTypeLabel(applicationType);
-    return {
-      canInstall: false,
-      label: '额度已满',
-      reason: `当前套餐每台设备最多可安装 ${limitValue} 个${applicationLabel}，这台电脑已安装 ${usedValue} 个。请先卸载不需要的${applicationLabel}，或在购买中心升级套餐。`,
-      usedValue,
-      limitValue
-    };
-  }
-
   return {
     canInstall: true,
     label: '可安装',
-    reason: '',
-    usedValue,
-    limitValue
+    reason: ''
   };
-}
-
-function formatRoleApplicationCapacityUsage(
-  applicationType: RoleApplicationType,
-  installedUsage: RoleApplicationUsage,
-  deviceCapacity: DesktopDeviceCapacitySummary | undefined
-): string {
-  const usedValue = installedUsage[applicationType];
-  const limitValue = roleApplicationCapacityLimit(applicationType, deviceCapacity);
-
-  return limitValue === undefined
-    ? `本机已安装 ${usedValue} 个`
-    : `本机已安装 ${usedValue}/${limitValue} 个`;
-}
-
-function restrictInstalledRolePackagesByDeviceCapacity(
-  rolePackages: RolePackageManifest[],
-  deviceCapacity: DesktopDeviceCapacitySummary | undefined
-): RolePackageManifest[] {
-  const limits: Record<RoleApplicationType, number | undefined> = {
-    digital_employee: deviceCapacity?.maxRoleInstances,
-    digital_factory: deviceCapacity?.maxDigitalFactories
-  };
-  const used: RoleApplicationUsage = {
-    digital_employee: 0,
-    digital_factory: 0
-  };
-
-  return rolePackages.filter((rolePackage) => {
-    const applicationType = readRoleApplicationType(rolePackage);
-    const limitValue = limits[applicationType];
-    if (limitValue !== undefined && used[applicationType] >= limitValue) {
-      return false;
-    }
-
-    used[applicationType] += 1;
-    return true;
-  });
 }
 
 function isSectionKey(value: string): value is SectionKey {
@@ -3265,6 +3191,10 @@ export default function App() {
   const [selectedRoleCategory, setSelectedRoleCategory] = useState('全部');
   const [selectedRoleApplicationType, setSelectedRoleApplicationType] =
     useState<RoleApplicationType>('digital_employee');
+  const [studioSearchQuery, setStudioSearchQuery] = useState('');
+  const [studioApplicationFilter, setStudioApplicationFilter] =
+    useState<StudioApplicationFilter>('all');
+  const [studioStatusFilter, setStudioStatusFilter] = useState<StudioStatusFilter>('all');
   const [selectedToolCategory, setSelectedToolCategory] = useState('全部');
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [accountModal, setAccountModal] = useState<AccountModalKey | null>(null);
@@ -3819,8 +3749,7 @@ export default function App() {
           pruneUnauthorizedRolePackages(
             current,
             authorizedTemplates,
-            catalog.deletedTemplateIds ?? [],
-            catalog.deviceCapacity
+            catalog.deletedTemplateIds ?? []
           )
         );
       }
@@ -4588,16 +4517,14 @@ export default function App() {
       ? findDefaultModelCredential(runtimeState.modelCredentials, selectedModelProfile.providerId)
       : undefined;
   }, [runtimeState.modelCredentials, selectedModelProfile]);
-  const selectedModelFormCapabilities = Form.useWatch('capabilities', modelForm) as ModelCapability[] | undefined;
+  const selectedModelFormCapabilities = Form.useWatch('capabilities', modelForm) as ModelCapability | ModelCapability[] | undefined;
   const selectedModelRequiredCapabilities = useMemo(() => {
     if (!selectedModelProfile) {
       return [];
     }
 
-    return normalizeModelCapabilities(
-      Array.isArray(selectedModelFormCapabilities)
-        ? selectedModelFormCapabilities
-        : selectedModelProfile.capabilities,
+    return normalizePrimaryModelCapabilities(
+      selectedModelFormCapabilities ?? selectedModelProfile.capabilities,
       selectedModelProfile.purpose
     );
   }, [selectedModelFormCapabilities, selectedModelProfile]);
@@ -4611,7 +4538,7 @@ export default function App() {
       providerName: selectedModelProfile.providerName,
       modelName: selectedModelProfile.modelName,
       purpose: selectedModelProfile.purpose,
-      capabilities: readModelProfileCapabilities(selectedModelProfile),
+      capabilities: readModelProfileCapabilities(selectedModelProfile)[0],
       apiBaseUrl: selectedModelDefaultCredential?.apiBaseUrl ?? selectedModelProfile.apiBaseUrl,
       apiKey: selectedModelDefaultCredential?.apiKey ?? selectedModelProfile.apiKey ?? '',
       temperature: selectedModelProfile.temperature,
@@ -5202,10 +5129,6 @@ export default function App() {
     return runtimeState.runtimeSnapshot.rolePackages;
   }, [runtimeState.runtimeSnapshot.rolePackages]);
 
-  const installedRoleApplicationUsage = useMemo(() => {
-    return countInstalledRoleApplications(refreshedInstalledRolePackages);
-  }, [refreshedInstalledRolePackages]);
-
   const enabledModelCount = runtimeState.localRuntime.enabledModelProfileIds.length;
   const enabledToolCount = runtimeState.localRuntime.enabledToolIds.length;
   const knowledgeBindingCount = runtimeState.localRuntime.knowledgeBindingIds.length;
@@ -5279,6 +5202,7 @@ export default function App() {
                 >
                   {selectedSection === 'workbench' ? renderWorkbench() : null}
                   {selectedSection === 'factories' ? renderFactories() : null}
+                  {selectedSection === 'studio' ? renderStudio() : null}
                   {selectedSection === 'roles' ? renderRoles() : null}
                   {selectedSection === 'logs' ? renderLogs() : null}
                   {selectedSection === 'snippets' ? <PromptSnippetBoard /> : null}
@@ -5443,6 +5367,355 @@ export default function App() {
           </button>
         </div>
       </aside>
+    );
+  }
+
+  function renderStudio() {
+    const tasksByRoleCode = new Map<string, DesktopTaskDetail[]>();
+    for (const task of taskDetails) {
+      const current = tasksByRoleCode.get(task.roleCode) ?? [];
+      current.push(task);
+      tasksByRoleCode.set(task.roleCode, current);
+    }
+
+    const buildCommonStudioItem = (
+      rolePackage: RolePackageManifest,
+      kind: RoleApplicationType
+    ) => {
+      const tasks = tasksByRoleCode.get(rolePackage.roleCode) ?? [];
+      const latestTask = tasks[0];
+      const summary = installedRoleSummaries.find((item) => item.roleCode === rolePackage.roleCode);
+      const isDeleted = summary?.state === 'deleted';
+      const status = resolveStudioRuntimeStatus(latestTask, isDeleted);
+      const template = desktopRoleTemplateByRoleCode.get(rolePackage.roleCode);
+      const category = template ? roleTemplateCategory(template) : '通用';
+      const deliverableCount = tasks.reduce((total, task) => total + countStudioTaskDeliverables(task), 0);
+
+      return {
+        roleCode: rolePackage.roleCode,
+        name: rolePackage.name,
+        summary: rolePackage.summary ?? template?.description ?? '',
+        kind,
+        category,
+        status,
+        latestTask,
+        taskCount: summary?.taskCount ?? tasks.length,
+        deliverableCount,
+        lastUpdatedAt: latestTask?.updatedAt ?? summary?.lastRunAt ?? summary?.installedAt,
+        isDeleted
+      };
+    };
+
+    const employeeItems = installedDigitalEmployeePackages.map((rolePackage, index) => {
+      const item = buildCommonStudioItem(rolePackage, 'digital_employee');
+      return {
+        ...item,
+        visualSkin: pickStudioEmployeeAvatarSkin(rolePackage.roleCode, rolePackage.name, index),
+        roleHint: isWatchRolePackage(rolePackage) ? '值守式员工' : '对话式员工'
+      };
+    });
+
+    const factoryItems = installedDigitalFactoryPackages.map((rolePackage, index) => {
+      const item = buildCommonStudioItem(rolePackage, 'digital_factory');
+      const factoryManifest = readFactoryManifest(rolePackage.dependencyManifest);
+      const roleHint = isMedicalCaseVideoFactory(factoryManifest)
+        ? '质检视频工厂'
+        : isEcommerceProductVideoFactory(factoryManifest)
+          ? '电商视频工厂'
+          : isAcademicDemoFactory(factoryManifest)
+            ? '学术 Demo 工厂'
+            : isOperationVideoFactory(factoryManifest)
+              ? '运营视频工厂'
+              : '批量生产工厂';
+
+      return {
+        ...item,
+        visualSkin: pickStudioFactoryAvatarSkin(rolePackage.roleCode, rolePackage.name, index),
+        roleHint
+      };
+    });
+
+    const studioItems = [...employeeItems, ...factoryItems].sort((left, right) => {
+      const rank = (status: StudioRuntimeStatus) => {
+        if (isStudioActiveRuntimeStatus(status)) return 0;
+        if (status === 'failed') return 1;
+        if (status === 'completed') return 2;
+        if (status === 'deleted') return 4;
+        return 3;
+      };
+      const rankDiff = rank(left.status) - rank(right.status);
+      if (rankDiff !== 0) {
+        return rankDiff;
+      }
+
+      return (right.lastUpdatedAt ?? '').localeCompare(left.lastUpdatedAt ?? '');
+    });
+
+    const normalizedSearchQuery = studioSearchQuery.trim().toLowerCase();
+    const filteredStudioItems = studioItems.filter((item) => {
+      if (studioApplicationFilter !== 'all' && item.kind !== studioApplicationFilter) {
+        return false;
+      }
+
+      if (!studioStatusFilterMatches(item.status, studioStatusFilter)) {
+        return false;
+      }
+
+      if (!normalizedSearchQuery) {
+        return true;
+      }
+
+      return [
+        item.name,
+        item.summary,
+        item.category,
+        item.roleHint,
+        item.latestTask?.title
+      ].some((value) => value?.toLowerCase().includes(normalizedSearchQuery));
+    });
+
+    const activeStudioCount = studioItems.filter((item) => isStudioActiveRuntimeStatus(item.status)).length;
+    const failedStudioCount = studioItems.filter((item) => item.status === 'failed').length;
+    const deliverableTotal = taskDetails.reduce((total, task) => total + countStudioTaskDeliverables(task), 0);
+    const latestTask = taskDetails[0];
+    const studioGroups = [
+      {
+        key: 'active',
+        title: '正在处理',
+        description: '运行中、排队中和待审批的应用。',
+        items: filteredStudioItems.filter((item) => isStudioActiveRuntimeStatus(item.status))
+      },
+      {
+        key: 'attention',
+        title: '需要关注',
+        description: '最近一次任务失败，需要检查日志或配置。',
+        items: filteredStudioItems.filter((item) => item.status === 'failed')
+      },
+      {
+        key: 'completed',
+        title: '最近完成',
+        description: '最近一次任务已经完成，可继续查看产物。',
+        items: filteredStudioItems.filter((item) => item.status === 'completed')
+      },
+      {
+        key: 'available',
+        title: '可用应用',
+        description: '暂无运行任务，点击即可进入工作区。',
+        items: filteredStudioItems.filter(
+          (item) =>
+            !isStudioActiveRuntimeStatus(item.status) &&
+            item.status !== 'failed' &&
+            item.status !== 'completed'
+        )
+      }
+    ].filter((group) => group.items.length > 0);
+
+    type StudioItem = (typeof studioItems)[number];
+
+    const openStudioItem = (item: StudioItem) => {
+      if (item.kind === 'digital_employee') {
+        activateRole(item.roleCode);
+        setTaskHistoryOpen(false);
+        if (item.latestTask) {
+          setSelectedTaskId(item.latestTask.taskId);
+        }
+        navigateToSection('workbench');
+        return;
+      }
+
+      setSelectedFactoryRoleCode(item.roleCode);
+      if (item.latestTask) {
+        setSelectedTaskId(item.latestTask.taskId);
+      }
+      navigateToSection('factories');
+    };
+
+    const renderStudioVisual = (item: StudioItem) => {
+      const motionClassName = studioMotionClassName(item.status);
+      if (item.kind === 'digital_employee') {
+        return (
+          <span
+            className={`studio-animal-avatar studio-skin-${item.visualSkin} ${motionClassName}`}
+            aria-hidden="true"
+          >
+            <span className="studio-animal-ear left" />
+            <span className="studio-animal-ear right" />
+            <span className="studio-animal-head">
+              <span className="studio-animal-eye left" />
+              <span className="studio-animal-eye right" />
+              <span className="studio-animal-muzzle" />
+            </span>
+          </span>
+        );
+      }
+
+      return (
+        <span
+          className={`studio-factory-avatar studio-factory-${item.visualSkin} ${motionClassName}`}
+          aria-hidden="true"
+        >
+          <span className="studio-factory-chimney" />
+          <span className="studio-factory-roof" />
+          <span className="studio-factory-body">
+            <span />
+            <span />
+            <span />
+          </span>
+          <span className="studio-factory-belt">
+            <span />
+            <span />
+            <span />
+          </span>
+        </span>
+      );
+    };
+
+    const renderStudioItemCard = (item: StudioItem) => (
+      <button
+        key={item.roleCode}
+        type="button"
+        className={[
+          'studio-app-card',
+          `studio-app-${item.kind}`,
+          studioMotionClassName(item.status),
+          item.isDeleted ? 'is-deleted' : ''
+        ].filter(Boolean).join(' ')}
+        onClick={() => openStudioItem(item)}
+      >
+        <span className="studio-app-visual">{renderStudioVisual(item)}</span>
+        <span className="studio-app-main">
+          <span className="studio-app-title-row">
+            <Typography.Text strong ellipsis>
+              {item.name}
+            </Typography.Text>
+            <Tag color={studioRuntimeStatusColor(item.status)}>
+              {studioRuntimeStatusLabel(item.status)}
+            </Tag>
+          </span>
+          <span className="studio-app-meta-row">
+            <Tag>{roleApplicationTypeLabel(item.kind)}</Tag>
+            <Tag>{item.category}</Tag>
+            <Tag>{item.roleHint}</Tag>
+          </span>
+          <Typography.Text type="secondary" ellipsis={{ tooltip: item.summary }} className="studio-app-summary">
+            {item.summary || '点击进入应用工作区。'}
+          </Typography.Text>
+          <span className="studio-app-stats-row">
+            <span>任务 {item.taskCount}</span>
+            <span>产物 {item.deliverableCount}</span>
+            <span>{item.lastUpdatedAt ? formatShortTime(item.lastUpdatedAt) : '待开始'}</span>
+          </span>
+          <Typography.Text type="secondary" ellipsis className="studio-app-latest-task">
+            {item.latestTask ? `最近：${item.latestTask.title}` : '还没有任务记录'}
+          </Typography.Text>
+        </span>
+      </button>
+    );
+
+    return (
+      <div className="studio-page">
+        <section className="studio-overview-band">
+          <div className="studio-overview-copy">
+            <Typography.Text strong className="studio-overview-title">
+              企业 AI 工作室
+            </Typography.Text>
+            <Typography.Text type="secondary">
+              把已安装的数字员工和数字工厂放在同一个工作空间里，快速判断谁在工作、谁需要处理、谁可以继续使用。
+            </Typography.Text>
+          </div>
+          <div className="studio-overview-stats">
+            <div>
+              <span>{installedDigitalEmployeePackages.length}</span>
+              <Typography.Text type="secondary">数字员工</Typography.Text>
+            </div>
+            <div>
+              <span>{installedDigitalFactoryPackages.length}</span>
+              <Typography.Text type="secondary">数字工厂</Typography.Text>
+            </div>
+            <div>
+              <span>{activeStudioCount}</span>
+              <Typography.Text type="secondary">处理中</Typography.Text>
+            </div>
+            <div>
+              <span>{deliverableTotal}</span>
+              <Typography.Text type="secondary">产物</Typography.Text>
+            </div>
+          </div>
+        </section>
+
+        <section className="studio-toolbar">
+          <Input
+            allowClear
+            value={studioSearchQuery}
+            placeholder="搜索名称、分类或最近任务"
+            className="studio-search-input"
+            onChange={(event) => setStudioSearchQuery(event.target.value)}
+          />
+          <Radio.Group
+            size="small"
+            optionType="button"
+            buttonStyle="solid"
+            value={studioApplicationFilter}
+            options={[
+              { value: 'all', label: '全部' },
+              { value: 'digital_employee', label: '员工' },
+              { value: 'digital_factory', label: '工厂' }
+            ]}
+            onChange={(event) => setStudioApplicationFilter(event.target.value as StudioApplicationFilter)}
+          />
+          <Select<StudioStatusFilter>
+            value={studioStatusFilter}
+            style={{ width: 128 }}
+            options={[
+              { value: 'all', label: '全部状态' },
+              { value: 'active', label: '处理中' },
+              { value: 'completed', label: '已完成' },
+              { value: 'failed', label: '失败' },
+              { value: 'idle', label: '可用' }
+            ]}
+            onChange={setStudioStatusFilter}
+          />
+          <Space size={6} wrap className="studio-toolbar-status">
+            <Tag color="geekblue">处理中 {activeStudioCount}</Tag>
+            <Tag color={failedStudioCount > 0 ? 'red' : 'default'}>异常 {failedStudioCount}</Tag>
+            {latestTask ? <Tag>最近 {formatShortTime(latestTask.updatedAt)}</Tag> : null}
+          </Space>
+        </section>
+
+        {studioGroups.length > 0 ? (
+          <div className="studio-group-list">
+            {studioGroups.map((group) => (
+              <section key={group.key} className="studio-group-section">
+                <div className="studio-group-header">
+                  <Space size={8} wrap>
+                    <Typography.Text strong>{group.title}</Typography.Text>
+                    <Tag>{group.items.length}</Tag>
+                  </Space>
+                  <Typography.Text type="secondary">{group.description}</Typography.Text>
+                </div>
+                <div className="studio-app-grid">
+                  {group.items.map(renderStudioItemCard)}
+                </div>
+              </section>
+            ))}
+          </div>
+        ) : (
+          <div className="studio-empty-state">
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有找到匹配的数字员工或数字工厂" />
+            <Button
+              type="primary"
+              onClick={() => {
+                setStudioSearchQuery('');
+                setStudioApplicationFilter('all');
+                setStudioStatusFilter('all');
+                navigateToSection(studioItems.length > 0 ? 'studio' : 'roles');
+              }}
+            >
+              {studioItems.length > 0 ? '清空筛选' : '去数字市场安装'}
+            </Button>
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -6847,13 +7120,6 @@ export default function App() {
             onFinish={submitRuntimeModelQuickSwitch}
           >
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              <div className="runtime-model-quick-note">
-                <InfoCircleOutlined />
-                <Typography.Text type="secondary">
-                  这里只切换当前应用各模型槽位实际调用的模型。API Key、工具、知识库请在对应数字员工或数字工厂的专属设置里配置。
-                </Typography.Text>
-              </div>
-
               {requirements.length > 0 ? (
                 requirements.map((requirement) => {
                   const binding = runtimeState.roleModelCredentialBindings.find(
@@ -6876,10 +7142,7 @@ export default function App() {
                       <Flex align="flex-start" justify="space-between" gap={12} wrap="wrap">
                         <Space direction="vertical" size={2}>
                           <Typography.Text strong>
-                            {modelCapabilitySummary(requirement.profile.capabilities, requirement.profile.purpose)}
-                          </Typography.Text>
-                          <Typography.Text type="secondary">
-                            槽位：{requirement.profile.providerName} / {requirement.profile.modelName}
+                            {modelRequirementSlotLabel(requirement.profile)}
                           </Typography.Text>
                         </Space>
                         <Tag color={runtimeReady ? 'green' : 'orange'}>
@@ -7029,7 +7292,7 @@ export default function App() {
 
       return {
         key: requirement.profile.id,
-        capability: modelCapabilitySummary(requirement.profile.capabilities, requirement.profile.purpose),
+        capability: modelRequirementSlotLabel(requirement.profile),
         model: `${displayProfile.providerName} / ${displayProfile.modelName}`,
         ready: requirement.ready
       };
@@ -9709,7 +9972,7 @@ export default function App() {
                             <Typography.Text strong>
                               {displayProfile.providerName} / {displayProfile.modelName}
                             </Typography.Text>
-                            <Tag>{modelCapabilitySummary(requirement.profile.capabilities, requirement.profile.purpose)}</Tag>
+                            <Tag>{modelRequirementSlotLabel(requirement.profile)}</Tag>
                             {isRuntimeOverride ? <Tag color="blue">实际调用</Tag> : null}
                             <Tag color={requirement.ready ? 'green' : 'orange'}>
                               {renderModelRequirementStatusLabel(requirement.issue)}
@@ -9955,12 +10218,6 @@ export default function App() {
     const filteredRoleTemplates = selectedApplicationTemplates.filter(
       (template) => selectedRoleCategory === '全部' || roleTemplateCategory(template) === selectedRoleCategory
     );
-    const selectedApplicationCapacityText = formatRoleApplicationCapacityUsage(
-      selectedRoleApplicationType,
-      installedRoleApplicationUsage,
-      authorizedRoleTemplateCatalog.deviceCapacity
-    );
-
     return (
       <>
         <div className="catalog-page">
@@ -10007,10 +10264,6 @@ export default function App() {
             ))}
           </div>
 
-          <div className="catalog-capacity-row">
-            <Tag>{selectedApplicationCapacityText}</Tag>
-          </div>
-
           {roleTemplateNotice ? (
             <Typography.Paragraph type="secondary">
               {roleTemplateNotice}
@@ -10045,11 +10298,7 @@ export default function App() {
               const fileContract = buildRoleFileContractSummary(template);
               const freeTemplate = isFreeRoleTemplate(template);
               const executionModeMeta = roleExecutionModeMeta(template.executionProfile);
-              const installAvailability = resolveRoleInstallAvailability(
-                template,
-                installedRoleApplicationUsage,
-                authorizedRoleTemplateCatalog.deviceCapacity
-              );
+              const installAvailability = resolveRoleInstallAvailability(template);
               const installStatusColor = active ? 'green' : installed ? 'blue' : installAvailability.canInstall ? 'default' : 'orange';
               const installStatusLabel = active
                 ? '当前'
@@ -10249,7 +10498,7 @@ export default function App() {
                               <Typography.Text strong>
                                 {requirement.profile.providerName} / {requirement.profile.modelName}
                               </Typography.Text>
-                              <Tag>{modelCapabilitySummary(requirement.profile.capabilities, requirement.profile.purpose)}</Tag>
+                              <Tag>{modelRequirementSlotLabel(requirement.profile)}</Tag>
                               <Tag color={requirement.ready ? 'green' : 'orange'}>
                                 {renderModelRequirementStatusLabel(requirement.issue)}
                               </Tag>
@@ -10873,9 +11122,8 @@ export default function App() {
                 rules={[{ required: true, message: '请选择模型能力' }]}
               >
                 <Select
-                  mode="multiple"
                   placeholder="按模型真实输入输出选择"
-                  options={modelCapabilityOptions.map((option) => ({
+                  options={primaryModelCapabilityOptions.map((option) => ({
                     label: `${option.label} - ${option.description}`,
                     value: option.value
                   }))}
@@ -11816,11 +12064,7 @@ export default function App() {
   }
 
   function installRoleFromMarket(template: DesktopRoleTemplate) {
-    const installAvailability = resolveRoleInstallAvailability(
-      template,
-      installedRoleApplicationUsage,
-      authorizedRoleTemplateCatalog.deviceCapacity
-    );
+    const installAvailability = resolveRoleInstallAvailability(template);
     if (!installAvailability.canInstall) {
       message.warning(installAvailability.reason);
       return;
@@ -12841,7 +13085,7 @@ export default function App() {
       providerName: '',
       modelName: profile.modelName,
       purpose: profile.purpose,
-      capabilities: readModelProfileCapabilities(profile),
+      capabilities: readModelProfileCapabilities(profile)[0],
       apiBaseUrl: '',
       apiKey: '',
       temperature: profile.temperature,
@@ -12932,7 +13176,7 @@ export default function App() {
     setIsSavingModelProfile(true);
     setModelTestNotice('');
 
-    const capabilities = normalizeModelCapabilities(
+    const capabilities = normalizePrimaryModelCapabilities(
       values.capabilities,
       values.purpose ?? selectedModelProfile.purpose
     );
@@ -13059,7 +13303,7 @@ export default function App() {
       providerName: preset.name,
       modelName: model.modelName,
       purpose: model.purpose,
-      capabilities: normalizeModelCapabilities(model.capabilities, model.purpose),
+      capabilities: normalizePrimaryModelCapabilities(model.capabilities, model.purpose)[0],
       apiBaseUrl: options.apiBaseUrl ?? defaultCredential?.apiBaseUrl ?? selection.profile.apiBaseUrl,
       apiKey: options.apiKey ?? defaultCredential?.apiKey ?? '',
       temperature: selection.profile.temperature,
@@ -13083,7 +13327,7 @@ export default function App() {
       const values = await modelForm.validateFields();
       const apiBaseUrl = values.apiBaseUrl?.trim();
       const apiKey = values.apiKey?.trim();
-      const capabilities = normalizeModelCapabilities(
+      const capabilities = normalizePrimaryModelCapabilities(
         values.capabilities,
         values.purpose ?? selectedModelProfile.purpose
       );
@@ -13146,7 +13390,7 @@ export default function App() {
       const values = await modelForm.validateFields();
       const apiBaseUrl = values.apiBaseUrl?.trim();
       const apiKey = values.apiKey?.trim();
-      const capabilities = normalizeModelCapabilities(
+      const capabilities = normalizePrimaryModelCapabilities(
         values.capabilities,
         values.purpose ?? selectedModelProfile.purpose
       );
@@ -13212,7 +13456,7 @@ export default function App() {
         models: []
       };
     const formCapabilities = normalizeExplicitModelCapabilities(
-      modelForm.getFieldValue('capabilities') as ModelCapability[] | undefined
+      modelForm.getFieldValue('capabilities') as ModelCapability | ModelCapability[] | undefined
     );
     const presetModel = createPresetModelFromCatalogEntry(
       model,
@@ -13222,8 +13466,7 @@ export default function App() {
 
     applyModelProviderPreset(preset, presetModel, {
       apiBaseUrl: formApiBaseUrl,
-      apiKey: formApiKey,
-      replaceProfileId: currentProfile.id
+      apiKey: formApiKey
     });
     setModelTestNotice(
       readModelCatalogEntryEffectiveCapabilities(model).length > 0
@@ -13401,11 +13644,7 @@ export default function App() {
       return;
     }
     if (mode === 'install') {
-      const installAvailability = resolveRoleInstallAvailability(
-        template,
-        installedRoleApplicationUsage,
-        authorizedRoleTemplateCatalog.deviceCapacity
-      );
+      const installAvailability = resolveRoleInstallAvailability(template);
       if (!installAvailability.canInstall) {
         message.warning(installAvailability.reason);
         return;
@@ -13582,11 +13821,7 @@ export default function App() {
       return;
     }
     if (roleConfigMode === 'install') {
-      const installAvailability = resolveRoleInstallAvailability(
-        template,
-        installedRoleApplicationUsage,
-        authorizedRoleTemplateCatalog.deviceCapacity
-      );
+      const installAvailability = resolveRoleInstallAvailability(template);
       if (!installAvailability.canInstall) {
         message.warning(installAvailability.reason);
         closeRoleConfig();
@@ -14818,6 +15053,10 @@ function sectionMeta(section: SectionKey) {
       title: '数字工厂',
       description: '运行批量化任务，查看批次进度和工厂产物。'
     },
+    studio: {
+      title: '工作室',
+      description: '用可视化方式查看数字员工、数字工厂和任务状态。'
+    },
     roles: {
       title: '数字市场',
       description: '发现、安装和配置数字员工与数字工厂。'
@@ -14898,6 +15137,85 @@ function taskStateColor(state: DesktopTaskState) {
   };
 
   return colors[state];
+}
+
+function resolveStudioRuntimeStatus(
+  latestTask: DesktopTaskDetail | undefined,
+  isDeleted: boolean
+): StudioRuntimeStatus {
+  if (isDeleted) {
+    return 'deleted';
+  }
+
+  return latestTask?.state ?? 'idle';
+}
+
+function isStudioActiveRuntimeStatus(status: StudioRuntimeStatus): boolean {
+  return status === 'running' || status === 'queued' || status === 'waiting_approval';
+}
+
+function studioStatusFilterMatches(status: StudioRuntimeStatus, filter: StudioStatusFilter): boolean {
+  if (filter === 'all') {
+    return true;
+  }
+
+  if (filter === 'active') {
+    return isStudioActiveRuntimeStatus(status);
+  }
+
+  if (filter === 'idle') {
+    return status === 'idle' || status === 'deleted' || status === 'cancelled';
+  }
+
+  return status === filter;
+}
+
+function studioRuntimeStatusLabel(status: StudioRuntimeStatus): string {
+  if (status === 'idle') return '可用';
+  if (status === 'deleted') return '已删除';
+  return taskStateLabel(status);
+}
+
+function studioRuntimeStatusColor(status: StudioRuntimeStatus): string {
+  if (status === 'idle') return 'default';
+  if (status === 'deleted') return 'red';
+  return taskStateColor(status);
+}
+
+function studioMotionClassName(status: StudioRuntimeStatus): string {
+  if (isStudioActiveRuntimeStatus(status)) return 'is-running';
+  if (status === 'completed') return 'is-resting';
+  if (status === 'failed') return 'is-failed';
+  return 'is-idle';
+}
+
+function countStudioTaskDeliverables(task: DesktopTaskDetail): number {
+  const artifactCount = task.artifactCount ?? task.artifacts.length;
+  const factoryOutputCount = task.factoryOutputs?.filter((item) => item.status !== 'excluded').length ?? 0;
+  return Math.max(artifactCount, factoryOutputCount);
+}
+
+function stableStudioIndex(value: string, total: number): number {
+  if (total <= 0) {
+    return 0;
+  }
+
+  let hash = 0;
+  for (const char of value) {
+    hash = (hash * 31 + char.charCodeAt(0)) % 1000003;
+  }
+
+  return Math.abs(hash) % total;
+}
+
+function pickStudioEmployeeAvatarSkin(roleCode: string, name: string, index: number): string {
+  const offset = stableStudioIndex(`${roleCode}:${name}`, studioEmployeeAvatarSkins.length);
+  return studioEmployeeAvatarSkins[(offset + index) % studioEmployeeAvatarSkins.length];
+}
+
+function pickStudioFactoryAvatarSkin(roleCode: string, name: string, index: number): string {
+  const offset = stableStudioIndex(`${roleCode}:${name}`, studioFactoryAvatarSkins.length);
+  return studioFactoryAvatarSkins[(offset + index) % studioFactoryAvatarSkins.length];
 }
 
 type FactoryTaskStageStatus = 'waiting' | 'running' | 'completed' | 'failed' | 'optional';
@@ -18112,7 +18430,7 @@ function createPresetModelFromCatalogEntry(
   const catalogCapabilities = readModelCatalogEntryEffectiveCapabilities(model);
   const usesManualFallback = catalogCapabilities.length === 0;
   const capabilities = usesManualFallback
-    ? normalizeModelCapabilities(fallbackCapabilities, fallbackPurpose)
+    ? normalizePrimaryModelCapabilities(fallbackCapabilities, fallbackPurpose)
     : catalogCapabilities;
   const purpose = purposeForModelCapabilities(capabilities, fallbackPurpose);
 
@@ -18287,18 +18605,14 @@ function uninstallRolePackageFromRuntimeState(
 function pruneUnauthorizedRolePackages(
   state: DesktopRuntimeState,
   authorizedTemplates: DesktopRoleTemplate[],
-  _deletedTemplateIds: string[] = [],
-  deviceCapacity?: DesktopDeviceCapacitySummary
+  _deletedTemplateIds: string[] = []
 ): DesktopRuntimeState {
   const authorizedRoleCodes = new Set(
     authorizedTemplates
       .filter((template) => canInstallRoleTemplate(template))
       .map((template) => template.roleCode)
   );
-  const rolePackages = restrictInstalledRolePackagesByDeviceCapacity(
-    state.rolePackages.filter((rolePackage) => authorizedRoleCodes.has(rolePackage.roleCode)),
-    deviceCapacity
-  );
+  const rolePackages = state.rolePackages.filter((rolePackage) => authorizedRoleCodes.has(rolePackage.roleCode));
   const keptRoleCodes = new Set(rolePackages.map((rolePackage) => rolePackage.roleCode));
   const roleModelCredentialBindings = state.roleModelCredentialBindings.filter((binding) =>
     keptRoleCodes.has(binding.roleCode)
@@ -18640,6 +18954,19 @@ function readRuntimeModelProfileIdsForRole(
 function resolveModelProfileLabel(modelProfiles: ModelProfile[], profileId: string): string {
   const profile = modelProfiles.find((item) => item.id === profileId);
   return profile ? `${profile.providerName} / ${profile.modelName}` : profileId;
+}
+
+function modelRequirementSlotLabel(profile: ModelProfile): string {
+  if (profile.id === 'qiu-general-default') return '文本模型';
+  if (profile.id === 'qiu-reasoning-default') return '推理模型';
+  if (profile.id === 'qiu-vision-default') return '图片理解模型';
+  if (profile.id === 'qiu-image-generation-default') return '生图模型';
+  if (profile.id === 'qiu-image-editing-default') return '参考图编辑模型';
+  if (profile.id === 'qiu-video-generation-default') return '生视频模型';
+  if (profile.id === 'qiu-asr-default') return '语音转文字模型';
+  if (profile.id === 'qiu-embedding-default') return '向量模型';
+  if (profile.id === 'qiu-rerank-default') return '重排模型';
+  return modelCapabilitySummary(profile.capabilities, profile.purpose) || profile.modelName || profile.id;
 }
 
 function getRuntimeRequirementEffectiveProfile(

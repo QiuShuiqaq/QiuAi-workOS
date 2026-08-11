@@ -14,6 +14,8 @@ export interface ModelCapabilityClassification {
   metadata: ModelCapabilityMetadata;
 }
 
+export type ModelCapabilityInput = ModelCapability | ModelCapability[] | undefined;
+
 export const modelCapabilityMetadataSourceOptions: Array<{
   value: ModelCapabilitySource;
   label: string;
@@ -61,6 +63,54 @@ export const modelCapabilityOptions: Array<{
   { value: 'text_to_audio', label: '文本转语音', description: '文本输入，音频输出' }
 ];
 
+export const primaryModelCapabilityOptions: Array<{
+  value: ModelCapability;
+  label: string;
+  description: string;
+}> = [
+  { value: 'text', label: '文本模型', description: '文本输入，文本或 JSON 输出' },
+  { value: 'reasoning_text', label: '推理模型', description: '复杂分析、规划、推理任务' },
+  { value: 'long_context', label: '长文档模型', description: '长文档或长上下文输入，文本输出' },
+  { value: 'image_understanding', label: '图片理解模型', description: '图片输入，文本或 JSON 输出' },
+  { value: 'image_generation', label: '生图模型', description: '文本输入，图片输出' },
+  { value: 'image_editing', label: '参考图编辑模型', description: '图片加文本输入，图片输出' },
+  { value: 'video_understanding', label: '视频理解模型', description: '视频输入，文本或 JSON 输出' },
+  { value: 'video_generation', label: '生视频模型', description: '文本或参考图输入，视频输出' },
+  { value: 'audio_to_text', label: '语音转文字模型', description: '音频输入，文本输出' },
+  { value: 'text_to_audio', label: '文本转语音模型', description: '文本输入，音频输出' },
+  { value: 'embedding', label: '向量模型', description: '知识库检索、语义匹配' },
+  { value: 'rerank', label: '重排模型', description: '检索结果重排' }
+];
+
+const primaryModelCapabilityValues = new Set<ModelCapability>(
+  primaryModelCapabilityOptions.map((option) => option.value)
+);
+
+const canonicalModelCapabilityMap: Partial<Record<ModelCapability, ModelCapability>> = {
+  vision_text: 'image_understanding',
+  vision_understanding: 'image_understanding',
+  text_to_image: 'image_generation',
+  image_to_image: 'image_editing',
+  video_text: 'video_understanding',
+  text_to_video: 'video_generation',
+  image_to_video: 'video_generation'
+};
+
+const primaryModelCapabilityPriority: ModelCapability[] = [
+  'audio_to_text',
+  'text_to_audio',
+  'embedding',
+  'rerank',
+  'video_generation',
+  'video_understanding',
+  'image_editing',
+  'image_generation',
+  'image_understanding',
+  'reasoning_text',
+  'long_context',
+  'text'
+];
+
 export function defaultCapabilitiesForPurpose(purpose: ModelPurpose): ModelCapability[] {
   if (purpose === 'reasoning') {
     return ['reasoning_text', 'text'];
@@ -92,21 +142,52 @@ const allowedModelCapabilities = new Set<ModelCapability>([
 ]);
 
 export function normalizeExplicitModelCapabilities(
-  capabilities: ModelCapability[] | undefined
+  capabilities: ModelCapabilityInput
 ): ModelCapability[] {
-  return [...new Set((capabilities ?? []).filter((item) => allowedModelCapabilities.has(item)))];
+  const capabilityList = Array.isArray(capabilities)
+    ? capabilities
+    : capabilities
+      ? [capabilities]
+      : [];
+  return [...new Set(capabilityList.filter((item) => allowedModelCapabilities.has(item)))];
 }
 
 export function normalizeModelCapabilities(
-  capabilities: ModelCapability[] | undefined,
+  capabilities: ModelCapabilityInput,
   purpose: ModelPurpose
 ): ModelCapability[] {
   const normalized = normalizeExplicitModelCapabilities(capabilities);
   return normalized.length > 0 ? normalized : defaultCapabilitiesForPurpose(purpose);
 }
 
+export function selectPrimaryModelCapability(
+  capabilities: ModelCapabilityInput,
+  purpose: ModelPurpose = 'general'
+): ModelCapability {
+  const normalized = normalizeExplicitModelCapabilities(capabilities)
+    .map((capability) => canonicalModelCapabilityMap[capability] ?? capability)
+    .filter((capability) => primaryModelCapabilityValues.has(capability));
+
+  if (normalized.length === 0) {
+    const fallback = defaultCapabilitiesForPurpose(purpose)
+      .map((capability) => canonicalModelCapabilityMap[capability] ?? capability)
+      .find((capability) => primaryModelCapabilityValues.has(capability));
+    return fallback ?? 'text';
+  }
+
+  const unique = [...new Set(normalized)];
+  return primaryModelCapabilityPriority.find((capability) => unique.includes(capability)) ?? unique[0] ?? 'text';
+}
+
+export function normalizePrimaryModelCapabilities(
+  capabilities: ModelCapabilityInput,
+  purpose: ModelPurpose
+): ModelCapability[] {
+  return [selectPrimaryModelCapability(normalizeModelCapabilities(capabilities, purpose), purpose)];
+}
+
 export function readModelProfileCapabilities(profile: ModelProfile): ModelCapability[] {
-  return normalizeModelCapabilities(
+  return normalizePrimaryModelCapabilities(
     [
       ...(profile.verifiedCapabilities ?? []),
       ...(profile.capabilities ?? [])
@@ -116,10 +197,17 @@ export function readModelProfileCapabilities(profile: ModelProfile): ModelCapabi
 }
 
 export function readEffectiveModelProfileCapabilities(profile: ModelProfile): string[] {
+  const explicitCapabilities = normalizeExplicitModelCapabilities([
+    ...(profile.verifiedCapabilities ?? []),
+    ...(profile.capabilities ?? [])
+  ]);
+  const sourceCapabilities = explicitCapabilities.length > 0
+    ? explicitCapabilities
+    : inferKnownModelCapabilitiesFromName(profile.modelName);
+
   return [
     ...new Set([
-      ...inferKnownModelCapabilitiesFromName(profile.modelName),
-      ...readModelProfileCapabilities(profile)
+      ...normalizePrimaryModelCapabilities(sourceCapabilities, profile.purpose)
     ].map(normalizeCapabilityToken))
   ];
 }
@@ -172,7 +260,7 @@ export function primaryCapabilityForPurpose(purpose: ModelPurpose): ModelCapabil
 }
 
 export function purposeForModelCapabilities(
-  capabilities: ModelCapability[] | undefined,
+  capabilities: ModelCapabilityInput,
   fallbackPurpose: ModelPurpose = 'general'
 ): ModelPurpose {
   const normalized = normalizeModelCapabilities(capabilities, fallbackPurpose);
@@ -214,18 +302,21 @@ export function purposeForModelCapabilities(
 }
 
 export function modelCapabilityLabel(capability: ModelCapability): string {
+  const primaryOption = primaryModelCapabilityOptions.find((option) => option.value === capability);
+  if (primaryOption) return primaryOption.label;
   if (capability === 'image_understanding') return '图片理解';
   if (capability === 'image_editing') return '参考图编辑';
   return modelCapabilityOptions.find((option) => option.value === capability)?.label ?? capability;
 }
 
-export function modelCapabilitySummary(capabilities: ModelCapability[] | undefined, purpose: ModelPurpose): string {
-  return normalizeModelCapabilities(capabilities, purpose).map(modelCapabilityLabel).join(' / ');
+export function modelCapabilitySummary(capabilities: ModelCapabilityInput, purpose: ModelPurpose): string {
+  return normalizePrimaryModelCapabilities(capabilities, purpose).map(modelCapabilityLabel).join(' / ');
 }
 
-export function explicitModelCapabilitySummary(capabilities: ModelCapability[] | undefined): string {
+export function explicitModelCapabilitySummary(capabilities: ModelCapabilityInput): string {
   const normalized = normalizeExplicitModelCapabilities(capabilities);
-  return normalized.length > 0 ? normalized.map(modelCapabilityLabel).join(' / ') : '待确认';
+  const primary = normalizePrimaryModelCapabilities(normalized, purposeForModelCapabilities(normalized));
+  return normalized.length > 0 ? primary.map(modelCapabilityLabel).join(' / ') : '???';
 }
 
 export function modelCapabilityMetadataSourceLabel(source: ModelCapabilitySource | undefined): string {
@@ -259,7 +350,10 @@ export function classifyModelCapabilitiesFromName(
     note?: string;
   } = {}
 ): ModelCapabilityClassification {
-  const capabilities = inferKnownModelCapabilitiesFromName(modelName);
+  const knownCapabilities = inferKnownModelCapabilitiesFromName(modelName);
+  const capabilities = knownCapabilities.length > 0
+    ? normalizePrimaryModelCapabilities(knownCapabilities, fallbackPurpose)
+    : [];
   if (capabilities.length > 0) {
     const metadataSource = options.source ?? 'name_inferred';
     return {
@@ -274,7 +368,7 @@ export function classifyModelCapabilitiesFromName(
   }
 
   if (options.allowFallback) {
-    const fallbackCapabilities = defaultCapabilitiesForPurpose(fallbackPurpose);
+    const fallbackCapabilities = normalizePrimaryModelCapabilities(undefined, fallbackPurpose);
     return {
       capabilities: fallbackCapabilities,
       purpose: fallbackPurpose,
@@ -298,12 +392,16 @@ export function classifyModelCapabilitiesFromName(
 }
 
 export function readModelCatalogEntryEffectiveCapabilities(model: ModelCatalogEntry): ModelCapability[] {
-  return normalizeExplicitModelCapabilities([
+  const capabilities = normalizeExplicitModelCapabilities([
     ...(model.verifiedCapabilities ?? []),
     ...(model.capabilities ?? []),
     ...inferKnownModelCapabilitiesFromName(model.id),
     ...(model.label ? inferKnownModelCapabilitiesFromName(model.label) : [])
   ]);
+
+  return capabilities.length > 0
+    ? normalizePrimaryModelCapabilities(capabilities, purposeForModelCapabilities(capabilities))
+    : [];
 }
 
 export function inferModelCapabilitiesFromName(
@@ -311,7 +409,9 @@ export function inferModelCapabilitiesFromName(
   fallbackPurpose: ModelPurpose = 'general'
 ): ModelCapability[] {
   const knownCapabilities = inferKnownModelCapabilitiesFromName(modelName);
-  return knownCapabilities.length > 0 ? knownCapabilities : defaultCapabilitiesForPurpose(fallbackPurpose);
+  return knownCapabilities.length > 0
+    ? normalizePrimaryModelCapabilities(knownCapabilities, fallbackPurpose)
+    : normalizePrimaryModelCapabilities(undefined, fallbackPurpose);
 }
 
 export function inferKnownModelCapabilitiesFromName(modelName: string): ModelCapability[] {

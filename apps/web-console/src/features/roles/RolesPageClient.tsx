@@ -127,7 +127,7 @@ export function RolesPageClient({
               <Space direction="vertical" size={12}>
                 <Typography.Text strong>PC 端负责安装和执行</Typography.Text>
                 <Typography.Text type="secondary">
-                  admin-console 上架的数字员工会进入 PC 端数字市场。企业成员在 PC 端安装、配置模型和工具，并通过对话发布任务。
+                  admin-console 上架的数字员工会进入 PC 端数字市场。企业账号在 PC 端安装、配置模型和工具，并通过对话发布任务。
                 </Typography.Text>
                 <Typography.Text strong>web-console 负责企业管理</Typography.Text>
                 <Typography.Text type="secondary">

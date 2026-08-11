@@ -1168,7 +1168,7 @@ test('admin role template factory governs publication and workspace visibility',
     assert.ok(overFactoryCapacitySnapshot);
     assert.deepEqual(
       overFactoryCapacitySnapshot.rolePackages.map((rolePackage) => rolePackage.templateId),
-      [capacityFactoryTemplateIds[0]]
+      [capacityFactoryTemplateIds[0], capacityFactoryTemplateIds[1]]
     );
     assert.equal(
       overFactoryCapacitySnapshot.tasks.some((task) => task.taskId === 'task-factory-capacity-kept'),
@@ -1176,7 +1176,7 @@ test('admin role template factory governs publication and workspace visibility',
     );
     assert.equal(
       overFactoryCapacitySnapshot.tasks.some((task) => task.taskId === 'task-factory-capacity-filtered'),
-      false
+      true
     );
 
     assert.ok(

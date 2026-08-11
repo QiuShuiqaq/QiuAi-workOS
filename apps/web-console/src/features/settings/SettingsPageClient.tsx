@@ -39,12 +39,10 @@ export interface SettingsPageClientProps {
 }
 
 const featureLabels: Record<string, string> = {
-  maxRoleInstances: '数字员工数量',
-  maxDigitalFactories: '数字工厂数量',
   maxDesktopDevices: '桌面端设备数量'
 };
 
-const visiblePlanFeatureKeys = ['maxDesktopDevices', 'maxRoleInstances', 'maxDigitalFactories'];
+const visiblePlanFeatureKeys = ['maxDesktopDevices'];
 
 function billingCycleLabel(value: string) {
   return {
