@@ -278,11 +278,21 @@ test('server role template catalog only exposes the approved production set', ()
         `${template.templateId} factory batch maxItems must be ${expectedMaxItems}`
       );
       if (factoryManifest.kind === 'cross_border_product_image_factory') {
-        const promptControls = readRecord(factoryManifest.promptControls);
-        assert.ok(promptControls, `${template.templateId} must define prompt control fields`);
+        assert.equal(factoryManifest.promptControls, undefined, `${template.templateId} should not expose prompt controls`);
+        assert.equal(
+          template.workflowGraph.nodes.some((node) => node.id === 'generate_package_prompts'),
+          false,
+          `${template.templateId} should not require an image understanding prompt node`
+        );
+        assert.deepEqual(
+          requiredDependencyModelProfileIds,
+          ['qiu-image-editing-default'],
+          `${template.templateId} should only require the image generation model`
+        );
+        const platforms = Array.isArray(factoryManifest.platforms) ? factoryManifest.platforms : [];
         assert.ok(
-          Array.isArray(promptControls.fields) && promptControls.fields.length >= 5,
-          `${template.templateId} must expose cross-border prompt controls`
+          platforms.length >= 5 && platforms.every((item) => readRecord(item)?.imageRatio),
+          `${template.templateId} must expose image ratio options`
         );
       }
       assert.ok(

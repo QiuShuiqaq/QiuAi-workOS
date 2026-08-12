@@ -5678,7 +5678,7 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
     `并发数：${batchRun.minConcurrency === batchRun.maxObservedConcurrency
       ? batchRun.maxObservedConcurrency
       : `${batchRun.minConcurrency}-${batchRun.maxObservedConcurrency}`}（上限 ${concurrency}）`,
-    targetPlatform.label ? `平台：${targetPlatform.label}` : undefined
+    targetPlatform.label ? `图片比例：${targetPlatform.label}` : undefined
   ].filter(Boolean).join('\n');
   const preview = {
     kind: 'digital_factory_image_batch' as const,

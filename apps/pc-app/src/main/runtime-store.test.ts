@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { createDesktopRuntimePreviewState } from '../shared/desktop-state.js';
+import { preserveCachedToolCatalogOnSyncFailure } from './runtime-tool-catalog-fallback.js';
 import { loadDesktopRuntimeState, saveDesktopRuntimeState } from './runtime-store.js';
 import { getDesktopStorageLayout } from './storage-layout.js';
 import {
@@ -104,6 +105,26 @@ assert.equal(loadedState?.knowledgeSources[0]?.localPath, 'C:\\QiuAI\\CustomerDo
 assert.equal(loadedState?.taskDetails?.length, initialState.taskDetails?.length);
 assert.equal(loadedState?.watchConfigs?.[0]?.sourceUrls[0], 'https://example.com/leads');
 assert.equal(loadedState?.watchRuns?.[0]?.status, 'completed');
+
+const cachedToolState = createDesktopRuntimePreviewState();
+cachedToolState.tools = [
+  {
+    id: 'office-document',
+    name: '办公文档',
+    version: 'server-defined',
+    scope: 'desktop',
+    entryPoint: 'bridge',
+    capabilities: ['document_extract', 'document_edit'],
+    requiresApproval: false
+  }
+];
+cachedToolState.localRuntime.enabledToolIds = ['office-document'];
+cachedToolState.runtimeSnapshot.tools = [{ toolId: 'office-document', enabled: true }];
+
+const preservedToolState = preserveCachedToolCatalogOnSyncFailure(cachedToolState);
+assert.equal(preservedToolState, cachedToolState);
+assert.equal(preservedToolState.tools.length, 1);
+assert.deepEqual(preservedToolState.localRuntime.enabledToolIds, ['office-document']);
 
 const legacyTempDir = mkdtempSync(path.join(os.tmpdir(), 'qiuai-workos-runtime-legacy-'));
 const legacyState = createDesktopRuntimePreviewState();

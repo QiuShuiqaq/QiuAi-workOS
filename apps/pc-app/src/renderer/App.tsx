@@ -523,9 +523,9 @@ interface AccountHelpSection {
 }
 
 const sectionItems: Array<{ key: SectionKey; icon: ReactNode; label: string }> = [
+  { key: 'studio', icon: <ApartmentOutlined />, label: '工作室' },
   { key: 'workbench', icon: <MessageOutlined />, label: '数字员工' },
   { key: 'factories', icon: <BankOutlined />, label: '数字工厂' },
-  { key: 'studio', icon: <ApartmentOutlined />, label: '工作室' },
   { key: 'roles', icon: <AppstoreOutlined />, label: '数字市场' },
   { key: 'logs', icon: <FileTextOutlined />, label: '日志' },
   { key: 'snippets', icon: <SnippetsOutlined />, label: '标签库' },
@@ -3776,11 +3776,7 @@ export default function App() {
 
     setIsRefreshing(true);
     try {
-      const serverConnection = await window.qiuDesktop.checkServerConnection();
-      setRuntimeState((current) => ({
-        ...current,
-        serverConnection
-      }));
+      setRuntimeState(await window.qiuDesktop.getRuntimeState());
     } finally {
       setIsRefreshing(false);
     }
@@ -5195,7 +5191,7 @@ export default function App() {
                 {renderProductRail()}
                 <div
                   className={
-                    selectedSection === 'workbench' || selectedSection === 'factories'
+                    selectedSection === 'workbench' || selectedSection === 'factories' || selectedSection === 'studio'
                       ? 'product-surface product-surface-flush'
                       : 'product-surface product-surface-padded'
                   }
@@ -5478,39 +5474,11 @@ export default function App() {
     const failedStudioCount = studioItems.filter((item) => item.status === 'failed').length;
     const deliverableTotal = taskDetails.reduce((total, task) => total + countStudioTaskDeliverables(task), 0);
     const latestTask = taskDetails[0];
-    const studioGroups = [
-      {
-        key: 'active',
-        title: '正在处理',
-        description: '运行中、排队中和待审批的应用。',
-        items: filteredStudioItems.filter((item) => isStudioActiveRuntimeStatus(item.status))
-      },
-      {
-        key: 'attention',
-        title: '需要关注',
-        description: '最近一次任务失败，需要检查日志或配置。',
-        items: filteredStudioItems.filter((item) => item.status === 'failed')
-      },
-      {
-        key: 'completed',
-        title: '最近完成',
-        description: '最近一次任务已经完成，可继续查看产物。',
-        items: filteredStudioItems.filter((item) => item.status === 'completed')
-      },
-      {
-        key: 'available',
-        title: '可用应用',
-        description: '暂无运行任务，点击即可进入工作区。',
-        items: filteredStudioItems.filter(
-          (item) =>
-            !isStudioActiveRuntimeStatus(item.status) &&
-            item.status !== 'failed' &&
-            item.status !== 'completed'
-        )
-      }
-    ].filter((group) => group.items.length > 0);
 
     type StudioItem = (typeof studioItems)[number];
+    const filteredEmployeeItems = filteredStudioItems.filter((item) => item.kind === 'digital_employee');
+    const filteredFactoryItems = filteredStudioItems.filter((item) => item.kind === 'digital_factory');
+    const activityTasks = taskDetails.slice(0, 6);
 
     const openStudioItem = (item: StudioItem) => {
       if (item.kind === 'digital_employee') {
@@ -5570,21 +5538,26 @@ export default function App() {
       );
     };
 
-    const renderStudioItemCard = (item: StudioItem) => (
+    const renderStudioDeskStation = (item: StudioItem) => (
       <button
         key={item.roleCode}
         type="button"
         className={[
-          'studio-app-card',
-          `studio-app-${item.kind}`,
+          'studio-desk-station',
           studioMotionClassName(item.status),
           item.isDeleted ? 'is-deleted' : ''
         ].filter(Boolean).join(' ')}
         onClick={() => openStudioItem(item)}
       >
-        <span className="studio-app-visual">{renderStudioVisual(item)}</span>
-        <span className="studio-app-main">
-          <span className="studio-app-title-row">
+        <span className="studio-desk-surface">
+          <span className="studio-desk-avatar">{renderStudioVisual(item)}</span>
+          <span className="studio-desk-laptop">
+            <span />
+            <span />
+          </span>
+        </span>
+        <span className="studio-station-copy">
+          <span className="studio-station-title-row">
             <Typography.Text strong ellipsis>
               {item.name}
             </Typography.Text>
@@ -5592,129 +5565,358 @@ export default function App() {
               {studioRuntimeStatusLabel(item.status)}
             </Tag>
           </span>
-          <span className="studio-app-meta-row">
-            <Tag>{roleApplicationTypeLabel(item.kind)}</Tag>
+          <span className="studio-station-meta-row">
             <Tag>{item.category}</Tag>
             <Tag>{item.roleHint}</Tag>
           </span>
-          <Typography.Text type="secondary" ellipsis={{ tooltip: item.summary }} className="studio-app-summary">
-            {item.summary || '点击进入应用工作区。'}
-          </Typography.Text>
-          <span className="studio-app-stats-row">
+          <span className="studio-task-bubble">
+            {item.latestTask ? item.latestTask.title : '等候新任务'}
+          </span>
+          <span className="studio-station-stats">
             <span>任务 {item.taskCount}</span>
             <span>产物 {item.deliverableCount}</span>
             <span>{item.lastUpdatedAt ? formatShortTime(item.lastUpdatedAt) : '待开始'}</span>
           </span>
-          <Typography.Text type="secondary" ellipsis className="studio-app-latest-task">
-            {item.latestTask ? `最近：${item.latestTask.title}` : '还没有任务记录'}
+        </span>
+      </button>
+    );
+
+    const renderStudioFactoryStation = (item: StudioItem) => (
+      <button
+        key={item.roleCode}
+        type="button"
+        className={[
+          'studio-production-station',
+          studioMotionClassName(item.status),
+          item.isDeleted ? 'is-deleted' : ''
+        ].filter(Boolean).join(' ')}
+        onClick={() => openStudioItem(item)}
+      >
+        <span className="studio-production-machine">
+          {renderStudioVisual(item)}
+          <span className="studio-production-signal" />
+        </span>
+        <span className="studio-station-copy">
+          <span className="studio-station-title-row">
+            <Typography.Text strong ellipsis>
+              {item.name}
+            </Typography.Text>
+            <Tag color={studioRuntimeStatusColor(item.status)}>
+              {studioRuntimeStatusLabel(item.status)}
+            </Tag>
+          </span>
+          <span className="studio-station-meta-row">
+            <Tag>{item.category}</Tag>
+            <Tag>{item.roleHint}</Tag>
+          </span>
+          <span className="studio-task-bubble">
+            {item.latestTask ? item.latestTask.title : '产线空闲，可发起批量任务'}
+          </span>
+          <span className="studio-factory-conveyor" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+          <span className="studio-station-stats">
+            <span>批次 {item.taskCount}</span>
+            <span>产物 {item.deliverableCount}</span>
+            <span>{item.lastUpdatedAt ? formatShortTime(item.lastUpdatedAt) : '待运行'}</span>
+          </span>
+        </span>
+      </button>
+    );
+
+    const renderStudioZoneEmpty = (text: string) => (
+      <div className="studio-zone-empty">
+        <Typography.Text type="secondary">{text}</Typography.Text>
+      </div>
+    );
+
+    const visibleEmployeeItems = filteredEmployeeItems.slice(0, 8);
+    const visibleFactoryItems = filteredFactoryItems.slice(0, 8);
+    const hiddenEmployeeCount = Math.max(0, filteredEmployeeItems.length - visibleEmployeeItems.length);
+    const hiddenFactoryCount = Math.max(0, filteredFactoryItems.length - visibleFactoryItems.length);
+    const completedTaskCount = taskDetails.filter((task) => task.state === 'completed').length;
+
+    const renderStudioSidebarItem = (item: StudioItem) => (
+      <button
+        key={item.roleCode}
+        type="button"
+        className="studio-marvis-app-item"
+        onClick={() => openStudioItem(item)}
+      >
+        <span className={`studio-marvis-app-dot ${studioMotionClassName(item.status)}`} />
+        <span>
+          <Typography.Text strong ellipsis>
+            {item.name}
+          </Typography.Text>
+          <Typography.Text type="secondary" ellipsis>
+            {item.roleHint}
+          </Typography.Text>
+        </span>
+      </button>
+    );
+
+    const factoryOutputKind = (item: StudioItem) => {
+      const text = `${item.name} ${item.roleHint} ${item.summary}`;
+      if (/质检|检测|审核/.test(text)) return 'quality';
+      if (/Demo|演示|学术|文档/.test(text)) return 'demo';
+      if (/视频|短视频|video/i.test(text)) return 'video';
+      if (/图片|图像|image/i.test(text)) return 'image';
+      return 'asset';
+    };
+
+    const renderFactoryOutputIcon = (item: StudioItem) => {
+      const kind = factoryOutputKind(item);
+      if (kind === 'quality') return <SafetyCertificateOutlined />;
+      if (kind === 'demo') return <FileTextOutlined />;
+      if (kind === 'video') return <VideoCameraOutlined />;
+      if (kind === 'image') return <FileImageOutlined />;
+      return <FileTextOutlined />;
+    };
+
+    const renderEmployeeWorkstation = (item: StudioItem) => (
+      <button
+        key={item.roleCode}
+        type="button"
+        className={[
+          'studio-employee-workstation',
+          studioMotionClassName(item.status),
+          item.isDeleted ? 'is-deleted' : ''
+        ].filter(Boolean).join(' ')}
+        onClick={() => openStudioItem(item)}
+      >
+        <span className="studio-employee-desk-scene" aria-hidden="true">
+          <span className="studio-employee-desk-top" />
+          <span className="studio-employee-monitor" />
+          <span className="studio-employee-chair" />
+          <span className="studio-employee-avatar">{renderStudioVisual(item)}</span>
+        </span>
+        <span className="studio-dual-station-copy">
+          <span className="studio-dual-station-title">
+            <Typography.Text strong ellipsis>
+              {item.name}
+            </Typography.Text>
+            <Tag color={studioRuntimeStatusColor(item.status)}>
+              {studioRuntimeStatusLabel(item.status)}
+            </Tag>
+          </span>
+          <Typography.Text type="secondary" ellipsis>
+            {item.latestTask?.title ?? item.roleHint}
+          </Typography.Text>
+        </span>
+      </button>
+    );
+
+    const renderFactoryLineStation = (item: StudioItem) => (
+      <button
+        key={item.roleCode}
+        type="button"
+        className={[
+          'studio-factory-module',
+          `output-${factoryOutputKind(item)}`,
+          studioMotionClassName(item.status),
+          item.isDeleted ? 'is-deleted' : ''
+        ].filter(Boolean).join(' ')}
+        onClick={() => openStudioItem(item)}
+      >
+        <span className="studio-factory-module-visual" aria-hidden="true">
+          <span className="studio-factory-control-screen" />
+          <span className="studio-factory-status-light" />
+          <span className="studio-factory-machine-body">
+            <span />
+            <span />
+            <span />
+          </span>
+          <span className="studio-factory-line-belt">
+            <span />
+            <span />
+            <span />
+          </span>
+          <span className="studio-factory-output-card">
+            {renderFactoryOutputIcon(item)}
+          </span>
+        </span>
+        <span className="studio-dual-station-copy">
+          <span className="studio-dual-station-title">
+            <Typography.Text strong ellipsis>
+              {item.name}
+            </Typography.Text>
+            <Tag color={studioRuntimeStatusColor(item.status)}>
+              {studioRuntimeStatusLabel(item.status)}
+            </Tag>
+          </span>
+          <Typography.Text type="secondary" ellipsis>
+            {item.latestTask?.title ?? item.roleHint}
           </Typography.Text>
         </span>
       </button>
     );
 
     return (
-      <div className="studio-page">
-        <section className="studio-overview-band">
-          <div className="studio-overview-copy">
-            <Typography.Text strong className="studio-overview-title">
-              企业 AI 工作室
-            </Typography.Text>
-            <Typography.Text type="secondary">
-              把已安装的数字员工和数字工厂放在同一个工作空间里，快速判断谁在工作、谁需要处理、谁可以继续使用。
-            </Typography.Text>
+      <div className="studio-page studio-marvis-page">
+        <aside className="studio-marvis-sidebar">
+          <div className="studio-marvis-brand">
+            <Typography.Text strong>QiuAI Office</Typography.Text>
+            <Typography.Text type="secondary">工作室</Typography.Text>
           </div>
-          <div className="studio-overview-stats">
-            <div>
-              <span>{installedDigitalEmployeePackages.length}</span>
-              <Typography.Text type="secondary">数字员工</Typography.Text>
-            </div>
-            <div>
-              <span>{installedDigitalFactoryPackages.length}</span>
-              <Typography.Text type="secondary">数字工厂</Typography.Text>
-            </div>
-            <div>
-              <span>{activeStudioCount}</span>
-              <Typography.Text type="secondary">处理中</Typography.Text>
-            </div>
-            <div>
-              <span>{deliverableTotal}</span>
-              <Typography.Text type="secondary">产物</Typography.Text>
-            </div>
-          </div>
-        </section>
-
-        <section className="studio-toolbar">
           <Input
             allowClear
             value={studioSearchQuery}
-            placeholder="搜索名称、分类或最近任务"
-            className="studio-search-input"
+            placeholder="搜索"
             onChange={(event) => setStudioSearchQuery(event.target.value)}
           />
-          <Radio.Group
-            size="small"
-            optionType="button"
-            buttonStyle="solid"
-            value={studioApplicationFilter}
-            options={[
-              { value: 'all', label: '全部' },
-              { value: 'digital_employee', label: '员工' },
-              { value: 'digital_factory', label: '工厂' }
-            ]}
-            onChange={(event) => setStudioApplicationFilter(event.target.value as StudioApplicationFilter)}
-          />
-          <Select<StudioStatusFilter>
-            value={studioStatusFilter}
-            style={{ width: 128 }}
-            options={[
-              { value: 'all', label: '全部状态' },
-              { value: 'active', label: '处理中' },
-              { value: 'completed', label: '已完成' },
-              { value: 'failed', label: '失败' },
-              { value: 'idle', label: '可用' }
-            ]}
-            onChange={setStudioStatusFilter}
-          />
-          <Space size={6} wrap className="studio-toolbar-status">
-            <Tag color="geekblue">处理中 {activeStudioCount}</Tag>
-            <Tag color={failedStudioCount > 0 ? 'red' : 'default'}>异常 {failedStudioCount}</Tag>
-            {latestTask ? <Tag>最近 {formatShortTime(latestTask.updatedAt)}</Tag> : null}
-          </Space>
-        </section>
+          <div className="studio-marvis-filter-stack">
+            <Radio.Group
+              size="small"
+              optionType="button"
+              buttonStyle="solid"
+              value={studioApplicationFilter}
+              options={[
+                { value: 'all', label: '全部' },
+                { value: 'digital_employee', label: '员工' },
+                { value: 'digital_factory', label: '工厂' }
+              ]}
+              onChange={(event) => setStudioApplicationFilter(event.target.value as StudioApplicationFilter)}
+            />
+            <Select<StudioStatusFilter>
+              value={studioStatusFilter}
+              options={[
+                { value: 'all', label: '全部状态' },
+                { value: 'active', label: '处理中' },
+                { value: 'completed', label: '已完成' },
+                { value: 'failed', label: '失败' },
+                { value: 'idle', label: '可用' }
+              ]}
+              onChange={setStudioStatusFilter}
+            />
+          </div>
 
-        {studioGroups.length > 0 ? (
-          <div className="studio-group-list">
-            {studioGroups.map((group) => (
-              <section key={group.key} className="studio-group-section">
-                <div className="studio-group-header">
-                  <Space size={8} wrap>
-                    <Typography.Text strong>{group.title}</Typography.Text>
-                    <Tag>{group.items.length}</Tag>
-                  </Space>
-                  <Typography.Text type="secondary">{group.description}</Typography.Text>
-                </div>
-                <div className="studio-app-grid">
-                  {group.items.map(renderStudioItemCard)}
-                </div>
-              </section>
-            ))}
+          <div className="studio-marvis-nav-block">
+            <Typography.Text type="secondary">应用</Typography.Text>
+            <div className="studio-marvis-app-list">
+              {filteredStudioItems.length > 0
+                ? filteredStudioItems.map(renderStudioSidebarItem)
+                : renderStudioZoneEmpty('没有匹配应用')}
+            </div>
           </div>
-        ) : (
-          <div className="studio-empty-state">
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有找到匹配的数字员工或数字工厂" />
-            <Button
-              type="primary"
-              onClick={() => {
-                setStudioSearchQuery('');
-                setStudioApplicationFilter('all');
-                setStudioStatusFilter('all');
-                navigateToSection(studioItems.length > 0 ? 'studio' : 'roles');
-              }}
-            >
-              {studioItems.length > 0 ? '清空筛选' : '去数字市场安装'}
-            </Button>
+        </aside>
+
+        <main className="studio-marvis-main">
+          <Typography.Text strong className="studio-marvis-title">
+            QiuAI 办公室
+          </Typography.Text>
+          <div className="studio-dual-room" aria-label="QiuAI 办公室场景">
+            <section className="studio-dual-zone studio-dual-zone-employees">
+              <div className="studio-dual-zone-header">
+                <span>
+                  <Typography.Text strong>数字员工区</Typography.Text>
+                  <Typography.Text type="secondary">办公桌 · 对话 · 文档处理</Typography.Text>
+                </span>
+                <Tag color="blue">{filteredEmployeeItems.length}</Tag>
+              </div>
+              <div className="studio-employee-workstation-grid">
+                {visibleEmployeeItems.length > 0
+                  ? visibleEmployeeItems.map(renderEmployeeWorkstation)
+                  : renderStudioZoneEmpty('当前没有数字员工')}
+              </div>
+              {hiddenEmployeeCount > 0 ? (
+                <button type="button" className="studio-dual-more" onClick={() => navigateToSection('roles')}>
+                  还有 {hiddenEmployeeCount} 个员工
+                </button>
+              ) : null}
+            </section>
+
+            <div className="studio-dual-corridor" aria-hidden="true">
+              <span />
+              <strong>任务流转</strong>
+              <span />
+            </div>
+
+            <section className="studio-dual-zone studio-dual-zone-factories">
+              <div className="studio-dual-zone-header">
+                <span>
+                  <Typography.Text strong>数字工厂区</Typography.Text>
+                  <Typography.Text type="secondary">生产设备 · 批量任务 · 产物出口</Typography.Text>
+                </span>
+                <Tag color="green">{filteredFactoryItems.length}</Tag>
+              </div>
+              <div className="studio-factory-module-grid">
+                {visibleFactoryItems.length > 0
+                  ? visibleFactoryItems.map(renderFactoryLineStation)
+                  : renderStudioZoneEmpty('当前没有数字工厂')}
+              </div>
+              {hiddenFactoryCount > 0 ? (
+                <button type="button" className="studio-dual-more" onClick={() => navigateToSection('roles')}>
+                  还有 {hiddenFactoryCount} 个工厂
+                </button>
+              ) : null}
+            </section>
           </div>
-        )}
+        </main>
+
+        <aside className="studio-marvis-right-panel">
+          <section className="studio-marvis-metric-block">
+            <div>
+              <Typography.Text type="secondary">今日处理</Typography.Text>
+              <Typography.Text strong>{taskDetails.length}</Typography.Text>
+            </div>
+            <div>
+              <Typography.Text type="secondary">今日产物</Typography.Text>
+              <Typography.Text strong>{deliverableTotal}</Typography.Text>
+            </div>
+          </section>
+          <section className="studio-marvis-summary-block">
+            <div>
+              <span>{activeStudioCount}</span>
+              <Typography.Text type="secondary">进行中</Typography.Text>
+            </div>
+            <div>
+              <span>{completedTaskCount}</span>
+              <Typography.Text type="secondary">已完成</Typography.Text>
+            </div>
+            <div>
+              <span>{taskDetails.length}</span>
+              <Typography.Text type="secondary">总计</Typography.Text>
+            </div>
+          </section>
+          <section className="studio-marvis-task-list">
+            <div className="studio-marvis-task-list-header">
+              <Typography.Text strong>对话/任务</Typography.Text>
+              <Tag color={failedStudioCount > 0 ? 'red' : 'default'}>异常 {failedStudioCount}</Tag>
+            </div>
+            <div>
+              {activityTasks.length > 0 ? (
+                activityTasks.map((task) => (
+                  <button
+                    key={task.taskId}
+                    type="button"
+                    className="studio-marvis-task-item"
+                    onClick={() => {
+                      setSelectedTaskId(task.taskId);
+                      const rolePackage = refreshedInstalledRolePackageByRoleCode.get(task.roleCode);
+                      navigateToSection(
+                        readRoleApplicationType(rolePackage) === 'digital_factory' ? 'factories' : 'workbench'
+                      );
+                    }}
+                  >
+                    <span>
+                      <Typography.Text strong ellipsis>
+                        {task.title}
+                      </Typography.Text>
+                      <Typography.Text type="secondary" ellipsis>
+                        {taskStateLabel(task.state)} · {formatShortTime(task.updatedAt)}
+                      </Typography.Text>
+                    </span>
+                    <span className="studio-marvis-task-state">{taskStateLabel(task.state)}</span>
+                  </button>
+                ))
+              ) : (
+                <Typography.Text type="secondary">暂无任务记录</Typography.Text>
+              )}
+            </div>
+          </section>
+        </aside>
       </div>
     );
   }
@@ -8119,6 +8321,7 @@ export default function App() {
     const isMedicalVideoFactory = isMedicalCaseVideoFactory(selectedFactoryManifest);
     const isEcommerceVideoFactory = isEcommerceProductVideoFactory(selectedFactoryManifest);
     const isOperationFactory = isOperationVideoFactory(selectedFactoryManifest);
+    const isEcommerceImageFactory = isCrossBorderProductImageFactory(selectedFactoryManifest);
     const isAcademicDemoFactoryType = isAcademicDemoFactory(selectedFactoryManifest);
     const packageOptions = readFactoryPackageOptions(selectedFactoryManifest);
     const platformOptions = readFactoryPlatformOptions(selectedFactoryManifest);
@@ -8160,6 +8363,8 @@ export default function App() {
         ? '.docx,.pdf,.xlsx,.csv'
       : isOperationFactory
         ? '.png,.jpg,.jpeg,.webp,.xlsx,.csv,.pdf,.doc,.docx,.ppt,.pptx,.txt,.md'
+      : isEcommerceImageFactory
+        ? '.png,.jpg,.jpeg,.webp'
         : '.png,.jpg,.jpeg,.webp,.xlsx,.csv';
     const validFactoryAttachments = isMedicalVideoFactory
       ? factoryAttachments.filter((attachment) => isFactoryVideoAttachment(attachment))
@@ -9054,12 +9259,18 @@ export default function App() {
                           </>
                         ) : (
                           <>
-                            <Form.Item name="platform" label="目标平台" rules={[{ required: true, message: '请选择目标平台' }]}>
+                            <Form.Item
+                              name="platform"
+                              label={isEcommerceImageFactory ? '图片比例' : '目标平台'}
+                              rules={[{ required: true, message: isEcommerceImageFactory ? '请选择图片比例' : '请选择目标平台' }]}
+                            >
                               <Select
                                 size="large"
                                 options={platformOptions.map((item) => ({
                                   value: item.key,
-                                  label: `${item.label}${item.imageRatio ? ` / ${item.imageRatio}` : ''}`
+                                  label: isEcommerceImageFactory
+                                    ? item.label
+                                    : `${item.label}${item.imageRatio ? ` / ${item.imageRatio}` : ''}`
                                 }))}
                               />
                             </Form.Item>
@@ -9107,41 +9318,45 @@ export default function App() {
                                 }))}
                               />
                             </Form.Item>
-                            <Form.Item
-                              name="enableImageUnderstanding"
-                              label={
-                                <InlineHelpTitle help="默认关闭以提升批量生成速度；开启后会先调用图片理解模型分析商品图并生成更细的提示词。">
-                                  图片理解增强
-                                </InlineHelpTitle>
-                              }
-                              valuePropName="checked"
-                            >
-                              <Switch checkedChildren="开启" unCheckedChildren="关闭" />
-                            </Form.Item>
-                            <div className="factory-prompt-control-block">
-                              <Flex align="center" justify="space-between" gap={8}>
-                                <InlineHelpTitle help="控制提示词模型如何编写生图指令，包括风格、禁止内容、文字语言和平台要求。">
-                                  <Typography.Text strong>提示词控制</Typography.Text>
-                                </InlineHelpTitle>
-                              </Flex>
-                              <div className="factory-prompt-control-grid">
-                                {promptControlFields.map((field) => (
-                                  <Form.Item key={field.key} name={field.key} label={field.label}>
-                                    {field.inputType === 'textarea' ? (
-                                      <Input.TextArea rows={2} placeholder={field.placeholder} />
-                                    ) : (
-                                      <Input placeholder={field.placeholder} />
-                                    )}
-                                  </Form.Item>
-                                ))}
-                              </div>
-                            </div>
-                            <Form.Item name="instruction" label="补充要求">
-                              <Input.TextArea
-                                rows={3}
-                                placeholder="例如：面向美国站，风格干净高级；白底图不要文字。"
-                              />
-                            </Form.Item>
+                            {!isEcommerceImageFactory ? (
+                              <>
+                                <Form.Item
+                                  name="enableImageUnderstanding"
+                                  label={
+                                    <InlineHelpTitle help="默认关闭以提升批量生成速度；开启后会先调用图片理解模型分析商品图并生成更细的提示词。">
+                                      图片理解增强
+                                    </InlineHelpTitle>
+                                  }
+                                  valuePropName="checked"
+                                >
+                                  <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+                                </Form.Item>
+                                <div className="factory-prompt-control-block">
+                                  <Flex align="center" justify="space-between" gap={8}>
+                                    <InlineHelpTitle help="控制提示词模型如何编写生图指令，包括风格、禁止内容、文字语言和平台要求。">
+                                      <Typography.Text strong>提示词控制</Typography.Text>
+                                    </InlineHelpTitle>
+                                  </Flex>
+                                  <div className="factory-prompt-control-grid">
+                                    {promptControlFields.map((field) => (
+                                      <Form.Item key={field.key} name={field.key} label={field.label}>
+                                        {field.inputType === 'textarea' ? (
+                                          <Input.TextArea rows={2} placeholder={field.placeholder} />
+                                        ) : (
+                                          <Input placeholder={field.placeholder} />
+                                        )}
+                                      </Form.Item>
+                                    ))}
+                                  </div>
+                                </div>
+                                <Form.Item name="instruction" label="补充要求">
+                                  <Input.TextArea
+                                    rows={3}
+                                    placeholder="例如：面向美国站，风格干净高级；白底图不要文字。"
+                                  />
+                                </Form.Item>
+                              </>
+                            ) : null}
                           </>
                         )}
                         <div className="factory-parameter-action-row">
@@ -12212,7 +12427,7 @@ export default function App() {
     return {
       roleCode,
       useKnowledge: false,
-      platform: platformOptions[0]?.key ?? 'amazon',
+      platform: platformOptions[0]?.key ?? 'ratio_1_1',
       packageDefinitions,
       packageKeys: resolveFactoryPackageSelection(roleCode, packageDefinitions),
       qualityCheckMode: qualityModes[0]?.key ?? 'basic',
@@ -12948,20 +13163,17 @@ export default function App() {
       return;
     }
     const optionalVisionModelProfileIds =
-      imageFactoryValues.enableImageUnderstanding === true || imageFactoryValues.qualityCheckMode === 'smart'
+      imageFactoryValues.qualityCheckMode === 'smart'
         ? findReadyImageUnderstandingModelProfileIds(runtimeState, values.roleCode)
         : [];
-    if (
-      (imageFactoryValues.enableImageUnderstanding === true || imageFactoryValues.qualityCheckMode === 'smart') &&
-      optionalVisionModelProfileIds.length === 0
-    ) {
-      message.warning('图片理解增强或智能质检需要先配置并启用图片理解模型；也可以关闭增强/智能质检后走快速生成。');
+    if (imageFactoryValues.qualityCheckMode === 'smart' && optionalVisionModelProfileIds.length === 0) {
+      message.warning('智能质检需要先配置并启用图片理解模型；也可以改用基础质检后走快速生成。');
       navigateToSection('models');
       return;
     }
 
     const platform = readFactoryPlatformOptions(factory).find((item) => item.key === imageFactoryValues.platform);
-    const title = `${template.name} - ${platform?.label ?? imageFactoryValues.platform} - ${imageAttachments.length} 个商品`;
+    const title = `${template.name} - ${platform?.label ?? imageFactoryValues.platform} - ${imageAttachments.length} 张图片`;
     const input = buildFactoryTaskInput({
       template,
       factory,
@@ -16576,16 +16788,11 @@ interface DigitalFactoryManifest {
 }
 
 const defaultFactoryPlatforms: DigitalFactoryPlatformOption[] = [
-  { key: 'amazon', label: 'Amazon', imageRatio: '1:1', notes: '主图简洁，避免夸张文字和过度装饰。' },
-  { key: 'temu', label: 'Temu', imageRatio: '1:1', notes: '强调直观卖点、价格感和清晰主体。' },
-  { key: 'aliexpress', label: '速卖通', imageRatio: '1:1', notes: '适合主图、场景图和参数卖点图组合。' },
-  { key: 'tiktok_shop', label: 'TikTok Shop', imageRatio: '1:1', notes: '画面更生活化，适合短视频封面和场景图。' },
-  { key: 'ozon', label: 'Ozon', imageRatio: '1:1', notes: '主体清晰，参数和尺寸信息需要可读。' },
-  { key: 'shopee', label: 'Shopee', imageRatio: '1:1', notes: '适合醒目、轻促销风格的商品图。' },
-  { key: 'lazada', label: 'Lazada', imageRatio: '1:1', notes: '重视商品主体和卖点信息层级。' },
-  { key: 'ebay', label: 'eBay', imageRatio: '1:1', notes: '真实、清晰、少修饰，便于买家检查商品。' },
-  { key: 'walmart', label: 'Walmart', imageRatio: '1:1', notes: '偏干净、规范的零售商品图。' },
-  { key: 'shein', label: 'SHEIN', imageRatio: '3:4', notes: '服饰类可突出模特、穿搭和风格。' }
+  { key: 'ratio_1_1', label: '1:1 方图', imageRatio: '1:1', notes: '适合商品主图、白底图、卖点图和大多数电商列表图。' },
+  { key: 'ratio_3_4', label: '3:4 竖图', imageRatio: '3:4', notes: '适合服饰、模特展示、详情页长图素材和小红书式视觉。' },
+  { key: 'ratio_4_3', label: '4:3 横图', imageRatio: '4:3', notes: '适合家居、工业产品、场景展示和横向构图商品图。' },
+  { key: 'ratio_9_16', label: '9:16 竖屏', imageRatio: '9:16', notes: '适合短视频封面、竖屏广告图和移动端信息流素材。' },
+  { key: 'ratio_16_9', label: '16:9 横屏', imageRatio: '16:9', notes: '适合横版广告、官网 Banner、产品展示页和投放素材。' }
 ];
 
 const defaultFactoryPackages: DigitalFactoryPackageOption[] = [
@@ -16962,9 +17169,11 @@ function readFactoryManifest(manifest: RoleTemplateDependencyManifest | undefine
       defaultMode: readFactoryQualityModeKey(qualityCheck?.defaultMode),
       modes: readFactoryQualityModeOptionsFromValue(qualityCheck?.modes)
     },
-    promptControls: {
-      fields: readFactoryPromptControlFieldsFromValue(promptControls?.fields)
-    },
+    promptControls: promptControls
+      ? {
+          fields: readFactoryPromptControlFieldsFromValue(promptControls.fields)
+        }
+      : undefined,
     asr: {
       defaultLanguage: readString(isPlainObject(factory.asr) ? factory.asr.defaultLanguage : undefined),
       defaultDialect: readString(isPlainObject(factory.asr) ? factory.asr.defaultDialect : undefined),
@@ -17051,6 +17260,9 @@ function readFactoryVideoDurationOptions(factory: DigitalFactoryManifest): numbe
 
 function readFactoryPromptControlFields(factory: DigitalFactoryManifest): DigitalFactoryPromptControlField[] {
   const manifestFields = factory.promptControls?.fields ?? [];
+  if (!factory.promptControls) {
+    return [];
+  }
   const fieldsByKey = new Map<string, DigitalFactoryPromptControlField>();
 
   for (const field of [...defaultFactoryPromptControlFields, ...manifestFields]) {
@@ -17138,6 +17350,10 @@ function isEcommerceProductVideoFactory(factory: DigitalFactoryManifest) {
   return readFactoryKind(factory) === 'ecommerce_product_video_factory';
 }
 
+function isCrossBorderProductImageFactory(factory: DigitalFactoryManifest) {
+  return readFactoryKind(factory) === 'cross_border_product_image_factory';
+}
+
 function isAcademicDemoFactory(factory: DigitalFactoryManifest) {
   return readFactoryKind(factory) === 'academic_project_demo_factory';
 }
@@ -17194,7 +17410,7 @@ function buildFactoryTaskInput({
     })),
     qualityCheckMode: values.qualityCheckMode ?? 'basic',
     qualityCheckLabel: qualityMode?.label ?? values.qualityCheckMode ?? 'basic',
-    enableImageUnderstanding: values.enableImageUnderstanding === true,
+    enableImageUnderstanding: false,
     itemCount: imageAttachments.length,
     maxItems: readFactoryMaxItems(factory),
     output: {
@@ -17202,7 +17418,7 @@ function buildFactoryTaskInput({
       packageFormat: factory.output?.packageFormat ?? 'url_manifest',
       folder: factory.output?.folder ?? 'product-images'
     },
-    promptControls,
+    promptControls: isCrossBorderProductImageFactory(factory) ? undefined : promptControls,
     attachments: imageAttachments.map((attachment) => ({
       name: attachment.name,
       size: attachment.size,
@@ -17210,9 +17426,11 @@ function buildFactoryTaskInput({
       localPath: attachment.localPath,
       kind: 'product_image'
     })),
-    instruction: values.instruction?.trim() || undefined
+    instruction: isCrossBorderProductImageFactory(factory) ? undefined : values.instruction?.trim() || undefined
   };
-  const taskBrief = `请运行「${template.name}」，为 ${platform?.label ?? values.platform} 批量生成跨境商品图。`;
+  const taskBrief = isCrossBorderProductImageFactory(factory)
+    ? `请运行「${template.name}」，按 ${platform?.label ?? values.platform} 批量生成电商商品图。`
+    : `请运行「${template.name}」，为 ${platform?.label ?? values.platform} 批量生成跨境商品图。`;
 
   return JSON.stringify(
     {
@@ -17224,10 +17442,14 @@ function buildFactoryTaskInput({
       imageCount: imageAttachments.length,
       instructions: [
         '按 factory_request 逐项处理每张商品图片。',
-        factoryRequest.enableImageUnderstanding
-          ? '已开启图片理解增强：先用图片理解模型分析商品图并生成分包提示词。'
-          : '未开启图片理解增强：直接使用平台、产物包和提示词控制生成基础生图提示词。',
-        '提示词生成必须优先遵守 factory_request.promptControls；不要出现的内容必须写入 negativePrompt。',
+        isCrossBorderProductImageFactory(factory)
+          ? '直接使用图片比例和产物包内置模板生成生图提示词。'
+          : factoryRequest.enableImageUnderstanding
+            ? '已开启图片理解增强：先用图片理解模型分析商品图并生成分包提示词。'
+            : '未开启图片理解增强：直接使用平台、产物包和提示词控制生成基础生图提示词。',
+        isCrossBorderProductImageFactory(factory)
+          ? '只使用当前产物包模板中的要求；不要额外要求用户编写复杂提示词。'
+          : '提示词生成必须优先遵守 factory_request.promptControls；不要出现的内容必须写入 negativePrompt。',
         '只生成用户勾选的产物包；不要生成未勾选的图片类型。',
         '生成结果只保存图片 URL 元数据；大图片不经过服务端，PC 端按 URL 展示缩略图。',
         '如果质检方式为 none，跳过额外智能质检；如果为 basic，只做文件数量、格式、命名检查。'

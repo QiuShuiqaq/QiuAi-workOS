@@ -36,6 +36,7 @@ import {
   updateRuntimeIdentity
 } from './runtime-store.js';
 import { buildDesktopToolStateFromServerCatalog } from './desktop-tool-catalog.js';
+import { preserveCachedToolCatalogOnSyncFailure } from './runtime-tool-catalog-fallback.js';
 import type { DesktopKnowledgeSourceSummary } from '../shared/desktop-contract.js';
 import {
   enterpriseKnowledgeBindingId,
@@ -291,19 +292,7 @@ async function applyServerDefinedToolCatalog(
       }
     };
   } catch {
-    return {
-      ...state,
-      tools: [],
-      localRuntime: {
-        ...state.localRuntime,
-        enabledToolIds: []
-      },
-      runtimeSnapshot: {
-        ...state.runtimeSnapshot,
-        tools: [],
-        toolActions: []
-      }
-    };
+    return preserveCachedToolCatalogOnSyncFailure(state);
   }
 }
 

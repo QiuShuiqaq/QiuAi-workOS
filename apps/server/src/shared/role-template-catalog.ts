@@ -1094,58 +1094,53 @@ const crossBorderFactoryPackageOptions: Array<{
   {
     key: 'white_background',
     label: '白底图',
-    description: '保留商品主体，生成干净白底商品图。',
+    description: '生成标准电商白底图：纯白背景、柔和棚拍光、商品居中完整展示，保留原始颜色、结构、材质、Logo 和关键细节，边缘干净无阴影污染，不添加促销文字、水印、边框、人物或多余道具。',
     outputType: 'image'
   },
   {
     key: 'main_image',
     label: '商品主图',
-    description: '突出商品卖点，适合平台列表和首图。',
+    description: '生成高转化商品主图：商品占画面主体，构图清晰有层次，光线明亮真实，突出材质、造型和核心卖点，可加入克制的场景氛围，但不得改变商品结构、颜色、品牌标识或真实比例。',
     outputType: 'image'
   },
   {
     key: 'scene_image',
     label: '场景图',
-    description: '把商品放入真实使用场景，增强购买代入感。',
+    description: '生成真实使用场景图：把商品自然放入符合品类的生活/办公/户外/家居场景，环境干净高级，主体清晰可识别，画面有购买代入感，避免夸张特效、虚假功能、杂乱背景和无关人物抢占主体。',
     outputType: 'image'
   },
   {
     key: 'background_replacement',
     label: '换背景',
-    description: '替换背景风格，同时保持商品主体一致。',
+    description: '生成换背景商品图：严格保持商品主体不变，只替换为更适合电商展示的背景，如极简渐变、轻奢台面、节日活动、自然光空间或品牌色氛围，主体边缘自然融合，不改变商品形状和材质。',
     outputType: 'image'
   },
   {
     key: 'model_replacement',
     label: '换模特',
-    description: '适合服饰、配饰、家居等需要人物展示的商品图。',
+    description: '生成模特展示图：适合服饰、配饰、美妆、家居小件等商品。模特姿态自然、画面商业摄影质感强，商品佩戴/持握/使用方式合理，必须保持商品真实外观、颜色、比例和关键细节，不生成畸形肢体。',
     outputType: 'image'
   },
   {
     key: 'dimension_image',
     label: '尺寸图',
-    description: '生成带尺寸、规格或关键参数标注的说明图。',
+    description: '生成尺寸规格说明图：画面清晰展示商品正面或关键角度，预留干净信息区域，可加入简洁尺寸线、参数标注和规格层级；文字必须清晰、少量、规整，不确定参数不得编造。',
     outputType: 'image'
   },
   {
     key: 'selling_point_image',
     label: '卖点图',
-    description: '围绕核心卖点生成电商详情页可用图片。',
+    description: '生成详情页卖点图：围绕材质、功能、结构、容量、适用场景或对比优势进行视觉表达，版式清爽、主次明确，可带少量标题式文字；避免虚假承诺、夸张功效、乱码文字和过度促销风格。',
     outputType: 'image'
   }
 ];
 
 const crossBorderFactoryPlatforms = [
-  { key: 'amazon', label: 'Amazon', imageRatio: '1:1', notes: '主图简洁，避免夸张文字和过度装饰。' },
-  { key: 'temu', label: 'Temu', imageRatio: '1:1', notes: '强调直观卖点、价格感和清晰主体。' },
-  { key: 'aliexpress', label: '速卖通', imageRatio: '1:1', notes: '适合主图、场景图和参数卖点图组合。' },
-  { key: 'tiktok_shop', label: 'TikTok Shop', imageRatio: '1:1', notes: '画面更生活化，适合短视频封面和场景图。' },
-  { key: 'ozon', label: 'Ozon', imageRatio: '1:1', notes: '主体清晰，参数和尺寸信息需要可读。' },
-  { key: 'shopee', label: 'Shopee', imageRatio: '1:1', notes: '适合醒目、轻促销风格的商品图。' },
-  { key: 'lazada', label: 'Lazada', imageRatio: '1:1', notes: '重视商品主体和卖点信息层级。' },
-  { key: 'ebay', label: 'eBay', imageRatio: '1:1', notes: '真实、清晰、少修饰，便于买家检查商品。' },
-  { key: 'walmart', label: 'Walmart', imageRatio: '1:1', notes: '偏干净、规范的零售商品图。' },
-  { key: 'shein', label: 'SHEIN', imageRatio: '3:4', notes: '服饰类可突出模特、穿搭和风格。' }
+  { key: 'ratio_1_1', label: '1:1 方图', imageRatio: '1:1', notes: '适合商品主图、白底图、卖点图和大多数电商列表图。' },
+  { key: 'ratio_3_4', label: '3:4 竖图', imageRatio: '3:4', notes: '适合服饰、模特展示、详情页长图素材和小红书式视觉。' },
+  { key: 'ratio_4_3', label: '4:3 横图', imageRatio: '4:3', notes: '适合家居、工业产品、场景展示和横向构图商品图。' },
+  { key: 'ratio_9_16', label: '9:16 竖屏', imageRatio: '9:16', notes: '适合短视频封面、竖屏广告图和移动端信息流素材。' },
+  { key: 'ratio_16_9', label: '16:9 横屏', imageRatio: '16:9', notes: '适合横版广告、官网 Banner、产品展示页和投放素材。' }
 ];
 
 const crossBorderFactoryDefaultPackageKeys: CrossBorderFactoryPackageKey[] = [
@@ -1258,10 +1253,9 @@ function buildCrossBorderImageFactoryManifest() {
     title: 'AI电商图片工厂',
     batch: {
       maxItems: 50,
-      itemUnit: 'product',
-      inputFileKinds: ['image', 'spreadsheet', 'csv'],
-      imageExtensions: ['png', 'jpg', 'jpeg', 'webp'],
-      tableExtensions: ['xlsx', 'csv']
+      itemUnit: 'image',
+      inputFileKinds: ['image'],
+      imageExtensions: ['png', 'jpg', 'jpeg', 'webp']
     },
     platforms: crossBorderFactoryPlatforms,
     packages: crossBorderFactoryPackageOptions.map((item) => ({
@@ -1271,40 +1265,6 @@ function buildCrossBorderImageFactoryManifest() {
       outputType: item.outputType,
       defaultSelected: crossBorderFactoryDefaultPackageKeys.includes(item.key)
     })),
-    promptControls: {
-      fields: [
-        {
-          key: 'promptLanguage',
-          label: '文字语言',
-          placeholder: '例如：English、中文、Deutsch、Español；不需要文字可填：不生成文字',
-          inputType: 'text'
-        },
-        {
-          key: 'promptStyle',
-          label: '图片风格',
-          placeholder: '例如：真实摄影、欧美电商、高级极简、TikTok生活感',
-          inputType: 'text'
-        },
-        {
-          key: 'promptGoal',
-          label: '希望效果',
-          placeholder: '例如：突出材质和容量，画面干净，有购买欲',
-          inputType: 'textarea'
-        },
-        {
-          key: 'promptMustKeep',
-          label: '必须保留',
-          placeholder: '例如：产品主体、颜色、结构、品牌标识、原有角度',
-          inputType: 'textarea'
-        },
-        {
-          key: 'promptAvoid',
-          label: '不要出现',
-          placeholder: '例如：水印、乱码文字、夸张变形、多余配件、错误 Logo',
-          inputType: 'textarea'
-        }
-      ]
-    },
     qualityCheck: {
       defaultMode: 'basic',
       modes: [
@@ -1323,7 +1283,7 @@ function buildCrossBorderImageFactoryManifest() {
     optionalCapabilities: ['vision'],
     ui: {
       primaryActionLabel: '开始生成',
-      uploadHint: '上传商品参考图，可选上传 SKU 表格；单批最多 50 个商品。',
+      uploadHint: '上传商品参考图，选择产物包和图片比例；单批最多 50 张图片。',
       packageSelection: 'checkbox'
     }
   };
@@ -1504,11 +1464,11 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
       id: 'factory_input',
       type: 'input',
       name: '接收商品批次',
-      instruction: '接收商品图片、SKU 表格、目标平台、勾选产物包和质检模式；单批最多 50 个商品。',
+      instruction: '接收商品图片、图片比例、勾选产物包和质检模式；单批最多 50 张图片。',
       inputVariables: ['start.text', 'start.files', 'start.images', 'start.spreadsheets'],
       outputVariables: ['task_brief'],
       config: {
-        acceptedFileKinds: ['image', 'spreadsheet', 'csv'],
+        acceptedFileKinds: ['image'],
         maxItems: 50,
         source: 'digital_factory'
       }
@@ -1516,8 +1476,8 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
     {
       id: 'gather_factory_rules',
       type: 'knowledge',
-      name: '读取平台和品牌规则',
-      instruction: '读取企业知识库里的平台规则、品牌素材规范、禁用词和历史优质商品图案例。',
+      name: '读取品牌图片规范',
+      instruction: '读取企业知识库里的品牌素材规范、禁用词、图片风格要求和历史优质商品图案例。',
       inputVariables: ['task_brief', 'factory_request'],
       outputVariables: ['knowledge_context']
     },
@@ -1527,7 +1487,7 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
       name: '整理批次参数',
       instruction: '把用户输入、附件和工厂面板参数整理成稳定 JSON，供后续节点读取。',
       inputVariables: ['start.files', 'factory_request'],
-      outputVariables: ['factory_request', 'factory_items', 'selected_packages', 'target_platform', 'quality_check_mode'],
+      outputVariables: ['factory_request', 'factory_items', 'selected_packages', 'target_platform', 'quality_check_mode', 'package_instructions'],
       config: {
         dataMode: 'code',
         outputVariable: 'factory_items',
@@ -1537,52 +1497,41 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
           'const files = Array.isArray(input["start.files"]) ? input["start.files"] : [];\n' +
           'const images = files.filter((file) => file && file.kind === "image");\n' +
           'const selectedPackages = Array.isArray(request.packages) ? request.packages : [];\n' +
-          'const platform = request.platform && typeof request.platform === "object" ? request.platform : { key: "amazon", label: "Amazon" };\n' +
+          'const platform = request.platform && typeof request.platform === "object" ? request.platform : { key: "ratio_1_1", label: "1:1 方图", imageRatio: "1:1" };\n' +
           'const qualityCheckMode = typeof request.qualityCheckMode === "string" ? request.qualityCheckMode : "basic";\n' +
+          'const packageInstructions = [];\n' +
+          'for (const packageItem of selectedPackages) {\n' +
+          '  if (!packageItem || typeof packageItem !== "object" || !packageItem.key) continue;\n' +
+          '  packageInstructions.push({\n' +
+          '    sku: "*",\n' +
+          '    packageKey: String(packageItem.key),\n' +
+          '    prompt: [\n' +
+          '      `Use the uploaded product image as the strict product reference.`,\n' +
+          '      `Create ${packageItem.label || packageItem.key} for ecommerce product presentation.`,\n' +
+          '      packageItem.description ? `Package template: ${packageItem.description}` : undefined,\n' +
+          '      platform.imageRatio ? `Required image ratio: ${platform.imageRatio}` : undefined,\n' +
+          '      platform.notes ? `Ratio usage: ${platform.notes}` : undefined,\n' +
+          '      `Preserve product identity, shape, color, material, logo, texture, structure and key details.`,\n' +
+          '      `Avoid watermark, random text, distorted product, extra accessories, wrong logo, messy background and unrealistic function.`\n' +
+          '    ].filter(Boolean).join("\\n"),\n' +
+          '    negativePrompt: "watermark, random text, garbled characters, distorted product, changed logo, extra accessories, messy background, unrealistic effect, low quality, blur"\n' +
+          '  });\n' +
+          '}\n' +
           'return {\n' +
           '  factory_request: request,\n' +
           '  factory_items: images.slice(0, 50).map((file, index) => ({ sku: `SKU-${index + 1}`, image: file, sourceName: file.name || `image-${index + 1}` })),\n' +
           '  selected_packages: selectedPackages,\n' +
           '  target_platform: platform,\n' +
-          '  quality_check_mode: qualityCheckMode\n' +
+          '  quality_check_mode: qualityCheckMode,\n' +
+          '  package_instructions: packageInstructions\n' +
           '};'
-      }
-    },
-    {
-      id: 'generate_package_prompts',
-      type: 'llm',
-      name: '可选图片理解增强',
-      instruction: '使用多模态模型读取商品参考图、平台规则、品牌规则和 factory_request.promptControls，直接输出每个商品、每个所选产物包的生图提示词。必须遵守文字语言、图片风格、希望效果、必须保留和不要出现；如果用户要求图片里出现文字，必须使用指定语言；如果用户填写不生成文字，则提示词要明确避免图片文字。不要出现的内容要写入 negativePrompt。不要生成图片，只输出 JSON。',
-      modelProfileId: 'qiu-vision-default',
-      inputVariables: ['factory_request', 'factory_items', 'selected_packages', 'target_platform', 'knowledge_context'],
-      outputVariables: ['package_instructions'],
-      config: {
-        llmTaskType: 'vision',
-        optionalModel: true,
-        outputMode: 'json',
-        schema: {
-          items: [
-            {
-              sku: 'string',
-              productName: 'string',
-              packages: [
-                {
-                  key: 'white_background',
-                  prompt: 'string',
-                  negativePrompt: 'string',
-                  referenceImagePath: 'string'
-                }
-              ]
-            }
-          ]
-        }
       }
     },
     {
       id: 'generate_images',
       type: 'llm',
       name: '批量生成商品图',
-      instruction: '按 package_instructions 调用图片生成模型。只处理用户勾选的产物包，保持商品主体一致，输出图片远程 URL 元数据；大图片不经过服务端。',
+      instruction: '按内置产物包模板和图片比例调用图片生成模型。只处理用户勾选的产物包，保持商品主体一致，输出图片远程 URL 元数据；大图片不经过服务端。',
       modelProfileId: 'qiu-image-editing-default',
       inputVariables: ['package_instructions', 'start.images'],
       outputVariables: ['factory_generated_images'],
@@ -1604,7 +1553,7 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
       id: 'quality_check',
       type: 'llm',
       name: '可选质检',
-      instruction: '如果 quality_check_mode 为 none，则输出 skipped。basic 只做文件数量、命名、尺寸规则检查；smart 再用多模态模型检查主体一致性、平台合规和卖点可读性。',
+      instruction: '如果 quality_check_mode 为 none，则输出 skipped。basic 只做文件数量、命名和格式检查；smart 再用多模态模型检查主体一致性、比例适配和卖点可读性。',
       modelProfileId: 'qiu-vision-default',
       inputVariables: ['factory_generated_images', 'factory_items', 'quality_check_mode', 'target_platform'],
       outputVariables: ['quality_report'],
@@ -1637,19 +1586,18 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
       { id: 'start__factory_input', sourceNodeId: 'start', targetNodeId: 'factory_input', condition: { type: 'always' } },
       { id: 'factory_input__gather_factory_rules', sourceNodeId: 'factory_input', targetNodeId: 'gather_factory_rules', condition: { type: 'always' } },
       { id: 'gather_factory_rules__prepare_batch', sourceNodeId: 'gather_factory_rules', targetNodeId: 'prepare_batch', condition: { type: 'always' } },
-      { id: 'prepare_batch__generate_package_prompts', sourceNodeId: 'prepare_batch', targetNodeId: 'generate_package_prompts', condition: { type: 'always' } },
-      { id: 'generate_package_prompts__generate_images', sourceNodeId: 'generate_package_prompts', targetNodeId: 'generate_images', condition: { type: 'always' } },
+      { id: 'prepare_batch__generate_images', sourceNodeId: 'prepare_batch', targetNodeId: 'generate_images', condition: { type: 'always' } },
       { id: 'generate_images__quality_check', sourceNodeId: 'generate_images', targetNodeId: 'quality_check', condition: { type: 'always' } },
       { id: 'quality_check__factory_output', sourceNodeId: 'quality_check', targetNodeId: 'factory_output', condition: { type: 'always' } }
     ],
     variables: [
       { name: 'factory_request', type: 'json', description: '工厂面板提交的批量运行参数。', required: true },
-      { name: 'factory_items', type: 'json', description: '待处理商品列表，单批最多 50 个。', required: true },
+      { name: 'factory_items', type: 'json', description: '待处理图片列表，单批最多 50 张。', required: true },
       { name: 'selected_packages', type: 'json', description: '用户勾选的产物包 key。', required: true },
-      { name: 'target_platform', type: 'text', description: '目标电商平台。', required: true },
+      { name: 'target_platform', type: 'text', description: '图片比例配置。', required: true },
       { name: 'quality_check_mode', type: 'text', description: 'none/basic/smart。', required: true },
-      { name: 'package_instructions', type: 'json', description: '多模态模型生成的分包生图提示词。', required: true },
-      { name: 'factory_generated_images', type: 'asset[]', description: '图片结果元数据，包含 remoteUrl、thumbnailPath、SKU 和产物包信息。', required: true },
+      { name: 'package_instructions', type: 'json', description: '内置产物包模板生成的分包生图提示词。', required: true },
+      { name: 'factory_generated_images', type: 'asset[]', description: '图片结果元数据，包含 remoteUrl、thumbnailPath、原图名称和产物包信息。', required: true },
       { name: 'quality_report', type: 'json', description: '质检报告或跳过记录。' }
     ],
     runtimePolicy: {
@@ -4120,14 +4068,14 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     name: 'AI电商图片工厂',
     industry: '电商 / 商品图片',
     scenario: '批量生成白底图、主图、场景图、换背景、换模特、尺寸图和卖点图',
-    description: '面向电商运营团队，批量上传商品参考图，选择目标平台和产物包后生成图片结果 URL 与本地缩略图预览。',
+    description: '面向电商运营团队，批量上传商品参考图，选择图片比例和产物包后生成图片结果 URL 与本地缩略图预览。',
     recommendedPlanCode: 'ENTERPRISE_PRO_MONTHLY',
-    businessGoal: '把电商商品图从单张手工制作提升为批量化工厂流程，减少运营制图和重复提示词调试成本。',
-    knowledgeSources: ['企业知识库', '品牌素材规范', '电商平台图片规则', '历史优质商品图案例'],
+    businessGoal: '把电商商品图从单张手工制作提升为批量化工厂流程，用内置专业产物包模板减少运营制图和重复提示词调试成本。',
+    knowledgeSources: ['企业知识库', '品牌素材规范', '图片风格要求', '历史优质商品图案例'],
     tools: ['local-filesystem'],
     skills: [
-      skill('product_image_understanding', '可选图片理解增强', '开启后识别商品主体、材质、颜色、使用场景和平台展示约束。'),
-      skill('prompt_package_generation', '分包提示词生成', '按白底图、主图、场景图等产物包生成稳定生图提示词。'),
+      skill('product_image_package_templates', '专业产物包模板', '内置白底图、主图、场景图、换背景、换模特、尺寸图和卖点图的稳定生图要求。'),
+      skill('image_ratio_control', '图片比例控制', '按 1:1、3:4、4:3、9:16、16:9 等常用比例生成适合投放和商品展示的图片。'),
       skill('image_batch_generation', '批量生图', '按用户勾选产物包并发生成商品图结果，输出 URL 和缩略图预览。')
     ],
     workflowSteps: [
@@ -4136,46 +4084,39 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
         order: 1,
         type: 'input',
         name: '接收商品批次',
-        instruction: '接收商品图片、SKU 表格、目标平台、勾选产物包和质检模式。'
+        instruction: '接收商品图片、图片比例、勾选产物包和质检模式。'
       },
       {
         id: 'gather_factory_rules',
         order: 2,
         type: 'knowledge',
-        name: '读取平台和品牌规则',
-        instruction: '读取企业知识库里的平台规则、品牌素材规范、禁用词和历史优质商品图案例。'
+        name: '读取品牌图片规范',
+        instruction: '读取企业知识库里的品牌素材规范、禁用词、图片风格要求和历史优质商品图案例。'
       },
       {
         id: 'prepare_batch',
         order: 3,
         type: 'llm',
         name: '整理批次参数',
-        instruction: '把商品图、SKU、目标平台和产物包整理成可并发执行的批次 JSON。'
-      },
-      {
-        id: 'generate_package_prompts',
-        order: 4,
-        type: 'llm',
-        name: '可选图片理解增强',
-        instruction: '用户开启图片理解增强时，用多模态模型理解商品图，同时生成各产物包的稳定生图提示词。'
+        instruction: '把商品图、图片比例和产物包整理成可并发执行的批次 JSON，并套用内置产物包模板。'
       },
       {
         id: 'generate_images',
-        order: 5,
+        order: 4,
         type: 'llm',
         name: '批量生成商品图',
-        instruction: '按商品批次和所选产物包调用图片生成模型，输出图片远程 URL 元数据。'
+        instruction: '按商品批次、图片比例和所选产物包调用图片生成模型，输出图片远程 URL 元数据。'
       },
       {
         id: 'quality_check',
-        order: 6,
+        order: 5,
         type: 'llm',
         name: '可选质检',
         instruction: '按用户选择执行基础规则检查或多模态质检。'
       },
       {
         id: 'factory_output',
-        order: 7,
+        order: 6,
         type: 'output',
         name: '返回结果',
         instruction: '返回批量任务统计、失败项和图片预览结果。'
@@ -4184,12 +4125,12 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     workflowGraph: buildCrossBorderImageFactoryWorkflowGraph(),
     dependencyManifestFactory: buildCrossBorderImageFactoryManifest(),
     sampleInputs: [
-      '请把这批商品图按 Amazon 生成白底图、主图、场景图、尺寸图和卖点图。',
-      '请按 Temu 风格批量生成商品图，保留主体一致，开启基础质检。'
+      '请把这批商品图按 1:1 方图生成白底图、主图、场景图、尺寸图和卖点图。',
+      '请按 9:16 竖屏比例批量生成商品图，保留主体一致，开启基础质检。'
     ],
-    outputFormat: '图片批次结果，包含各 SKU 的产物包、远程图片 URL、本地缩略图、失败原因和质检摘要。',
+    outputFormat: '图片批次结果，包含各原图的产物包、远程图片 URL、本地缩略图、失败原因和质检摘要。',
     allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_BASIC_MONTHLY'),
-    approvalPolicy: '生成前由用户选择产物包和目标平台；对外发布前需人工复核平台规则、品牌合规和图片真实性。'
+    approvalPolicy: '生成前由用户选择产物包和图片比例；对外发布前需人工复核品牌合规、素材版权和图片真实性。'
   },
   {
     templateId: 'factory_ecommerce_product_videos_v1',
