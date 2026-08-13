@@ -3,6 +3,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerDesktopIpc } from './ipc.js';
 import { configureUserDataPath } from './runtime-state.js';
+import {
+  registerArtifactPreviewProtocol,
+  registerArtifactPreviewScheme
+} from './artifact-preview.js';
 
 const electronApi = (electron as typeof electron & { default?: typeof electron }).default ?? electron;
 const { app, BrowserWindow, Menu, shell } = electronApi;
@@ -27,6 +31,7 @@ const appId = 'com.qiuai.workos.pc';
 const appIconPath = path.resolve(currentDir, '..', '..', 'resources', 'icon.png');
 
 configureUserDataPath();
+registerArtifactPreviewScheme();
 
 if (process.platform === 'win32') {
   app.setAppUserModelId(appId);
@@ -89,6 +94,7 @@ async function createMainWindow() {
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
+  registerArtifactPreviewProtocol();
   registerDesktopIpc();
   void createMainWindow();
 

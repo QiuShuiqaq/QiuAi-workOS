@@ -67,17 +67,15 @@ function planTone(plan: AdminPlanDetail): 'default' | 'processing' | 'warning' {
 }
 
 const capacityFeatureLabels: Record<string, string> = {
-  maxDesktopDevices: '设备',
-  maxRoleInstances: '单设备数字员工',
-  maxDigitalFactories: '单设备数字工厂'
+  maxDesktopDevices: '可绑定设备'
 };
 
-const capacityFeatureOrder = ['maxDesktopDevices', 'maxRoleInstances', 'maxDigitalFactories'];
+const capacityFeatureOrder = ['maxDesktopDevices'];
 const editableEntitlementLabels: Record<string, string> = {
   maxDesktopDevices: '企业可绑定设备数',
-  maxRoleInstances: '单设备数字员工',
-  maxDigitalFactories: '单设备数字工厂',
-  maxTasksPerMonth: '月任务额度'
+  maxRoleInstances: '兼容字段：数字员工容量',
+  maxDigitalFactories: '兼容字段：数字工厂容量',
+  maxTasksPerMonth: '兼容字段：月任务保护'
 };
 const editableEntitlementOrder = ['maxDesktopDevices', 'maxRoleInstances', 'maxDigitalFactories', 'maxTasksPerMonth'];
 const editableEntitlementKeys = new Set(editableEntitlementOrder);
@@ -306,7 +304,7 @@ export function AdminPlansPageClient({ currentAccount, plans }: AdminPlansPageCl
             showIcon
             type="info"
             message="这里只展示当前产品化的套餐权益"
-            description="可编辑项为 maxDesktopDevices、maxRoleInstances、maxDigitalFactories、maxTasksPerMonth。canUseXXX、maxMembers 等历史预留字段会自动隐藏并在保存时按原值保留。"
+            description="当前前台只展示设备授权。数字员工默认开放，数字工厂由模板 allowedPlanCodes 控制；maxRoleInstances、maxDigitalFactories、maxTasksPerMonth 仅作为兼容字段保留。"
             style={{ marginBottom: 16 }}
           />
 

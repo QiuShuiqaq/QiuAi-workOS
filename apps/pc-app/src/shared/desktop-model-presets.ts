@@ -3,7 +3,7 @@ import {
   createModelCapabilityMetadata,
   defaultCapabilitiesForPurpose,
   normalizeExplicitModelCapabilities,
-  normalizeModelCapabilities,
+  normalizePrimaryModelCapabilities,
   purposeForModelCapabilities
 } from './desktop-model-capabilities.js';
 
@@ -136,7 +136,7 @@ export function createCustomCompatibleModelProfile(
   const providerId = createUniqueCustomProviderId(modelProfiles, options.providerName);
   const modelName = options.modelName?.trim() || 'custom-model';
   const fallbackPurpose = options.purpose ?? 'general';
-  const capabilities = normalizeModelCapabilities(
+  const capabilities = normalizePrimaryModelCapabilities(
     options.capabilities ?? defaultCapabilitiesForPurpose(fallbackPurpose),
     fallbackPurpose
   );
@@ -209,7 +209,7 @@ function applyPresetToProfile(
     providerName: preset.name,
     modelName: model.modelName,
     purpose: model.purpose,
-    capabilities: normalizeModelCapabilities(model.capabilities, model.purpose),
+    capabilities: normalizePrimaryModelCapabilities(model.capabilities, model.purpose),
     capabilityMetadata: model.capabilityMetadata ?? createModelCapabilityMetadata({
       source: 'official_catalog',
       confidence: 'high',
@@ -234,7 +234,7 @@ function createModelProfileFromPreset(
     providerName: preset.name,
     modelName: model.modelName,
     purpose: model.purpose,
-    capabilities: normalizeModelCapabilities(
+    capabilities: normalizePrimaryModelCapabilities(
       model.capabilities ?? defaultCapabilitiesForPurpose(model.purpose),
       model.purpose
     ),

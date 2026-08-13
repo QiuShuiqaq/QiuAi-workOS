@@ -41,6 +41,7 @@ export interface DesktopRolePackageSummary {
 export interface DesktopAuthorizedRoleTemplateSummary {
   id: string;
   applicationType?: 'digital_employee' | 'digital_factory';
+  outputCategory?: string;
   version: string;
   name: string;
   industry: string;

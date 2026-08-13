@@ -145,7 +145,6 @@ const legacyVideoFactoryManifestRolePackage: RolePackageManifest = {
   }
 };
 assert.deepEqual(readRequiredModelProfileIdsForRolePackage(legacyVideoFactoryManifestRolePackage), [
-  'qiu-asr-default',
   'qiu-general-default'
 ]);
 
@@ -156,6 +155,159 @@ assert.ok(asrProfile.capabilities?.includes('audio_to_text'));
 assert.deepEqual(readRequiredModelProfileIdsForRolePackage(rolePackage), [
   'qiu-general-default'
 ]);
+
+const explicitTextWorkflowWithStaleVideoManifestRolePackage: RolePackageManifest = {
+  ...rolePackage,
+  roleCode: 'ai-translation-polish',
+  workflowGraph: {
+    version: '1.0.0',
+    entryNodeId: 'start',
+    nodes: [
+      { id: 'start', type: 'start', name: 'Start' },
+      {
+        id: 'extract_parameters',
+        type: 'llm',
+        name: 'Extract parameters',
+        config: { llmTaskType: 'structured_extraction' }
+      },
+      {
+        id: 'analyze_work',
+        type: 'llm',
+        name: 'Analyze work',
+        config: { llmTaskType: 'reasoning' }
+      },
+      {
+        id: 'draft_deliverable',
+        type: 'llm',
+        name: 'Draft deliverable',
+        config: { llmTaskType: 'text' }
+      },
+      {
+        id: 'write_artifact',
+        type: 'artifact',
+        name: 'Write Word',
+        artifactType: 'docx'
+      }
+    ],
+    edges: []
+  },
+  dependencyManifest: {
+    version: '1.0.0',
+    generatedAt: '2026-08-10T00:00:00.000Z',
+    variables: [],
+    modelAssets: [
+      {
+        key: 'qiu-video-generation-default',
+        name: 'Stale Video Slot',
+        providerId: 'provider-pending',
+        providerName: 'Pending',
+        modelId: 'qiu-video-generation-default',
+        modelProfileId: 'qiu-video-generation-default',
+        capabilities: ['video_generation', 'text_to_video', 'image_to_video'],
+        inputTypes: ['text', 'image'],
+        outputTypes: ['video'],
+        credentialFields: ['apiKey', 'apiBaseUrl'],
+        required: true,
+        nodeIds: ['generate_videos']
+      }
+    ],
+    toolActions: [],
+    artifactTemplates: [],
+    nodeTemplates: [],
+    warnings: []
+  }
+};
+const explicitTextModelProfileIds = readRequiredModelProfileIdsForRolePackage(
+  explicitTextWorkflowWithStaleVideoManifestRolePackage
+);
+assert.deepEqual(explicitTextModelProfileIds, [
+  'qiu-general-default',
+  'qiu-reasoning-default'
+]);
+assert.equal(explicitTextModelProfileIds.includes('qiu-video-generation-default'), false);
+assert.equal(
+  getRoleModelRequirementStatuses(
+    [
+      createPlaceholderModelProfile('qiu-general-default'),
+      createPlaceholderModelProfile('qiu-reasoning-default'),
+      createPlaceholderModelProfile('qiu-video-generation-default')
+    ],
+    explicitTextWorkflowWithStaleVideoManifestRolePackage
+  ).some((status) => status.profile.id === 'qiu-video-generation-default'),
+  false
+);
+const pollutedReasoningProfile: ModelProfile = {
+  id: 'qiu-reasoning-default',
+  providerId: 'minimax',
+  providerName: 'MiniMax',
+  modelName: 'MiniMax-Hailuo-2.3-Fast',
+  purpose: 'vision',
+  capabilities: ['video_generation', 'image_to_video'],
+  apiBaseUrl: 'https://api.minimaxi.com/v1'
+};
+const pollutedReasoningStatuses = getRoleModelRuntimeRequirementStatuses(
+  [
+    createPlaceholderModelProfile('qiu-general-default'),
+    pollutedReasoningProfile
+  ],
+  ['qiu-general-default', 'qiu-reasoning-default'],
+  explicitTextWorkflowWithStaleVideoManifestRolePackage
+);
+const pollutedReasoningRequirement = pollutedReasoningStatuses.find(
+  (status) => status.profile.id === 'qiu-reasoning-default'
+);
+assert.ok(pollutedReasoningRequirement);
+assert.deepEqual(pollutedReasoningRequirement.profile.capabilities, [
+  'reasoning_text'
+]);
+assert.equal(
+  pollutedReasoningRequirement.profile.capabilities?.includes('video_generation'),
+  false
+);
+assert.equal(pollutedReasoningRequirement.runtimeProfile?.id, 'qiu-reasoning-default');
+assert.equal(pollutedReasoningRequirement.issue, 'incompatible');
+const compatibleTextRuntimeProfile: ModelProfile = {
+  id: 'deepseek-v4-flash',
+  providerId: 'deepseek',
+  providerName: 'DeepSeek',
+  modelName: 'deepseek-v4-flash',
+  purpose: 'general',
+  capabilities: ['text'],
+  apiBaseUrl: 'https://api.deepseek.com'
+};
+const fallbackReasoningStatuses = getRoleModelRuntimeRequirementStatuses(
+  [
+    createPlaceholderModelProfile('qiu-general-default'),
+    pollutedReasoningProfile,
+    compatibleTextRuntimeProfile
+  ],
+  ['qiu-general-default', 'qiu-reasoning-default', compatibleTextRuntimeProfile.id],
+  explicitTextWorkflowWithStaleVideoManifestRolePackage,
+  {
+    credentials: [
+      {
+        id: 'credential-default-deepseek',
+        providerId: 'deepseek',
+        providerName: 'DeepSeek',
+        label: 'DeepSeek default',
+        apiBaseUrl: 'https://api.deepseek.com',
+        apiKey: 'deepseek-key',
+        isDefault: true,
+        createdAt: '2026-08-10T00:00:00.000Z',
+        updatedAt: '2026-08-10T00:00:00.000Z'
+      }
+    ]
+  }
+);
+const fallbackReasoningRequirement = fallbackReasoningStatuses.find(
+  (status) => status.profile.id === 'qiu-reasoning-default'
+);
+assert.ok(fallbackReasoningRequirement);
+assert.deepEqual(fallbackReasoningRequirement.profile.capabilities, [
+  'reasoning_text'
+]);
+assert.equal(fallbackReasoningRequirement.runtimeProfile?.id, compatibleTextRuntimeProfile.id);
+assert.equal(fallbackReasoningRequirement.ready, true);
 
 const manifestDrivenRolePackage: RolePackageManifest = {
   ...rolePackage,
@@ -186,19 +338,19 @@ const manifestDrivenRolePackage: RolePackageManifest = {
   }
 };
 assert.deepEqual(readRequiredModelProfileIdsForRolePackage(manifestDrivenRolePackage), [
-  'qiu-reasoning-default'
+  'qiu-general-default'
 ]);
 const manifestDrivenRequirementStatus = getRoleModelRequirementStatuses(
-  [createPlaceholderModelProfile('qiu-reasoning-default')],
+  [createPlaceholderModelProfile('qiu-general-default')],
   manifestDrivenRolePackage
 )[0];
 assert.equal(
   manifestDrivenRequirementStatus?.profile.id,
-  'qiu-reasoning-default'
+  'qiu-general-default'
 );
 assert.deepEqual(
   manifestDrivenRequirementStatus?.requiredByNodeIds,
-  ['classify']
+  ['classify', 'draft']
 );
 
 const visionManifestDrivenRolePackage: RolePackageManifest = {
@@ -230,7 +382,7 @@ const visionManifestDrivenRolePackage: RolePackageManifest = {
   }
 };
 assert.deepEqual(readRequiredModelProfileIdsForRolePackage(visionManifestDrivenRolePackage), [
-  'qiu-vision-default'
+  'qiu-general-default'
 ]);
 
 const imageManifestDrivenRolePackage: RolePackageManifest = {
@@ -262,7 +414,7 @@ const imageManifestDrivenRolePackage: RolePackageManifest = {
   }
 };
 assert.deepEqual(readRequiredModelProfileIdsForRolePackage(imageManifestDrivenRolePackage), [
-  'qiu-image-editing-default'
+  'qiu-general-default'
 ]);
 
 const videoGenerationManifestDrivenRolePackage: RolePackageManifest = {
@@ -294,7 +446,7 @@ const videoGenerationManifestDrivenRolePackage: RolePackageManifest = {
   }
 };
 assert.deepEqual(readRequiredModelProfileIdsForRolePackage(videoGenerationManifestDrivenRolePackage), [
-  'qiu-video-generation-default'
+  'qiu-general-default'
 ]);
 const videoGenerationProfile = createPlaceholderModelProfile('qiu-video-generation-default');
 assert.equal(videoGenerationProfile.purpose, 'vision');
@@ -411,7 +563,31 @@ assert.equal(
 const imageFactoryRolePackage: RolePackageManifest = {
   ...imageManifestDrivenRolePackage,
   roleCode: 'cross-border-image-factory',
-  modelProfileIds: readRequiredModelProfileIdsForRolePackage(imageManifestDrivenRolePackage)
+  workflowGraph: {
+    version: '1.0.0',
+    entryNodeId: 'start',
+    nodes: [
+      { id: 'start', type: 'start', name: 'Start' },
+      {
+        id: 'generate_images',
+        type: 'llm',
+        name: 'Generate images',
+        inputVariables: ['start.images'],
+        config: {
+          llmTaskType: 'image_generation'
+        }
+      }
+    ],
+    edges: [
+      {
+        id: 'start-generate',
+        sourceNodeId: 'start',
+        targetNodeId: 'generate_images',
+        condition: { type: 'always' }
+      }
+    ]
+  },
+  modelProfileIds: ['qiu-image-editing-default']
 };
 const imageEditingSlotProfile = createPlaceholderModelProfile('qiu-image-editing-default');
 const grsaiImageProfile: ModelProfile = {
@@ -516,7 +692,31 @@ const misconfiguredVisionStatuses = getRoleModelRuntimeRequirementStatuses(
   {
     ...visionManifestDrivenRolePackage,
     roleCode: 'vision-slot-misconfigured',
-    modelProfileIds: ['qiu-vision-default']
+    modelProfileIds: ['qiu-vision-default'],
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'describe_image',
+          type: 'llm',
+          name: 'Describe image',
+          inputVariables: ['start.images'],
+          config: {
+            llmTaskType: 'vision'
+          }
+        }
+      ],
+      edges: [
+        {
+          id: 'start-describe',
+          sourceNodeId: 'start',
+          targetNodeId: 'describe_image',
+          condition: { type: 'always' }
+        }
+      ]
+    }
   },
   {
     roleCode: 'vision-slot-misconfigured'

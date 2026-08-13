@@ -68,6 +68,7 @@ const channels = {
   exportLocalFiles: 'qiuai:desktop:export-local-files',
   saveRemoteFileAs: 'qiuai:desktop:save-remote-file-as',
   invokeDesktopTool: 'qiuai:desktop:invoke-desktop-tool',
+  getArtifactPreviewUrl: 'qiuai:desktop:get-artifact-preview-url',
   openLocalPath: 'qiuai:desktop:open-local-path',
   openExternalUrl: 'qiuai:desktop:open-external-url',
   controlWindow: 'qiuai:desktop:control-window'
@@ -133,6 +134,8 @@ const bridge: QiuDesktopBridge = {
     ipcRenderer.invoke(channels.saveRemoteFileAs, request) as Promise<DesktopRemoteFileSaveAsResult>,
   invokeDesktopTool: (request: DesktopToolInvocationRequest) =>
     ipcRenderer.invoke(channels.invokeDesktopTool, request) as Promise<DesktopToolInvocationResult>,
+  getArtifactPreviewUrl: (path: string) =>
+    ipcRenderer.invoke(channels.getArtifactPreviewUrl, path) as Promise<string>,
   getPathForFile: (file: unknown) => {
     try {
       const path = webUtils.getPathForFile(file as Parameters<typeof webUtils.getPathForFile>[0]);

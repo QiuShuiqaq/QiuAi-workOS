@@ -60,6 +60,26 @@ declare module 'electron' {
     setApplicationMenu(menu: unknown): void;
   };
 
+  export const protocol: {
+    registerSchemesAsPrivileged(schemes: Array<{
+      scheme: string;
+      privileges: {
+        secure?: boolean;
+        standard?: boolean;
+        supportFetchAPI?: boolean;
+        stream?: boolean;
+      };
+    }>): void;
+    handle(
+      scheme: string,
+      handler: (request: Request) => Promise<Response> | Response
+    ): void;
+  };
+
+  export const net: {
+    fetch(input: string, init?: RequestInit): Promise<Response>;
+  };
+
   export const shell: {
     openExternal(url: string): Promise<void>;
     openPath(path: string): Promise<string>;

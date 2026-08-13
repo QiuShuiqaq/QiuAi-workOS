@@ -10,6 +10,7 @@ import {
   buildRoleTemplateDependencyManifest,
   type ServerRoleTemplateDependencyManifest
 } from '../role-template-dependencies';
+import { resolveRoleTemplateOutputCategory } from '../role-template-output-category';
 
 export interface MockWorkspaceSummary {
   id: string;
@@ -39,6 +40,7 @@ export interface MockPlanDetail {
 export interface MockRoleTemplateSummary {
   id: string;
   applicationType?: 'DIGITAL_EMPLOYEE' | 'DIGITAL_FACTORY';
+  outputCategory?: string;
   version: string;
   name: string;
   industry: string;
@@ -267,7 +269,7 @@ export const demoPlans: MockPlanDetail[] = [
     billingCycle: 'MONTHLY',
     priceCents: 58800,
     currency: 'CNY',
-    description: '适合小团队试点，按企业设备数和单设备数字员工、数字工厂容量授权。',
+    description: '适合小团队试点，开放企业设备授权和基础数字工厂能力。',
     entitlements: enterpriseBasicEntitlements
   },
   {
@@ -285,7 +287,7 @@ export const demoPlans: MockPlanDetail[] = [
     billingCycle: 'MONTHLY',
     priceCents: 108800,
     currency: 'CNY',
-    description: '适合正常企业团队使用，按企业设备数和单设备数字员工、数字工厂容量授权。',
+    description: '适合正常企业团队使用，开放更多设备授权和标准数字工厂能力。',
     entitlements: enterpriseStandardEntitlements
   },
   {
@@ -303,7 +305,7 @@ export const demoPlans: MockPlanDetail[] = [
     billingCycle: 'MONTHLY',
     priceCents: 288800,
     currency: 'CNY',
-    description: '适合多团队或高频生产使用，按企业设备数和单设备数字员工、数字工厂容量授权。',
+    description: '适合多团队或高频生产使用，开放更高设备授权和完整数字工厂能力。',
     entitlements: enterpriseProEntitlements
   },
   {
@@ -329,6 +331,13 @@ export const demoRoleTemplates: MockRoleTemplateSummary[] = serverRoleTemplateCa
   (template) => ({
     id: template.templateId,
     applicationType: template.applicationType,
+    outputCategory: resolveRoleTemplateOutputCategory({
+      applicationType: template.applicationType,
+      templateId: template.templateId,
+      name: template.name,
+      outputFormat: template.outputFormat,
+      dependencyManifestFactory: template.dependencyManifestFactory
+    }),
     version: template.version,
     name: template.name,
     industry: template.industry,

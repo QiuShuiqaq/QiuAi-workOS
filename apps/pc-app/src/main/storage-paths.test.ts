@@ -34,6 +34,9 @@ assert.equal(fallbackUserDir.installPath, blockedInstallRoot);
 assert.equal(fallbackUserDir.storageMode, 'fallback_user_dir');
 assert.equal(fallbackUserDir.dataPath, path.join(roamingRoot, 'QiuAI WorkOS'));
 
+const previousDevUserDataDir = process.env.QIUAI_PC_DEV_USER_DATA_DIR;
+delete process.env.QIUAI_PC_DEV_USER_DATA_DIR;
+
 const devMode = resolveDesktopStoragePathInfo({
   isPackaged: false,
   processExecPath: path.join(installRoot, 'QiuAI WorkOS.exe'),
@@ -43,5 +46,23 @@ const devMode = resolveDesktopStoragePathInfo({
 
 assert.equal(devMode.storageMode, 'fallback_user_dir');
 assert.equal(devMode.dataPath, path.resolve(process.cwd(), '.local', 'user-data'));
+
+process.env.QIUAI_PC_DEV_USER_DATA_DIR = path.join(roamingRoot, 'dev-user-data');
+
+const configuredDevMode = resolveDesktopStoragePathInfo({
+  isPackaged: false,
+  processExecPath: path.join(installRoot, 'QiuAI WorkOS.exe'),
+  homeDir: os.homedir(),
+  appDataPath: roamingRoot
+});
+
+assert.equal(configuredDevMode.storageMode, 'fallback_user_dir');
+assert.equal(configuredDevMode.dataPath, path.join(roamingRoot, 'dev-user-data'));
+
+if (previousDevUserDataDir === undefined) {
+  delete process.env.QIUAI_PC_DEV_USER_DATA_DIR;
+} else {
+  process.env.QIUAI_PC_DEV_USER_DATA_DIR = previousDevUserDataDir;
+}
 
 console.log('Desktop storage path resolution passed.');

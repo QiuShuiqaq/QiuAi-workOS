@@ -1,5 +1,6 @@
 import {
   ApiOutlined,
+  ApartmentOutlined,
   AppstoreOutlined,
   BankOutlined,
   BorderOutlined,
@@ -10,6 +11,7 @@ import {
   DeleteOutlined,
   CompassOutlined,
   DownOutlined,
+  EyeOutlined,
   ExclamationCircleOutlined,
   FileAddOutlined,
   FileExcelOutlined,
@@ -30,6 +32,7 @@ import {
   RobotOutlined,
   SafetyCertificateOutlined,
   SettingOutlined,
+  SnippetsOutlined,
   RollbackOutlined,
   ReloadOutlined,
   MessageOutlined,
@@ -75,7 +78,6 @@ import type {
   DesktopAuthorizedRoleTemplateCatalog,
   DesktopAuthorizedRoleTemplateSummary,
   DesktopBackupSummary,
-  DesktopDeviceCapacitySummary,
   DesktopIssueCategory,
   DesktopIssueReportSubmitRequest,
   DesktopIssueSeverity,
@@ -113,15 +115,15 @@ import type {
 import {
   createModelCapabilityMetadata,
   explicitModelCapabilitySummary,
-  modelCapabilityOptions,
   modelCapabilityConfidenceLabel,
   modelCapabilityLabel,
   modelCapabilityMetadataSourceLabel,
   modelCapabilitySummary,
   modelProfileSupportsRequiredCapabilities,
-  normalizeModelCapabilities,
+  normalizePrimaryModelCapabilities,
   normalizeExplicitModelCapabilities,
   purposeForModelCapabilities,
+  primaryModelCapabilityOptions,
   readModelCatalogEntryEffectiveCapabilities,
   readModelProfileCapabilities
 } from '../shared/desktop-model-capabilities';
@@ -150,6 +152,10 @@ import {
   type RoleModelRuntimeIssue,
   type RoleModelRuntimeRequirementStatus
 } from '../shared/desktop-role-requirements';
+import {
+  isWatchExecutionProfile,
+  resolveRoleExecutionModeMeta
+} from '../shared/role-execution-mode';
 import {
   createCustomCompatibleModelProfile,
   selectModelProfileForPreset,
@@ -192,8 +198,26 @@ import siliconcloudLogoUrl from './assets/model-providers/siliconcloud-color.svg
 import tencentcloudLogoUrl from './assets/model-providers/tencentcloud-color.svg';
 import volcengineLogoUrl from './assets/model-providers/volcengine-color.svg';
 import zhipuLogoUrl from './assets/model-providers/zhipu-color.svg';
+import ArtifactWorkspace, {
+  type ArtifactRevisionDraft
+} from './ArtifactWorkspace';
+import {
+  getFactoryPreviewRemoteSrc,
+  hasFactoryPreviewSource
+} from './factory-preview';
+import { PromptSnippetBoard } from './PromptSnippetBoard';
 
-type SectionKey = 'workbench' | 'factories' | 'roles' | 'logs' | 'models' | 'tools' | 'knowledge' | 'settings';
+type SectionKey =
+  | 'workbench'
+  | 'factories'
+  | 'studio'
+  | 'roles'
+  | 'logs'
+  | 'snippets'
+  | 'models'
+  | 'tools'
+  | 'knowledge'
+  | 'settings';
 type AccountModalKey = 'enterprise' | 'help' | 'release' | 'download' | 'logout';
 type DesktopThemePreference = 'light' | 'system';
 type DesktopDensityPreference = 'comfortable' | 'compact';
@@ -275,7 +299,30 @@ interface TaskFormValues {
   useKnowledge?: boolean;
 }
 
+interface DocumentAssistantConfigFormValues {
+  scenarioKey: string;
+  outputContentType: string;
+  promptTemplate: string;
+}
+
+interface DocumentAssistantPreferences {
+  scenarioKey: string;
+  outputContentType: string;
+  promptTemplate: string;
+}
+
+interface DocumentAssistantScenarioPreset {
+  key: string;
+  label: string;
+  description: string;
+  outputContentType: string;
+  promptTemplate: string;
+}
+
 type RoleApplicationType = 'digital_employee' | 'digital_factory';
+type StudioApplicationFilter = 'all' | RoleApplicationType;
+type StudioStatusFilter = 'all' | 'active' | 'completed' | 'failed' | 'idle';
+type StudioRuntimeStatus = DesktopTaskState | 'idle' | 'deleted';
 
 interface AcademicDemoSectionFormValue {
   type: AcademicDemoSectionType;
@@ -413,7 +460,7 @@ interface ModelFormValues {
   providerName: string;
   modelName: string;
   purpose?: ModelProfile['purpose'];
-  capabilities?: ModelCapability[];
+  capabilities?: ModelCapability | ModelCapability[];
   apiBaseUrl?: string;
   apiKey?: string;
   temperature?: number;
@@ -484,15 +531,20 @@ interface AccountHelpSection {
 }
 
 const sectionItems: Array<{ key: SectionKey; icon: ReactNode; label: string }> = [
+  { key: 'studio', icon: <ApartmentOutlined />, label: '工作室' },
   { key: 'workbench', icon: <MessageOutlined />, label: '数字员工' },
   { key: 'factories', icon: <BankOutlined />, label: '数字工厂' },
   { key: 'roles', icon: <AppstoreOutlined />, label: '数字市场' },
   { key: 'logs', icon: <FileTextOutlined />, label: '日志' },
+  { key: 'snippets', icon: <SnippetsOutlined />, label: '标签库' },
   { key: 'models', icon: <ApiOutlined />, label: '模型' },
   { key: 'tools', icon: <ToolOutlined />, label: '工具' },
   { key: 'knowledge', icon: <DatabaseOutlined />, label: '知识库' },
   { key: 'settings', icon: <SettingOutlined />, label: '设置' }
 ];
+
+const studioEmployeeAvatarSkins = ['cat', 'fox', 'bear', 'rabbit', 'panda', 'dog', 'koala'] as const;
+const studioFactoryAvatarSkins = ['blue', 'green', 'amber', 'rose', 'slate'] as const;
 
 const desktopClientPreferenceStorageKey = 'qiuai.pc.client.preferences.v1';
 const desktopOnboardingTutorialStorageKey = 'qiuai.pc.tutorial.digital-employee.v1';
@@ -500,6 +552,258 @@ const factoryPackagePresetStorageKey = 'qiuai.pc.factory.package.presets.v1';
 const factoryPackageSelectionStorageKey = 'qiuai.pc.factory.package.selections.v1';
 const factoryRunParameterStorageKey = 'qiuai.pc.factory.run.parameters.v1';
 const factoryScreeningProfileStorageKey = 'qiuai.pc.factory.screening.profiles.v1';
+const documentAssistantPreferencesStorageKey = 'qiuai.pc.document-assistant.preferences.v1';
+const documentAssistantScenarioPresetsStorageKey = 'qiuai.pc.document-assistant.scenario-presets.v1';
+const documentAssistantRoleCode = 'ai-document-assistant';
+const documentAssistantOutputOptions = [
+  { value: '.docx', label: '.docx Word 文档' },
+  { value: '.xlsx', label: '.xlsx Excel 表格' },
+  { value: '.md', label: '.md Markdown 文档' },
+  { value: '.txt', label: '.txt 纯文本' }
+] as const;
+const documentAssistantOutputFormatValues = new Set<string>(
+  documentAssistantOutputOptions.map((option) => option.value)
+);
+const documentAssistantLegacyOutputTypeMap = new Map<string, string>([
+  ['正式文档', '.docx'],
+  ['分析报告', '.docx'],
+  ['结构化清单', '.xlsx'],
+  ['会议纪要', '.docx'],
+  ['方案草稿', '.docx'],
+  ['自定义', '.docx']
+]);
+const documentAssistantBuiltinScenarioPresets: DocumentAssistantScenarioPreset[] = [
+  {
+    key: 'general_document',
+    label: '通用文档整理',
+    description: '提取资料重点，整理成清晰、正式、可复核的文档。',
+    outputContentType: '.docx',
+    promptTemplate: '保留原始资料中的明确事实，删除重复和无关内容，按标题、摘要、正文、清单和待确认事项整理。'
+  },
+  {
+    key: 'recruiting',
+    label: '招聘简历筛选',
+    description: '根据岗位要求整理候选人事实、匹配点、风险和面试建议。',
+    outputContentType: '.xlsx',
+    promptTemplate: '只依据岗位 JD 和简历中的明确内容进行比较，不使用性别、年龄、婚育等敏感信息做判断。'
+  },
+  {
+    key: 'finance',
+    label: '财务单据整理',
+    description: '提取费用、票据、异常和待补材料，形成财务初筛结果。',
+    outputContentType: '.xlsx',
+    promptTemplate: '区分原始金额、费用科目、票据状态、异常项和待补材料，不直接批准付款或报销。'
+  },
+  {
+    key: 'administration',
+    label: '行政制度文档',
+    description: '生成制度、通知、公告、SOP 和流程说明。',
+    outputContentType: '.docx',
+    promptTemplate: '明确适用范围、规则、流程、责任和执行注意事项；没有企业依据的处罚、薪酬和劳动关系内容标记为待确认。'
+  },
+  {
+    key: 'contract_review',
+    label: '合同初审',
+    description: '提取合同条款、风险依据、修改建议和法务待确认事项。',
+    outputContentType: '.docx',
+    promptTemplate: '重点检查付款、交付、违约、保密、终止和争议解决条款；只做初审提示，不输出最终法律意见。'
+  },
+  {
+    key: 'meeting_minutes',
+    label: '会议纪要',
+    description: '从会议记录中提取结论、决议、待办、责任人和截止时间。',
+    outputContentType: '.docx',
+    promptTemplate: '严格区分讨论意见、已决议事项、待办事项和待确认问题，没有明确责任人或日期时不要擅自补充。'
+  },
+  {
+    key: 'research_report',
+    label: '调研报告',
+    description: '整理调研资料、来源、关键事实、机会、风险和下一步动作。',
+    outputContentType: '.docx',
+    promptTemplate: '为每个重要事实保留来源或原文依据，不确定内容标记为待验证，不把推测写成结论。'
+  },
+  {
+    key: 'sales_followup',
+    label: '销售跟进',
+    description: '整理客户背景、需求、异议、匹配卖点和下一步跟进动作。',
+    outputContentType: '.docx',
+    promptTemplate: '结合企业产品资料生成可直接使用的跟进内容；价格、交付周期和效果承诺没有依据时列为待确认。'
+  },
+  {
+    key: 'project_proposal',
+    label: '项目方案',
+    description: '把客户需求整理为目标、方案、范围、里程碑、交付物和验收标准。',
+    outputContentType: '.docx',
+    promptTemplate: '明确范围边界、交付物、验收标准、风险和依赖；工期、价格和资源承诺没有依据时不得写成确定结论。'
+  }
+];
+const documentAssistantBuiltinScenarioKeys = new Set(
+  documentAssistantBuiltinScenarioPresets.map((preset) => preset.key)
+);
+
+function readDocumentAssistantCustomScenarioPresets(): DocumentAssistantScenarioPreset[] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(documentAssistantScenarioPresetsStorageKey);
+    if (!rawValue) {
+      return [];
+    }
+
+    const parsed = JSON.parse(rawValue) as Partial<DocumentAssistantScenarioPreset>[];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .map((item) => ({
+        key: typeof item?.key === 'string' ? item.key : '',
+        label: typeof item?.label === 'string' ? item.label.trim() : '',
+        description: typeof item?.description === 'string' ? item.description.trim() : '',
+        outputContentType: normalizeDocumentAssistantOutputContentType(
+          typeof item?.outputContentType === 'string' ? item.outputContentType : undefined,
+          '.docx'
+        ),
+        promptTemplate: typeof item?.promptTemplate === 'string' ? item.promptTemplate.trim() : ''
+      }))
+      .filter((item) => item.key && item.label && item.promptTemplate)
+      .filter((item) => !documentAssistantBuiltinScenarioKeys.has(item.key));
+  } catch {
+    return [];
+  }
+}
+
+function writeDocumentAssistantCustomScenarioPresets(presets: DocumentAssistantScenarioPreset[]) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(documentAssistantScenarioPresetsStorageKey, JSON.stringify(presets));
+  } catch {
+    // Custom presets are optional local preferences.
+  }
+}
+
+function readDocumentAssistantScenarioCatalog(): DocumentAssistantScenarioPreset[] {
+  return [...documentAssistantBuiltinScenarioPresets, ...readDocumentAssistantCustomScenarioPresets()];
+}
+
+function isDocumentAssistantBuiltinScenarioKey(scenarioKey: string) {
+  return documentAssistantBuiltinScenarioKeys.has(scenarioKey);
+}
+
+function createDocumentAssistantCustomScenarioKey(label: string) {
+  const safeLabel = label
+    .trim()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-zA-Z0-9_\-\u4e00-\u9fa5]/g, '')
+    .slice(0, 12);
+  return `custom_${Date.now().toString(36)}_${safeLabel || 'template'}_${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+}
+
+function normalizeDocumentAssistantOutputContentType(value: string | undefined, fallback: string) {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+  if (documentAssistantOutputFormatValues.has(trimmed)) {
+    return trimmed;
+  }
+  return documentAssistantLegacyOutputTypeMap.get(trimmed) ?? fallback;
+}
+
+function getDocumentAssistantScenarioPreset(
+  scenarioKey: string | undefined
+): DocumentAssistantScenarioPreset {
+  const scenarioCatalog = readDocumentAssistantScenarioCatalog();
+  return scenarioCatalog.find((preset) => preset.key === scenarioKey) ?? scenarioCatalog[0];
+}
+
+function createDefaultDocumentAssistantPreferences(): DocumentAssistantPreferences {
+  const preset = getDocumentAssistantScenarioPreset('general_document');
+  return {
+    scenarioKey: preset.key,
+    outputContentType: preset.outputContentType,
+    promptTemplate: preset.promptTemplate
+  };
+}
+
+function readDocumentAssistantPreferences(): DocumentAssistantPreferences {
+  const fallback = createDefaultDocumentAssistantPreferences();
+  if (typeof window === 'undefined') {
+    return fallback;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(documentAssistantPreferencesStorageKey);
+    if (!rawValue) {
+      return fallback;
+    }
+
+    const parsed = JSON.parse(rawValue) as Partial<DocumentAssistantPreferences>;
+    const preset = getDocumentAssistantScenarioPreset(parsed.scenarioKey);
+    const outputContentType = normalizeDocumentAssistantOutputContentType(
+      parsed.outputContentType,
+      preset.outputContentType
+    );
+    const promptTemplate =
+      typeof parsed.promptTemplate === 'string' && parsed.promptTemplate.trim()
+        ? parsed.promptTemplate.trim()
+        : preset.promptTemplate;
+
+    return {
+      scenarioKey: preset.key,
+      outputContentType,
+      promptTemplate
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function writeDocumentAssistantPreferences(preferences: DocumentAssistantPreferences) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      documentAssistantPreferencesStorageKey,
+      JSON.stringify(preferences)
+    );
+  } catch {
+    // User preferences are non-critical; keep the assistant usable if storage is unavailable.
+  }
+}
+
+function buildDocumentAssistantTaskInput(
+  preferences: DocumentAssistantPreferences,
+  userInput: string
+): string {
+  const preset = getDocumentAssistantScenarioPreset(preferences.scenarioKey);
+  const outputContentType = normalizeDocumentAssistantOutputContentType(
+    preferences.outputContentType,
+    preset.outputContentType
+  );
+  const promptTemplate = preferences.promptTemplate.trim() || preset.promptTemplate;
+  const normalizedUserInput = userInput.trim() || '请读取上传附件，并按以上配置生成文档产物。';
+
+  return [
+    '文档助手配置：',
+    `场景模板：${preset.label}`,
+    `文件格式：${outputContentType}`,
+    `提示词模板：${promptTemplate}`,
+    '',
+    '用户任务：',
+    normalizedUserInput
+  ].join('\n');
+}
+
 const defaultDesktopClientPreferences: DesktopClientPreferences = {
   theme: 'light',
   density: 'comfortable',
@@ -1586,8 +1890,9 @@ function toDesktopRoleTemplate(summary: DesktopAuthorizedRoleTemplateSummary): D
   const executionProfile = cloneJsonValue(
     summary.executionProfile ?? dependencyManifest?.executionProfile
   ) as DesktopRoleTemplate['executionProfile'];
-  const manifestModelProfileIds = readDependencyManifestModelProfileIds(dependencyManifest);
   const manifestToolIds = readDependencyManifestToolIds(dependencyManifest);
+  const workflowModelProfileIds = inferDesktopModelProfileIds(workflowGraph);
+  const templateModelProfileIds = workflowModelProfileIds;
 
   return {
     templateId: summary.id,
@@ -1595,6 +1900,7 @@ function toDesktopRoleTemplate(summary: DesktopAuthorizedRoleTemplateSummary): D
     roleCode,
     name: summary.name,
     version: summary.version,
+    outputCategory: summary.outputCategory,
     summary: summary.description,
     industry: summary.industry,
     scenario: summary.scenario,
@@ -1618,10 +1924,7 @@ function toDesktopRoleTemplate(summary: DesktopAuthorizedRoleTemplateSummary): D
     executionProfile,
     sampleInputs: [...(summary.sampleInputs ?? [])],
     outputFormat: summary.outputFormat ?? '',
-    modelProfileIds:
-      manifestModelProfileIds.length > 0
-        ? manifestModelProfileIds
-        : inferDesktopModelProfileIds(workflowGraph),
+    modelProfileIds: templateModelProfileIds,
     toolIds:
       manifestToolIds.length > 0
         ? manifestToolIds
@@ -1661,21 +1964,6 @@ function isRoleTemplateDependencyManifest(value: unknown): value is RoleTemplate
   );
 }
 
-function readDependencyManifestModelProfileIds(
-  manifest: RoleTemplateDependencyManifest | undefined
-): string[] {
-  if (!manifest) {
-    return [];
-  }
-
-  return mergeUniqueStrings(
-    manifest.modelAssets
-      .map((asset) => asset.modelProfileId || asset.modelId || asset.key)
-      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
-    []
-  );
-}
-
 function readDependencyManifestToolIds(
   manifest: RoleTemplateDependencyManifest | undefined
 ): string[] {
@@ -1692,8 +1980,12 @@ function readDependencyManifestToolIds(
 }
 
 function inferDesktopModelProfileIds(workflowGraph: DesktopRoleTemplate['workflowGraph']): string[] {
+  if (!parseWorkflowGraph(workflowGraph)) {
+    return [];
+  }
+
   const workflowModelProfileIds = readWorkflowRequiredModelProfileIds(workflowGraph);
-  return workflowModelProfileIds.length > 0 ? workflowModelProfileIds : ['qiu-general-default'];
+  return workflowModelProfileIds;
 }
 
 function createRoleCodeFromTemplateId(templateId: string): string {
@@ -1811,20 +2103,6 @@ function roleTemplateAccessReason(template: Pick<DesktopRoleTemplate, 'accessRea
   return template.accessReason?.trim() || '\u5f53\u524d\u7248\u672c\u6682\u4e0d\u652f\u6301\u5b89\u88c5\u8be5\u6a21\u677f\u3002';
 }
 
-function roleExecutionModeMeta(profile: DesktopRoleExecutionProfile | undefined): {
-  label: string;
-  color: string;
-} {
-  switch (profile?.mode) {
-    case 'watch':
-      return { label: '值守式', color: 'gold' };
-    case 'hybrid':
-      return { label: '混合式', color: 'cyan' };
-    default:
-      return { label: '对话式', color: 'blue' };
-  }
-}
-
 function roleExecutionProfileTooltip(profile: DesktopRoleExecutionProfile | undefined): ReactNode {
   if (!profile) {
     return '由用户发起任务，按模板读取资料并输出结果。';
@@ -1891,42 +2169,14 @@ function roleExecutionOutputTargetLabel(value: string): string {
   return labels[value] ?? value;
 }
 
-type RoleApplicationUsage = Record<RoleApplicationType, number>;
-
 interface RoleInstallAvailability {
   canInstall: boolean;
   label: string;
   reason: string;
-  usedValue?: number;
-  limitValue?: number;
-}
-
-function countInstalledRoleApplications(rolePackages: RolePackageManifest[]): RoleApplicationUsage {
-  return rolePackages.reduce<RoleApplicationUsage>(
-    (counts, rolePackage) => {
-      counts[readRoleApplicationType(rolePackage)] += 1;
-      return counts;
-    },
-    {
-      digital_employee: 0,
-      digital_factory: 0
-    }
-  );
-}
-
-function roleApplicationCapacityLimit(
-  applicationType: RoleApplicationType,
-  deviceCapacity: DesktopDeviceCapacitySummary | undefined
-): number | undefined {
-  return applicationType === 'digital_factory'
-    ? deviceCapacity?.maxDigitalFactories
-    : deviceCapacity?.maxRoleInstances;
 }
 
 function resolveRoleInstallAvailability(
-  template: DesktopRoleTemplate,
-  installedUsage: RoleApplicationUsage,
-  deviceCapacity: DesktopDeviceCapacitySummary | undefined
+  template: DesktopRoleTemplate
 ): RoleInstallAvailability {
   if (!canInstallRoleTemplate(template)) {
     return {
@@ -1936,65 +2186,11 @@ function resolveRoleInstallAvailability(
     };
   }
 
-  const applicationType = readRoleApplicationType(template);
-  const limitValue = roleApplicationCapacityLimit(applicationType, deviceCapacity);
-  const usedValue = installedUsage[applicationType];
-  if (limitValue !== undefined && usedValue >= limitValue) {
-    const applicationLabel = roleApplicationTypeLabel(applicationType);
-    return {
-      canInstall: false,
-      label: '额度已满',
-      reason: `当前套餐每台设备最多可安装 ${limitValue} 个${applicationLabel}，这台电脑已安装 ${usedValue} 个。请先卸载不需要的${applicationLabel}，或在购买中心升级套餐。`,
-      usedValue,
-      limitValue
-    };
-  }
-
   return {
     canInstall: true,
     label: '可安装',
-    reason: '',
-    usedValue,
-    limitValue
+    reason: ''
   };
-}
-
-function formatRoleApplicationCapacityUsage(
-  applicationType: RoleApplicationType,
-  installedUsage: RoleApplicationUsage,
-  deviceCapacity: DesktopDeviceCapacitySummary | undefined
-): string {
-  const usedValue = installedUsage[applicationType];
-  const limitValue = roleApplicationCapacityLimit(applicationType, deviceCapacity);
-
-  return limitValue === undefined
-    ? `本机已安装 ${usedValue} 个`
-    : `本机已安装 ${usedValue}/${limitValue} 个`;
-}
-
-function restrictInstalledRolePackagesByDeviceCapacity(
-  rolePackages: RolePackageManifest[],
-  deviceCapacity: DesktopDeviceCapacitySummary | undefined
-): RolePackageManifest[] {
-  const limits: Record<RoleApplicationType, number | undefined> = {
-    digital_employee: deviceCapacity?.maxRoleInstances,
-    digital_factory: deviceCapacity?.maxDigitalFactories
-  };
-  const used: RoleApplicationUsage = {
-    digital_employee: 0,
-    digital_factory: 0
-  };
-
-  return rolePackages.filter((rolePackage) => {
-    const applicationType = readRoleApplicationType(rolePackage);
-    const limitValue = limits[applicationType];
-    if (limitValue !== undefined && used[applicationType] >= limitValue) {
-      return false;
-    }
-
-    used[applicationType] += 1;
-    return true;
-  });
 }
 
 function isSectionKey(value: string): value is SectionKey {
@@ -2462,7 +2658,7 @@ function normalizeFactoryRunParameterMemory(value: unknown): Partial<FactoryRunF
       continue;
     }
 
-    if (typeof item === 'string') {
+    if (typeof item === 'string' && item.trim()) {
       (normalized as Record<string, unknown>)[key] = item;
     }
   }
@@ -2904,6 +3100,7 @@ export default function App() {
     useState<ProviderModelCapabilityFilter>('all');
   const [providerModelCompatibilityOnly, setProviderModelCompatibilityOnly] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string>('');
+  const [selectedConversationArtifactId, setSelectedConversationArtifactId] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isBindingDevice, setIsBindingDevice] = useState(false);
@@ -2961,10 +3158,21 @@ export default function App() {
   const [runtimeModelQuickSwitchForm] = Form.useForm<RuntimeModelQuickSwitchFormValues>();
   const [watchConfigForm] = Form.useForm<WatchConfigFormValues>();
   const [issueFeedbackForm] = Form.useForm<IssueFeedbackFormValues>();
+  const [documentAssistantConfigForm] = Form.useForm<DocumentAssistantConfigFormValues>();
+  const [documentAssistantConfig, setDocumentAssistantConfig] =
+    useState<DocumentAssistantPreferences>(() => readDocumentAssistantPreferences());
+  const [documentAssistantCustomScenarioPresets, setDocumentAssistantCustomScenarioPresets] = useState<
+    DocumentAssistantScenarioPreset[]
+  >(() => readDocumentAssistantCustomScenarioPresets());
+  const documentAssistantScenarioPresets = useMemo(
+    () => [...documentAssistantBuiltinScenarioPresets, ...documentAssistantCustomScenarioPresets],
+    [documentAssistantCustomScenarioPresets]
+  );
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [roleConfigModalOpen, setRoleConfigModalOpen] = useState(false);
   const [roleConfigMode, setRoleConfigMode] = useState<'install' | 'configure'>('install');
   const [roleConfigRoleCode, setRoleConfigRoleCode] = useState('');
+  const [documentAssistantConfigOpen, setDocumentAssistantConfigOpen] = useState(false);
   const [runtimeModelQuickSwitchOpen, setRuntimeModelQuickSwitchOpen] = useState(false);
   const [runtimeModelQuickSwitchRoleCode, setRuntimeModelQuickSwitchRoleCode] = useState('');
   const [watchConfigModalOpen, setWatchConfigModalOpen] = useState(false);
@@ -2978,6 +3186,10 @@ export default function App() {
   const [selectedRoleCategory, setSelectedRoleCategory] = useState('全部');
   const [selectedRoleApplicationType, setSelectedRoleApplicationType] =
     useState<RoleApplicationType>('digital_employee');
+  const [studioSearchQuery, setStudioSearchQuery] = useState('');
+  const [studioApplicationFilter, setStudioApplicationFilter] =
+    useState<StudioApplicationFilter>('all');
+  const [studioStatusFilter, setStudioStatusFilter] = useState<StudioStatusFilter>('all');
   const [selectedToolCategory, setSelectedToolCategory] = useState('全部');
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [accountModal, setAccountModal] = useState<AccountModalKey | null>(null);
@@ -3147,14 +3359,22 @@ export default function App() {
     }
   }, [runtimeState.runtimeSnapshot.tasks, selectedTaskId]);
 
+  useEffect(() => {
+    setSelectedConversationArtifactId('');
+  }, [selectedTaskId]);
+
   const desktopRoleTemplates = useMemo(() => {
     return authorizedRoleTemplateCatalog.templates.map(toDesktopRoleTemplate);
   }, [authorizedRoleTemplateCatalog.source, authorizedRoleTemplateCatalog.templates]);
 
   const desktopRoleTemplateByRoleCode = useMemo(() => {
-    const authorizedByRoleCode = new Map(
-      desktopRoleTemplates.map((template) => [template.roleCode, template] as const)
-    );
+    const authorizedByRoleCode = new Map<string, DesktopRoleTemplate>();
+    for (const template of desktopRoleTemplates) {
+      authorizedByRoleCode.set(template.roleCode, template);
+      if (template.templateId) {
+        authorizedByRoleCode.set(template.templateId, template);
+      }
+    }
 
     return authorizedByRoleCode;
   }, [desktopRoleTemplates]);
@@ -3517,22 +3737,21 @@ export default function App() {
     setIsLoadingRoleTemplates(true);
     try {
       const catalog = await window.qiuDesktop.listAuthorizedRoleTemplates();
+      const authorizedTemplates = catalog.templates.map(toDesktopRoleTemplate);
       setAuthorizedRoleTemplateCatalog(catalog);
       if (catalog.source === 'server') {
-        const authorizedTemplates = catalog.templates.map(toDesktopRoleTemplate);
         setRuntimeState((current) =>
           pruneUnauthorizedRolePackages(
             current,
             authorizedTemplates,
-            catalog.deletedTemplateIds ?? [],
-            catalog.deviceCapacity
+            catalog.deletedTemplateIds ?? []
           )
         );
       }
       setRoleTemplateNotice(
         catalog.message ??
           (catalog.source === 'server'
-            ? `已同步 ${catalog.templates.length} 个市场应用`
+            ? formatRoleApplicationSyncNotice(countRoleApplications(authorizedTemplates))
             : '暂未同步到数字市场，请检查网络或服务端配置。')
       );
     } catch (error) {
@@ -3552,11 +3771,7 @@ export default function App() {
 
     setIsRefreshing(true);
     try {
-      const serverConnection = await window.qiuDesktop.checkServerConnection();
-      setRuntimeState((current) => ({
-        ...current,
-        serverConnection
-      }));
+      setRuntimeState(await window.qiuDesktop.getRuntimeState());
     } finally {
       setIsRefreshing(false);
     }
@@ -4293,16 +4508,14 @@ export default function App() {
       ? findDefaultModelCredential(runtimeState.modelCredentials, selectedModelProfile.providerId)
       : undefined;
   }, [runtimeState.modelCredentials, selectedModelProfile]);
-  const selectedModelFormCapabilities = Form.useWatch('capabilities', modelForm) as ModelCapability[] | undefined;
+  const selectedModelFormCapabilities = Form.useWatch('capabilities', modelForm) as ModelCapability | ModelCapability[] | undefined;
   const selectedModelRequiredCapabilities = useMemo(() => {
     if (!selectedModelProfile) {
       return [];
     }
 
-    return normalizeModelCapabilities(
-      Array.isArray(selectedModelFormCapabilities)
-        ? selectedModelFormCapabilities
-        : selectedModelProfile.capabilities,
+    return normalizePrimaryModelCapabilities(
+      selectedModelFormCapabilities ?? selectedModelProfile.capabilities,
       selectedModelProfile.purpose
     );
   }, [selectedModelFormCapabilities, selectedModelProfile]);
@@ -4316,7 +4529,7 @@ export default function App() {
       providerName: selectedModelProfile.providerName,
       modelName: selectedModelProfile.modelName,
       purpose: selectedModelProfile.purpose,
-      capabilities: readModelProfileCapabilities(selectedModelProfile),
+      capabilities: readModelProfileCapabilities(selectedModelProfile)[0],
       apiBaseUrl: selectedModelDefaultCredential?.apiBaseUrl ?? selectedModelProfile.apiBaseUrl,
       apiKey: selectedModelDefaultCredential?.apiKey ?? selectedModelProfile.apiKey ?? '',
       temperature: selectedModelProfile.temperature,
@@ -4550,6 +4763,212 @@ export default function App() {
     return taskDetails.find((task) => task.taskId === selectedTaskId) ?? taskDetails[0];
   }, [selectedTaskId, taskDetails]);
 
+  async function saveConversationArtifactRevision(
+    task: DesktopTaskDetail,
+    sourceArtifact: DesktopTaskDetail['artifacts'][number],
+    draft: ArtifactRevisionDraft
+  ) {
+    if (!window.qiuDesktop) {
+      throw new Error('当前桌面环境无法保存产物。');
+    }
+
+    const originalFileName = getArtifactFileName(sourceArtifact);
+    const baseFileName =
+      originalFileName
+        .replace(/\.[^.]+$/, '')
+        .replace(/(?:-修订\d+)+$/u, '') || '产物';
+    const revision =
+      Math.max(
+        1,
+        ...task.artifacts
+          .filter((artifact) => {
+            const artifactBaseFileName = getArtifactFileName(artifact)
+              .replace(/\.[^.]+$/, '')
+              .replace(/(?:-修订\d+)+$/u, '');
+            return artifactBaseFileName.toLocaleLowerCase() === baseFileName.toLocaleLowerCase();
+          })
+          .map((artifact) => artifact.revision ?? 1)
+      ) + 1;
+    const fileName = `${baseFileName}-修订${revision}`;
+    const commonInput = {
+      title: draft.title || baseFileName,
+      folder: 'edited-artifacts',
+      fileName
+    };
+    const request =
+      draft.format === 'docx'
+        ? {
+            workspaceId: runtimeState.localRuntime.workspaceId,
+            toolId: 'office-document',
+            action: 'office.write_docx_document' as const,
+            input: { ...commonInput, content: draft.content ?? '' }
+          }
+        : draft.format === 'xlsx'
+          ? {
+              workspaceId: runtimeState.localRuntime.workspaceId,
+              toolId: 'office-document',
+              action: 'spreadsheet.write_xlsx' as const,
+              input: { ...commonInput, sheets: draft.sheets ?? [] }
+            }
+          : draft.format === 'csv'
+            ? {
+                workspaceId: runtimeState.localRuntime.workspaceId,
+                toolId: 'office-document',
+                action: 'spreadsheet.write_csv' as const,
+                input: { ...commonInput, rows: draft.sheets?.[0]?.rows ?? [] }
+              }
+            : {
+                workspaceId: runtimeState.localRuntime.workspaceId,
+                toolId: 'office-document',
+                action: 'office.write_markdown_document' as const,
+                input: { ...commonInput, content: draft.content ?? '' }
+              };
+    const result = await window.qiuDesktop.invokeDesktopTool(request);
+    const localPath = typeof result.output?.localPath === 'string' ? result.output.localPath : '';
+    if (!result.ok || !localPath) {
+      throw new Error(result.message ?? '产物修订文件生成失败。');
+    }
+
+    const updatedAt = new Date().toISOString();
+    const revisedArtifact: DesktopTaskDetail['artifacts'][number] = {
+      ...sourceArtifact,
+      id: `${sourceArtifact.id}-revision-${revision}-${Date.parse(updatedAt) || Date.now()}`,
+      title: getPathFileName(localPath) || `${fileName}.${draft.format === 'text' ? 'md' : draft.format}`,
+      content: draft.content ?? JSON.stringify({ sheets: draft.sheets ?? [] }),
+      createdAt: updatedAt,
+      localPath,
+      remoteUrl: undefined,
+      format: draft.format === 'text' ? 'markdown' : draft.format,
+      editable: true,
+      revision
+    };
+    const updatedTaskWithArtifact: DesktopTaskDetail = {
+      ...task,
+      updatedAt,
+      artifacts: [...task.artifacts, revisedArtifact]
+    };
+    const updatedTask = appendTaskExecutionLog(
+      {
+        ...updatedTaskWithArtifact,
+        artifactCount: countUserDeliverableArtifacts(updatedTaskWithArtifact)
+      },
+      createTaskExecutionLog(
+        task.taskId,
+        'info',
+        'ARTIFACT_REVISION_SAVED',
+        `已保存产物修订版本：${revisedArtifact.title}`,
+        updatedAt
+      )
+    );
+    const nextState = upsertTaskDetailInRuntimeState(
+      runtimeStateRef.current,
+      updatedTask,
+      ['office-document'],
+      updatedAt
+    );
+
+    runtimeStateRef.current = nextState;
+    setRuntimeState(nextState);
+    await window.qiuDesktop.saveRuntimeState(nextState);
+    setSelectedConversationArtifactId(revisedArtifact.id);
+    message.success('产物修订版本已保存。');
+  }
+
+  async function rewriteConversationArtifactSelection(
+    rolePackage: RolePackageManifest,
+    input: {
+      selectedText: string;
+      instruction: string;
+      context: string;
+    }
+  ): Promise<string> {
+    if (!window.qiuDesktop) {
+      throw new Error('当前桌面环境无法调用模型。');
+    }
+
+    const requirements = getRoleModelRuntimeRequirementStatuses(
+      runtimeState.modelProfiles,
+      runtimeState.localRuntime.enabledModelProfileIds,
+      rolePackage,
+      {
+        roleCode: rolePackage.roleCode,
+        credentials: runtimeState.modelCredentials,
+        roleBindings: runtimeState.roleModelCredentialBindings
+      }
+    );
+    const readyTextRequirement =
+      requirements.find(
+        (requirement) =>
+          requirement.ready &&
+          requirement.profile.id === 'qiu-general-default'
+      ) ??
+      requirements.find((requirement) => {
+        if (!requirement.ready) {
+          return false;
+        }
+        const profile = getRuntimeRequirementEffectiveProfile(requirement);
+        const capabilities = new Set(readModelProfileCapabilities(profile));
+        return (
+          capabilities.has('text') &&
+          !capabilities.has('image_generation') &&
+          !capabilities.has('video_generation') &&
+          !capabilities.has('audio_to_text')
+        );
+      });
+
+    if (!readyTextRequirement) {
+      throw new Error('当前数字员工没有可用的文本模型，请先在“当前调用模型”中配置。');
+    }
+
+    const runtimeProfile = getRuntimeRequirementEffectiveProfile(readyTextRequirement);
+    const resolved = resolveModelProfileCredential({
+      profile: runtimeProfile,
+      roleCode: rolePackage.roleCode,
+      credentials: runtimeState.modelCredentials,
+      roleBindings: runtimeState.roleModelCredentialBindings
+    });
+    if (!resolved.configured) {
+      throw new Error('当前文本模型没有可用的 API Key。');
+    }
+
+    const selectedIndex = input.context.indexOf(input.selectedText);
+    const contextStart = Math.max(0, selectedIndex - 1200);
+    const contextEnd = Math.min(
+      input.context.length,
+      Math.max(0, selectedIndex) + input.selectedText.length + 1200
+    );
+    const response = await window.qiuDesktop.invokeModelChat({
+      profile: resolved.profile,
+      timeoutMs: 60_000,
+      messages: [
+        {
+          role: 'system',
+          content: '你是文档编辑助手。只返回重写后的正文，不解释过程，不添加标题，不使用代码块。不得编造原文没有的事实。'
+        },
+        {
+          role: 'user',
+          content: [
+            `修改要求：${input.instruction}`,
+            '',
+            '待修改内容：',
+            input.selectedText,
+            '',
+            '上下文，仅用于保持语义一致：',
+            input.context.slice(contextStart, contextEnd)
+          ].join('\n')
+        }
+      ]
+    });
+    const rewritten = response.content
+      .replace(/^```(?:text|markdown)?\s*/i, '')
+      .replace(/\s*```$/, '')
+      .trim();
+    if (!rewritten) {
+      throw new Error('模型没有返回可替换的内容。');
+    }
+    return rewritten;
+  }
+
   const issueFeedbackTask = useMemo(
     () => taskDetails.find((task) => task.taskId === issueFeedbackTaskId),
     [issueFeedbackTaskId, taskDetails]
@@ -4701,10 +5120,6 @@ export default function App() {
     return runtimeState.runtimeSnapshot.rolePackages;
   }, [runtimeState.runtimeSnapshot.rolePackages]);
 
-  const installedRoleApplicationUsage = useMemo(() => {
-    return countInstalledRoleApplications(refreshedInstalledRolePackages);
-  }, [refreshedInstalledRolePackages]);
-
   const enabledModelCount = runtimeState.localRuntime.enabledModelProfileIds.length;
   const enabledToolCount = runtimeState.localRuntime.enabledToolIds.length;
   const knowledgeBindingCount = runtimeState.localRuntime.knowledgeBindingIds.length;
@@ -4771,15 +5186,17 @@ export default function App() {
                 {renderProductRail()}
                 <div
                   className={
-                    selectedSection === 'workbench' || selectedSection === 'factories'
+                    selectedSection === 'workbench' || selectedSection === 'factories' || selectedSection === 'studio'
                       ? 'product-surface product-surface-flush'
                       : 'product-surface product-surface-padded'
                   }
                 >
                   {selectedSection === 'workbench' ? renderWorkbench() : null}
                   {selectedSection === 'factories' ? renderFactories() : null}
+                  {selectedSection === 'studio' ? renderStudio() : null}
                   {selectedSection === 'roles' ? renderRoles() : null}
                   {selectedSection === 'logs' ? renderLogs() : null}
+                  {selectedSection === 'snippets' ? <PromptSnippetBoard /> : null}
                   {selectedSection === 'models' ? renderModels() : null}
                   {selectedSection === 'tools' ? renderTools() : null}
                   {selectedSection === 'knowledge' ? renderKnowledge() : null}
@@ -4797,6 +5214,7 @@ export default function App() {
         {renderRuntimeModelQuickSwitchModal()}
         {renderWatchConfigModal()}
         {renderRoleConfigModal()}
+        {renderDocumentAssistantConfigModal()}
         {renderFactoryPackageEditorModal()}
         {renderFactoryScreeningProfileEditorModal()}
         {renderFactoryImagePreviewModal()}
@@ -4940,6 +5358,561 @@ export default function App() {
           </button>
         </div>
       </aside>
+    );
+  }
+
+  function renderStudio() {
+    const tasksByRoleCode = new Map<string, DesktopTaskDetail[]>();
+    for (const task of taskDetails) {
+      const current = tasksByRoleCode.get(task.roleCode) ?? [];
+      current.push(task);
+      tasksByRoleCode.set(task.roleCode, current);
+    }
+
+    const buildCommonStudioItem = (
+      rolePackage: RolePackageManifest,
+      kind: RoleApplicationType
+    ) => {
+      const tasks = tasksByRoleCode.get(rolePackage.roleCode) ?? [];
+      const latestTask = tasks[0];
+      const summary = installedRoleSummaries.find((item) => item.roleCode === rolePackage.roleCode);
+      const isDeleted = summary?.state === 'deleted';
+      const status = resolveStudioRuntimeStatus(latestTask, isDeleted);
+      const template = desktopRoleTemplateByRoleCode.get(rolePackage.roleCode);
+      const category = template ? roleTemplateCategory(template) : '通用';
+      const deliverableCount = tasks.reduce((total, task) => total + countStudioTaskDeliverables(task), 0);
+
+      return {
+        roleCode: rolePackage.roleCode,
+        name: rolePackage.name,
+        summary: rolePackage.summary ?? template?.description ?? '',
+        kind,
+        category,
+        status,
+        latestTask,
+        taskCount: summary?.taskCount ?? tasks.length,
+        deliverableCount,
+        lastUpdatedAt: latestTask?.updatedAt ?? summary?.lastRunAt ?? summary?.installedAt,
+        isDeleted
+      };
+    };
+
+    const employeeItems = installedDigitalEmployeePackages.map((rolePackage, index) => {
+      const item = buildCommonStudioItem(rolePackage, 'digital_employee');
+      return {
+        ...item,
+        visualSkin: pickStudioEmployeeAvatarSkin(rolePackage.roleCode, rolePackage.name, index),
+        roleHint: isWatchRolePackage(rolePackage) ? '值守式员工' : '对话式员工'
+      };
+    });
+
+    const factoryItems = installedDigitalFactoryPackages.map((rolePackage, index) => {
+      const item = buildCommonStudioItem(rolePackage, 'digital_factory');
+      const factoryManifest = readFactoryManifest(rolePackage.dependencyManifest);
+      const roleHint = isMedicalCaseVideoFactory(factoryManifest)
+        ? '质检视频工厂'
+        : isReferenceImageVideoFactory(factoryManifest)
+          ? '视频生成工厂'
+          : isAcademicDemoFactory(factoryManifest)
+            ? '学术 Demo 工厂'
+            : isOperationVideoFactory(factoryManifest)
+              ? '运营视频工厂'
+              : '批量生产工厂';
+
+      return {
+        ...item,
+        visualSkin: pickStudioFactoryAvatarSkin(rolePackage.roleCode, rolePackage.name, index),
+        roleHint
+      };
+    });
+
+    const studioItems = [...employeeItems, ...factoryItems].sort((left, right) => {
+      const rank = (status: StudioRuntimeStatus) => {
+        if (isStudioActiveRuntimeStatus(status)) return 0;
+        if (status === 'failed') return 1;
+        if (status === 'completed') return 2;
+        if (status === 'deleted') return 4;
+        return 3;
+      };
+      const rankDiff = rank(left.status) - rank(right.status);
+      if (rankDiff !== 0) {
+        return rankDiff;
+      }
+
+      return (right.lastUpdatedAt ?? '').localeCompare(left.lastUpdatedAt ?? '');
+    });
+
+    const normalizedSearchQuery = studioSearchQuery.trim().toLowerCase();
+    const filteredStudioItems = studioItems.filter((item) => {
+      if (studioApplicationFilter !== 'all' && item.kind !== studioApplicationFilter) {
+        return false;
+      }
+
+      if (!studioStatusFilterMatches(item.status, studioStatusFilter)) {
+        return false;
+      }
+
+      if (!normalizedSearchQuery) {
+        return true;
+      }
+
+      return [
+        item.name,
+        item.summary,
+        item.category,
+        item.roleHint,
+        item.latestTask?.title
+      ].some((value) => value?.toLowerCase().includes(normalizedSearchQuery));
+    });
+
+    const activeStudioCount = studioItems.filter((item) => isStudioActiveRuntimeStatus(item.status)).length;
+    const failedStudioCount = studioItems.filter((item) => item.status === 'failed').length;
+    const deliverableTotal = taskDetails.reduce((total, task) => total + countStudioTaskDeliverables(task), 0);
+    const latestTask = taskDetails[0];
+
+    type StudioItem = (typeof studioItems)[number];
+    const filteredEmployeeItems = filteredStudioItems.filter((item) => item.kind === 'digital_employee');
+    const filteredFactoryItems = filteredStudioItems.filter((item) => item.kind === 'digital_factory');
+    const activityTasks = taskDetails.slice(0, 6);
+
+    const openStudioItem = (item: StudioItem) => {
+      if (item.kind === 'digital_employee') {
+        activateRole(item.roleCode);
+        setTaskHistoryOpen(false);
+        if (item.latestTask) {
+          setSelectedTaskId(item.latestTask.taskId);
+        }
+        navigateToSection('workbench');
+        return;
+      }
+
+      setSelectedFactoryRoleCode(item.roleCode);
+      if (item.latestTask) {
+        setSelectedTaskId(item.latestTask.taskId);
+      }
+      navigateToSection('factories');
+    };
+
+    const renderStudioVisual = (item: StudioItem) => {
+      const motionClassName = studioMotionClassName(item.status);
+      if (item.kind === 'digital_employee') {
+        return (
+          <span
+            className={`studio-animal-avatar studio-skin-${item.visualSkin} ${motionClassName}`}
+            aria-hidden="true"
+          >
+            <span className="studio-animal-ear left" />
+            <span className="studio-animal-ear right" />
+            <span className="studio-animal-head">
+              <span className="studio-animal-eye left" />
+              <span className="studio-animal-eye right" />
+              <span className="studio-animal-muzzle" />
+            </span>
+          </span>
+        );
+      }
+
+      return (
+        <span
+          className={`studio-factory-avatar studio-factory-${item.visualSkin} ${motionClassName}`}
+          aria-hidden="true"
+        >
+          <span className="studio-factory-chimney" />
+          <span className="studio-factory-roof" />
+          <span className="studio-factory-body">
+            <span />
+            <span />
+            <span />
+          </span>
+          <span className="studio-factory-belt">
+            <span />
+            <span />
+            <span />
+          </span>
+        </span>
+      );
+    };
+
+    const renderStudioDeskStation = (item: StudioItem) => (
+      <button
+        key={item.roleCode}
+        type="button"
+        className={[
+          'studio-desk-station',
+          studioMotionClassName(item.status),
+          item.isDeleted ? 'is-deleted' : ''
+        ].filter(Boolean).join(' ')}
+        onClick={() => openStudioItem(item)}
+      >
+        <span className="studio-desk-surface">
+          <span className="studio-desk-avatar">{renderStudioVisual(item)}</span>
+          <span className="studio-desk-laptop">
+            <span />
+            <span />
+          </span>
+        </span>
+        <span className="studio-station-copy">
+          <span className="studio-station-title-row">
+            <Typography.Text strong ellipsis>
+              {item.name}
+            </Typography.Text>
+            <Tag color={studioRuntimeStatusColor(item.status)}>
+              {studioRuntimeStatusLabel(item.status)}
+            </Tag>
+          </span>
+          <span className="studio-station-meta-row">
+            <Tag>{item.category}</Tag>
+            <Tag>{item.roleHint}</Tag>
+          </span>
+          <span className="studio-task-bubble">
+            {item.latestTask ? item.latestTask.title : '等候新任务'}
+          </span>
+          <span className="studio-station-stats">
+            <span>任务 {item.taskCount}</span>
+            <span>产物 {item.deliverableCount}</span>
+            <span>{item.lastUpdatedAt ? formatShortTime(item.lastUpdatedAt) : '待开始'}</span>
+          </span>
+        </span>
+      </button>
+    );
+
+    const renderStudioFactoryStation = (item: StudioItem) => (
+      <button
+        key={item.roleCode}
+        type="button"
+        className={[
+          'studio-production-station',
+          studioMotionClassName(item.status),
+          item.isDeleted ? 'is-deleted' : ''
+        ].filter(Boolean).join(' ')}
+        onClick={() => openStudioItem(item)}
+      >
+        <span className="studio-production-machine">
+          {renderStudioVisual(item)}
+          <span className="studio-production-signal" />
+        </span>
+        <span className="studio-station-copy">
+          <span className="studio-station-title-row">
+            <Typography.Text strong ellipsis>
+              {item.name}
+            </Typography.Text>
+            <Tag color={studioRuntimeStatusColor(item.status)}>
+              {studioRuntimeStatusLabel(item.status)}
+            </Tag>
+          </span>
+          <span className="studio-station-meta-row">
+            <Tag>{item.category}</Tag>
+            <Tag>{item.roleHint}</Tag>
+          </span>
+          <span className="studio-task-bubble">
+            {item.latestTask ? item.latestTask.title : '产线空闲，可发起批量任务'}
+          </span>
+          <span className="studio-factory-conveyor" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+          <span className="studio-station-stats">
+            <span>批次 {item.taskCount}</span>
+            <span>产物 {item.deliverableCount}</span>
+            <span>{item.lastUpdatedAt ? formatShortTime(item.lastUpdatedAt) : '待运行'}</span>
+          </span>
+        </span>
+      </button>
+    );
+
+    const renderStudioZoneEmpty = (text: string) => (
+      <div className="studio-zone-empty">
+        <Typography.Text type="secondary">{text}</Typography.Text>
+      </div>
+    );
+
+    const visibleEmployeeItems = filteredEmployeeItems.slice(0, 8);
+    const visibleFactoryItems = filteredFactoryItems.slice(0, 8);
+    const hiddenEmployeeCount = Math.max(0, filteredEmployeeItems.length - visibleEmployeeItems.length);
+    const hiddenFactoryCount = Math.max(0, filteredFactoryItems.length - visibleFactoryItems.length);
+    const completedTaskCount = taskDetails.filter((task) => task.state === 'completed').length;
+
+    const renderStudioSidebarItem = (item: StudioItem) => (
+      <button
+        key={item.roleCode}
+        type="button"
+        className="studio-marvis-app-item"
+        onClick={() => openStudioItem(item)}
+      >
+        <span className={`studio-marvis-app-dot ${studioMotionClassName(item.status)}`} />
+        <span>
+          <Typography.Text strong ellipsis>
+            {item.name}
+          </Typography.Text>
+          <Typography.Text type="secondary" ellipsis>
+            {item.roleHint}
+          </Typography.Text>
+        </span>
+      </button>
+    );
+
+    const factoryOutputKind = (item: StudioItem) => {
+      const text = `${item.name} ${item.roleHint} ${item.summary}`;
+      if (/质检|检测|审核/.test(text)) return 'quality';
+      if (/Demo|演示|学术|文档/.test(text)) return 'demo';
+      if (/视频|短视频|video/i.test(text)) return 'video';
+      if (/图片|图像|image/i.test(text)) return 'image';
+      return 'asset';
+    };
+
+    const renderFactoryOutputIcon = (item: StudioItem) => {
+      const kind = factoryOutputKind(item);
+      if (kind === 'quality') return <SafetyCertificateOutlined />;
+      if (kind === 'demo') return <FileTextOutlined />;
+      if (kind === 'video') return <VideoCameraOutlined />;
+      if (kind === 'image') return <FileImageOutlined />;
+      return <FileTextOutlined />;
+    };
+
+    const renderEmployeeWorkstation = (item: StudioItem) => (
+      <button
+        key={item.roleCode}
+        type="button"
+        className={[
+          'studio-employee-workstation',
+          studioMotionClassName(item.status),
+          item.isDeleted ? 'is-deleted' : ''
+        ].filter(Boolean).join(' ')}
+        onClick={() => openStudioItem(item)}
+      >
+        <span className="studio-employee-desk-scene" aria-hidden="true">
+          <span className="studio-employee-desk-top" />
+          <span className="studio-employee-monitor" />
+          <span className="studio-employee-chair" />
+          <span className="studio-employee-avatar">{renderStudioVisual(item)}</span>
+        </span>
+        <span className="studio-dual-station-copy">
+          <span className="studio-dual-station-title">
+            <Typography.Text strong ellipsis>
+              {item.name}
+            </Typography.Text>
+            <Tag color={studioRuntimeStatusColor(item.status)}>
+              {studioRuntimeStatusLabel(item.status)}
+            </Tag>
+          </span>
+          <Typography.Text type="secondary" ellipsis>
+            {item.latestTask?.title ?? item.roleHint}
+          </Typography.Text>
+        </span>
+      </button>
+    );
+
+    const renderFactoryLineStation = (item: StudioItem) => (
+      <button
+        key={item.roleCode}
+        type="button"
+        className={[
+          'studio-factory-module',
+          `output-${factoryOutputKind(item)}`,
+          studioMotionClassName(item.status),
+          item.isDeleted ? 'is-deleted' : ''
+        ].filter(Boolean).join(' ')}
+        onClick={() => openStudioItem(item)}
+      >
+        <span className="studio-factory-module-visual" aria-hidden="true">
+          <span className="studio-factory-control-screen" />
+          <span className="studio-factory-status-light" />
+          <span className="studio-factory-machine-body">
+            <span />
+            <span />
+            <span />
+          </span>
+          <span className="studio-factory-line-belt">
+            <span />
+            <span />
+            <span />
+          </span>
+          <span className="studio-factory-output-card">
+            {renderFactoryOutputIcon(item)}
+          </span>
+        </span>
+        <span className="studio-dual-station-copy">
+          <span className="studio-dual-station-title">
+            <Typography.Text strong ellipsis>
+              {item.name}
+            </Typography.Text>
+            <Tag color={studioRuntimeStatusColor(item.status)}>
+              {studioRuntimeStatusLabel(item.status)}
+            </Tag>
+          </span>
+          <Typography.Text type="secondary" ellipsis>
+            {item.latestTask?.title ?? item.roleHint}
+          </Typography.Text>
+        </span>
+      </button>
+    );
+
+    return (
+      <div className="studio-page studio-marvis-page">
+        <aside className="studio-marvis-sidebar">
+          <div className="studio-marvis-brand">
+            <Typography.Text strong>QiuAI Office</Typography.Text>
+            <Typography.Text type="secondary">工作室</Typography.Text>
+          </div>
+          <Input
+            allowClear
+            value={studioSearchQuery}
+            placeholder="搜索"
+            onChange={(event) => setStudioSearchQuery(event.target.value)}
+          />
+          <div className="studio-marvis-filter-stack">
+            <Radio.Group
+              size="small"
+              optionType="button"
+              buttonStyle="solid"
+              value={studioApplicationFilter}
+              options={[
+                { value: 'all', label: '全部' },
+                { value: 'digital_employee', label: '员工' },
+                { value: 'digital_factory', label: '工厂' }
+              ]}
+              onChange={(event) => setStudioApplicationFilter(event.target.value as StudioApplicationFilter)}
+            />
+            <Select<StudioStatusFilter>
+              value={studioStatusFilter}
+              options={[
+                { value: 'all', label: '全部状态' },
+                { value: 'active', label: '处理中' },
+                { value: 'completed', label: '已完成' },
+                { value: 'failed', label: '失败' },
+                { value: 'idle', label: '可用' }
+              ]}
+              onChange={setStudioStatusFilter}
+            />
+          </div>
+
+          <div className="studio-marvis-nav-block">
+            <Typography.Text type="secondary">应用</Typography.Text>
+            <div className="studio-marvis-app-list">
+              {filteredStudioItems.length > 0
+                ? filteredStudioItems.map(renderStudioSidebarItem)
+                : renderStudioZoneEmpty('没有匹配应用')}
+            </div>
+          </div>
+        </aside>
+
+        <main className="studio-marvis-main">
+          <Typography.Text strong className="studio-marvis-title">
+            QiuAI 办公室
+          </Typography.Text>
+          <div className="studio-dual-room" aria-label="QiuAI 办公室场景">
+            <section className="studio-dual-zone studio-dual-zone-employees">
+              <div className="studio-dual-zone-header">
+                <span>
+                  <Typography.Text strong>数字员工区</Typography.Text>
+                  <Typography.Text type="secondary">办公桌 · 对话 · 文档处理</Typography.Text>
+                </span>
+                <Tag color="blue">{filteredEmployeeItems.length}</Tag>
+              </div>
+              <div className="studio-employee-workstation-grid">
+                {visibleEmployeeItems.length > 0
+                  ? visibleEmployeeItems.map(renderEmployeeWorkstation)
+                  : renderStudioZoneEmpty('当前没有数字员工')}
+              </div>
+              {hiddenEmployeeCount > 0 ? (
+                <button type="button" className="studio-dual-more" onClick={() => navigateToSection('roles')}>
+                  还有 {hiddenEmployeeCount} 个员工
+                </button>
+              ) : null}
+            </section>
+
+            <div className="studio-dual-corridor" aria-hidden="true">
+              <span />
+              <strong>任务流转</strong>
+              <span />
+            </div>
+
+            <section className="studio-dual-zone studio-dual-zone-factories">
+              <div className="studio-dual-zone-header">
+                <span>
+                  <Typography.Text strong>数字工厂区</Typography.Text>
+                  <Typography.Text type="secondary">生产设备 · 批量任务 · 产物出口</Typography.Text>
+                </span>
+                <Tag color="green">{filteredFactoryItems.length}</Tag>
+              </div>
+              <div className="studio-factory-module-grid">
+                {visibleFactoryItems.length > 0
+                  ? visibleFactoryItems.map(renderFactoryLineStation)
+                  : renderStudioZoneEmpty('当前没有数字工厂')}
+              </div>
+              {hiddenFactoryCount > 0 ? (
+                <button type="button" className="studio-dual-more" onClick={() => navigateToSection('roles')}>
+                  还有 {hiddenFactoryCount} 个工厂
+                </button>
+              ) : null}
+            </section>
+          </div>
+        </main>
+
+        <aside className="studio-marvis-right-panel">
+          <section className="studio-marvis-metric-block">
+            <div>
+              <Typography.Text type="secondary">今日处理</Typography.Text>
+              <Typography.Text strong>{taskDetails.length}</Typography.Text>
+            </div>
+            <div>
+              <Typography.Text type="secondary">今日产物</Typography.Text>
+              <Typography.Text strong>{deliverableTotal}</Typography.Text>
+            </div>
+          </section>
+          <section className="studio-marvis-summary-block">
+            <div>
+              <span>{activeStudioCount}</span>
+              <Typography.Text type="secondary">进行中</Typography.Text>
+            </div>
+            <div>
+              <span>{completedTaskCount}</span>
+              <Typography.Text type="secondary">已完成</Typography.Text>
+            </div>
+            <div>
+              <span>{taskDetails.length}</span>
+              <Typography.Text type="secondary">总计</Typography.Text>
+            </div>
+          </section>
+          <section className="studio-marvis-task-list">
+            <div className="studio-marvis-task-list-header">
+              <Typography.Text strong>对话/任务</Typography.Text>
+              <Tag color={failedStudioCount > 0 ? 'red' : 'default'}>异常 {failedStudioCount}</Tag>
+            </div>
+            <div>
+              {activityTasks.length > 0 ? (
+                activityTasks.map((task) => (
+                  <button
+                    key={task.taskId}
+                    type="button"
+                    className="studio-marvis-task-item"
+                    onClick={() => {
+                      setSelectedTaskId(task.taskId);
+                      const rolePackage = refreshedInstalledRolePackageByRoleCode.get(task.roleCode);
+                      navigateToSection(
+                        readRoleApplicationType(rolePackage) === 'digital_factory' ? 'factories' : 'workbench'
+                      );
+                    }}
+                  >
+                    <span>
+                      <Typography.Text strong ellipsis>
+                        {task.title}
+                      </Typography.Text>
+                      <Typography.Text type="secondary" ellipsis>
+                        {taskStateLabel(task.state)} · {formatShortTime(task.updatedAt)}
+                      </Typography.Text>
+                    </span>
+                    <span className="studio-marvis-task-state">{taskStateLabel(task.state)}</span>
+                  </button>
+                ))
+              ) : (
+                <Typography.Text type="secondary">暂无任务记录</Typography.Text>
+              )}
+            </div>
+          </section>
+        </aside>
+      </div>
     );
   }
 
@@ -6183,7 +7156,6 @@ export default function App() {
   }
 
   function renderFactoryImagePreviewModal() {
-    const imageSrc = previewFactoryImage ? getFactoryPreviewImageSrc(previewFactoryImage) : '';
     const title = previewFactoryImage
       ? `${getFactoryPreviewItemDisplayName(previewFactoryImage)} / ${previewFactoryImage.packageLabel}`
       : '图片预览';
@@ -6213,8 +7185,12 @@ export default function App() {
         onCancel={() => setPreviewFactoryImage(null)}
       >
         <div className="factory-preview-modal-body">
-          {imageSrc ? (
-            <img className="factory-preview-modal-image" src={imageSrc} alt={title} />
+          {previewFactoryImage && hasFactoryPreviewSource(previewFactoryImage) ? (
+            <FactoryPreviewImage
+              item={previewFactoryImage}
+              className="factory-preview-modal-image"
+              alt={title}
+            />
           ) : (
             <Empty description="没有可预览的图片地址" />
           )}
@@ -6344,13 +7320,6 @@ export default function App() {
             onFinish={submitRuntimeModelQuickSwitch}
           >
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              <div className="runtime-model-quick-note">
-                <InfoCircleOutlined />
-                <Typography.Text type="secondary">
-                  这里只切换当前应用各模型槽位实际调用的模型。API Key、工具、知识库请在“模型与工具”里配置。
-                </Typography.Text>
-              </div>
-
               {requirements.length > 0 ? (
                 requirements.map((requirement) => {
                   const binding = runtimeState.roleModelCredentialBindings.find(
@@ -6359,9 +7328,11 @@ export default function App() {
                       item.modelProfileId === requirement.profile.id
                   );
                   const runtimeModelProfileId =
-                    requirement.runtimeProfileId ?? binding?.runtimeModelProfileId ?? requirement.profile.id;
+                    requirement.issue === 'incompatible'
+                      ? requirement.profile.id
+                      : requirement.runtimeProfileId ?? binding?.runtimeModelProfileId ?? requirement.profile.id;
                   const runtimeProfile =
-                    requirement.runtimeProfile ??
+                    getRuntimeRequirementEffectiveProfile(requirement) ??
                     runtimeState.modelProfiles.find((profile) => profile.id === runtimeModelProfileId) ??
                     requirement.profile;
                   const runtimeReady = requirement.ready;
@@ -6371,10 +7342,7 @@ export default function App() {
                       <Flex align="flex-start" justify="space-between" gap={12} wrap="wrap">
                         <Space direction="vertical" size={2}>
                           <Typography.Text strong>
-                            {modelCapabilitySummary(requirement.profile.capabilities, requirement.profile.purpose)}
-                          </Typography.Text>
-                          <Typography.Text type="secondary">
-                            槽位：{requirement.profile.providerName} / {requirement.profile.modelName}
+                            {modelRequirementSlotLabel(requirement.profile)}
                           </Typography.Text>
                         </Space>
                         <Tag color={runtimeReady ? 'green' : 'orange'}>
@@ -6520,11 +7488,11 @@ export default function App() {
       const runtimeProfile = runtimeModelProfileId
         ? runtimeState.modelProfiles.find((profile) => profile.id === runtimeModelProfileId)
         : undefined;
-      const displayProfile = requirement.runtimeProfile ?? runtimeProfile ?? requirement.profile;
+      const displayProfile = getRuntimeRequirementEffectiveProfile(requirement);
 
       return {
         key: requirement.profile.id,
-        capability: modelCapabilitySummary(requirement.profile.capabilities, requirement.profile.purpose),
+        capability: modelRequirementSlotLabel(requirement.profile),
         model: `${displayProfile.providerName} / ${displayProfile.modelName}`,
         ready: requirement.ready
       };
@@ -6669,24 +7637,29 @@ export default function App() {
     const conversationRole =
       refreshedInstalledRolePackageByRoleCode.get(activeRoleCode) ??
       activeRolePackage;
-    const openConversationConfig = () => {
-      if (!conversationRole) {
-        return;
-      }
-      setSelectedRoleApplicationType('digital_employee');
-      setSelectedRoleCategory('全部');
-      openRoleConfig(conversationRole.roleCode, 'configure');
-    };
     const openConversationRuntimeModelQuickSwitch = () => {
       if (!conversationRole) {
         return;
       }
       openRuntimeModelQuickSwitch(conversationRole.roleCode);
     };
+    const openConversationDocumentAssistantConfig = () => {
+      if (conversationRole?.roleCode !== documentAssistantRoleCode) {
+        return;
+      }
+      openDocumentAssistantConfig();
+    };
+    const isDocumentAssistantConversation = conversationRole?.roleCode === documentAssistantRoleCode;
+    const documentAssistantScenario = getDocumentAssistantScenarioPreset(
+      documentAssistantConfig.scenarioKey
+    );
     const conversationFinalAnswer = conversationTask ? readConversationFinalAnswer(conversationTask) : '';
     const conversationArtifacts = conversationTask
       ? conversationTask.artifacts.filter(isUserDeliverableArtifact)
       : [];
+    const selectedConversationArtifact = selectedConversationArtifactId
+      ? conversationArtifacts.find((artifact) => artifact.id === selectedConversationArtifactId)
+      : undefined;
     const canRunConversationTask =
       conversationTask &&
       !activeRoleDeleted &&
@@ -6811,6 +7784,12 @@ export default function App() {
           </div>
         </aside>
 
+        <div
+          className={[
+            'conversation-workspace-split',
+            selectedConversationArtifact ? 'with-artifact-preview' : ''
+          ].filter(Boolean).join(' ')}
+        >
         <section className="chat-workspace">
           <header className="chat-workspace-header">
             <Space size={12}>
@@ -6847,22 +7826,29 @@ export default function App() {
               </Space>
             </Space>
 
-            <Space wrap>
+            <Flex align="center" justify="flex-end" gap={8} wrap="wrap" style={{ marginLeft: 'auto' }}>
               <Tag color="geekblue">运行中 {runningTaskCount}</Tag>
               <Tag color="gold">待处理 {waitingTaskCount}</Tag>
               <Tag color="green">已完成 {completedTaskCount}</Tag>
-              <Button size="small" disabled={activeRoleDeleted} onClick={startNewConversationTask}>
-                新任务
-              </Button>
-              <Button
-                size="small"
-                icon={<SettingOutlined />}
-                disabled={!conversationRole}
-                onClick={openConversationConfig}
-              >
-                模型与工具
-              </Button>
-            </Space>
+              {isDocumentAssistantConversation ? (
+                <Tag color="blue">{documentAssistantScenario.label}</Tag>
+              ) : null}
+              <Space size={8} wrap>
+                <Button size="small" disabled={activeRoleDeleted} onClick={startNewConversationTask}>
+                  新任务
+                </Button>
+                {isDocumentAssistantConversation ? (
+                  <Button
+                    size="small"
+                    icon={<SettingOutlined />}
+                    disabled={activeRoleDeleted}
+                    onClick={openConversationDocumentAssistantConfig}
+                  >
+                    文档助手设置
+                  </Button>
+                ) : null}
+              </Space>
+            </Flex>
           </header>
 
           {conversationRole && isWatchRolePackage(conversationRole)
@@ -7004,22 +7990,21 @@ export default function App() {
                                 </div>
                                 <div className="factory-preview-grid">
                                   {previewItems.map((item) => {
-                                    const imageSrc = getFactoryPreviewImageSrc(item);
                                     return (
                                       <button
                                         key={item.id}
                                         type="button"
                                         className={`factory-preview-tile ${item.status}`}
-                                        disabled={!imageSrc}
+                                        disabled={!hasFactoryPreviewSource(item)}
                                         title={item.error ?? `${getFactoryPreviewItemDisplayName(item)} / ${item.packageLabel}`}
                                         onClick={() => setPreviewFactoryImage(item)}
                                       >
                                         <span className="factory-preview-thumb">
-                                          {imageSrc ? (
-                                            <img src={imageSrc} alt={`${getFactoryPreviewItemDisplayName(item)} ${item.packageLabel}`} loading="lazy" />
-                                          ) : (
-                                            <FileImageOutlined />
-                                          )}
+                                          <FactoryPreviewImage
+                                            item={item}
+                                            alt={`${getFactoryPreviewItemDisplayName(item)} ${item.packageLabel}`}
+                                            loading="lazy"
+                                          />
                                         </span>
                                         <span className="factory-preview-caption">
                                           <span>{getFactoryPreviewItemDisplayName(item)}</span>
@@ -7035,7 +8020,13 @@ export default function App() {
 
                           const fileName = getArtifactFileName(artifact);
                           return (
-                          <div key={artifact.id} className="chat-artifact-card">
+                          <div
+                            key={artifact.id}
+                            className={[
+                              'chat-artifact-card',
+                              selectedConversationArtifact?.id === artifact.id ? 'selected' : ''
+                            ].filter(Boolean).join(' ')}
+                          >
                             <div className={`artifact-file-icon ${getArtifactToneClass(artifact)}`}>
                               {renderArtifactFileIcon(artifact)}
                             </div>
@@ -7050,19 +8041,29 @@ export default function App() {
                                 {formatArtifactMeta(artifact)}
                               </Typography.Text>
                             </div>
-                            {artifact.localPath ? (
+                            <Space size={4}>
                               <Button
                                 size="small"
                                 className="artifact-download-button"
-                                icon={<DownloadOutlined />}
-                                loading={savingArtifactId === artifact.id}
-                                title="Save file"
-                                aria-label="Save file"
-                                onClick={() => void saveArtifactAs(artifact)}
+                                icon={<EyeOutlined />}
+                                title="预览产物"
+                                aria-label="预览产物"
+                                onClick={() => setSelectedConversationArtifactId(artifact.id)}
                               />
-                            ) : (
-                              <Tag color="warning">缓存已过期</Tag>
-                            )}
+                              {artifact.localPath ? (
+                                <Button
+                                  size="small"
+                                  className="artifact-download-button"
+                                  icon={<DownloadOutlined />}
+                                  loading={savingArtifactId === artifact.id}
+                                  title="另存文件"
+                                  aria-label="另存文件"
+                                  onClick={() => void saveArtifactAs(artifact)}
+                                />
+                              ) : (
+                                <Tag color="warning">缓存已过期</Tag>
+                              )}
+                            </Space>
                           </div>
                           );
                         })}
@@ -7135,10 +8136,18 @@ export default function App() {
                 return;
               }
 
-              const taskInput = buildTaskInputWithAttachments(input, composerAttachments);
+              const configuredInput =
+                activeRoleCode === documentAssistantRoleCode
+                  ? buildDocumentAssistantTaskInput(documentAssistantConfig, input)
+                  : input;
+              const taskInput = buildTaskInputWithAttachments(configuredInput, composerAttachments);
+              const taskTitle =
+                activeRoleCode === documentAssistantRoleCode
+                  ? input || `文档助手：${getDocumentAssistantScenarioPreset(documentAssistantConfig.scenarioKey).label}`
+                  : taskInput;
               createTask({
                 roleCode: activeRoleCode,
-                title: createChatTaskTitle(taskInput),
+                title: createChatTaskTitle(taskTitle),
                 input: taskInput,
                 attachments: composerAttachments,
                 useKnowledge: values.useKnowledge === true
@@ -7243,6 +8252,28 @@ export default function App() {
             </Flex>
           </Form>
         </section>
+        {selectedConversationArtifact && conversationTask && conversationRole ? (
+          <ArtifactWorkspace
+            artifact={selectedConversationArtifact}
+            workspaceId={runtimeState.localRuntime.workspaceId}
+            desktopToolInvoker={window.qiuDesktop?.invokeDesktopTool}
+            getPreviewUrl={window.qiuDesktop?.getArtifactPreviewUrl}
+            onClose={() => setSelectedConversationArtifactId('')}
+            onOpenLocal={(targetPath) => void openLocalPath(targetPath)}
+            onSaveAs={() => void saveArtifactAs(selectedConversationArtifact)}
+            onSaveRevision={(draft) =>
+              saveConversationArtifactRevision(
+                conversationTask,
+                selectedConversationArtifact,
+                draft
+              )
+            }
+            onAiRewrite={(input) =>
+              rewriteConversationArtifactSelection(conversationRole, input)
+            }
+          />
+        ) : null}
+        </div>
       </div>
     );
   }
@@ -7285,8 +8316,9 @@ export default function App() {
       : undefined;
     const maxItems = readFactoryMaxItems(selectedFactoryManifest);
     const isMedicalVideoFactory = isMedicalCaseVideoFactory(selectedFactoryManifest);
-    const isEcommerceVideoFactory = isEcommerceProductVideoFactory(selectedFactoryManifest);
+    const isEcommerceVideoFactory = isReferenceImageVideoFactory(selectedFactoryManifest);
     const isOperationFactory = isOperationVideoFactory(selectedFactoryManifest);
+    const isImageFactory = isImageGenerationFactory(selectedFactoryManifest);
     const isAcademicDemoFactoryType = isAcademicDemoFactory(selectedFactoryManifest);
     const packageOptions = readFactoryPackageOptions(selectedFactoryManifest);
     const platformOptions = readFactoryPlatformOptions(selectedFactoryManifest);
@@ -7328,6 +8360,8 @@ export default function App() {
         ? '.docx,.pdf,.xlsx,.csv'
       : isOperationFactory
         ? '.png,.jpg,.jpeg,.webp,.xlsx,.csv,.pdf,.doc,.docx,.ppt,.pptx,.txt,.md'
+      : isEcommerceVideoFactory || isImageFactory
+        ? '.png,.jpg,.jpeg,.webp'
         : '.png,.jpg,.jpeg,.webp,.xlsx,.csv';
     const validFactoryAttachments = isMedicalVideoFactory
       ? factoryAttachments.filter((attachment) => isFactoryVideoAttachment(attachment))
@@ -7368,7 +8402,7 @@ export default function App() {
         ? `缺少模型配置：${missingFactoryModel.profile.modelName}`
         : missingFactoryToolId
           ? `缺少工具配置：${resolveToolLabel(runtimeState.tools, missingFactoryToolId)}`
-          : '请检查模型和工具配置';
+          : '请检查当前配置';
     const renderFactoryStatusPanel = (variant: 'default' | 'drawer' = 'default') => (
       <section className={`factory-panel factory-status-panel ${variant === 'drawer' ? 'factory-drawer-panel' : ''}`}>
         <Flex align="center" justify="space-between" gap={12}>
@@ -7576,7 +8610,7 @@ export default function App() {
                         {isMedicalVideoFactory
                           ? '视频质检'
                           : isEcommerceVideoFactory
-                            ? '电商视频批处理'
+                            ? '视频生成'
                             : isAcademicDemoFactoryType
                               ? '学术Demo生成'
                             : isOperationFactory
@@ -7639,7 +8673,7 @@ export default function App() {
                             {isMedicalVideoFactory
                               ? `上传待质检视频，单批最多 ${maxItems} 个。`
                               : isEcommerceVideoFactory
-                                ? `上传商品参考图或表格，单批最多 ${maxItems} 个商品。`
+                                ? `上传参考图，单批最多 ${maxItems} 张。`
                                 : isAcademicDemoFactoryType
                                   ? `上传 Word、PDF、Excel 或 CSV 项目资料，每次最多 ${maxItems} 个文件。`
                                 : isOperationFactory
@@ -7657,22 +8691,26 @@ export default function App() {
                       >
                         <FileAddOutlined />
                         <span>
-                          {isMedicalVideoFactory
-                            ? '添加视频或拖拽到这里'
-                            : isAcademicDemoFactoryType
-                              ? '添加项目资料或拖拽到这里'
+                            {isMedicalVideoFactory
+                              ? '添加视频或拖拽到这里'
+                              : isAcademicDemoFactoryType
+                                ? '添加项目资料或拖拽到这里'
                             : isOperationFactory
                               ? '添加资料/图片/表格或拖拽到这里'
-                              : '添加图片/表格或拖拽到这里'}
+                              : isEcommerceVideoFactory || isImageFactory
+                                ? '添加图片或拖拽到这里'
+                                : '添加图片/表格或拖拽到这里'}
                         </span>
                         <small>
-                          {isMedicalVideoFactory
-                            ? 'mp4、mov、mkv、avi、webm、m4v'
-                            : isAcademicDemoFactoryType
-                              ? 'docx、pdf、xlsx、csv'
+                            {isMedicalVideoFactory
+                              ? 'mp4、mov、mkv、avi、webm、m4v'
+                              : isAcademicDemoFactoryType
+                                ? 'docx、pdf、xlsx、csv'
                             : isOperationFactory
                               ? 'pdf、docx、pptx、图片、xlsx、csv、txt'
-                              : 'png、jpg、webp、xlsx、csv'}
+                              : isEcommerceVideoFactory || isImageFactory
+                                ? 'png、jpg、jpeg、webp'
+                                : 'png、jpg、webp、xlsx、csv'}
                         </small>
                       </button>
                       <input
@@ -7895,15 +8933,6 @@ export default function App() {
                           </>
                         ) : isEcommerceVideoFactory ? (
                           <>
-                            <Form.Item name="platform" label="目标平台" rules={[{ required: true, message: '请选择目标平台' }]}>
-                              <Select
-                                size="large"
-                                options={platformOptions.map((item) => ({
-                                  value: item.key,
-                                  label: `${item.label}${item.imageRatio ? ` / ${item.imageRatio}` : ''}`
-                                }))}
-                              />
-                            </Form.Item>
                             <Form.Item shouldUpdate noStyle>
                               {({ getFieldValue }) => {
                                 const currentPackages = normalizeFactoryPackageDefinitions(
@@ -7956,30 +8985,6 @@ export default function App() {
                                 />
                               </Form.Item>
                             </div>
-                            <div className="factory-prompt-control-block">
-                              <Flex align="center" justify="space-between" gap={8}>
-                                <InlineHelpTitle help="控制生视频模型的画面、风格、镜头语言和画面文字，最终会参与生成视频提示词。">
-                                  <Typography.Text strong>提示词控制</Typography.Text>
-                                </InlineHelpTitle>
-                              </Flex>
-                              <div className="factory-prompt-control-grid">
-                                {promptControlFields.map((field) => (
-                                  <Form.Item key={field.key} name={field.key} label={field.label}>
-                                    {field.inputType === 'textarea' ? (
-                                      <Input.TextArea rows={2} placeholder={field.placeholder} />
-                                    ) : (
-                                      <Input placeholder={field.placeholder} />
-                                    )}
-                                  </Form.Item>
-                                ))}
-                              </div>
-                            </div>
-                            <Form.Item name="instruction" label="补充要求">
-                              <Input.TextArea
-                                rows={3}
-                                placeholder="例如：前三秒突出商品卖点，画面真实，不要生成夸张文字和虚假功能。"
-                              />
-                            </Form.Item>
                           </>
                         ) : isOperationFactory ? (
                           <>
@@ -8222,15 +9227,26 @@ export default function App() {
                           </>
                         ) : (
                           <>
-                            <Form.Item name="platform" label="目标平台" rules={[{ required: true, message: '请选择目标平台' }]}>
+                            <Form.Item
+                              name="platform"
+                              label={isImageFactory ? '图片比例' : '目标平台'}
+                              rules={[{ required: true, message: isImageFactory ? '请选择图片比例' : '请选择目标平台' }]}
+                            >
                               <Select
                                 size="large"
                                 options={platformOptions.map((item) => ({
                                   value: item.key,
-                                  label: `${item.label}${item.imageRatio ? ` / ${item.imageRatio}` : ''}`
+                                  label: isImageFactory
+                                    ? item.label
+                                    : `${item.label}${item.imageRatio ? ` / ${item.imageRatio}` : ''}`
                                 }))}
                               />
                             </Form.Item>
+                            {isImageFactory ? (
+                              <Form.Item name="promptLanguage" label="图片文字语言" rules={[{ required: true, message: '请选择图片文字语言' }]}>
+                                <Select size="large" options={ecommerceImageTextLanguageOptions} />
+                              </Form.Item>
+                            ) : null}
                             <Form.Item shouldUpdate noStyle>
                               {({ getFieldValue }) => {
                                 const currentPackages = normalizeFactoryPackageDefinitions(
@@ -8275,41 +9291,45 @@ export default function App() {
                                 }))}
                               />
                             </Form.Item>
-                            <Form.Item
-                              name="enableImageUnderstanding"
-                              label={
-                                <InlineHelpTitle help="默认关闭以提升批量生成速度；开启后会先调用图片理解模型分析商品图并生成更细的提示词。">
-                                  图片理解增强
-                                </InlineHelpTitle>
-                              }
-                              valuePropName="checked"
-                            >
-                              <Switch checkedChildren="开启" unCheckedChildren="关闭" />
-                            </Form.Item>
-                            <div className="factory-prompt-control-block">
-                              <Flex align="center" justify="space-between" gap={8}>
-                                <InlineHelpTitle help="控制提示词模型如何编写生图指令，包括风格、禁止内容、文字语言和平台要求。">
-                                  <Typography.Text strong>提示词控制</Typography.Text>
-                                </InlineHelpTitle>
-                              </Flex>
-                              <div className="factory-prompt-control-grid">
-                                {promptControlFields.map((field) => (
-                                  <Form.Item key={field.key} name={field.key} label={field.label}>
-                                    {field.inputType === 'textarea' ? (
-                                      <Input.TextArea rows={2} placeholder={field.placeholder} />
-                                    ) : (
-                                      <Input placeholder={field.placeholder} />
-                                    )}
-                                  </Form.Item>
-                                ))}
-                              </div>
-                            </div>
-                            <Form.Item name="instruction" label="补充要求">
-                              <Input.TextArea
-                                rows={3}
-                                placeholder="例如：面向美国站，风格干净高级；白底图不要文字。"
-                              />
-                            </Form.Item>
+                            {!isImageFactory ? (
+                              <>
+                                <Form.Item
+                                  name="enableImageUnderstanding"
+                                  label={
+                                    <InlineHelpTitle help="默认关闭以提升批量生成速度；开启后会先调用图片理解模型分析商品图并生成更细的提示词。">
+                                      图片理解增强
+                                    </InlineHelpTitle>
+                                  }
+                                  valuePropName="checked"
+                                >
+                                  <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+                                </Form.Item>
+                                <div className="factory-prompt-control-block">
+                                  <Flex align="center" justify="space-between" gap={8}>
+                                    <InlineHelpTitle help="控制提示词模型如何编写生图指令，包括风格、禁止内容、文字语言和平台要求。">
+                                      <Typography.Text strong>提示词控制</Typography.Text>
+                                    </InlineHelpTitle>
+                                  </Flex>
+                                  <div className="factory-prompt-control-grid">
+                                    {promptControlFields.map((field) => (
+                                      <Form.Item key={field.key} name={field.key} label={field.label}>
+                                        {field.inputType === 'textarea' ? (
+                                          <Input.TextArea rows={2} placeholder={field.placeholder} />
+                                        ) : (
+                                          <Input placeholder={field.placeholder} />
+                                        )}
+                                      </Form.Item>
+                                    ))}
+                                  </div>
+                                </div>
+                                <Form.Item name="instruction" label="补充要求">
+                                  <Input.TextArea
+                                    rows={3}
+                                    placeholder="例如：面向美国站，风格干净高级；白底图不要文字。"
+                                  />
+                                </Form.Item>
+                              </>
+                            ) : null}
                           </>
                         )}
                         <div className="factory-parameter-action-row">
@@ -8757,22 +9777,21 @@ export default function App() {
                 </div>
                 <div className="factory-preview-grid">
                   {previewItems.map((item) => {
-                    const imageSrc = getFactoryPreviewImageSrc(item);
                     return (
                       <button
                         key={item.id}
                         type="button"
                         className={`factory-preview-tile ${item.status}`}
-                        disabled={!imageSrc}
+                        disabled={!hasFactoryPreviewSource(item)}
                         title={item.error ?? `${getFactoryPreviewItemDisplayName(item)} / ${item.packageLabel}`}
                         onClick={() => setPreviewFactoryImage(item)}
                       >
                         <span className="factory-preview-thumb">
-                          {imageSrc ? (
-                            <img src={imageSrc} alt={`${getFactoryPreviewItemDisplayName(item)} ${item.packageLabel}`} loading="lazy" />
-                          ) : (
-                            <FileImageOutlined />
-                          )}
+                          <FactoryPreviewImage
+                            item={item}
+                            alt={`${getFactoryPreviewItemDisplayName(item)} ${item.packageLabel}`}
+                            loading="lazy"
+                          />
                         </span>
                         <span className="factory-preview-caption">
                           <span>{getFactoryPreviewItemDisplayName(item)}</span>
@@ -9062,11 +10081,11 @@ export default function App() {
         open={roleConfigModalOpen}
         title={
           roleConfigDisplayName
-            ? `${roleConfigMode === 'install' ? '安装' : '模型与工具'}：${roleConfigDisplayName}`
+            ? `${roleConfigMode === 'install' ? '安装' : '配置'}：${roleConfigDisplayName}`
             : roleConfigMode === 'install'
               ? `安装${roleConfigApplicationLabel}`
-              : `${roleConfigApplicationLabel}模型与工具`
-        }
+              : `${roleConfigApplicationLabel}配置`
+          }
         okText={roleConfigMode === 'install' ? '安装' : '保存'}
         onCancel={closeRoleConfig}
         onOk={() => roleConfigForm.submit()}
@@ -9118,7 +10137,7 @@ export default function App() {
                   dataSource={roleConfigModelRequirements}
                   locale={{ emptyText: `当前${roleConfigApplicationLabel}没有声明模型需求` }}
                   renderItem={(requirement) => {
-                    const displayProfile = requirement.runtimeProfile ?? requirement.profile;
+                    const displayProfile = getRuntimeRequirementEffectiveProfile(requirement);
                     const isRuntimeOverride = displayProfile.id !== requirement.profile.id;
 
                     return (
@@ -9140,7 +10159,7 @@ export default function App() {
                             <Typography.Text strong>
                               {displayProfile.providerName} / {displayProfile.modelName}
                             </Typography.Text>
-                            <Tag>{modelCapabilitySummary(requirement.profile.capabilities, requirement.profile.purpose)}</Tag>
+                            <Tag>{modelRequirementSlotLabel(requirement.profile)}</Tag>
                             {isRuntimeOverride ? <Tag color="blue">实际调用</Tag> : null}
                             <Tag color={requirement.ready ? 'green' : 'orange'}>
                               {renderModelRequirementStatusLabel(requirement.issue)}
@@ -9260,6 +10279,85 @@ export default function App() {
     );
   }
 
+  function renderDocumentAssistantConfigModal() {
+    return (
+      <Modal
+        open={documentAssistantConfigOpen}
+        title="文档助手设置"
+        okText="保存"
+        cancelText="取消"
+        onCancel={closeDocumentAssistantConfig}
+        onOk={() => documentAssistantConfigForm.submit()}
+        width={720}
+        destroyOnHidden
+      >
+        <Form<DocumentAssistantConfigFormValues>
+          form={documentAssistantConfigForm}
+          layout="vertical"
+          onFinish={saveDocumentAssistantConfig}
+        >
+          <Form.Item
+            name="scenarioKey"
+            label="场景模板"
+            rules={[{ required: true, message: '请选择场景模板' }]}
+          >
+            <Select
+              options={documentAssistantScenarioPresets.map((preset) => ({
+                value: preset.key,
+                label: <Typography.Text>{preset.label}</Typography.Text>
+              }))}
+              onChange={(scenarioKey) => {
+                const preset = getDocumentAssistantScenarioPreset(scenarioKey);
+                documentAssistantConfigForm.setFieldsValue({
+                  outputContentType: preset.outputContentType,
+                  promptTemplate: preset.promptTemplate
+                });
+              }}
+            />
+          </Form.Item>
+          <Space size={8} wrap style={{ marginBottom: 12 }}>
+            <Button icon={<PlusOutlined />} onClick={() => void createDocumentAssistantScenarioPreset()}>
+              新建模板
+            </Button>
+            {!isDocumentAssistantBuiltinScenarioKey(documentAssistantConfigForm.getFieldValue('scenarioKey')) ? (
+              <Popconfirm
+                title="删除这个自定义模板？"
+                description="删除后不会影响已经保存的任务记录。"
+                okText="删除"
+                okButtonProps={{ danger: true }}
+                onConfirm={() => void deleteDocumentAssistantScenarioPreset(documentAssistantConfigForm.getFieldValue('scenarioKey'))}
+              >
+                <Button danger icon={<DeleteOutlined />}>
+                  删除模板
+                </Button>
+              </Popconfirm>
+            ) : null}
+          </Space>
+          <Form.Item
+            name="outputContentType"
+            label="文件格式"
+            rules={[{ required: true, message: '请选择文件格式' }]}
+          >
+            <Select options={[...documentAssistantOutputOptions]} />
+          </Form.Item>
+          <Form.Item
+            name="promptTemplate"
+            label="提示词模板"
+            rules={[{ required: true, message: '请填写提示词模板' }]}
+          >
+            <Input.TextArea
+              autoSize={{ minRows: 6, maxRows: 12 }}
+              placeholder="描述文档结构、重点、禁止事项和人工确认边界"
+            />
+          </Form.Item>
+          <Typography.Text type="secondary">
+            保存后，这些设置会自动加入 AI 文档助手的下一次任务；上传文件仍通过下方对话框添加。
+          </Typography.Text>
+        </Form>
+      </Modal>
+    );
+  }
+
   function renderRoles() {
     const roleConfigTemplate = roleConfigRoleCode
       ? desktopRoleTemplateByRoleCode.get(roleConfigRoleCode)
@@ -9307,12 +10405,6 @@ export default function App() {
     const filteredRoleTemplates = selectedApplicationTemplates.filter(
       (template) => selectedRoleCategory === '全部' || roleTemplateCategory(template) === selectedRoleCategory
     );
-    const selectedApplicationCapacityText = formatRoleApplicationCapacityUsage(
-      selectedRoleApplicationType,
-      installedRoleApplicationUsage,
-      authorizedRoleTemplateCatalog.deviceCapacity
-    );
-
     return (
       <>
         <div className="catalog-page">
@@ -9359,10 +10451,6 @@ export default function App() {
             ))}
           </div>
 
-          <div className="catalog-capacity-row">
-            <Tag>{selectedApplicationCapacityText}</Tag>
-          </div>
-
           {roleTemplateNotice ? (
             <Typography.Paragraph type="secondary">
               {roleTemplateNotice}
@@ -9396,12 +10484,11 @@ export default function App() {
               const hasTemplateUpdate = isInstalledRoleTemplateOutdated(template, installedRolePackage);
               const fileContract = buildRoleFileContractSummary(template);
               const freeTemplate = isFreeRoleTemplate(template);
-              const executionModeMeta = roleExecutionModeMeta(template.executionProfile);
-              const installAvailability = resolveRoleInstallAvailability(
-                template,
-                installedRoleApplicationUsage,
-                authorizedRoleTemplateCatalog.deviceCapacity
+              const executionModeMeta = resolveRoleExecutionModeMeta(
+                template.executionProfile,
+                readRoleApplicationType(template)
               );
+              const installAvailability = resolveRoleInstallAvailability(template);
               const installStatusColor = active ? 'green' : installed ? 'blue' : installAvailability.canInstall ? 'default' : 'orange';
               const installStatusLabel = active
                 ? '当前'
@@ -9470,7 +10557,11 @@ export default function App() {
                     </div>
 
                     <Typography.Text type="secondary" ellipsis className="catalog-card-meta">
-                      {roleTemplateCategory(template)} / {template.industry} · 任务 {summary?.taskCount ?? 0}
+                      {isFactory
+                        ? roleTemplateCategory(template)
+                        : `${roleTemplateCategory(template)} / ${template.industry}`}
+                      {' · 任务 '}
+                      {summary?.taskCount ?? 0}
                     </Typography.Text>
 
                     <Space size={6} className="role-card-actions">
@@ -9601,7 +10692,7 @@ export default function App() {
                               <Typography.Text strong>
                                 {requirement.profile.providerName} / {requirement.profile.modelName}
                               </Typography.Text>
-                              <Tag>{modelCapabilitySummary(requirement.profile.capabilities, requirement.profile.purpose)}</Tag>
+                              <Tag>{modelRequirementSlotLabel(requirement.profile)}</Tag>
                               <Tag color={requirement.ready ? 'green' : 'orange'}>
                                 {renderModelRequirementStatusLabel(requirement.issue)}
                               </Tag>
@@ -10225,9 +11316,8 @@ export default function App() {
                 rules={[{ required: true, message: '请选择模型能力' }]}
               >
                 <Select
-                  mode="multiple"
                   placeholder="按模型真实输入输出选择"
-                  options={modelCapabilityOptions.map((option) => ({
+                  options={primaryModelCapabilityOptions.map((option) => ({
                     label: `${option.label} - ${option.description}`,
                     value: option.value
                   }))}
@@ -10392,14 +11482,20 @@ export default function App() {
             getFieldValue(runtimeModelPath).trim()
               ? getFieldValue(runtimeModelPath).trim()
               : profile.id;
+          const selectedRuntimeProfile =
+            runtimeState.modelProfiles.find((item) => item.id === runtimeModelProfileId) ?? profile;
+          const runtimeProfile = modelProfileSupportsRequiredCapabilities(
+            selectedRuntimeProfile,
+            readRequiredCapabilitiesForRuntimeRequirementProfile(profile)
+          )
+            ? selectedRuntimeProfile
+            : profile;
           const compatibleRuntimeModelOptions = buildCompatibleRuntimeModelOptions(
             runtimeState,
             profile,
             roleConfigRoleCode,
-            runtimeModelProfileId
+            runtimeProfile.id
           );
-          const runtimeProfile =
-            runtimeState.modelProfiles.find((item) => item.id === runtimeModelProfileId) ?? profile;
           const defaultCredential = findDefaultModelCredential(
             runtimeState.modelCredentials,
             runtimeProfile.providerId
@@ -11162,11 +12258,7 @@ export default function App() {
   }
 
   function installRoleFromMarket(template: DesktopRoleTemplate) {
-    const installAvailability = resolveRoleInstallAvailability(
-      template,
-      installedRoleApplicationUsage,
-      authorizedRoleTemplateCatalog.deviceCapacity
-    );
+    const installAvailability = resolveRoleInstallAvailability(template);
     if (!installAvailability.canInstall) {
       message.warning(installAvailability.reason);
       return;
@@ -11228,7 +12320,7 @@ export default function App() {
       };
     }
 
-    if (isEcommerceProductVideoFactory(factory)) {
+    if (isReferenceImageVideoFactory(factory)) {
       const packageOptions = readFactoryPackageOptions(factory);
       const packageDefinitions = readFactoryPackagePreset(roleCode, packageOptions);
       const platformOptions = readFactoryPlatformOptions(factory);
@@ -11244,13 +12336,7 @@ export default function App() {
         packageKeys: resolveFactoryPackageSelection(roleCode, packageDefinitions),
         qualityCheckMode: qualityModes[0]?.key ?? 'basic',
         videoDurationSeconds: durationOptions[1] ?? durationOptions[0] ?? 8,
-        videoRatio: platformOptions[0]?.imageRatio ?? ratios[0]?.key ?? '9:16',
-        promptLanguage: '',
-        promptStyle: '',
-        promptGoal: '',
-        promptMustKeep: '',
-        promptAvoid: '',
-        instruction: ''
+        videoRatio: platformOptions[0]?.imageRatio ?? ratios[0]?.key ?? '9:16'
       };
     }
 
@@ -11314,12 +12400,12 @@ export default function App() {
     return {
       roleCode,
       useKnowledge: false,
-      platform: platformOptions[0]?.key ?? 'amazon',
+      platform: platformOptions[0]?.key ?? 'ratio_1_1',
       packageDefinitions,
       packageKeys: resolveFactoryPackageSelection(roleCode, packageDefinitions),
       qualityCheckMode: qualityModes[0]?.key ?? 'basic',
       enableImageUnderstanding: false,
-      promptLanguage: '',
+      promptLanguage: isImageGenerationFactory(factory) ? '中文' : '',
       promptStyle: '',
       promptGoal: '',
       promptMustKeep: '',
@@ -11828,7 +12914,7 @@ export default function App() {
       return;
     }
 
-    if (isEcommerceProductVideoFactory(factory)) {
+    if (isReferenceImageVideoFactory(factory)) {
       const ecommerceAttachments = factoryAttachments.filter((attachment) => isFactoryImageAttachment(attachment));
       const invalidEcommerceAttachments = factoryAttachments.filter(
         (attachment) => !isFactoryImageAttachment(attachment)
@@ -11867,9 +12953,8 @@ export default function App() {
         return;
       }
 
-      const platform = readFactoryPlatformOptions(factory).find((item) => item.key === ecommerceVideoValues.platform);
       const selectedPackageCount = ecommerceVideoValues.packageKeys.length;
-      const title = `${template.name} - ${platform?.label ?? ecommerceVideoValues.platform} - ${ecommerceAttachments.length * selectedPackageCount} 条视频`;
+      const title = `${template.name} - ${ecommerceAttachments.length * selectedPackageCount} 条视频`;
       const input = buildEcommerceProductVideoFactoryTaskInput({
         template,
         factory,
@@ -12050,20 +13135,17 @@ export default function App() {
       return;
     }
     const optionalVisionModelProfileIds =
-      imageFactoryValues.enableImageUnderstanding === true || imageFactoryValues.qualityCheckMode === 'smart'
+      imageFactoryValues.qualityCheckMode === 'smart'
         ? findReadyImageUnderstandingModelProfileIds(runtimeState, values.roleCode)
         : [];
-    if (
-      (imageFactoryValues.enableImageUnderstanding === true || imageFactoryValues.qualityCheckMode === 'smart') &&
-      optionalVisionModelProfileIds.length === 0
-    ) {
-      message.warning('图片理解增强或智能质检需要先配置并启用图片理解模型；也可以关闭增强/智能质检后走快速生成。');
+    if (imageFactoryValues.qualityCheckMode === 'smart' && optionalVisionModelProfileIds.length === 0) {
+      message.warning('智能质检需要先配置并启用图片理解模型；也可以改用基础质检后走快速生成。');
       navigateToSection('models');
       return;
     }
 
     const platform = readFactoryPlatformOptions(factory).find((item) => item.key === imageFactoryValues.platform);
-    const title = `${template.name} - ${platform?.label ?? imageFactoryValues.platform} - ${imageAttachments.length} 个商品`;
+    const title = `${template.name} - ${platform?.label ?? imageFactoryValues.platform} - ${imageAttachments.length} 张图片`;
     const input = buildFactoryTaskInput({
       template,
       factory,
@@ -12187,7 +13269,7 @@ export default function App() {
       providerName: '',
       modelName: profile.modelName,
       purpose: profile.purpose,
-      capabilities: readModelProfileCapabilities(profile),
+      capabilities: readModelProfileCapabilities(profile)[0],
       apiBaseUrl: '',
       apiKey: '',
       temperature: profile.temperature,
@@ -12278,7 +13360,7 @@ export default function App() {
     setIsSavingModelProfile(true);
     setModelTestNotice('');
 
-    const capabilities = normalizeModelCapabilities(
+    const capabilities = normalizePrimaryModelCapabilities(
       values.capabilities,
       values.purpose ?? selectedModelProfile.purpose
     );
@@ -12405,7 +13487,7 @@ export default function App() {
       providerName: preset.name,
       modelName: model.modelName,
       purpose: model.purpose,
-      capabilities: normalizeModelCapabilities(model.capabilities, model.purpose),
+      capabilities: normalizePrimaryModelCapabilities(model.capabilities, model.purpose)[0],
       apiBaseUrl: options.apiBaseUrl ?? defaultCredential?.apiBaseUrl ?? selection.profile.apiBaseUrl,
       apiKey: options.apiKey ?? defaultCredential?.apiKey ?? '',
       temperature: selection.profile.temperature,
@@ -12429,7 +13511,7 @@ export default function App() {
       const values = await modelForm.validateFields();
       const apiBaseUrl = values.apiBaseUrl?.trim();
       const apiKey = values.apiKey?.trim();
-      const capabilities = normalizeModelCapabilities(
+      const capabilities = normalizePrimaryModelCapabilities(
         values.capabilities,
         values.purpose ?? selectedModelProfile.purpose
       );
@@ -12492,7 +13574,7 @@ export default function App() {
       const values = await modelForm.validateFields();
       const apiBaseUrl = values.apiBaseUrl?.trim();
       const apiKey = values.apiKey?.trim();
-      const capabilities = normalizeModelCapabilities(
+      const capabilities = normalizePrimaryModelCapabilities(
         values.capabilities,
         values.purpose ?? selectedModelProfile.purpose
       );
@@ -12558,7 +13640,7 @@ export default function App() {
         models: []
       };
     const formCapabilities = normalizeExplicitModelCapabilities(
-      modelForm.getFieldValue('capabilities') as ModelCapability[] | undefined
+      modelForm.getFieldValue('capabilities') as ModelCapability | ModelCapability[] | undefined
     );
     const presetModel = createPresetModelFromCatalogEntry(
       model,
@@ -12568,8 +13650,7 @@ export default function App() {
 
     applyModelProviderPreset(preset, presetModel, {
       apiBaseUrl: formApiBaseUrl,
-      apiKey: formApiKey,
-      replaceProfileId: currentProfile.id
+      apiKey: formApiKey
     });
     setModelTestNotice(
       readModelCatalogEntryEffectiveCapabilities(model).length > 0
@@ -12747,11 +13828,7 @@ export default function App() {
       return;
     }
     if (mode === 'install') {
-      const installAvailability = resolveRoleInstallAvailability(
-        template,
-        installedRoleApplicationUsage,
-        authorizedRoleTemplateCatalog.deviceCapacity
-      );
+      const installAvailability = resolveRoleInstallAvailability(template);
       if (!installAvailability.canInstall) {
         message.warning(installAvailability.reason);
         return;
@@ -12786,17 +13863,149 @@ export default function App() {
     roleConfigForm.resetFields();
   }
 
+  function openDocumentAssistantConfig() {
+    const preset = getDocumentAssistantScenarioPreset(documentAssistantConfig.scenarioKey);
+    documentAssistantConfigForm.setFieldsValue({
+      scenarioKey: preset.key,
+      outputContentType: documentAssistantConfig.outputContentType || preset.outputContentType,
+      promptTemplate: documentAssistantConfig.promptTemplate || preset.promptTemplate
+    });
+    setDocumentAssistantConfigOpen(true);
+  }
+
+  function closeDocumentAssistantConfig() {
+    setDocumentAssistantConfigOpen(false);
+    documentAssistantConfigForm.resetFields();
+  }
+
+  function saveDocumentAssistantConfig(values: DocumentAssistantConfigFormValues) {
+    const preset = getDocumentAssistantScenarioPreset(values.scenarioKey);
+    const nextPreferences: DocumentAssistantPreferences = {
+      scenarioKey: preset.key,
+      outputContentType: normalizeDocumentAssistantOutputContentType(
+        values.outputContentType,
+        preset.outputContentType
+      ),
+      promptTemplate: values.promptTemplate?.trim() || preset.promptTemplate
+    };
+
+    setDocumentAssistantConfig(nextPreferences);
+    writeDocumentAssistantPreferences(nextPreferences);
+    closeDocumentAssistantConfig();
+    message.success('文档助手配置已保存');
+  }
+
+  function createDocumentAssistantScenarioPreset() {
+    const currentValues = documentAssistantConfigForm.getFieldsValue(true) as DocumentAssistantConfigFormValues;
+    const currentPreset = getDocumentAssistantScenarioPreset(currentValues.scenarioKey);
+    let nextLabel = `${currentPreset.label} 副本`;
+
+    Modal.confirm({
+      title: '新建场景模板',
+      content: (
+        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          <Typography.Text type="secondary">
+            当前模板内容会复制为新模板，输入一个不重复的名称即可。
+          </Typography.Text>
+          <Input
+            defaultValue={nextLabel}
+            onChange={(event) => {
+              nextLabel = event.target.value;
+            }}
+            placeholder="模板名称"
+          />
+        </Space>
+      ),
+      okText: '创建',
+      cancelText: '取消',
+      onOk: () => {
+        const label = nextLabel.trim();
+        if (!label) {
+          message.warning('请输入模板名称');
+          return Promise.reject(new Error('missing scenario label'));
+        }
+        if (documentAssistantScenarioPresets.some((preset) => preset.label === label)) {
+          message.warning('模板名称已存在');
+          return Promise.reject(new Error('duplicate scenario label'));
+        }
+
+        const nextPreset: DocumentAssistantScenarioPreset = {
+          key: createDocumentAssistantCustomScenarioKey(label),
+          label,
+          description: currentPreset.description,
+          outputContentType: normalizeDocumentAssistantOutputContentType(
+            currentValues.outputContentType,
+            currentPreset.outputContentType
+          ),
+          promptTemplate: currentValues.promptTemplate?.trim() || currentPreset.promptTemplate
+        };
+        const nextCustomScenarioPresets = [...documentAssistantCustomScenarioPresets, nextPreset];
+        const nextPreferences: DocumentAssistantPreferences = {
+          scenarioKey: nextPreset.key,
+          outputContentType: nextPreset.outputContentType,
+          promptTemplate: nextPreset.promptTemplate
+        };
+
+        writeDocumentAssistantCustomScenarioPresets(nextCustomScenarioPresets);
+        setDocumentAssistantCustomScenarioPresets(nextCustomScenarioPresets);
+        setDocumentAssistantConfig(nextPreferences);
+        writeDocumentAssistantPreferences(nextPreferences);
+        documentAssistantConfigForm.setFieldsValue({
+          scenarioKey: nextPreset.key,
+          outputContentType: nextPreset.outputContentType,
+          promptTemplate: nextPreset.promptTemplate
+        });
+        message.success('已创建场景模板');
+      }
+    });
+  }
+
+  function deleteDocumentAssistantScenarioPreset(scenarioKey: string) {
+    if (!scenarioKey || isDocumentAssistantBuiltinScenarioKey(scenarioKey)) {
+      return;
+    }
+
+    const preset = getDocumentAssistantScenarioPreset(scenarioKey);
+    Modal.confirm({
+      title: '删除场景模板',
+      content: `确定删除模板“${preset.label}”吗？`,
+      okText: '删除',
+      okButtonProps: { danger: true },
+      onOk: () => {
+        const nextCustomScenarioPresets = documentAssistantCustomScenarioPresets.filter(
+          (item) => item.key !== scenarioKey
+        );
+        writeDocumentAssistantCustomScenarioPresets(nextCustomScenarioPresets);
+        setDocumentAssistantCustomScenarioPresets(nextCustomScenarioPresets);
+
+        if (documentAssistantConfig.scenarioKey === scenarioKey) {
+          const fallbackPreset = getDocumentAssistantScenarioPreset('general_document');
+          const nextPreferences: DocumentAssistantPreferences = {
+            scenarioKey: fallbackPreset.key,
+            outputContentType: fallbackPreset.outputContentType,
+            promptTemplate: fallbackPreset.promptTemplate
+          };
+          setDocumentAssistantConfig(nextPreferences);
+          writeDocumentAssistantPreferences(nextPreferences);
+          documentAssistantConfigForm.setFieldsValue({
+            scenarioKey: fallbackPreset.key,
+            outputContentType: fallbackPreset.outputContentType,
+            promptTemplate: fallbackPreset.promptTemplate
+          });
+        }
+
+        message.success('场景模板已删除');
+      }
+    });
+  }
+
   function submitRoleConfig(values: RoleConfigFormValues) {
     const template = desktopRoleTemplateByRoleCode.get(roleConfigRoleCode);
     if (!template) {
       return;
     }
     if (roleConfigMode === 'install') {
-      const installAvailability = resolveRoleInstallAvailability(
-        template,
-        installedRoleApplicationUsage,
-        authorizedRoleTemplateCatalog.deviceCapacity
-      );
+      const installAvailability = resolveRoleInstallAvailability(template);
       if (!installAvailability.canInstall) {
         message.warning(installAvailability.reason);
         closeRoleConfig();
@@ -12894,7 +14103,7 @@ export default function App() {
 
     if (firstUnreadyModel) {
       setRuntimeState(preparedState);
-      setSelectedModelId(firstUnreadyModel.runtimeProfileId ?? firstUnreadyModel.profile.id);
+      setSelectedModelId(getRuntimeRequirementEffectiveProfile(firstUnreadyModel).id);
       setModelConfigOpen(true);
       setModelTestNotice(
         firstUnreadyModel.issue === 'disabled'
@@ -12965,7 +14174,7 @@ export default function App() {
     if (firstUnreadyModel) {
       if (notifyUser) {
         setRuntimeState(preparedState);
-        setSelectedModelId(firstUnreadyModel.runtimeProfileId ?? firstUnreadyModel.profile.id);
+      setSelectedModelId(getRuntimeRequirementEffectiveProfile(firstUnreadyModel).id);
         setModelConfigOpen(true);
         setModelTestNotice('值守数字员工需要先完成模型配置。');
         navigateToSection('models');
@@ -13423,8 +14632,10 @@ export default function App() {
 }
 
 function isWatchRolePackage(rolePackage: RolePackageManifest | undefined): boolean {
-  const mode = rolePackage?.executionProfile?.mode;
-  return mode === 'watch' || rolePackage?.toolIds.includes('browser-automation') === true;
+  return isWatchExecutionProfile(
+    rolePackage?.executionProfile,
+    readRoleApplicationType(rolePackage)
+  );
 }
 
 function getRuntimeWatchConfigs(state: DesktopRuntimeState): DesktopRoleWatchConfig[] {
@@ -13465,7 +14676,7 @@ function createDefaultWatchConfig(rolePackage: RolePackageManifest, now: string)
 
 function buildDefaultWatchRules(rolePackage: RolePackageManifest): string {
   const name = rolePackage.name;
-  const profileMode = rolePackage.executionProfile?.mode === 'watch' ? '值守式' : '辅助式';
+  const profileMode = isWatchRolePackage(rolePackage) ? '值守式' : '对话式';
   return [
     `你是${name}，当前以${profileMode}数字员工方式巡检网页业务信息。`,
     '只读取用户配置的网页来源，不绕过登录、验证码或平台风控。',
@@ -13888,6 +15099,14 @@ function findReadyImageUnderstandingModelProfileIds(
 }
 
 function roleTemplateCategory(template: DesktopRoleTemplate): string {
+  if (readRoleApplicationType(template) === 'digital_factory') {
+    return template.outputCategory ?? inferFactoryOutputCategory(template);
+  }
+
+  if (template.templateId === 'template_document_assistant' || template.roleCode === documentAssistantRoleCode) {
+    return '通用';
+  }
+
   const text = [template.name, template.industry, template.scenario, template.summary, template.businessGoal].join(' ');
   if (includesAny(text, ['教育', '课程', '培训', '学习'])) return '教育';
   if (includesAny(text, ['医疗', '健康', '医生', '医药', '康复'])) return '医疗';
@@ -13901,8 +15120,32 @@ function roleTemplateCategory(template: DesktopRoleTemplate): string {
   return '通用';
 }
 
+function inferFactoryOutputCategory(template: DesktopRoleTemplate): string {
+  const text = [
+    template.templateId,
+    template.name,
+    template.outputFormat,
+    JSON.stringify(template.dependencyManifest?.factory ?? '')
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  if (includesAny(text, ['image', 'picture', '图片', '图像'])) return '图片生成';
+  if (includesAny(text, ['medical_case_video_screening', 'video_screening', '视频质检', '质检视频'])) return '视频质检';
+  if (includesAny(text, ['video', '视频', 'mp4', '剪辑'])) return '视频生成';
+  if (includesAny(text, ['academic_project_demo', 'demo', '演示'])) return '演示 Demo';
+  if (includesAny(text, ['document', 'word', 'excel', 'xlsx', 'markdown', '文档'])) return '文档处理';
+  return '其他产物';
+}
+
 function buildRoleCategoryTabs(templates: DesktopRoleTemplate[]): string[] {
-  const fixedCategories = ['全部', '教育', '医疗', '销售', '运营', '人力', '财务', '法务', '行政', '研究', '通用'];
+  const isFactoryCatalog = templates.some(
+    (template) => readRoleApplicationType(template) === 'digital_factory'
+  );
+  const fixedCategories = isFactoryCatalog
+    ? ['全部', '图片生成', '视频生成', '视频质检', '文档处理', '演示 Demo', '其他产物']
+    : ['全部', '教育', '医疗', '销售', '运营', '人力', '财务', '法务', '行政', '研究', '通用'];
   const availableCategories = new Set(templates.map(roleTemplateCategory));
   return fixedCategories.filter((category) => category === '全部' || availableCategories.has(category));
 }
@@ -14024,6 +15267,10 @@ function sectionMeta(section: SectionKey) {
       title: '数字工厂',
       description: '运行批量化任务，查看批次进度和工厂产物。'
     },
+    studio: {
+      title: '工作室',
+      description: '用可视化方式查看数字员工、数字工厂和任务状态。'
+    },
     roles: {
       title: '数字市场',
       description: '发现、安装和配置数字员工与数字工厂。'
@@ -14031,6 +15278,10 @@ function sectionMeta(section: SectionKey) {
     logs: {
       title: '日志',
       description: '查看任务执行细节和排错信息。'
+    },
+    snippets: {
+      title: '标签库',
+      description: '保存常用提示词和文本，方便以后快速复制使用。'
     },
     models: {
       title: '模型',
@@ -14100,6 +15351,85 @@ function taskStateColor(state: DesktopTaskState) {
   };
 
   return colors[state];
+}
+
+function resolveStudioRuntimeStatus(
+  latestTask: DesktopTaskDetail | undefined,
+  isDeleted: boolean
+): StudioRuntimeStatus {
+  if (isDeleted) {
+    return 'deleted';
+  }
+
+  return latestTask?.state ?? 'idle';
+}
+
+function isStudioActiveRuntimeStatus(status: StudioRuntimeStatus): boolean {
+  return status === 'running' || status === 'queued' || status === 'waiting_approval';
+}
+
+function studioStatusFilterMatches(status: StudioRuntimeStatus, filter: StudioStatusFilter): boolean {
+  if (filter === 'all') {
+    return true;
+  }
+
+  if (filter === 'active') {
+    return isStudioActiveRuntimeStatus(status);
+  }
+
+  if (filter === 'idle') {
+    return status === 'idle' || status === 'deleted' || status === 'cancelled';
+  }
+
+  return status === filter;
+}
+
+function studioRuntimeStatusLabel(status: StudioRuntimeStatus): string {
+  if (status === 'idle') return '可用';
+  if (status === 'deleted') return '已删除';
+  return taskStateLabel(status);
+}
+
+function studioRuntimeStatusColor(status: StudioRuntimeStatus): string {
+  if (status === 'idle') return 'default';
+  if (status === 'deleted') return 'red';
+  return taskStateColor(status);
+}
+
+function studioMotionClassName(status: StudioRuntimeStatus): string {
+  if (isStudioActiveRuntimeStatus(status)) return 'is-running';
+  if (status === 'completed') return 'is-resting';
+  if (status === 'failed') return 'is-failed';
+  return 'is-idle';
+}
+
+function countStudioTaskDeliverables(task: DesktopTaskDetail): number {
+  const artifactCount = task.artifactCount ?? task.artifacts.length;
+  const factoryOutputCount = task.factoryOutputs?.filter((item) => item.status !== 'excluded').length ?? 0;
+  return Math.max(artifactCount, factoryOutputCount);
+}
+
+function stableStudioIndex(value: string, total: number): number {
+  if (total <= 0) {
+    return 0;
+  }
+
+  let hash = 0;
+  for (const char of value) {
+    hash = (hash * 31 + char.charCodeAt(0)) % 1000003;
+  }
+
+  return Math.abs(hash) % total;
+}
+
+function pickStudioEmployeeAvatarSkin(roleCode: string, name: string, index: number): string {
+  const offset = stableStudioIndex(`${roleCode}:${name}`, studioEmployeeAvatarSkins.length);
+  return studioEmployeeAvatarSkins[(offset + index) % studioEmployeeAvatarSkins.length];
+}
+
+function pickStudioFactoryAvatarSkin(roleCode: string, name: string, index: number): string {
+  const offset = stableStudioIndex(`${roleCode}:${name}`, studioFactoryAvatarSkins.length);
+  return studioFactoryAvatarSkins[(offset + index) % studioFactoryAvatarSkins.length];
 }
 
 type FactoryTaskStageStatus = 'waiting' | 'running' | 'completed' | 'failed' | 'optional';
@@ -14691,13 +16021,6 @@ function formatFactoryPreviewMeta(preview: FactoryArtifactPreview) {
   return `完成 ${preview.completed}/${preview.total}${failedText} · 并发 ${preview.concurrency}${platformText}`;
 }
 
-function getFactoryPreviewImageSrc(item: FactoryArtifactPreviewItem) {
-  return toFactoryPreviewImageSrc(item.thumbnailPath)
-    ?? toFactoryPreviewImageSrc(item.localPath)
-    ?? toFactoryPreviewImageSrc(item.remoteUrl)
-    ?? '';
-}
-
 function getFactoryPreviewImageFileName(item: FactoryArtifactPreviewItem) {
   const extension = getFactoryPreviewImageExtension(item.remoteUrl ?? item.thumbnailPath ?? item.localPath) ?? 'png';
   const displayName = sanitizeFactoryPreviewFileNamePart(getFactoryPreviewItemDisplayName(item)) || 'product';
@@ -14753,6 +16076,70 @@ function toFactoryPreviewImageSrc(value: string | undefined) {
   }
 
   return `file:///${normalized.replace(/\\/g, '/').replace(/^\/+/, '')}`;
+}
+
+interface FactoryPreviewImageProps {
+  item: FactoryArtifactPreviewItem;
+  alt: string;
+  className?: string;
+  loading?: 'eager' | 'lazy';
+}
+
+function FactoryPreviewImage({
+  item,
+  alt,
+  className,
+  loading
+}: FactoryPreviewImageProps) {
+  const remoteSrc = toFactoryPreviewImageSrc(getFactoryPreviewRemoteSrc(item));
+  const [src, setSrc] = useState(remoteSrc ?? '');
+
+  useEffect(() => {
+    let cancelled = false;
+    setSrc(remoteSrc ?? '');
+
+    const localPath = item.localPath?.trim();
+    const getPreviewUrl = window.qiuDesktop?.getArtifactPreviewUrl;
+    if (!localPath || !getPreviewUrl) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void getPreviewUrl(localPath)
+      .then((localPreviewUrl) => {
+        if (!cancelled) {
+          setSrc(localPreviewUrl);
+        }
+      })
+      .catch(() => {
+        // Keep the provider URL when a local preview token cannot be created.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [item.localPath, remoteSrc]);
+
+  if (!src) {
+    return <FileImageOutlined />;
+  }
+
+  return (
+    <img
+      className={className}
+      src={src}
+      alt={alt}
+      loading={loading}
+      onError={() => {
+        if (remoteSrc && src !== remoteSrc) {
+          setSrc(remoteSrc);
+        } else {
+          setSrc('');
+        }
+      }}
+    />
+  );
 }
 
 function createChatTaskTitle(input: string) {
@@ -15275,7 +16662,7 @@ function readMessageDetails(message: string) {
 }
 
 function toInstalledRolePackage(template: DesktopRoleTemplate): RolePackageManifest {
-  return {
+  const rolePackage: RolePackageManifest = {
     roleCode: template.roleCode,
     applicationType: template.applicationType ?? 'digital_employee',
     name: template.name,
@@ -15298,6 +16685,11 @@ function toInstalledRolePackage(template: DesktopRoleTemplate): RolePackageManif
     requiredKnowledgeSources: [...template.requiredKnowledgeSources],
     defaultTaskTypes: [...template.defaultTaskTypes],
     syncPolicy: template.syncPolicy
+  };
+
+  return {
+    ...rolePackage,
+    modelProfileIds: readRequiredModelProfileIdsForRolePackage(rolePackage)
   };
 }
 
@@ -15455,16 +16847,11 @@ interface DigitalFactoryManifest {
 }
 
 const defaultFactoryPlatforms: DigitalFactoryPlatformOption[] = [
-  { key: 'amazon', label: 'Amazon', imageRatio: '1:1', notes: '主图简洁，避免夸张文字和过度装饰。' },
-  { key: 'temu', label: 'Temu', imageRatio: '1:1', notes: '强调直观卖点、价格感和清晰主体。' },
-  { key: 'aliexpress', label: '速卖通', imageRatio: '1:1', notes: '适合主图、场景图和参数卖点图组合。' },
-  { key: 'tiktok_shop', label: 'TikTok Shop', imageRatio: '1:1', notes: '画面更生活化，适合短视频封面和场景图。' },
-  { key: 'ozon', label: 'Ozon', imageRatio: '1:1', notes: '主体清晰，参数和尺寸信息需要可读。' },
-  { key: 'shopee', label: 'Shopee', imageRatio: '1:1', notes: '适合醒目、轻促销风格的商品图。' },
-  { key: 'lazada', label: 'Lazada', imageRatio: '1:1', notes: '重视商品主体和卖点信息层级。' },
-  { key: 'ebay', label: 'eBay', imageRatio: '1:1', notes: '真实、清晰、少修饰，便于买家检查商品。' },
-  { key: 'walmart', label: 'Walmart', imageRatio: '1:1', notes: '偏干净、规范的零售商品图。' },
-  { key: 'shein', label: 'SHEIN', imageRatio: '3:4', notes: '服饰类可突出模特、穿搭和风格。' }
+  { key: 'ratio_1_1', label: '1:1 方图', imageRatio: '1:1', notes: '适合商品主图、白底图、卖点图和大多数电商列表图。' },
+  { key: 'ratio_3_4', label: '3:4 竖图', imageRatio: '3:4', notes: '适合服饰、模特展示、详情页长图素材和小红书式视觉。' },
+  { key: 'ratio_4_3', label: '4:3 横图', imageRatio: '4:3', notes: '适合家居、工业产品、场景展示和横向构图商品图。' },
+  { key: 'ratio_9_16', label: '9:16 竖屏', imageRatio: '9:16', notes: '适合短视频封面、竖屏广告图和移动端信息流素材。' },
+  { key: 'ratio_16_9', label: '16:9 横屏', imageRatio: '16:9', notes: '适合横版广告、官网 Banner、产品展示页和投放素材。' }
 ];
 
 const defaultFactoryPackages: DigitalFactoryPackageOption[] = [
@@ -15706,6 +17093,17 @@ const defaultFactoryPromptControlFields: DigitalFactoryPromptControlField[] = [
   }
 ];
 
+const ecommerceImageTextLanguageOptions = [
+  '中文',
+  '英文',
+  '日语',
+  '韩语',
+  '德语',
+  '西班牙语',
+  '法语',
+  '不生成文字'
+].map((value) => ({ value, label: value }));
+
 const factoryImageExtensions = new Set(['png', 'jpg', 'jpeg', 'webp']);
 const factoryTableExtensions = new Set(['xlsx', 'csv']);
 const factoryVideoExtensions = new Set(['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v']);
@@ -15803,6 +17201,17 @@ function countRoleApplications(templates: DesktopRoleTemplate[]): Record<RoleApp
   );
 }
 
+function formatRoleApplicationSyncNotice(counts: Record<RoleApplicationType, number>): string {
+  const segments = [
+    counts.digital_employee ? `${counts.digital_employee} 个数字员工` : '',
+    counts.digital_factory ? `${counts.digital_factory} 个数字工厂` : ''
+  ].filter(Boolean);
+
+  return segments.length > 0
+    ? `已同步 ${segments.join('、')}`
+    : '暂未同步到可用的数字员工或数字工厂';
+}
+
 function readFactoryManifest(manifest: RoleTemplateDependencyManifest | undefined): DigitalFactoryManifest {
   const factory = manifest?.factory;
   if (!isPlainObject(factory)) {
@@ -15830,9 +17239,11 @@ function readFactoryManifest(manifest: RoleTemplateDependencyManifest | undefine
       defaultMode: readFactoryQualityModeKey(qualityCheck?.defaultMode),
       modes: readFactoryQualityModeOptionsFromValue(qualityCheck?.modes)
     },
-    promptControls: {
-      fields: readFactoryPromptControlFieldsFromValue(promptControls?.fields)
-    },
+    promptControls: promptControls
+      ? {
+          fields: readFactoryPromptControlFieldsFromValue(promptControls.fields)
+        }
+      : undefined,
     asr: {
       defaultLanguage: readString(isPlainObject(factory.asr) ? factory.asr.defaultLanguage : undefined),
       defaultDialect: readString(isPlainObject(factory.asr) ? factory.asr.defaultDialect : undefined),
@@ -15907,8 +17318,14 @@ function readFactoryOperationRatios(factory: DigitalFactoryManifest) {
   return factory.contentControls?.ratios?.length ? factory.contentControls.ratios : defaultFactoryOperationRatios;
 }
 
+function isReferenceImageVideoFactoryKind(kind: string | undefined): boolean {
+  return kind === 'ecommerce_product_video_factory' ||
+    kind === 'digital_spokesperson_video_factory' ||
+    kind === 'ad_social_media_video_factory';
+}
+
 function readFactoryVideoDurationOptions(factory: DigitalFactoryManifest): number[] {
-  if (factory.kind === 'ecommerce_product_video_factory') {
+  if (isReferenceImageVideoFactoryKind(factory.kind)) {
     return [6, 10];
   }
 
@@ -15919,6 +17336,9 @@ function readFactoryVideoDurationOptions(factory: DigitalFactoryManifest): numbe
 
 function readFactoryPromptControlFields(factory: DigitalFactoryManifest): DigitalFactoryPromptControlField[] {
   const manifestFields = factory.promptControls?.fields ?? [];
+  if (!factory.promptControls) {
+    return [];
+  }
   const fieldsByKey = new Map<string, DigitalFactoryPromptControlField>();
 
   for (const field of [...defaultFactoryPromptControlFields, ...manifestFields]) {
@@ -16006,6 +17426,15 @@ function isEcommerceProductVideoFactory(factory: DigitalFactoryManifest) {
   return readFactoryKind(factory) === 'ecommerce_product_video_factory';
 }
 
+function isReferenceImageVideoFactory(factory: DigitalFactoryManifest) {
+  return isReferenceImageVideoFactoryKind(readFactoryKind(factory));
+}
+
+function isImageGenerationFactory(factory: DigitalFactoryManifest) {
+  const kind = readFactoryKind(factory);
+  return kind === 'cross_border_product_image_factory' || kind.endsWith('_image_factory');
+}
+
 function isAcademicDemoFactory(factory: DigitalFactoryManifest) {
   return readFactoryKind(factory) === 'academic_project_demo_factory';
 }
@@ -16062,7 +17491,8 @@ function buildFactoryTaskInput({
     })),
     qualityCheckMode: values.qualityCheckMode ?? 'basic',
     qualityCheckLabel: qualityMode?.label ?? values.qualityCheckMode ?? 'basic',
-    enableImageUnderstanding: values.enableImageUnderstanding === true,
+    enableImageUnderstanding: false,
+    imageTextLanguage: isImageGenerationFactory(factory) ? values.promptLanguage?.trim() || '中文' : undefined,
     itemCount: imageAttachments.length,
     maxItems: readFactoryMaxItems(factory),
     output: {
@@ -16070,7 +17500,7 @@ function buildFactoryTaskInput({
       packageFormat: factory.output?.packageFormat ?? 'url_manifest',
       folder: factory.output?.folder ?? 'product-images'
     },
-    promptControls,
+    promptControls: isImageGenerationFactory(factory) ? undefined : promptControls,
     attachments: imageAttachments.map((attachment) => ({
       name: attachment.name,
       size: attachment.size,
@@ -16078,9 +17508,11 @@ function buildFactoryTaskInput({
       localPath: attachment.localPath,
       kind: 'product_image'
     })),
-    instruction: values.instruction?.trim() || undefined
+    instruction: isImageGenerationFactory(factory) ? undefined : values.instruction?.trim() || undefined
   };
-  const taskBrief = `请运行「${template.name}」，为 ${platform?.label ?? values.platform} 批量生成跨境商品图。`;
+  const taskBrief = isImageGenerationFactory(factory)
+    ? `请运行「${template.name}」，按 ${platform?.label ?? values.platform} 批量生成图片。`
+    : `请运行「${template.name}」，为 ${platform?.label ?? values.platform} 批量生成内容。`;
 
   return JSON.stringify(
     {
@@ -16091,11 +17523,15 @@ function buildFactoryTaskInput({
       qualityCheckMode: factoryRequest.qualityCheckMode,
       imageCount: imageAttachments.length,
       instructions: [
-        '按 factory_request 逐项处理每张商品图片。',
-        factoryRequest.enableImageUnderstanding
-          ? '已开启图片理解增强：先用图片理解模型分析商品图并生成分包提示词。'
-          : '未开启图片理解增强：直接使用平台、产物包和提示词控制生成基础生图提示词。',
-        '提示词生成必须优先遵守 factory_request.promptControls；不要出现的内容必须写入 negativePrompt。',
+        '按 factory_request 逐项处理每张参考图片。',
+        isImageGenerationFactory(factory)
+          ? '直接使用图片比例和产物包内置模板生成生图提示词。'
+          : factoryRequest.enableImageUnderstanding
+            ? '已开启图片理解增强：先用图片理解模型分析商品图并生成分包提示词。'
+            : '未开启图片理解增强：直接使用平台、产物包和提示词控制生成基础生图提示词。',
+        isImageGenerationFactory(factory)
+          ? '只使用当前产物包模板中的要求；不要额外要求用户编写复杂提示词。'
+          : '提示词生成必须优先遵守 factory_request.promptControls；不要出现的内容必须写入 negativePrompt。',
         '只生成用户勾选的产物包；不要生成未勾选的图片类型。',
         '生成结果只保存图片 URL 元数据；大图片不经过服务端，PC 端按 URL 展示缩略图。',
         '如果质检方式为 none，跳过额外智能质检；如果为 basic，只做文件数量、格式、命名检查。'
@@ -16117,7 +17553,14 @@ function buildEcommerceProductVideoFactoryTaskInput({
   values: FactoryRunFormValues;
   attachments: ComposerAttachment[];
 }) {
-  const platform = readFactoryPlatformOptions(factory).find((item) => item.key === values.platform);
+  const factoryKind = readFactoryKind(factory);
+  const ratio = readFactoryOperationRatios(factory).find((item) => item.key === values.videoRatio);
+  const platform = {
+    key: 'default_video_ratio',
+    label: '通用视频',
+    imageRatio: ratio?.key ?? values.videoRatio ?? '9:16',
+    notes: '按用户选择的画幅生成视频，发布前人工确认平台规则、版权和品牌表达。'
+  };
   const packageOptions = normalizeFactoryPackageDefinitions(
     values.packageDefinitions,
     readFactoryPackageOptions(factory)
@@ -16126,23 +17569,16 @@ function buildEcommerceProductVideoFactoryTaskInput({
   const selectedPackages = packageOptions.filter((item) => selectedPackageKeys.includes(item.key));
   const qualityMode = readFactoryQualityModes(factory).find((item) => item.key === values.qualityCheckMode);
   const imageAttachments = attachments.filter((attachment) => isFactoryImageAttachment(attachment));
-  const ratio = readFactoryOperationRatios(factory).find((item) => item.key === values.videoRatio);
   const durationOptions = readFactoryVideoDurationOptions(factory);
   const requestedDuration = Number(values.videoDurationSeconds);
   const videoDurationSeconds = durationOptions.includes(requestedDuration)
     ? requestedDuration
     : durationOptions[1] ?? durationOptions[0] ?? 8;
-  const promptControls = buildFactoryPromptControls(values);
   const factoryRequest = {
     applicationType: 'digital_factory',
-    factoryKind: 'ecommerce_product_video_factory',
+    factoryKind,
     factoryName: template.name,
-    platform: {
-      key: platform?.key ?? values.platform ?? 'tiktok_shop',
-      label: platform?.label ?? values.platform ?? 'TikTok Shop',
-      imageRatio: platform?.imageRatio,
-      notes: platform?.notes
-    },
+    platform,
     packages: selectedPackages.map((item) => ({
       key: item.key,
       label: item.label,
@@ -16168,17 +17604,15 @@ function buildEcommerceProductVideoFactoryTaskInput({
       packageFormat: factory.output?.packageFormat ?? 'url_manifest',
       videoFormat: factory.output?.videoFormat ?? 'mp4'
     },
-    promptControls,
     attachments: imageAttachments.map((attachment) => ({
       name: attachment.name,
       size: attachment.size,
       type: attachment.type,
       localPath: attachment.localPath,
       kind: 'product_image'
-    })),
-    instruction: values.instruction?.trim() || undefined
+    }))
   };
-  const taskBrief = `请运行「${template.name}」，为 ${factoryRequest.platform.label} 批量生成电商商品视频。`;
+  const taskBrief = `请运行「${template.name}」，批量生成视频。`;
 
   return JSON.stringify(
     {
@@ -16191,9 +17625,9 @@ function buildEcommerceProductVideoFactoryTaskInput({
       videoDurationSeconds,
       videoRatio: factoryRequest.videoGeneration.ratio,
       instructions: [
-        '按 factory_request 逐项处理每张商品图片。',
-        '只生成用户勾选的商品视频产物包；不要生成未勾选的视频类型。',
-        '提示词必须优先遵守 factory_request.promptControls 和 videoGeneration；画面文字必须使用指定语言，不需要文字时要明确避免画面文字。',
+        '按 factory_request 逐项处理每张参考图片。',
+        '只生成用户勾选的视频产物包；不要生成未勾选的视频类型。',
+        '生视频提示词必须以所选产物包 description 为核心，并遵守 videoGeneration 的时长和画幅。',
         '生成结果只保存视频 URL 元数据；大视频不经过服务端，PC 端按 URL 展示和导出。',
         '如果质检方式为 none，跳过额外智能质检；如果为 basic，只做产物数量、URL、命名和基础元数据检查。'
       ]
@@ -17298,7 +18732,7 @@ function createPresetModelFromCatalogEntry(
   const catalogCapabilities = readModelCatalogEntryEffectiveCapabilities(model);
   const usesManualFallback = catalogCapabilities.length === 0;
   const capabilities = usesManualFallback
-    ? normalizeModelCapabilities(fallbackCapabilities, fallbackPurpose)
+    ? normalizePrimaryModelCapabilities(fallbackCapabilities, fallbackPurpose)
     : catalogCapabilities;
   const purpose = purposeForModelCapabilities(capabilities, fallbackPurpose);
 
@@ -17470,48 +18904,28 @@ function uninstallRolePackageFromRuntimeState(
   };
 }
 
-function isRolePackageTemplateDeleted(
-  rolePackage: RolePackageManifest,
-  deletedTemplateIds: Set<string>
-): boolean {
-  return Boolean(rolePackage.templateId && deletedTemplateIds.has(rolePackage.templateId));
-}
-
 function pruneUnauthorizedRolePackages(
   state: DesktopRuntimeState,
   authorizedTemplates: DesktopRoleTemplate[],
-  deletedTemplateIds: string[] = [],
-  deviceCapacity?: DesktopDeviceCapacitySummary
+  _deletedTemplateIds: string[] = []
 ): DesktopRuntimeState {
   const authorizedRoleCodes = new Set(
     authorizedTemplates
       .filter((template) => canInstallRoleTemplate(template))
       .map((template) => template.roleCode)
   );
-  const deletedTemplateIdSet = new Set(deletedTemplateIds);
-  const rolePackages = restrictInstalledRolePackagesByDeviceCapacity(
-    state.rolePackages.filter((rolePackage) =>
-      authorizedRoleCodes.has(rolePackage.roleCode) ||
-      isRolePackageTemplateDeleted(rolePackage, deletedTemplateIdSet)
-    ),
-    deviceCapacity
-  );
-  const deletedRoleCodes = new Set(
-    rolePackages
-      .filter((rolePackage) => isRolePackageTemplateDeleted(rolePackage, deletedTemplateIdSet))
-      .map((rolePackage) => rolePackage.roleCode)
+  const rolePackages = state.rolePackages.filter((rolePackage) => authorizedRoleCodes.has(rolePackage.roleCode));
+  const keptRoleCodes = new Set(rolePackages.map((rolePackage) => rolePackage.roleCode));
+  const roleModelCredentialBindings = state.roleModelCredentialBindings.filter((binding) =>
+    keptRoleCodes.has(binding.roleCode)
   );
   const activeRoleIsAvailable =
     Boolean(state.localRuntime.activeRoleCode) &&
-    rolePackages.some(
-      (rolePackage) =>
-        rolePackage.roleCode === state.localRuntime.activeRoleCode &&
-        !deletedRoleCodes.has(rolePackage.roleCode)
-    );
+    rolePackages.some((rolePackage) => rolePackage.roleCode === state.localRuntime.activeRoleCode);
 
   if (
     rolePackages.length === state.rolePackages.length &&
-    deletedRoleCodes.size === 0 &&
+    roleModelCredentialBindings.length === state.roleModelCredentialBindings.length &&
     (!state.localRuntime.activeRoleCode || activeRoleIsAvailable)
   ) {
     return state;
@@ -17520,24 +18934,18 @@ function pruneUnauthorizedRolePackages(
   const activeRoleCode =
     state.localRuntime.activeRoleCode && activeRoleIsAvailable
       ? state.localRuntime.activeRoleCode
-      : rolePackages.find((rolePackage) => !deletedRoleCodes.has(rolePackage.roleCode))?.roleCode;
+      : rolePackages[0]?.roleCode;
   const rolePackageSummaries = rebuildRoleSummaries(
     rolePackages,
     state.runtimeSnapshot.tasks,
     state.runtimeSnapshot.rolePackages,
     activeRoleCode
-  ).map((summary) =>
-    deletedRoleCodes.has(summary.roleCode)
-      ? {
-          ...summary,
-          state: 'deleted' as const
-        }
-      : summary
   );
 
   return {
     ...state,
     rolePackages,
+    roleModelCredentialBindings,
     localRuntime: {
       ...state.localRuntime,
       installedRoleCodes: rolePackages.map((rolePackage) => rolePackage.roleCode),
@@ -17850,10 +19258,31 @@ function resolveModelProfileLabel(modelProfiles: ModelProfile[], profileId: stri
   return profile ? `${profile.providerName} / ${profile.modelName}` : profileId;
 }
 
+function modelRequirementSlotLabel(profile: ModelProfile): string {
+  if (profile.id === 'qiu-general-default') return '文本模型';
+  if (profile.id === 'qiu-reasoning-default') return '推理模型';
+  if (profile.id === 'qiu-vision-default') return '图片理解模型';
+  if (profile.id === 'qiu-image-generation-default') return '生图模型';
+  if (profile.id === 'qiu-image-editing-default') return '参考图编辑模型';
+  if (profile.id === 'qiu-video-generation-default') return '生视频模型';
+  if (profile.id === 'qiu-asr-default') return '语音转文字模型';
+  if (profile.id === 'qiu-embedding-default') return '向量模型';
+  if (profile.id === 'qiu-rerank-default') return '重排模型';
+  return modelCapabilitySummary(profile.capabilities, profile.purpose) || profile.modelName || profile.id;
+}
+
 function getRuntimeRequirementEffectiveProfile(
   requirement: RoleModelRuntimeRequirementStatus
 ): ModelProfile {
-  return requirement.runtimeProfile ?? requirement.profile;
+  const runtimeProfile = requirement.runtimeProfile;
+  if (!runtimeProfile) {
+    return requirement.profile;
+  }
+
+  const requiredCapabilities = readRequiredCapabilitiesForRuntimeRequirementProfile(requirement.profile);
+  return modelProfileSupportsRequiredCapabilities(runtimeProfile, requiredCapabilities)
+    ? runtimeProfile
+    : requirement.profile;
 }
 
 function findIncompatibleRuntimeModelSelection(input: {

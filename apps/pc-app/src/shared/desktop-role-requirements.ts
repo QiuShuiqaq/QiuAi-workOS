@@ -62,21 +62,7 @@ export function readWorkflowRequiredModelProfileIds(workflowGraph: unknown): str
 export function readRequiredModelProfileIdsForRolePackage(
   rolePackage: Pick<RolePackageManifest, 'modelProfileIds' | 'workflowGraph' | 'dependencyManifest'>
 ): string[] {
-  const manifestModelProfileIds = readDependencyManifestModelProfileIds(rolePackage.dependencyManifest);
-  if (manifestModelProfileIds.length > 0) {
-    return manifestModelProfileIds;
-  }
-
-  const declaredModelProfileIds = rolePackage.modelProfileIds
-    .map((profileId) => profileId.trim())
-    .map(mapModelProfileIdToSemanticDefault)
-    .filter(Boolean);
-  const workflowModelProfileIds = readWorkflowRequiredModelProfileIds(rolePackage.workflowGraph);
-
-  return mergeUniqueStrings(
-    declaredModelProfileIds.length > 0 ? declaredModelProfileIds : ['qiu-general-default'],
-    workflowModelProfileIds
-  );
+  return readWorkflowRequiredModelProfileIds(rolePackage.workflowGraph);
 }
 
 export function ensureModelProfilesForRolePackage(
@@ -100,9 +86,14 @@ export function getRoleModelRequirementStatuses(
   const nodeIdsByModelId = readModelNodeIdsByModelProfileId(rolePackage);
 
   return readRequiredModelProfileIdsForRolePackage(rolePackage).map((profileId) => {
-    const profile = knownProfilesById.get(profileId);
-    const normalizedProfile = profile ?? createPlaceholderModelProfile(profileId);
-    const configured = hasConfiguredModelApi(normalizedProfile, {
+    const configuredProfile = knownProfilesById.get(profileId);
+    const requirementProfile = createPlaceholderModelProfile(profileId);
+    const directProfile = configuredProfile ?? requirementProfile;
+    const requiredCapabilities = getRequiredCapabilitiesForSemanticProfileId(requirementProfile.id);
+    const directCompatible =
+      requiredCapabilities.length === 0 ||
+      modelProfileSupportsAnyCapability(directProfile, requiredCapabilities);
+    const configured = directCompatible && hasConfiguredModelApi(directProfile, {
       roleCode: credentialContext.roleCode ?? rolePackage.roleCode,
       credentials: credentialContext.credentials,
       roleBindings: credentialContext.roleBindings
@@ -115,10 +106,10 @@ export function getRoleModelRequirementStatuses(
           roleBindings: credentialContext.roleBindings
         });
     return {
-      profile: normalizedProfile,
+      profile: requirementProfile,
       requiredByNodeIds: nodeIdsByModelId.get(profileId) ?? [],
       configured: configured || Boolean(compatibleConfiguredProfile),
-      known: Boolean(profile || compatibleConfiguredProfile)
+      known: Boolean(configuredProfile || compatibleConfiguredProfile || isSemanticModelProfileId(profileId))
     };
   });
 }
@@ -130,6 +121,7 @@ export function getRoleModelRuntimeRequirementStatuses(
   credentialContext: RoleModelCredentialContext = {}
 ): RoleModelRuntimeRequirementStatus[] {
   const enabledIds = new Set(enabledModelProfileIds);
+  const modelProfileById = new Map(modelProfiles.map((profile) => [profile.id, profile]));
 
   return getRoleModelRequirementStatuses(modelProfiles, rolePackage, credentialContext).map((requirement) => {
     const runtimeProfileId = findRuntimeModelProfileIdForRequirement(
@@ -137,26 +129,36 @@ export function getRoleModelRuntimeRequirementStatuses(
       credentialContext.roleCode ?? rolePackage.roleCode,
       requirement.profile.id
     );
-    const runtimeProfile = runtimeProfileId
-      ? modelProfiles.find((profile) => profile.id === runtimeProfileId)
-      : undefined;
+    const directRuntimeProfile = runtimeProfileId
+      ? modelProfileById.get(runtimeProfileId)
+      : modelProfileById.get(requirement.profile.id);
     const runtimeOverrideSelected = Boolean(
       runtimeProfileId &&
       runtimeProfileId !== requirement.profile.id
     );
     const requiredCapabilities = getRequiredCapabilitiesForSemanticProfileId(requirement.profile.id);
-    const selectedRuntimeProfile = runtimeOverrideSelected ? runtimeProfile : requirement.profile;
+    const directRuntimeCompatible =
+      !directRuntimeProfile ||
+      requiredCapabilities.length === 0 ||
+      modelProfileSupportsAnyCapability(directRuntimeProfile, requiredCapabilities);
+    const directRuntimeConfigured = directRuntimeProfile
+      ? hasConfiguredModelApi(directRuntimeProfile, credentialContext)
+      : false;
+    const compatibleConfiguredRuntimeProfile =
+      runtimeOverrideSelected || (directRuntimeCompatible && directRuntimeConfigured)
+        ? undefined
+        : findConfiguredCompatibleModelProfile(modelProfiles, requirement.profile.id, credentialContext);
+    const runtimeProfile = compatibleConfiguredRuntimeProfile ?? directRuntimeProfile;
+    const selectedRuntimeProfile = runtimeProfile ?? requirement.profile;
     const runtimeCompatible =
       !selectedRuntimeProfile ||
       requiredCapabilities.length === 0 ||
       modelProfileSupportsAnyCapability(selectedRuntimeProfile, requiredCapabilities);
     const known = runtimeOverrideSelected ? Boolean(runtimeProfile) : requirement.known;
-    const configured = runtimeOverrideSelected && runtimeProfile
+    const configured = runtimeProfile
       ? hasConfiguredModelApi(runtimeProfile, credentialContext)
       : requirement.configured;
-    const enabledProfileId = runtimeOverrideSelected
-      ? runtimeProfile?.id
-      : requirement.profile.id;
+    const enabledProfileId = runtimeProfile?.id ?? requirement.profile.id;
     const enabled = known && Boolean(enabledProfileId && enabledIds.has(enabledProfileId));
     const ready = known && runtimeCompatible && enabled && configured;
 
@@ -179,6 +181,20 @@ export function getRoleModelRuntimeRequirementStatuses(
             : 'unconfigured'
     };
   });
+}
+
+function isSemanticModelProfileId(profileId: string): boolean {
+  return [
+    'qiu-general-default',
+    'qiu-reasoning-default',
+    'qiu-vision-default',
+    'qiu-image-generation-default',
+    'qiu-image-editing-default',
+    'qiu-video-generation-default',
+    'qiu-asr-default',
+    'qiu-embedding-default',
+    'qiu-rerank-default'
+  ].includes(profileId.trim());
 }
 
 export function findFirstUnconfiguredRequiredModelProfileId(
@@ -306,69 +322,7 @@ function readWorkflowModelNodeIdsByModelProfileId(workflowGraph: unknown): Map<s
 function readModelNodeIdsByModelProfileId(
   rolePackage: Pick<RolePackageManifest, 'workflowGraph' | 'dependencyManifest'>
 ): Map<string, string[]> {
-  const manifestNodeIds = readDependencyManifestModelNodeIdsByModelProfileId(rolePackage.dependencyManifest);
-  return manifestNodeIds.size > 0 ? manifestNodeIds : readWorkflowModelNodeIdsByModelProfileId(rolePackage.workflowGraph);
-}
-
-function readDependencyManifestModelProfileIds(
-  manifest: RolePackageManifest['dependencyManifest']
-): string[] {
-  if (!manifest?.modelAssets?.length) {
-    return [];
-  }
-
-  return mergeUniqueStrings(
-    manifest.modelAssets
-      .filter((asset) => asset.required !== false)
-      .map(readDependencyManifestSemanticModelProfileId)
-      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
-    []
-  );
-}
-
-function readDependencyManifestModelNodeIdsByModelProfileId(
-  manifest: RolePackageManifest['dependencyManifest']
-): Map<string, string[]> {
-  const result = new Map<string, string[]>();
-  if (!manifest?.modelAssets?.length) {
-    return result;
-  }
-
-  for (const asset of manifest.modelAssets) {
-    if (asset.required === false) {
-      continue;
-    }
-
-    const profileId = readDependencyManifestSemanticModelProfileId(asset);
-    if (!profileId) {
-      continue;
-    }
-
-    result.set(profileId, mergeUniqueStrings(result.get(profileId) ?? [], asset.nodeIds ?? []));
-  }
-
-  return result;
-}
-
-function readDependencyManifestSemanticModelProfileId(
-  asset: NonNullable<RolePackageManifest['dependencyManifest']>['modelAssets'][number]
-): string {
-  const declaredProfileId = asset.modelProfileId || asset.modelId || asset.key;
-  const declaredSemanticProfileId = mapModelProfileIdToSemanticDefault(declaredProfileId);
-  if (declaredProfileId.trim().toLowerCase().startsWith('qiu-')) {
-    return declaredSemanticProfileId;
-  }
-
-  const capabilityProfileId = getSemanticModelProfileIdForCapabilities({
-    capabilities: asset.capabilities,
-    inputTypes: asset.inputTypes,
-    outputTypes: asset.outputTypes
-  });
-  if (capabilityProfileId) {
-    return capabilityProfileId;
-  }
-
-  return declaredSemanticProfileId;
+  return readWorkflowModelNodeIdsByModelProfileId(rolePackage.workflowGraph);
 }
 
 function readConfigString(config: Record<string, unknown> | undefined, key: string): string | undefined {
@@ -422,50 +376,6 @@ function workflowNodeUsesReferenceImage(node: WorkflowGraphNode): boolean {
   });
 }
 
-function getSemanticModelProfileIdForCapabilities(input: {
-  capabilities?: string[];
-  inputTypes?: string[];
-  outputTypes?: string[];
-}): string | undefined {
-  const capabilities = new Set((input.capabilities ?? []).map(normalizeModelRequirementToken));
-  const inputTypes = new Set((input.inputTypes ?? []).map(normalizeModelRequirementToken));
-  const outputTypes = new Set((input.outputTypes ?? []).map(normalizeModelRequirementToken));
-
-  if (capabilities.has('audio_to_text')) return 'qiu-asr-default';
-  if (capabilities.has('embedding') || outputTypes.has('embedding')) return 'qiu-embedding-default';
-  if (capabilities.has('rerank') || outputTypes.has('scores')) return 'qiu-rerank-default';
-  if (
-    capabilities.has('image_editing') ||
-    capabilities.has('image_to_image') ||
-    (inputTypes.has('image') && outputTypes.has('image'))
-  ) {
-    return 'qiu-image-editing-default';
-  }
-  if (capabilities.has('text_to_image') || (outputTypes.has('image') && !inputTypes.has('image'))) {
-    return 'qiu-image-generation-default';
-  }
-  if (capabilities.has('video_generation') || capabilities.has('text_to_video') || capabilities.has('image_to_video') || outputTypes.has('video')) {
-    return 'qiu-video-generation-default';
-  }
-  if (
-    capabilities.has('image_understanding') ||
-    capabilities.has('vision_understanding') ||
-    capabilities.has('vision_text') ||
-    (inputTypes.has('image') && (outputTypes.has('text') || outputTypes.has('json')))
-  ) {
-    return 'qiu-vision-default';
-  }
-  if (capabilities.has('video_understanding') || inputTypes.has('video')) return 'qiu-vision-default';
-  if (capabilities.has('reasoning') || capabilities.has('reasoning_text')) {
-    return 'qiu-reasoning-default';
-  }
-  if (capabilities.has('text')) {
-    return 'qiu-general-default';
-  }
-
-  return undefined;
-}
-
 function mapModelProfileIdToSemanticDefault(profileId: string): string {
   const normalized = profileId.trim().toLowerCase();
   if (!normalized) return '';
@@ -506,10 +416,6 @@ function mapModelProfileIdToSemanticDefault(profileId: string): string {
   if (normalized.includes('embedding') || normalized.includes('embed')) return 'qiu-embedding-default';
   if (normalized.includes('rerank')) return 'qiu-rerank-default';
   return 'qiu-general-default';
-}
-
-function normalizeModelRequirementToken(value: string): string {
-  return value.trim().toLowerCase().replace(/[-\s]+/g, '_');
 }
 
 function inferModelProviderFromProfileId(profileId: string): {

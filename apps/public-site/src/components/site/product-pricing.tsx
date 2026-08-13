@@ -67,6 +67,24 @@ function entitlementValue(plan: PublicPlan | undefined, featureKey: string, lang
   return entitlement.limitValue.toLocaleString(lang === "zh" ? "zh-CN" : "en-US");
 }
 
+function factoryAccessText(groupKey: string, lang: SiteLanguage) {
+  const zhText =
+    {
+      FREE: "数字工厂：暂不开放",
+      BASIC: "数字工厂：基础开放",
+      STANDARD: "数字工厂：标准开放",
+      PRO: "数字工厂：全量开放",
+    }[groupKey] ?? "数字工厂：按套餐开放";
+  const enText =
+    {
+      FREE: "Digital factories: not included",
+      BASIC: "Digital factories: basic access",
+      STANDARD: "Digital factories: standard access",
+      PRO: "Digital factories: full access",
+    }[groupKey] ?? "Digital factories: plan-based access";
+  return lang === "zh" ? zhText : enText;
+}
+
 function priceDetails(plan: PublicPlan | undefined, period: BillingPeriod, lang: SiteLanguage) {
   if (plan?.billingCycle === "FREE") {
     return {
@@ -179,16 +197,12 @@ export function ProductPricing({
                   <dd>{entitlementValue(plan, "maxDesktopDevices", lang)}</dd>
                 </div>
                 <div>
-                  <dt>{isZh ? "每台设备数字员工" : "Workers per device"}</dt>
-                  <dd>{entitlementValue(plan, "maxRoleInstances", lang)}</dd>
+                  <dt>{isZh ? "数字员工" : "Digital workers"}</dt>
+                  <dd>{isZh ? "全部开放" : "Included"}</dd>
                 </div>
                 <div>
-                  <dt>{isZh ? "每台设备数字工厂" : "Factories per device"}</dt>
-                  <dd>{entitlementValue(plan, "maxDigitalFactories", lang)}</dd>
-                </div>
-                <div>
-                  <dt>{isZh ? "企业成员" : "Members"}</dt>
-                  <dd>{entitlementValue(plan, "maxMembers", lang)}</dd>
+                  <dt>{isZh ? "数字工厂" : "Digital factories"}</dt>
+                  <dd>{factoryAccessText(group.key, lang)}</dd>
                 </div>
               </dl>
               <a className={group.highlight ? "is-primary" : undefined} href={targetUrl}>

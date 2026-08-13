@@ -18,6 +18,7 @@ import {
 } from '../../shared/role-template-access-policy';
 import {
   buildRoleTemplateDependencyManifest,
+  validateRoleTemplateModelContracts,
   type RoleTemplateDependencyAsset
 } from '../../shared/role-template-dependencies';
 import {
@@ -2195,6 +2196,12 @@ export class RoleTemplateFactoryService {
       const graph = normalizeWorkflowGraph(template.workflowGraph, workflowSteps);
       issues.push(
         ...this.validateWorkflowGraphToolActions(graph, new Set(this.toStringArray(template.tools)))
+      );
+      issues.push(
+        ...validateRoleTemplateModelContracts({
+          workflowGraph: graph,
+          dependencyManifest: template.dependencyManifest
+        })
       );
     } catch (error) {
       issues.push(error instanceof Error ? error.message : 'Template workflow graph is invalid.');

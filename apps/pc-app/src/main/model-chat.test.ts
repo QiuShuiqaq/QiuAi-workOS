@@ -45,7 +45,7 @@ try {
   assert.equal(catalog.models.length, 4);
   assert.deepEqual(
     catalog.models.find((model) => model.id === 'deepseek-v4-pro')?.capabilities,
-    ['reasoning_text', 'text']
+    ['reasoning_text']
   );
   assert.deepEqual(
     catalog.models.find((model) => model.id === 'text-embedding-3-large')?.capabilities,
@@ -297,6 +297,156 @@ try {
     configurable: true,
     value: originalAbortSignalTimeout
   });
+}
+
+let capturedGrsaiGenerationBody: Record<string, unknown> | undefined;
+const grsaiGenerationTempDir = mkdtempSync(path.join(os.tmpdir(), 'qiuai-grsai-image-'));
+const grsaiGenerationImagePath = path.join(grsaiGenerationTempDir, 'product.jpg');
+writeFileSync(grsaiGenerationImagePath, Buffer.from([4, 5, 6]));
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = String(input);
+  if (url.endsWith('/api/generate')) {
+    capturedGrsaiGenerationBody = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
+    return new Response(
+      JSON.stringify({
+        id: 'grsai-image-job-001',
+        status: 'pending'
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    );
+  }
+
+  return new Response(JSON.stringify({ status: 'pending' }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' }
+  });
+}) as typeof fetch;
+
+try {
+  const response = await invokeOpenAiCompatibleModelChat({
+    profile: {
+      id: 'grsai-image-profile',
+      providerId: 'grsai',
+      providerName: 'GrsAI',
+      modelName: 'gpt-image-2',
+      purpose: 'vision',
+      capabilities: ['image_generation', 'image_editing'],
+      apiBaseUrl: 'https://grsai.dakka.com.cn/v1',
+      apiKey: 'image-key'
+    },
+    taskKind: 'image_generation',
+    imageGeneration: {
+      prompt: '生成1:1比例的电商商品图片。\n图片文字语言：中文。',
+      sourceImagePath: grsaiGenerationImagePath,
+      aspectRatio: '1:1',
+      responseFormat: 'url',
+      asyncMode: 'submit_only'
+    },
+    messages: [{ role: 'user', content: 'Generate image.' }]
+  });
+
+  assert.equal(capturedGrsaiGenerationBody?.model, 'gpt-image-2');
+  assert.equal(capturedGrsaiGenerationBody?.prompt, '生成1:1比例的电商商品图片。\n图片文字语言：中文。');
+  assert.equal(capturedGrsaiGenerationBody?.aspectRatio, '1024x1024');
+  assert.equal(capturedGrsaiGenerationBody?.imageSize, undefined);
+  assert.equal(capturedGrsaiGenerationBody?.replyType, 'json');
+  assert.ok(Array.isArray(capturedGrsaiGenerationBody?.images));
+  assert.equal(response.artifacts?.[0]?.providerJobId, 'grsai-image-job-001');
+} finally {
+  globalThis.fetch = originalFetch;
+  rmSync(grsaiGenerationTempDir, { recursive: true, force: true });
+}
+
+let capturedNanoBananaGenerationBody: Record<string, unknown> | undefined;
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  if (String(input).endsWith('/api/generate')) {
+    capturedNanoBananaGenerationBody = init?.body
+      ? JSON.parse(String(init.body)) as Record<string, unknown>
+      : undefined;
+    return new Response(
+      JSON.stringify({
+        id: 'grsai-nano-banana-job-001',
+        status: 'pending'
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    );
+  }
+
+  return new Response(JSON.stringify({ status: 'pending' }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' }
+  });
+}) as typeof fetch;
+
+try {
+  await invokeOpenAiCompatibleModelChat({
+    profile: {
+      id: 'grsai-nano-banana-profile',
+      providerId: 'grsai',
+      providerName: 'GrsAI',
+      modelName: 'nano-banana-2',
+      purpose: 'vision',
+      capabilities: ['image_generation', 'image_editing'],
+      apiBaseUrl: 'https://grsai.dakka.com.cn/v1',
+      apiKey: 'image-key'
+    },
+    taskKind: 'image_generation',
+    imageGeneration: {
+      prompt: '生成一张1:1比例的电商商品图片。',
+      aspectRatio: '1:1',
+      responseFormat: 'url',
+      asyncMode: 'submit_only'
+    },
+    messages: [{ role: 'user', content: 'Generate image.' }]
+  });
+
+  assert.equal(capturedNanoBananaGenerationBody?.model, 'nano-banana-2');
+  assert.equal(capturedNanoBananaGenerationBody?.aspectRatio, '1:1');
+  assert.equal(capturedNanoBananaGenerationBody?.imageSize, '1K');
+  assert.equal(capturedNanoBananaGenerationBody?.replyType, 'json');
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+globalThis.fetch = (async (input: RequestInfo | URL) => {
+  assert.match(String(input), /\/api\/result\?id=grsai-violation-job-001$/);
+  return new Response(
+    JSON.stringify({
+      id: 'grsai-violation-job-001',
+      status: 'violation',
+      error: {
+        message: 'prompt rejected by provider safety policy'
+      }
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+}) as typeof fetch;
+
+try {
+  await assert.rejects(
+    () => invokeOpenAiCompatibleModelChat({
+      profile: {
+        id: 'grsai-violation-profile',
+        providerId: 'grsai',
+        providerName: 'GrsAI',
+        modelName: 'gpt-image-2',
+        purpose: 'vision',
+        capabilities: ['image_generation'],
+        apiBaseUrl: 'https://grsai.dakka.com.cn/v1',
+        apiKey: 'image-key'
+      },
+      taskKind: 'image_generation',
+      imageGeneration: {
+        prompt: 'Generate image.',
+        asyncMode: 'poll_once',
+        providerJobId: 'grsai-violation-job-001'
+      },
+      messages: [{ role: 'user', content: 'Poll image.' }]
+    }),
+    /GrsAI image task failed: prompt rejected by provider safety policy/
+  );
+} finally {
+  globalThis.fetch = originalFetch;
 }
 
 const grsaiModelListUrls: string[] = [];

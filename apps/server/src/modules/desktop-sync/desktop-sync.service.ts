@@ -13,6 +13,7 @@ import { Prisma } from '@prisma/client';
 
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
 import { demoPlans } from '../../shared/mock/platform-seed';
+import { isLocalDevelopmentUnlimitedEnabled } from '../../shared/local-development-mode';
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { listServerToolActionCatalog } from '../../shared/tool-action-catalog';
@@ -189,6 +190,20 @@ export class DesktopSyncService {
   ) {
     const deletedTemplateIds = await this.roleService.listDeletedTemplateIds(installedTemplateIds);
 
+    if (isLocalDevelopmentUnlimitedEnabled()) {
+      if (isDatabasePersistenceEnabled()) {
+        await this.requireDatabaseDeviceTokenForWorkspace(workspaceId, deviceToken);
+      } else {
+        this.assertMockWorkspace(workspaceId);
+        this.requireMockDeviceTokenForWorkspace(workspaceId, deviceToken, new Date());
+      }
+
+      return {
+        ...(await this.roleService.listAllPublishedTemplatesForLocalDevelopment()),
+        deletedTemplateIds
+      };
+    }
+
     if (isDatabasePersistenceEnabled()) {
       await this.requireDatabaseDeviceTokenForWorkspace(workspaceId, deviceToken);
       const [response, deviceCapacity] = await Promise.all([
@@ -226,6 +241,17 @@ export class DesktopSyncService {
   }
 
   async listPublicFreeRoleTemplates(installedTemplateIds: string[] = []) {
+    if (isLocalDevelopmentUnlimitedEnabled()) {
+      const [response, deletedTemplateIds] = await Promise.all([
+        this.roleService.listAllPublishedTemplatesForLocalDevelopment(),
+        this.roleService.listDeletedTemplateIds(installedTemplateIds)
+      ]);
+      return {
+        ...response,
+        deletedTemplateIds
+      };
+    }
+
     const [response, deletedTemplateIds, deviceCapacity] = await Promise.all([
       this.roleService.listPublicFreeTemplatesForDesktop(),
       this.roleService.listDeletedTemplateIds(installedTemplateIds),
@@ -1060,21 +1086,18 @@ export class DesktopSyncService {
     workspaceId: string,
     snapshot: DesktopRuntimeSnapshot
   ): Promise<DesktopRuntimeSnapshot> {
-    const [authorizedTemplates, deviceCapacity] = await Promise.all([
-      this.roleService.listPublishedTemplatesForDesktop(workspaceId),
-      this.resolveDesktopDeviceCapacity(workspaceId)
-    ]);
+    if (isLocalDevelopmentUnlimitedEnabled()) {
+      return snapshot;
+    }
+
+    const authorizedTemplates = await this.roleService.listPublishedTemplatesForDesktop(workspaceId);
     const authorizedTemplateById = new Map(
       authorizedTemplates.data
         .filter((template) => template.canInstall !== false)
         .map((template) => [template.id, template] as const)
     );
-    const rolePackages = this.restrictRolePackagesByDeviceCapacity(
-      snapshot.rolePackages.filter(
-        (rolePackage) => rolePackage.templateId && authorizedTemplateById.has(rolePackage.templateId)
-      ),
-      authorizedTemplateById,
-      deviceCapacity
+    const rolePackages = snapshot.rolePackages.filter(
+      (rolePackage) => rolePackage.templateId && authorizedTemplateById.has(rolePackage.templateId)
     );
 
     if (rolePackages.length === snapshot.rolePackages.length) {
@@ -1087,37 +1110,6 @@ export class DesktopSyncService {
       rolePackages,
       tasks: snapshot.tasks.filter((task) => authorizedRoleCodes.has(task.roleCode))
     };
-  }
-
-  private restrictRolePackagesByDeviceCapacity(
-    rolePackages: DesktopRuntimeSnapshot['rolePackages'],
-    authorizedTemplateById: Map<string, { applicationType?: string }>,
-    deviceCapacity?: DesktopDeviceCapacitySummary
-  ): DesktopRuntimeSnapshot['rolePackages'] {
-    const limits: Record<DesktopApplicationType, number | undefined> = {
-      digital_employee: deviceCapacity?.maxRoleInstances,
-      digital_factory: deviceCapacity?.maxDigitalFactories
-    };
-    const used: Record<DesktopApplicationType, number> = {
-      digital_employee: 0,
-      digital_factory: 0
-    };
-
-    return rolePackages.filter((rolePackage) => {
-      if (rolePackage.state === 'deleted') {
-        return true;
-      }
-
-      const template = rolePackage.templateId ? authorizedTemplateById.get(rolePackage.templateId) : undefined;
-      const applicationType = this.toDesktopApplicationType(template?.applicationType);
-      const limit = limits[applicationType];
-      if (limit !== undefined && used[applicationType] >= limit) {
-        return false;
-      }
-
-      used[applicationType] += 1;
-      return true;
-    });
   }
 
   private async resolveDesktopDeviceCapacity(workspaceId: string): Promise<DesktopDeviceCapacitySummary | undefined> {

@@ -109,7 +109,7 @@ assert.ok(deepSeekProSelection);
 assert.equal(deepSeekProSelection.profile.id, 'qiu-reasoning-default');
 assert.equal(deepSeekProSelection.profile.providerId, 'deepseek');
 assert.equal(deepSeekProSelection.profile.modelName, 'deepseek-v4-pro');
-assert.deepEqual(deepSeekProSelection.profile.capabilities, ['reasoning_text', 'text']);
+assert.deepEqual(deepSeekProSelection.profile.capabilities, ['reasoning_text']);
 assert.equal(
   deepSeekProSelection.modelProfiles.find((profile) => profile.id === 'qiu-general-default')?.modelName,
   'deepseek-v4-flash'
@@ -221,7 +221,9 @@ const secondCustomProfile = createCustomCompatibleModelProfile([firstCustomProfi
 
 assert.equal(firstCustomProfile.providerName, 'GrsAI');
 assert.equal(firstCustomProfile.modelName, 'gpt-image-2');
+assert.deepEqual(firstCustomProfile.capabilities, ['image_generation']);
 assert.equal(firstCustomProfile.providerId, 'custom-grsai');
+assert.deepEqual(secondCustomProfile.capabilities, ['image_editing']);
 assert.equal(secondCustomProfile.providerId, 'custom-grsai-2');
 assert.notEqual(firstCustomProfile.id, secondCustomProfile.id);
 
@@ -256,7 +258,7 @@ assert.equal(customReplacementSelection.profile.id, firstCustomProfile.id);
 assert.equal(customReplacementSelection.profile.providerId, firstCustomProfile.providerId);
 assert.equal(customReplacementSelection.profile.providerName, 'GrsAI');
 assert.equal(customReplacementSelection.profile.modelName, 'nano-banana-2');
-assert.deepEqual(customReplacementSelection.profile.capabilities, ['image_to_image']);
+assert.deepEqual(customReplacementSelection.profile.capabilities, ['image_editing']);
 
 assert.equal(
   modelProfileSupportsRequiredCapabilities(
@@ -276,6 +278,10 @@ assert.equal(
 );
 assert.equal(
   modelProfileSupportsRequiredCapabilities(firstCustomProfile, ['image_editing', 'image_to_image']),
+  false
+);
+assert.equal(
+  modelProfileSupportsRequiredCapabilities(secondCustomProfile, ['image_editing', 'image_to_image']),
   true
 );
 

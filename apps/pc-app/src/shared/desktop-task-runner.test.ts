@@ -3430,6 +3430,7 @@ const factoryTask = await runDesktopTask({
         assert.ok(request.imageGeneration?.prompt);
         assert.match(request.imageGeneration?.prompt ?? '', /Text language: English/);
         assert.equal(request.imageGeneration?.negativePrompt, 'watermark, malformed logo');
+        assert.equal(request.imageGeneration?.aspectRatio, '1:1');
         assert.match(request.imageGeneration?.sourceImagePath ?? '', /sku-[12]\.png/);
         assert.match(request.messages[1]?.content ?? '', /Source image local path/);
         assert.match(request.messages[1]?.content ?? '', /Package:/);
@@ -3923,7 +3924,7 @@ const legacyImageFactoryTask = await runDesktopTask({
       factory_request: {
         platform: { key: 'amazon', label: 'Amazon', imageRatio: '1:1' },
         packages: [
-          { key: 'main_image', label: 'Main image', description: 'Marketplace main product image.' }
+          { key: 'character_illustration', label: '角色立绘', description: 'Anime character illustration.' }
         ]
       }
     }),
@@ -4092,12 +4093,13 @@ let imageFactoryOutputUnexpectedModelCalls = 0;
 const imageFactoryOutputTask = await runDesktopTask({
   task: createMockTaskDetail({
     taskId: 'task-runner-image-factory-output-no-model-001',
-    roleCode: 'cross-border-image-factory',
-    roleName: 'AI Ecommerce Image Factory',
-    title: 'Return generated product image without extra model call',
+    roleCode: 'anime-image-factory',
+    roleName: 'AI动漫图片工厂',
+    title: 'Return generated anime image without extra model call',
     input: JSON.stringify({
       factory_request: {
-        factoryKind: 'cross_border_product_image_factory',
+        factoryKind: 'anime_image_factory',
+        factoryName: 'AI动漫图片工厂',
         qualityCheckMode: 'basic',
         platform: { key: 'amazon', label: 'Amazon', imageRatio: '1:1' },
         packages: [
@@ -4116,11 +4118,11 @@ const imageFactoryOutputTask = await runDesktopTask({
     }
   }),
   rolePackage: {
-    roleCode: 'cross-border-image-factory',
+    roleCode: 'anime-image-factory',
     applicationType: 'digital_factory',
-    name: 'AI Ecommerce Image Factory',
+    name: 'AI动漫图片工厂',
     version: '1.0.0',
-    templateId: 'factory_cross_border_product_images_v1',
+    templateId: 'factory_anime_images_v1',
     workflowGraph: {
       version: '1.0.0',
       entryNodeId: 'start',

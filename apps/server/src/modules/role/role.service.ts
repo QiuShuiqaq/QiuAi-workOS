@@ -12,11 +12,17 @@ import {
   normalizeWorkflowGraphOrFallback,
   type WorkflowStepLike
 } from '../../shared/workflow-graph';
+import { buildRoleTemplateDependencyManifest } from '../../shared/role-template-dependencies';
 import {
   buildRoleTemplateExecutionProfile,
   readRoleTemplateExecutionProfile,
   type ServerRoleTemplateExecutionProfile
 } from '../../shared/role-template-execution-profile';
+import { resolveRoleTemplateOutputCategory } from '../../shared/role-template-output-category';
+import { retiredServerRoleTemplateIds } from '../../shared/role-template-catalog';
+
+const retiredDesktopTemplateIds = [...retiredServerRoleTemplateIds];
+const retiredDesktopTemplateIdSet = new Set<string>(retiredDesktopTemplateIds);
 
 const workflowStepTypeSet = new Set<string>([
   'input',
@@ -147,6 +153,7 @@ export class RoleService {
         data: this.store
           .listRoleTemplates()
           .filter((template) => template.status === 'PUBLISHED')
+          .filter((template) => !this.isRetiredDesktopTemplate(template))
           .filter((template) =>
             this.canWorkspaceSeeDesktopTemplate(template, workspaceId, {
               includeWorkspaceVisibility: access.includeWorkspaceVisibility
@@ -158,7 +165,10 @@ export class RoleService {
 
     const templates = await this.prismaService.roleTemplate.findMany({
       where: {
-        status: 'PUBLISHED'
+        status: 'PUBLISHED',
+        id: {
+          notIn: retiredDesktopTemplateIds
+        }
       },
       orderBy: [
         {
@@ -186,8 +196,43 @@ export class RoleService {
       return {
         data: this.store
           .listRoleTemplates()
+          .filter((template) => !this.isRetiredDesktopTemplate(template))
           .filter((template) => this.isPublicDesktopTemplate(template))
           .map((template) => this.toPublicDesktopTemplateSummary(template))
+      };
+    }
+
+    const templates = await this.prismaService.roleTemplate.findMany({
+      where: {
+        status: 'PUBLISHED',
+        id: {
+          notIn: retiredDesktopTemplateIds
+        }
+      },
+      orderBy: [
+        {
+          publishedAt: 'desc'
+        },
+        {
+          createdAt: 'asc'
+        }
+      ]
+    });
+
+    return {
+      data: templates
+        .filter((template) => this.isPublicDesktopTemplate(template))
+      .map((template) => this.toPublicDesktopTemplateSummary(template))
+    };
+  }
+
+  async listAllPublishedTemplatesForLocalDevelopment() {
+    if (!isDatabasePersistenceEnabled()) {
+      return {
+        data: this.store
+          .listRoleTemplates()
+          .filter((template) => template.status === 'PUBLISHED')
+          .map((template) => this.toTemplateSummary(template, { canInstall: true }))
       };
     }
 
@@ -206,9 +251,7 @@ export class RoleService {
     });
 
     return {
-      data: templates
-        .filter((template) => this.isPublicDesktopTemplate(template))
-        .map((template) => this.toPublicDesktopTemplateSummary(template))
+      data: templates.map((template) => this.toTemplateSummary(template, { canInstall: true }))
     };
   }
 
@@ -217,13 +260,17 @@ export class RoleService {
     if (normalizedTemplateIds.length === 0) {
       return [];
     }
+    const retiredTemplateIds = normalizedTemplateIds.filter((templateId) =>
+      retiredDesktopTemplateIdSet.has(templateId)
+    );
 
     if (!isDatabasePersistenceEnabled()) {
-      return this.store
+      const deletedTemplateIds = this.store
         .listRoleTemplates()
         .filter((template) => normalizedTemplateIds.includes(template.id))
         .filter((template) => template.status === 'DELETED')
         .map((template) => template.id);
+      return [...new Set([...retiredTemplateIds, ...deletedTemplateIds])];
     }
 
     const deletedTemplates = await this.prismaService.roleTemplate.findMany({
@@ -238,7 +285,7 @@ export class RoleService {
       }
     });
 
-    return deletedTemplates.map((template) => template.id);
+    return [...new Set([...retiredTemplateIds, ...deletedTemplates.map((template) => template.id)])];
   }
 
   async listRoles(workspaceId: string) {
@@ -483,14 +530,22 @@ export class RoleService {
       tools,
       skills
     });
+    const workflowGraph = normalizeWorkflowGraphOrFallback(template.workflowGraph, workflowSteps);
     const dependencyManifest = this.withTemplateExecutionProfile(
-      template.dependencyManifest,
+      this.rebuildModelDependencyManifest(template.dependencyManifest, workflowGraph),
       executionProfile
     );
 
     return {
       id: template.id,
       applicationType,
+      outputCategory: resolveRoleTemplateOutputCategory({
+        applicationType,
+        templateId: template.id,
+        name: template.name,
+        outputFormat: template.outputFormat,
+        dependencyManifest
+      }),
       version: template.version,
       name: template.name,
       industry: template.industry,
@@ -508,7 +563,7 @@ export class RoleService {
       tools,
       skills,
       workflowSteps,
-      workflowGraph: normalizeWorkflowGraphOrFallback(template.workflowGraph, workflowSteps),
+      workflowGraph,
       dependencyManifest,
       executionProfile,
       sampleInputs: this.toStringArray(template.sampleInputs),
@@ -732,6 +787,10 @@ export class RoleService {
     return options.includeWorkspaceVisibility !== false && visibleWorkspaceIds.includes(workspaceId);
   }
 
+  private isRetiredDesktopTemplate(template: { id: string }): boolean {
+    return retiredDesktopTemplateIdSet.has(template.id);
+  }
+
   private isPublicDesktopTemplate(template: {
     status: string;
     visibleWorkspaceIds: unknown;
@@ -862,6 +921,30 @@ export class RoleService {
     return {
       ...record,
       executionProfile: readRoleTemplateExecutionProfile(record.executionProfile) ?? executionProfile
+    };
+  }
+
+  private rebuildModelDependencyManifest(
+    dependencyManifest: unknown,
+    workflowGraph: DatabaseRoleTemplate['workflowGraph']
+  ): unknown {
+    const existing = this.toRecord(dependencyManifest);
+    const generatedAt =
+      typeof existing?.generatedAt === 'string' && existing.generatedAt.trim()
+        ? existing.generatedAt
+        : new Date().toISOString();
+    const compiled = buildRoleTemplateDependencyManifest({
+      workflowGraph: workflowGraph as Parameters<typeof buildRoleTemplateDependencyManifest>[0]['workflowGraph'],
+      generatedAt
+    });
+
+    if (!existing) {
+      return compiled;
+    }
+
+    return {
+      ...existing,
+      modelAssets: compiled.modelAssets
     };
   }
 

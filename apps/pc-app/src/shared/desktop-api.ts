@@ -266,6 +266,7 @@ export interface DesktopAuthorizedRoleTemplateWorkflowStep {
 export interface DesktopAuthorizedRoleTemplateSummary {
   id: string;
   applicationType?: 'digital_employee' | 'digital_factory';
+  outputCategory?: string;
   version: string;
   name: string;
   industry: string;
@@ -333,6 +334,7 @@ export interface DesktopModelChatRequest {
     negativePrompt?: string;
     sourceImagePath?: string;
     size?: string;
+    aspectRatio?: string;
     responseFormat?: 'url';
     asyncMode?: 'wait' | 'submit_only' | 'poll_once';
     providerJobId?: string;
@@ -482,6 +484,7 @@ export type DesktopToolInvocationAction =
   | 'filesystem.download_remote_file'
   | 'filesystem.package_zip'
   | 'document.extract_text'
+  | 'spreadsheet.read_xlsx'
   | 'web.fetch_url'
   | 'web.search'
   | 'browser.open_url'
@@ -548,6 +551,7 @@ export interface QiuDesktopBridge {
   exportLocalFiles(request: DesktopLocalFileExportRequest): Promise<DesktopLocalFileExportResult>;
   saveRemoteFileAs(request: DesktopRemoteFileSaveAsRequest): Promise<DesktopRemoteFileSaveAsResult>;
   invokeDesktopTool(request: DesktopToolInvocationRequest): Promise<DesktopToolInvocationResult>;
+  getArtifactPreviewUrl(path: string): Promise<string>;
   getPathForFile(file: unknown): string | undefined;
   openLocalPath(path: string): Promise<void>;
   openExternalUrl(url: string): Promise<void>;

@@ -149,7 +149,10 @@ export function buildRoleTemplateDependencyManifest(input: {
           modelProfileId
         },
         assetByTypeAndKey,
-        warnings
+        warnings,
+        {
+          semanticModelProfileId: mapModelProfileIdToSemanticDefault(modelProfileId)
+        }
       );
     }
 
@@ -192,6 +195,65 @@ export function buildRoleTemplateDependencyManifest(input: {
   };
 }
 
+export function readWorkflowModelContractProfileIds(
+  workflowGraph: ServerRoleWorkflowGraph
+): string[] {
+  return buildRoleTemplateDependencyManifest({ workflowGraph }).modelAssets
+    .map((asset) => asset.modelProfileId)
+    .filter(Boolean);
+}
+
+export function validateRoleTemplateModelContracts(input: {
+  workflowGraph: ServerRoleWorkflowGraph;
+  dependencyManifest?: unknown;
+}): string[] {
+  const issues: string[] = [];
+  const expectedProfileIds = new Set(
+    readWorkflowModelContractProfileIds(input.workflowGraph)
+  );
+
+  for (const node of input.workflowGraph.nodes) {
+    if (!isModelNode(node)) {
+      continue;
+    }
+
+    const expectedProfileId = getSemanticModelProfileIdForNode(node);
+    const declaredProfileId = node.modelProfileId?.trim();
+    if (declaredProfileId && declaredProfileId !== expectedProfileId) {
+      issues.push(
+        `LLM node ${node.id} declares ${declaredProfileId}, but llmTaskType requires ${expectedProfileId}.`
+      );
+    }
+  }
+
+  const manifestRecord = readRecord(input.dependencyManifest);
+  const manifestAssets = Array.isArray(manifestRecord?.modelAssets)
+    ? manifestRecord.modelAssets
+        .map((asset) => {
+          const record = readRecord(asset);
+          const profileId = record?.modelProfileId ?? record?.modelId ?? record?.key;
+          return typeof profileId === 'string'
+            ? mapModelProfileIdToSemanticDefault(profileId)
+            : '';
+        })
+        .filter((profileId): profileId is string => Boolean(profileId))
+    : [];
+  const actualProfileIds = new Set(manifestAssets);
+
+  for (const profileId of expectedProfileIds) {
+    if (!actualProfileIds.has(profileId)) {
+      issues.push(`Dependency manifest is missing model contract ${profileId}.`);
+    }
+  }
+  for (const profileId of actualProfileIds) {
+    if (!expectedProfileIds.has(profileId)) {
+      issues.push(`Dependency manifest contains stale model contract ${profileId}.`);
+    }
+  }
+
+  return [...new Set(issues)];
+}
+
 function upsertVariable(
   variables: Map<string, ServerRoleTemplateDependencyManifest['variables'][number]>,
   input: {
@@ -219,17 +281,18 @@ function upsertModelAsset(
   modelAssets: Map<string, ServerRoleTemplateDependencyManifest['modelAssets'][number]>,
   node: ServerRoleWorkflowGraphNode,
   assetByTypeAndKey: Map<string, RoleTemplateDependencyAsset>,
-  warnings: Set<string>
+  warnings: Set<string>,
+  options: {
+    semanticModelProfileId?: string;
+  } = {}
 ) {
   const explicitAssetKey = readConfigString(node.config, 'modelAssetKey');
   const modelProfileId = node.modelProfileId?.trim();
   const asset = explicitAssetKey
     ? readExplicitAsset(assetByTypeAndKey, 'MODEL', explicitAssetKey, node.id, warnings)
     : findAssetByKeyOrSchemaValue(assetByTypeAndKey, 'MODEL', modelProfileId, 'modelId');
-  const mappedModelProfileId = mapModelProfileIdToSemanticDefault(modelProfileId ?? '');
-  const semanticModelProfileId = mappedModelProfileId?.startsWith('qiu-')
-    ? mappedModelProfileId
-    : getSemanticModelProfileIdForNode(node);
+  const semanticModelProfileId =
+    options.semanticModelProfileId ?? getSemanticModelProfileIdForNode(node);
   const resolvedModelProfileId =
     semanticModelProfileId ??
     mapModelProfileIdToSemanticDefault(readSchemaString(asset, 'modelProfileId') ?? readSchemaString(asset, 'modelId') ?? modelProfileId ?? explicitAssetKey ?? '') ??

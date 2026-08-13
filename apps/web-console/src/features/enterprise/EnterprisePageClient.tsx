@@ -26,12 +26,10 @@ export interface EnterprisePageClientProps {
 }
 
 const featureLabels: Record<string, string> = {
-  maxRoleInstances: '数字员工数量',
-  maxDigitalFactories: '数字工厂数量',
   maxDesktopDevices: '桌面端设备数量'
 };
 
-const visiblePlanFeatureKeys = ['maxDesktopDevices', 'maxRoleInstances', 'maxDigitalFactories'];
+const visiblePlanFeatureKeys = ['maxDesktopDevices'];
 
 function entitlementValue(value: EnterpriseWorkspaceOverview['plan']['entitlements'][number]) {
   if (!value.enabled) return '未启用';
@@ -126,16 +124,16 @@ export function EnterprisePageClient({
             </Col>
             <Col xs={24} md={12} xl={6}>
               <QiuMetricCard
-                title="桌面端设备"
-                value={usageText(overview, 'desktopDevices.count')}
-                trend="授权接入"
+                title="数字员工"
+                value={usageText(overview, 'roleInstances.count')}
+                trend="PC 端使用"
               />
             </Col>
             <Col xs={24} md={12} xl={6}>
               <QiuMetricCard
-                title="数字员工"
-                value={usageText(overview, 'roleInstances.count')}
-                trend="PC 端使用"
+                title="部门数量"
+                value={usageText(overview, 'departments.count')}
+                trend="组织结构"
               />
             </Col>
           </Row>
@@ -179,7 +177,7 @@ export function EnterprisePageClient({
           <Card title="用量记录" bordered={false}>
             <Row gutter={[16, 16]}>
               {overview.usage
-                .filter((item) => ['desktopDevices.count', 'roleInstances.count', 'digitalFactories.count'].includes(item.metricKey))
+                .filter((item) => ['roleInstances.count', 'departments.count', 'storage.usedGB'].includes(item.metricKey))
                 .map((item) => (
                   <Col key={item.metricKey} xs={24} md={12} xl={8}>
                     <QiuMetricCard
