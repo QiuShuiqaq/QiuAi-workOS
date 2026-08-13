@@ -279,6 +279,11 @@ test('server role template catalog only exposes the approved production set', ()
       );
       if (factoryManifest.kind === 'cross_border_product_image_factory') {
         assert.equal(factoryManifest.promptControls, undefined, `${template.templateId} should not expose prompt controls`);
+        const workflowSource = JSON.stringify(template.workflowGraph);
+        assert.match(workflowSource, /imageTextLanguage/, `${template.templateId} must expose image text language in request`);
+        assert.doesNotMatch(workflowSource, /Negative prompt:/, `${template.templateId} should not append a separate negative prompt block`);
+        assert.doesNotMatch(workflowSource, /Package template:/, `${template.templateId} should not mix prompt metadata labels into prompts`);
+        assert.doesNotMatch(workflowSource, /Required image ratio:/, `${template.templateId} should pass ratio as a clean prompt requirement`);
         assert.equal(
           template.workflowGraph.nodes.some((node) => node.id === 'generate_package_prompts'),
           false,

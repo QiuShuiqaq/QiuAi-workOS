@@ -8425,6 +8425,7 @@ async function submitFactoryImageGenerationTask(input: {
           prompt: input.task.prompt,
           negativePrompt: input.task.negativePrompt,
           sourceImagePath: input.task.sourceImage.localPath,
+          aspectRatio: input.task.targetPlatform.imageRatio,
           responseFormat: 'url',
           asyncMode: 'submit_only'
         },
@@ -8629,6 +8630,7 @@ async function runFactoryImageGenerationTask(input: {
           prompt: input.task.prompt,
           negativePrompt: input.task.negativePrompt,
           sourceImagePath: input.task.sourceImage.localPath,
+          aspectRatio: input.task.targetPlatform.imageRatio,
           responseFormat: 'url'
         },
         messages: buildFactoryImageGenerationMessages(input.task),

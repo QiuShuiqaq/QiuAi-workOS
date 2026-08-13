@@ -1094,43 +1094,43 @@ const crossBorderFactoryPackageOptions: Array<{
   {
     key: 'white_background',
     label: '白底图',
-    description: '生成标准电商白底图：纯白背景、柔和棚拍光、商品居中完整展示，保留原始颜色、结构、材质、Logo 和关键细节，边缘干净无阴影污染，不添加促销文字、水印、边框、人物或多余道具。',
+    description: '生成标准电商白底图：纯白背景、柔和棚拍光、商品居中完整展示，保留原始颜色、结构、材质、Logo 和关键细节，边缘干净无阴影污染。避免促销文字、水印、边框、人物、多余道具、乱码文字和低清晰度。',
     outputType: 'image'
   },
   {
     key: 'main_image',
     label: '商品主图',
-    description: '生成高转化商品主图：商品占画面主体，构图清晰有层次，光线明亮真实，突出材质、造型和核心卖点，可加入克制的场景氛围，但不得改变商品结构、颜色、品牌标识或真实比例。',
+    description: '生成高转化商品主图：商品占画面主体，构图清晰有层次，光线明亮真实，突出材质、造型和核心卖点，可加入克制的场景氛围。避免改变商品结构、颜色、品牌标识、真实比例，避免虚假功能、杂乱背景和过度促销。',
     outputType: 'image'
   },
   {
     key: 'scene_image',
     label: '场景图',
-    description: '生成真实使用场景图：把商品自然放入符合品类的生活/办公/户外/家居场景，环境干净高级，主体清晰可识别，画面有购买代入感，避免夸张特效、虚假功能、杂乱背景和无关人物抢占主体。',
+    description: '生成真实使用场景图：把商品自然放入符合品类的生活、办公、户外或家居场景，环境干净高级，主体清晰可识别，画面有购买代入感。避免夸张特效、虚假功能、杂乱背景、无关人物抢占主体和商品变形。',
     outputType: 'image'
   },
   {
     key: 'background_replacement',
     label: '换背景',
-    description: '生成换背景商品图：严格保持商品主体不变，只替换为更适合电商展示的背景，如极简渐变、轻奢台面、节日活动、自然光空间或品牌色氛围，主体边缘自然融合，不改变商品形状和材质。',
+    description: '生成换背景商品图：严格保持商品主体不变，只替换为更适合电商展示的背景，如极简渐变、轻奢台面、节日活动、自然光空间或品牌色氛围，主体边缘自然融合。避免改变商品形状、材质、Logo、颜色和真实比例。',
     outputType: 'image'
   },
   {
     key: 'model_replacement',
     label: '换模特',
-    description: '生成模特展示图：适合服饰、配饰、美妆、家居小件等商品。模特姿态自然、画面商业摄影质感强，商品佩戴/持握/使用方式合理，必须保持商品真实外观、颜色、比例和关键细节，不生成畸形肢体。',
+    description: '生成模特展示图：适合服饰、配饰、美妆、家居小件等商品。模特姿态自然，画面有商业摄影质感，商品佩戴、持握或使用方式合理，必须保持商品真实外观、颜色、比例和关键细节。避免畸形肢体、错误穿戴、商品变形和虚假材质。',
     outputType: 'image'
   },
   {
     key: 'dimension_image',
     label: '尺寸图',
-    description: '生成尺寸规格说明图：画面清晰展示商品正面或关键角度，预留干净信息区域，可加入简洁尺寸线、参数标注和规格层级；文字必须清晰、少量、规整，不确定参数不得编造。',
+    description: '生成尺寸规格说明图：画面清晰展示商品正面或关键角度，预留干净信息区域，可加入简洁尺寸线、参数标注和规格层级；文字必须清晰、少量、规整。避免编造不确定参数、乱码文字、错误尺寸线、遮挡商品和杂乱排版。',
     outputType: 'image'
   },
   {
     key: 'selling_point_image',
     label: '卖点图',
-    description: '生成详情页卖点图：围绕材质、功能、结构、容量、适用场景或对比优势进行视觉表达，版式清爽、主次明确，可带少量标题式文字；避免虚假承诺、夸张功效、乱码文字和过度促销风格。',
+    description: '生成详情页卖点图：围绕材质、功能、结构、容量、适用场景或对比优势进行视觉表达，版式清爽、主次明确，可带少量标题式文字。避免虚假承诺、夸张功效、乱码文字、错误 Logo、过度促销风格和信息堆砌。',
     outputType: 'image'
   }
 ];
@@ -1498,6 +1498,9 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
           'const images = files.filter((file) => file && file.kind === "image");\n' +
           'const selectedPackages = Array.isArray(request.packages) ? request.packages : [];\n' +
           'const platform = request.platform && typeof request.platform === "object" ? request.platform : { key: "ratio_1_1", label: "1:1 方图", imageRatio: "1:1" };\n' +
+          'const imageTextLanguage = typeof request.imageTextLanguage === "string" && request.imageTextLanguage.trim() ? request.imageTextLanguage.trim() : "中文";\n' +
+          'const imageRatio = typeof platform.imageRatio === "string" && platform.imageRatio.trim() ? platform.imageRatio.trim() : "1:1";\n' +
+          'const languageInstruction = imageTextLanguage === "不生成文字" ? "画面中不要生成任何文字、字母或数字，商品原有 Logo 除外。" : `如画面需要文字，文字统一使用${imageTextLanguage}，并保持少量、清晰、可读。`;\n' +
           'const qualityCheckMode = typeof request.qualityCheckMode === "string" ? request.qualityCheckMode : "basic";\n' +
           'const packageInstructions = [];\n' +
           'for (const packageItem of selectedPackages) {\n' +
@@ -1506,15 +1509,11 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
           '    sku: "*",\n' +
           '    packageKey: String(packageItem.key),\n' +
           '    prompt: [\n' +
-          '      `Use the uploaded product image as the strict product reference.`,\n' +
-          '      `Create ${packageItem.label || packageItem.key} for ecommerce product presentation.`,\n' +
-          '      packageItem.description ? `Package template: ${packageItem.description}` : undefined,\n' +
-          '      platform.imageRatio ? `Required image ratio: ${platform.imageRatio}` : undefined,\n' +
-          '      platform.notes ? `Ratio usage: ${platform.notes}` : undefined,\n' +
-          '      `Preserve product identity, shape, color, material, logo, texture, structure and key details.`,\n' +
-          '      `Avoid watermark, random text, distorted product, extra accessories, wrong logo, messy background and unrealistic function.`\n' +
-          '    ].filter(Boolean).join("\\n"),\n' +
-          '    negativePrompt: "watermark, random text, garbled characters, distorted product, changed logo, extra accessories, messy background, unrealistic effect, low quality, blur"\n' +
+          '      `生成${imageRatio}比例的电商商品图片。`,\n' +
+          '      languageInstruction,\n' +
+          '      "以用户上传的商品图片作为严格参考，保持商品主体、颜色、结构、材质、Logo、纹理和关键细节一致。",\n' +
+          '      packageItem.description ? String(packageItem.description).trim() : `生成${packageItem.label || packageItem.key}。`\n' +
+          '    ].filter(Boolean).join("\\n")\n' +
           '  });\n' +
           '}\n' +
           'return {\n' +
@@ -1522,6 +1521,7 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
           '  factory_items: images.slice(0, 50).map((file, index) => ({ sku: `SKU-${index + 1}`, image: file, sourceName: file.name || `image-${index + 1}` })),\n' +
           '  selected_packages: selectedPackages,\n' +
           '  target_platform: platform,\n' +
+          '  image_text_language: imageTextLanguage,\n' +
           '  quality_check_mode: qualityCheckMode,\n' +
           '  package_instructions: packageInstructions\n' +
           '};'

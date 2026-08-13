@@ -333,6 +333,7 @@ export interface DesktopModelChatRequest {
     negativePrompt?: string;
     sourceImagePath?: string;
     size?: string;
+    aspectRatio?: string;
     responseFormat?: 'url';
     asyncMode?: 'wait' | 'submit_only' | 'poll_once';
     providerJobId?: string;

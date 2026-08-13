@@ -3430,6 +3430,7 @@ const factoryTask = await runDesktopTask({
         assert.ok(request.imageGeneration?.prompt);
         assert.match(request.imageGeneration?.prompt ?? '', /Text language: English/);
         assert.equal(request.imageGeneration?.negativePrompt, 'watermark, malformed logo');
+        assert.equal(request.imageGeneration?.aspectRatio, '1:1');
         assert.match(request.imageGeneration?.sourceImagePath ?? '', /sku-[12]\.png/);
         assert.match(request.messages[1]?.content ?? '', /Source image local path/);
         assert.match(request.messages[1]?.content ?? '', /Package:/);

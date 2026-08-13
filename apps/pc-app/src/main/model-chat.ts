@@ -434,6 +434,10 @@ async function invokeGrsaiAsyncImageGeneration(input: {
   const submittedUrl = readImageUrlFromUnknown(body);
   const providerJobId = readGrsaiJobId(body);
   const submittedStatus = readGrsaiJobStatus(body);
+  if (isGrsaiFailedStatus(submittedStatus)) {
+    const errorMessage = readGrsaiErrorMessage(body) ?? bodyText.slice(0, 500);
+    throw new Error(`GrsAI image task failed: ${errorMessage || submittedStatus}`);
+  }
   if (submittedUrl) {
     return buildImageGenerationResponse({
       provider: input.request.profile.providerName,
@@ -485,14 +489,67 @@ function buildGrsaiImageGenerationPayload(input: {
   const images = input.sourceImagePath
     ? [buildLocalImageDataUrl(input.sourceImagePath)]
     : [];
-  const aspectRatio = inferImageAspectRatioFromSize(input.request.imageGeneration?.size);
-  return {
+  const requestedAspectRatio = normalizeImageAspectRatio(input.request.imageGeneration?.aspectRatio)
+    ?? inferImageAspectRatioFromSize(input.request.imageGeneration?.size);
+  const aspectRatio = resolveGrsaiImageAspectRatio(input.modelName, requestedAspectRatio);
+  const payload: Record<string, unknown> = {
     model: input.modelName,
     prompt: input.prompt,
     images,
-    aspectRatio,
     replyType: 'json'
   };
+  if (aspectRatio) {
+    payload.aspectRatio = aspectRatio;
+  }
+  const imageSize = resolveGrsaiImageSize(input.modelName);
+  if (imageSize) {
+    payload.imageSize = imageSize;
+  }
+  return payload;
+}
+
+function resolveGrsaiImageAspectRatio(modelName: string, aspectRatio: string | undefined): string | undefined {
+  if (!aspectRatio) {
+    return undefined;
+  }
+
+  const normalizedModelName = modelName.trim().toLowerCase();
+  if (!normalizedModelName.includes('gpt-image-2')) {
+    return aspectRatio;
+  }
+
+  const pixelSizeByRatio: Record<string, string> = {
+    '1:1': '1024x1024',
+    '16:9': '1672x941',
+    '9:16': '941x1672',
+    '4:3': '1443x1090',
+    '3:4': '1090x1443',
+    '3:2': '1536x1024',
+    '2:3': '1024x1536',
+    '5:4': '1408x1120',
+    '4:5': '1120x1408',
+    '21:9': '1920x832',
+    '9:21': '832x1920',
+    '1:2': '896x1792',
+    '2:1': '1792x896'
+  };
+
+  return pixelSizeByRatio[aspectRatio] ?? aspectRatio;
+}
+
+function resolveGrsaiImageSize(modelName: string): '1K' | '2K' | '4K' | undefined {
+  const normalizedModelName = modelName.trim().toLowerCase();
+  if (!normalizedModelName.includes('nano-banana-2')) {
+    return undefined;
+  }
+
+  if (normalizedModelName.includes('4k')) {
+    return '4K';
+  }
+  if (normalizedModelName.includes('2k')) {
+    return '2K';
+  }
+  return '1K';
 }
 
 async function pollGrsaiImageGenerationResult(input: {
@@ -592,6 +649,10 @@ async function invokeGrsaiAsyncVideoGeneration(input: {
   const submittedUrl = readVideoUrlFromUnknown(body);
   const providerJobId = readGrsaiJobId(body);
   const submittedStatus = readGrsaiJobStatus(body);
+  if (isGrsaiFailedStatus(submittedStatus)) {
+    const errorMessage = readGrsaiErrorMessage(body) ?? bodyText.slice(0, 500);
+    throw new Error(`GrsAI video task failed: ${errorMessage || submittedStatus}`);
+  }
   if (submittedUrl) {
     return buildVideoGenerationResponse({
       provider: input.request.profile.providerName,
@@ -2058,8 +2119,11 @@ function readGrsaiJobStatus(body: Record<string, unknown> | undefined): string |
 function readGrsaiErrorMessage(body: Record<string, unknown> | undefined): string | undefined {
   return readStringFromUnknownPath(body, ['message'])
     ?? readStringFromUnknownPath(body, ['error'])
+    ?? readStringFromUnknownPath(body, ['error', 'message'])
     ?? readStringFromUnknownPath(body, ['errorMessage'])
     ?? readStringFromUnknownPath(body, ['data', 'message'])
+    ?? readStringFromUnknownPath(body, ['data', 'error'])
+    ?? readStringFromUnknownPath(body, ['data', 'error', 'message'])
     ?? readStringFromUnknownPath(body, ['result', 'message']);
 }
 
@@ -2269,7 +2333,10 @@ function isGrsaiPendingStatus(value: string | undefined): boolean {
 }
 
 function isGrsaiFailedStatus(value: string | undefined): boolean {
-  return Boolean(value && ['failed', 'error', 'cancelled', 'canceled', 'timeout', 'rejected'].includes(value));
+  return Boolean(
+    value &&
+      ['failed', 'failure', 'error', 'violation', 'cancelled', 'canceled', 'timeout', 'rejected'].includes(value)
+  );
 }
 
 function isMiniMaxPendingStatus(value: string | undefined): boolean {
@@ -2303,6 +2370,11 @@ function buildLocalImageDataUrl(filePath: string): string {
 }
 
 function inferImageAspectRatioFromSize(size: string | undefined): string | undefined {
+  const directRatio = normalizeImageAspectRatio(size);
+  if (directRatio) {
+    return directRatio;
+  }
+
   const match = size?.trim().match(/^(\d+)\s*x\s*(\d+)$/i);
   if (!match) {
     return undefined;
@@ -2316,6 +2388,26 @@ function inferImageAspectRatioFromSize(size: string | undefined): string | undef
 
   const divisor = greatestCommonDivisor(width, height);
   return `${Math.round(width / divisor)}:${Math.round(height / divisor)}`;
+}
+
+function normalizeImageAspectRatio(value: string | undefined): string | undefined {
+  const match = value?.trim().match(/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/);
+  if (!match) {
+    return undefined;
+  }
+
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return undefined;
+  }
+
+  if (Number.isInteger(width) && Number.isInteger(height)) {
+    const divisor = greatestCommonDivisor(width, height);
+    return `${Math.round(width / divisor)}:${Math.round(height / divisor)}`;
+  }
+
+  return `${match[1]}:${match[2]}`;
 }
 
 function greatestCommonDivisor(left: number, right: number): number {

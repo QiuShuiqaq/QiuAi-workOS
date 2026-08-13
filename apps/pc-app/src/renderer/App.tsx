@@ -2663,7 +2663,7 @@ function normalizeFactoryRunParameterMemory(value: unknown): Partial<FactoryRunF
       continue;
     }
 
-    if (typeof item === 'string') {
+    if (typeof item === 'string' && item.trim()) {
       (normalized as Record<string, unknown>)[key] = item;
     }
   }
@@ -9274,6 +9274,11 @@ export default function App() {
                                 }))}
                               />
                             </Form.Item>
+                            {isEcommerceImageFactory ? (
+                              <Form.Item name="promptLanguage" label="图片文字语言" rules={[{ required: true, message: '请选择图片文字语言' }]}>
+                                <Select size="large" options={ecommerceImageTextLanguageOptions} />
+                              </Form.Item>
+                            ) : null}
                             <Form.Item shouldUpdate noStyle>
                               {({ getFieldValue }) => {
                                 const currentPackages = normalizeFactoryPackageDefinitions(
@@ -12432,7 +12437,7 @@ export default function App() {
       packageKeys: resolveFactoryPackageSelection(roleCode, packageDefinitions),
       qualityCheckMode: qualityModes[0]?.key ?? 'basic',
       enableImageUnderstanding: false,
-      promptLanguage: '',
+      promptLanguage: isCrossBorderProductImageFactory(factory) ? '中文' : '',
       promptStyle: '',
       promptGoal: '',
       promptMustKeep: '',
@@ -17034,6 +17039,17 @@ const defaultFactoryPromptControlFields: DigitalFactoryPromptControlField[] = [
   }
 ];
 
+const ecommerceImageTextLanguageOptions = [
+  '中文',
+  '英文',
+  '日语',
+  '韩语',
+  '德语',
+  '西班牙语',
+  '法语',
+  '不生成文字'
+].map((value) => ({ value, label: value }));
+
 const factoryImageExtensions = new Set(['png', 'jpg', 'jpeg', 'webp']);
 const factoryTableExtensions = new Set(['xlsx', 'csv']);
 const factoryVideoExtensions = new Set(['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v']);
@@ -17411,6 +17427,7 @@ function buildFactoryTaskInput({
     qualityCheckMode: values.qualityCheckMode ?? 'basic',
     qualityCheckLabel: qualityMode?.label ?? values.qualityCheckMode ?? 'basic',
     enableImageUnderstanding: false,
+    imageTextLanguage: isCrossBorderProductImageFactory(factory) ? values.promptLanguage?.trim() || '中文' : undefined,
     itemCount: imageAttachments.length,
     maxItems: readFactoryMaxItems(factory),
     output: {
