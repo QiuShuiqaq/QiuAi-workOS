@@ -14,7 +14,59 @@ import {
   buildRoleTemplateDependencyManifest,
   validateRoleTemplateModelContracts
 } from './role-template-dependencies';
+import { resolveRoleTemplateOutputCategory } from './role-template-output-category';
 import { normalizeWorkflowGraph } from './workflow-graph';
+
+test('digital factory market categories follow final output type', () => {
+  assert.equal(
+    resolveRoleTemplateOutputCategory({
+      applicationType: 'DIGITAL_FACTORY',
+      templateId: 'factory_cross_border_product_images_v1',
+      dependencyManifestFactory: {
+        kind: 'cross_border_product_image_factory'
+      }
+    }),
+    '图片生成'
+  );
+  assert.equal(
+    resolveRoleTemplateOutputCategory({
+      applicationType: 'DIGITAL_FACTORY',
+      templateId: 'factory_operation_video_v1',
+      dependencyManifestFactory: {
+        kind: 'operation_video_factory'
+      }
+    }),
+    '视频生成'
+  );
+  assert.equal(
+    resolveRoleTemplateOutputCategory({
+      applicationType: 'DIGITAL_FACTORY',
+      templateId: 'factory_medical_case_video_screening_v1',
+      dependencyManifestFactory: {
+        kind: 'medical_case_video_screening_factory'
+      }
+    }),
+    '视频质检'
+  );
+  assert.equal(
+    resolveRoleTemplateOutputCategory({
+      applicationType: 'DIGITAL_FACTORY',
+      templateId: 'factory_academic_project_demo_v1',
+      dependencyManifestFactory: {
+        kind: 'academic_project_demo_factory'
+      }
+    }),
+    '演示 Demo'
+  );
+  assert.equal(
+    resolveRoleTemplateOutputCategory({
+      applicationType: 'DIGITAL_EMPLOYEE',
+      templateId: 'template_document_assistant',
+      outputFormat: 'Word 文档'
+    }),
+    undefined
+  );
+});
 
 test('workflow graph llm task type controls semantic model slots', () => {
   const graph = normalizeWorkflowGraph({
@@ -158,7 +210,18 @@ test('server role template catalog only exposes the approved production set', ()
   const expectedFactoryTemplateIds = expectedTemplateIds.filter((templateId) => templateId.startsWith('factory_'));
   const expectedEmployeeTemplateIds = expectedTemplateIds.filter((templateId) => !templateId.startsWith('factory_'));
 
-  assert.equal(expectedEmployeeTemplateIds.length, 1);
+  assert.deepEqual(expectedEmployeeTemplateIds, [
+    'template_document_assistant',
+    'core_enterprise_researcher_v1',
+    'core_customer_support_agent_v1',
+    'core_after_sales_ticket_v1',
+    'core_contract_review_v1',
+    'core_recruiting_v1',
+    'core_employee_policy_v1',
+    'core_reimbursement_v1',
+    'core_ecommerce_copywriter_v1',
+    'core_requirement_analyst_v1'
+  ]);
   assert.equal(expectedFactoryTemplateIds.length, 13);
   assert.equal(serverRoleTemplateCatalog.length, expectedTemplateIds.length);
   assert.deepEqual(serverRoleTemplateCatalog.map((template) => template.templateId), expectedTemplateIds);
@@ -172,9 +235,9 @@ test('server role template catalog only exposes the approved production set', ()
     'basic_spreadsheet_organizer_v1',
     'basic_meeting_minutes_v1',
     'basic_translation_polish_v1',
-    'core_after_sales_ticket_v1',
-    'core_employee_policy_v1',
-    'core_reimbursement_v1',
+    'core_receivables_followup_v1',
+    'core_project_proposal_v1',
+    'core_procurement_assistant_v1',
     'template_quality_inspector',
     'template_video_quality_editor'
   ]) {
@@ -185,6 +248,16 @@ test('server role template catalog only exposes the approved production set', ()
   assert.ok(templateById.get('template_document_assistant'), 'template_document_assistant must exist');
   assert.equal(templateById.get('template_document_assistant')?.recommendedPlanCode, 'PERSONAL_FREE');
   assert.equal(templateById.get('template_document_assistant')?.executionProfile?.mode, 'conversation');
+  for (const templateId of expectedEmployeeTemplateIds) {
+    const template = templateById.get(templateId);
+    assert.ok(template, `${templateId} must exist`);
+    assert.equal(template.executionProfile?.mode, 'conversation', `${templateId} must be a conversation employee`);
+    assert.equal(
+      template.tools.includes('browser-automation'),
+      false,
+      `${templateId} conversation employee must not expose RPA browser automation`
+    );
+  }
   assert.deepEqual(
     templateById.get('template_document_assistant')?.workflowGraph.nodes
       .filter((node) => node.type === 'llm')

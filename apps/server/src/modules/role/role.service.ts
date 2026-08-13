@@ -18,6 +18,7 @@ import {
   readRoleTemplateExecutionProfile,
   type ServerRoleTemplateExecutionProfile
 } from '../../shared/role-template-execution-profile';
+import { resolveRoleTemplateOutputCategory } from '../../shared/role-template-output-category';
 import { retiredServerRoleTemplateIds } from '../../shared/role-template-catalog';
 
 const retiredDesktopTemplateIds = [...retiredServerRoleTemplateIds];
@@ -538,6 +539,13 @@ export class RoleService {
     return {
       id: template.id,
       applicationType,
+      outputCategory: resolveRoleTemplateOutputCategory({
+        applicationType,
+        templateId: template.id,
+        name: template.name,
+        outputFormat: template.outputFormat,
+        dependencyManifest
+      }),
       version: template.version,
       name: template.name,
       industry: template.industry,

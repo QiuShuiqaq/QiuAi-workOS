@@ -3715,7 +3715,49 @@ type DesignedOfficeRoleTemplateInput = {
   qualityTimeoutMs?: number;
 };
 
+function createConversationOfficeExecutionProfile(input: {
+  summary: string;
+  requiredActions?: string[];
+  inputSources?: ServerRoleTemplateExecutionProfile['inputSources'];
+  toolCapabilities?: ServerRoleTemplateExecutionProfile['toolCapabilities'];
+  notes?: string[];
+}): ServerRoleTemplateExecutionProfile {
+  return {
+    mode: 'conversation',
+    summary: `对话式数字员工：${input.summary}`,
+    triggerModes: ['manual'],
+    inputSources: input.inputSources ?? ['chat', 'uploaded_files', 'enterprise_knowledge', 'local_folder'],
+    toolCapabilities: input.toolCapabilities ?? ['llm', 'knowledge', 'office', 'local_files', 'approval_queue'],
+    outputTargets: ['chat_response', 'artifact', 'approval_queue'],
+    approval: {
+      required: true,
+      requiredActions: input.requiredActions ?? ['关键结论确认', '正式对外使用前复核']
+    },
+    dataBoundary: 'local_first',
+    rolloutPhase: 'ready',
+    notes: input.notes ?? ['当前版本由用户主动发起任务，不启用 RPA 定时值守。']
+  };
+}
+
 function createOfficeRoleTemplate(input: DesignedOfficeRoleTemplateInput): BaseServerRoleTemplateCatalogEntry {
+  const defaultConversationToolCapabilities: ServerRoleTemplateExecutionProfile['toolCapabilities'] = [
+    'llm',
+    'knowledge',
+    'office',
+    ...((input.includeWebSearch || input.tools?.includes('web-search')) ? (['web_search'] as const) : []),
+    'local_files',
+    'approval_queue'
+  ];
+  const executionProfile =
+    input.executionProfile ??
+    createConversationOfficeExecutionProfile({
+      summary: `由用户上传或输入资料，按「${input.scenario}」生成可复核的业务产物。`,
+      inputSources:
+        input.includeWebSearch || input.tools?.includes('web-search')
+          ? ['chat', 'uploaded_files', 'enterprise_knowledge', 'local_folder', 'web']
+          : undefined,
+      toolCapabilities: [...new Set(defaultConversationToolCapabilities)]
+    });
   const inferredBrowserAutomation = shouldUseBrowserAutomationText([
     input.templateId,
     input.name,
@@ -3726,9 +3768,11 @@ function createOfficeRoleTemplate(input: DesignedOfficeRoleTemplateInput): BaseS
     ...input.knowledgeSources,
     ...input.skills.flatMap((item) => [item.code, item.name, item.summary])
   ]);
+  const allowInferredBrowserAutomation =
+    executionProfile.mode === 'watch' || executionProfile.mode === 'hybrid';
   const tools = input.tools ?? [
     ...(input.includeWebSearch ? ['web-search'] : []),
-    ...(inferredBrowserAutomation ? ['browser-automation'] : []),
+    ...(allowInferredBrowserAutomation && inferredBrowserAutomation ? ['browser-automation'] : []),
     'office-document',
     'local-filesystem'
   ];
@@ -3747,7 +3791,7 @@ function createOfficeRoleTemplate(input: DesignedOfficeRoleTemplateInput): BaseS
     businessGoal: input.businessGoal,
     knowledgeSources: input.knowledgeSources,
     tools,
-    ...(input.executionProfile ? { executionProfile: input.executionProfile } : {}),
+    executionProfile,
     skills: input.skills,
     workflowSteps: buildOfficeProductionWorkflowSteps({
       artifactType,
@@ -4794,6 +4838,15 @@ const allServerRoleTemplateCatalogCandidates: BaseServerRoleTemplateCatalogEntry
 
 export const productionRoleTemplateIds = [
   'template_document_assistant',
+  'core_enterprise_researcher_v1',
+  'core_customer_support_agent_v1',
+  'core_after_sales_ticket_v1',
+  'core_contract_review_v1',
+  'core_recruiting_v1',
+  'core_employee_policy_v1',
+  'core_reimbursement_v1',
+  'core_ecommerce_copywriter_v1',
+  'core_requirement_analyst_v1',
   'factory_cross_border_product_images_v1',
   'factory_anime_images_v1',
   'factory_game_images_v1',

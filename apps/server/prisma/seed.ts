@@ -688,18 +688,6 @@ async function seedRoleTemplates() {
   }
 
   for (const template of roleTemplates) {
-    const existingTemplate = await prisma.roleTemplate.findUnique({
-      where: {
-        id: template.templateId
-      },
-      select: {
-        status: true
-      }
-    });
-    if (existingTemplate?.status === 'DELETED') {
-      continue;
-    }
-
     await prisma.roleTemplate.upsert({
       where: {
         id: template.templateId

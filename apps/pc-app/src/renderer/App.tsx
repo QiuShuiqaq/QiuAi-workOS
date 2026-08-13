@@ -1896,6 +1896,7 @@ function toDesktopRoleTemplate(summary: DesktopAuthorizedRoleTemplateSummary): D
     roleCode,
     name: summary.name,
     version: summary.version,
+    outputCategory: summary.outputCategory,
     summary: summary.description,
     industry: summary.industry,
     scenario: summary.scenario,
@@ -2106,7 +2107,7 @@ function roleExecutionModeMeta(profile: DesktopRoleExecutionProfile | undefined)
     case 'watch':
       return { label: '值守式', color: 'gold' };
     case 'hybrid':
-      return { label: '混合式', color: 'cyan' };
+      return { label: '值守式', color: 'gold' };
     default:
       return { label: '对话式', color: 'blue' };
   }
@@ -10592,7 +10593,11 @@ export default function App() {
                     </div>
 
                     <Typography.Text type="secondary" ellipsis className="catalog-card-meta">
-                      {roleTemplateCategory(template)} / {template.industry} · 任务 {summary?.taskCount ?? 0}
+                      {isFactory
+                        ? roleTemplateCategory(template)
+                        : `${roleTemplateCategory(template)} / ${template.industry}`}
+                      {' · 任务 '}
+                      {summary?.taskCount ?? 0}
                     </Typography.Text>
 
                     <Space size={6} className="role-card-actions">
@@ -14671,7 +14676,7 @@ export default function App() {
 
 function isWatchRolePackage(rolePackage: RolePackageManifest | undefined): boolean {
   const mode = rolePackage?.executionProfile?.mode;
-  return mode === 'watch' || rolePackage?.toolIds.includes('browser-automation') === true;
+  return mode === 'watch' || mode === 'hybrid';
 }
 
 function getRuntimeWatchConfigs(state: DesktopRuntimeState): DesktopRoleWatchConfig[] {
@@ -14712,7 +14717,7 @@ function createDefaultWatchConfig(rolePackage: RolePackageManifest, now: string)
 
 function buildDefaultWatchRules(rolePackage: RolePackageManifest): string {
   const name = rolePackage.name;
-  const profileMode = rolePackage.executionProfile?.mode === 'watch' ? '值守式' : '辅助式';
+  const profileMode = isWatchRolePackage(rolePackage) ? '值守式' : '对话式';
   return [
     `你是${name}，当前以${profileMode}数字员工方式巡检网页业务信息。`,
     '只读取用户配置的网页来源，不绕过登录、验证码或平台风控。',
@@ -15135,6 +15140,10 @@ function findReadyImageUnderstandingModelProfileIds(
 }
 
 function roleTemplateCategory(template: DesktopRoleTemplate): string {
+  if (readRoleApplicationType(template) === 'digital_factory') {
+    return template.outputCategory ?? inferFactoryOutputCategory(template);
+  }
+
   if (template.templateId === 'template_document_assistant' || template.roleCode === documentAssistantRoleCode) {
     return '通用';
   }
@@ -15152,8 +15161,32 @@ function roleTemplateCategory(template: DesktopRoleTemplate): string {
   return '通用';
 }
 
+function inferFactoryOutputCategory(template: DesktopRoleTemplate): string {
+  const text = [
+    template.templateId,
+    template.name,
+    template.outputFormat,
+    JSON.stringify(template.dependencyManifest?.factory ?? '')
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  if (includesAny(text, ['image', 'picture', '图片', '图像'])) return '图片生成';
+  if (includesAny(text, ['medical_case_video_screening', 'video_screening', '视频质检', '质检视频'])) return '视频质检';
+  if (includesAny(text, ['video', '视频', 'mp4', '剪辑'])) return '视频生成';
+  if (includesAny(text, ['academic_project_demo', 'demo', '演示'])) return '演示 Demo';
+  if (includesAny(text, ['document', 'word', 'excel', 'xlsx', 'markdown', '文档'])) return '文档处理';
+  return '其他产物';
+}
+
 function buildRoleCategoryTabs(templates: DesktopRoleTemplate[]): string[] {
-  const fixedCategories = ['全部', '教育', '医疗', '销售', '运营', '人力', '财务', '法务', '行政', '研究', '通用'];
+  const isFactoryCatalog = templates.some(
+    (template) => readRoleApplicationType(template) === 'digital_factory'
+  );
+  const fixedCategories = isFactoryCatalog
+    ? ['全部', '图片生成', '视频生成', '视频质检', '文档处理', '演示 Demo', '其他产物']
+    : ['全部', '教育', '医疗', '销售', '运营', '人力', '财务', '法务', '行政', '研究', '通用'];
   const availableCategories = new Set(templates.map(roleTemplateCategory));
   return fixedCategories.filter((category) => category === '全部' || availableCategories.has(category));
 }

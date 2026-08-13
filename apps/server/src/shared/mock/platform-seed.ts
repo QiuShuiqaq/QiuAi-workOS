@@ -10,6 +10,7 @@ import {
   buildRoleTemplateDependencyManifest,
   type ServerRoleTemplateDependencyManifest
 } from '../role-template-dependencies';
+import { resolveRoleTemplateOutputCategory } from '../role-template-output-category';
 
 export interface MockWorkspaceSummary {
   id: string;
@@ -39,6 +40,7 @@ export interface MockPlanDetail {
 export interface MockRoleTemplateSummary {
   id: string;
   applicationType?: 'DIGITAL_EMPLOYEE' | 'DIGITAL_FACTORY';
+  outputCategory?: string;
   version: string;
   name: string;
   industry: string;
@@ -329,6 +331,13 @@ export const demoRoleTemplates: MockRoleTemplateSummary[] = serverRoleTemplateCa
   (template) => ({
     id: template.templateId,
     applicationType: template.applicationType,
+    outputCategory: resolveRoleTemplateOutputCategory({
+      applicationType: template.applicationType,
+      templateId: template.templateId,
+      name: template.name,
+      outputFormat: template.outputFormat,
+      dependencyManifestFactory: template.dependencyManifestFactory
+    }),
     version: template.version,
     name: template.name,
     industry: template.industry,

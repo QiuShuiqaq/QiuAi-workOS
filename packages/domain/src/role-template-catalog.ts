@@ -60,6 +60,7 @@ export interface RoleTemplateCatalogEntry {
   roleCode: string;
   name: string;
   version: string;
+  outputCategory?: string;
   summary: string;
   industry: string;
   scenario: string;
