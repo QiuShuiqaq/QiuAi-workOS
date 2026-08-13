@@ -4282,7 +4282,8 @@ async function invokeWorkflowRuntimeEcommerceProductVideoFactoryNode(input: {
   message: string;
 } | undefined> {
   const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
-  if (readWorkflowRuntimeString(factoryRequest?.factoryKind) !== 'ecommerce_product_video_factory') {
+  const factoryKind = readWorkflowRuntimeString(factoryRequest?.factoryKind);
+  if (!isReferenceImageVideoFactoryRuntimeKind(factoryKind)) {
     return undefined;
   }
 
@@ -4293,7 +4294,8 @@ async function invokeWorkflowRuntimeEcommerceProductVideoFactoryNode(input: {
   }
 
   const targetPlatform = readFactoryRuntimePlatform(input.pool.get('target_platform'));
-  const promptControls = readFactoryRuntimePromptControls(factoryRequest?.promptControls);
+  const outputConfig = isWorkflowRuntimeRecord(factoryRequest?.output) ? factoryRequest.output : undefined;
+  const outputFolder = readWorkflowRuntimeString(outputConfig?.folder) ?? 'product-videos';
   const videoConfig = readFactoryRuntimeVideoGenerationConfig(factoryRequest);
   const concurrency = clampWorkflowRuntimeLimit(
     readFactoryRuntimeNumber(input.node.config?.concurrency ?? factoryRequest?.concurrency),
@@ -4311,7 +4313,6 @@ async function invokeWorkflowRuntimeEcommerceProductVideoFactoryNode(input: {
     items,
     packages,
     targetPlatform,
-    promptControls,
     videoConfig,
     createdAt: input.createdAt
   });
@@ -4341,9 +4342,9 @@ async function invokeWorkflowRuntimeEcommerceProductVideoFactoryNode(input: {
     workspaceId: input.workspaceId,
     results: batchRun.results,
     mediaKind: 'video',
-    folder: 'product-videos',
+    folder: outputFolder,
     createdAt: input.createdAt,
-    logSuffix: `${input.node.id}-product-videos`
+    logSuffix: `${input.node.id}-${sanitizeLogSuffix(outputFolder)}`
   });
   const results = localAssetSave.results;
   const completed = results.filter((item) => item.status === 'completed').length;
@@ -4385,6 +4386,7 @@ async function invokeWorkflowRuntimeEcommerceProductVideoFactoryNode(input: {
   });
   const factoryOutputs = buildFactoryEcommerceVideoOutputItems({
     taskId: input.task.taskId,
+    factoryKind,
     results,
     createdAt: input.createdAt
   });
@@ -4392,13 +4394,12 @@ async function invokeWorkflowRuntimeEcommerceProductVideoFactoryNode(input: {
   const generatedArtifacts: DesktopArtifactSummary[] = [];
   const extraLogs: DesktopExecutionLogEntry[] = [...localAssetSave.logs];
   const summaryContent = [
-    `电商视频生成完成：共 ${batchTasks.length} 条视频`,
+    `${readWorkflowRuntimeString(factoryRequest?.factoryName) ?? '视频工厂'}生成完成：共 ${batchTasks.length} 条视频`,
     `成功：${completed}`,
     `失败：${failed}`,
     `并发数：${batchRun.minConcurrency === batchRun.maxObservedConcurrency
       ? batchRun.maxObservedConcurrency
       : `${batchRun.minConcurrency}-${batchRun.maxObservedConcurrency}`}（上限 ${concurrency}）`,
-    targetPlatform.label ? `平台：${targetPlatform.label}` : undefined,
     `时长：${videoConfig.durationSeconds} 秒`,
     `画幅：${videoConfig.ratio}`
   ].filter(Boolean).join('\n');
@@ -4413,7 +4414,7 @@ async function invokeWorkflowRuntimeEcommerceProductVideoFactoryNode(input: {
       toolId: 'local-filesystem',
       action: 'filesystem.write_text_file',
       input: {
-        folder: 'product-videos',
+        folder: outputFolder,
         fileName: buildWorkflowArtifactFileName(input.task.title, '视频生成结果清单'),
         content: buildFactoryEcommerceVideoManifestContent({
           taskTitle: input.task.title,
@@ -4471,7 +4472,7 @@ async function invokeWorkflowRuntimeEcommerceProductVideoFactoryNode(input: {
         input.task.taskId,
         failed > 0 ? 'warning' : 'info',
         'WORKFLOW_RUNTIME_ECOMMERCE_VIDEO_FACTORY_COMPLETED',
-        `Ecommerce video factory completed: completed=${completed}, failed=${failed}, total=${batchTasks.length}.`,
+        `Reference image video factory completed: completed=${completed}, failed=${failed}, total=${batchTasks.length}.`,
         input.createdAt,
         sanitizeLogSuffix(`${input.node.id}-ecommerce-video-factory`),
         {
@@ -4676,7 +4677,7 @@ function completeWorkflowRuntimeFactoryOutputNode(input: {
     };
   }
 
-  if (factoryKind === 'ecommerce_product_video_factory') {
+  if (isReferenceImageVideoFactoryRuntimeKind(factoryKind)) {
     const summary = readWorkflowRuntimeString(input.pool.get('video_generation_summary'));
     const results = input.pool.get('factory_generated_videos');
     if (!summary || results === undefined) {
@@ -4704,7 +4705,7 @@ function completeWorkflowRuntimeFactoryOutputNode(input: {
           input.task.taskId,
           'info',
           'WORKFLOW_RUNTIME_FACTORY_OUTPUT_COMPLETED',
-          'Ecommerce video factory output returned without an extra model call.',
+          'Reference image video factory output returned without an extra model call.',
           input.createdAt,
           sanitizeLogSuffix(input.node.id)
         )
@@ -4713,7 +4714,7 @@ function completeWorkflowRuntimeFactoryOutputNode(input: {
       generatedArtifacts: [],
       inputVariables: input.node.inputVariables ?? ['video_generation_summary', 'factory_generated_videos'],
       outputVariables,
-      message: 'Ecommerce video factory output returned without an extra model call.'
+      message: 'Reference image video factory output returned without an extra model call.'
     };
   }
 
@@ -7022,6 +7023,7 @@ function buildFactoryVideoOutputItems(input: {
 
 function buildFactoryEcommerceVideoOutputItems(input: {
   taskId: string;
+  factoryKind?: string;
   results: FactoryVideoGenerationResult[];
   createdAt: string;
 }): FactoryOutputItem[] {
@@ -7031,7 +7033,7 @@ function buildFactoryEcommerceVideoOutputItems(input: {
     const order = String(result.order || 1).padStart(2, '0');
     return {
       id: `${input.taskId}-ecommerce-video-output-${result.order}`,
-      factoryKind: 'ecommerce_product_video_factory',
+      factoryKind: input.factoryKind ?? 'ecommerce_product_video_factory',
       kind: 'video',
       title: `${displayName}-${order}-${result.packageLabel}`,
       status,
@@ -9059,8 +9061,6 @@ function buildFactoryVideoGenerationFallbackPrompt(
     `Create one ecommerce product video for source image ${item.sourceName ?? item.image.name ?? item.sku}.`,
     `Video package: ${packageItem.label} (${packageItem.key}).`,
     packageItem.description ? `Package requirement: ${packageItem.description}.` : undefined,
-    platform.label ? `Target platform: ${platform.label}.` : undefined,
-    platform.notes ? `Platform notes: ${platform.notes}.` : undefined,
     `Required duration: ${videoConfig.durationSeconds} seconds.`,
     `Required aspect ratio: ${videoConfig.ratio}.`,
     promptControls?.language ? `On-screen text language: ${promptControls.language}.` : undefined,
@@ -10209,10 +10209,11 @@ function isOptionalCrossBorderFactoryQualityCheckNode(
   node: WorkflowGraphNode,
   rolePackage?: RolePackageManifest
 ): boolean {
+  const factoryKind = readRolePackageFactoryKind(rolePackage);
   const isSupportedFactory =
     isImageFactoryRolePackage(rolePackage) ||
-    rolePackage?.templateId === 'factory_ecommerce_product_videos_v1' ||
-    rolePackage?.roleCode.includes('ecommerce') === true;
+    isReferenceImageVideoFactoryRuntimeKind(factoryKind) ||
+    rolePackage?.templateId === 'factory_ecommerce_product_videos_v1';
 
   return (
     isSupportedFactory &&
@@ -10221,17 +10222,28 @@ function isOptionalCrossBorderFactoryQualityCheckNode(
   );
 }
 
+function isReferenceImageVideoFactoryRuntimeKind(factoryKind: string | undefined) {
+  return factoryKind === 'ecommerce_product_video_factory' ||
+    factoryKind === 'digital_spokesperson_video_factory' ||
+    factoryKind === 'ad_social_media_video_factory';
+}
+
 function isImageFactoryRuntimeKind(factoryKind: string | undefined) {
   return factoryKind === 'cross_border_product_image_factory' || factoryKind?.endsWith('_image_factory') === true;
 }
 
-function isImageFactoryRolePackage(rolePackage?: RolePackageManifest) {
+function readRolePackageFactoryKind(rolePackage?: RolePackageManifest): string | undefined {
   const kind = readWorkflowRuntimeString(
     rolePackage?.dependencyManifest?.factory &&
       isWorkflowRuntimeRecord(rolePackage.dependencyManifest.factory)
       ? rolePackage.dependencyManifest.factory.kind
       : undefined
   );
+  return kind;
+}
+
+function isImageFactoryRolePackage(rolePackage?: RolePackageManifest) {
+  const kind = readRolePackageFactoryKind(rolePackage);
   return (
     isImageFactoryRuntimeKind(kind) ||
     rolePackage?.templateId === 'factory_cross_border_product_images_v1' ||
@@ -10256,6 +10268,12 @@ function shouldRunCrossBorderFactorySmartQualityCheck(pool: WorkflowVariablePool
   const factoryRequest = readFactoryRuntimeObject(pool.get('factory_request'));
   const requestMode = readWorkflowRuntimeString(factoryRequest?.qualityCheckMode)?.toLowerCase();
   return (mode ?? requestMode) === 'smart';
+}
+
+function readFactoryGeneratedMediaPoolKey(factoryKind: string | undefined): 'factory_generated_images' | 'factory_generated_videos' {
+  return isReferenceImageVideoFactoryRuntimeKind(factoryKind)
+    ? 'factory_generated_videos'
+    : 'factory_generated_images';
 }
 
 function completeOptionalCrossBorderFactoryPromptNodeWithoutVisionModel(input: {
@@ -10346,15 +10364,13 @@ function completeCrossBorderFactoryQualityCheckWithoutVisionModel(input: {
     readWorkflowRuntimeString(factoryRequest?.qualityCheckMode)?.toLowerCase() ??
     'none';
   const factoryKind = readWorkflowRuntimeString(factoryRequest?.factoryKind);
-  const generatedMedia = input.pool.get(
-    factoryKind === 'ecommerce_product_video_factory' ? 'factory_generated_videos' : 'factory_generated_images'
-  );
+  const generatedMedia = input.pool.get(readFactoryGeneratedMediaPoolKey(factoryKind));
   const mediaCount = Array.isArray(generatedMedia)
     ? generatedMedia.length
     : isWorkflowRuntimeRecord(generatedMedia) && Array.isArray(generatedMedia.items)
       ? generatedMedia.items.length
       : 0;
-  const mediaLabel = factoryKind === 'ecommerce_product_video_factory' ? '视频' : '图片';
+  const mediaLabel = isReferenceImageVideoFactoryRuntimeKind(factoryKind) ? '视频' : '图片';
   const report = {
     mode,
     passed: true,

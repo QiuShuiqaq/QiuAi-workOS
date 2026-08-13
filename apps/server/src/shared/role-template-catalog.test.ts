@@ -222,7 +222,7 @@ test('server role template catalog only exposes the approved production set', ()
     'core_ecommerce_copywriter_v1',
     'core_requirement_analyst_v1'
   ]);
-  assert.equal(expectedFactoryTemplateIds.length, 13);
+  assert.equal(expectedFactoryTemplateIds.length, 15);
   assert.equal(serverRoleTemplateCatalog.length, expectedTemplateIds.length);
   assert.deepEqual(serverRoleTemplateCatalog.map((template) => template.templateId), expectedTemplateIds);
 
@@ -276,6 +276,8 @@ test('server role template catalog only exposes the approved production set', ()
     'graphic_content_image_factory',
     'artistic_creation_image_factory',
     'ecommerce_product_video_factory',
+    'digital_spokesperson_video_factory',
+    'ad_social_media_video_factory',
     'medical_case_video_screening_factory',
     'operation_video_factory',
     'academic_project_demo_factory'
@@ -390,6 +392,32 @@ test('server role template catalog only exposes the approved production set', ()
             `${template.templateId} generic image factory must not expose ecommerce platform labels`
           );
         }
+      }
+      if (
+        factoryManifest.kind === 'ecommerce_product_video_factory' ||
+        factoryManifest.kind === 'digital_spokesperson_video_factory' ||
+        factoryManifest.kind === 'ad_social_media_video_factory'
+      ) {
+        assert.equal(factoryManifest.promptControls, undefined, `${template.templateId} video factory should not expose prompt controls`);
+        const batch = readRecord(factoryManifest.batch);
+        assert.deepEqual(
+          batch?.inputFileKinds,
+          ['image'],
+          `${template.templateId} reference video factory should only accept image inputs`
+        );
+        const platforms = Array.isArray(factoryManifest.platforms) ? factoryManifest.platforms.map(readRecord) : [];
+        assert.deepEqual(
+          platforms.map((item) => item?.key),
+          ['default_video_ratio'],
+          `${template.templateId} reference video factory should use the internal video ratio platform`
+        );
+        assert.deepEqual(
+          requiredDependencyModelProfileIds,
+          ['qiu-video-generation-default'],
+          `${template.templateId} should only require the video generation model`
+        );
+        const workflowSource = JSON.stringify(template.workflowGraph);
+        assert.doesNotMatch(workflowSource, /factory_request\.promptControls/, `${template.templateId} should not depend on prompt controls`);
       }
       assert.ok(
         template.workflowGraph.nodes.some((node) => node.type === 'input'),

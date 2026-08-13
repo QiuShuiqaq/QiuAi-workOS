@@ -153,6 +153,10 @@ import {
   type RoleModelRuntimeRequirementStatus
 } from '../shared/desktop-role-requirements';
 import {
+  isWatchExecutionProfile,
+  resolveRoleExecutionModeMeta
+} from '../shared/role-execution-mode';
+import {
   createCustomCompatibleModelProfile,
   selectModelProfileForPreset,
   type ModelProviderPreset,
@@ -2097,20 +2101,6 @@ function roleTemplateAccessLabel(template: Pick<DesktopRoleTemplate, 'accessLabe
 
 function roleTemplateAccessReason(template: Pick<DesktopRoleTemplate, 'accessReason'>): string {
   return template.accessReason?.trim() || '\u5f53\u524d\u7248\u672c\u6682\u4e0d\u652f\u6301\u5b89\u88c5\u8be5\u6a21\u677f\u3002';
-}
-
-function roleExecutionModeMeta(profile: DesktopRoleExecutionProfile | undefined): {
-  label: string;
-  color: string;
-} {
-  switch (profile?.mode) {
-    case 'watch':
-      return { label: '值守式', color: 'gold' };
-    case 'hybrid':
-      return { label: '值守式', color: 'gold' };
-    default:
-      return { label: '对话式', color: 'blue' };
-  }
 }
 
 function roleExecutionProfileTooltip(profile: DesktopRoleExecutionProfile | undefined): ReactNode {
@@ -5421,8 +5411,8 @@ export default function App() {
       const factoryManifest = readFactoryManifest(rolePackage.dependencyManifest);
       const roleHint = isMedicalCaseVideoFactory(factoryManifest)
         ? '质检视频工厂'
-        : isEcommerceProductVideoFactory(factoryManifest)
-          ? '电商视频工厂'
+        : isReferenceImageVideoFactory(factoryManifest)
+          ? '视频生成工厂'
           : isAcademicDemoFactory(factoryManifest)
             ? '学术 Demo 工厂'
             : isOperationVideoFactory(factoryManifest)
@@ -8326,7 +8316,7 @@ export default function App() {
       : undefined;
     const maxItems = readFactoryMaxItems(selectedFactoryManifest);
     const isMedicalVideoFactory = isMedicalCaseVideoFactory(selectedFactoryManifest);
-    const isEcommerceVideoFactory = isEcommerceProductVideoFactory(selectedFactoryManifest);
+    const isEcommerceVideoFactory = isReferenceImageVideoFactory(selectedFactoryManifest);
     const isOperationFactory = isOperationVideoFactory(selectedFactoryManifest);
     const isImageFactory = isImageGenerationFactory(selectedFactoryManifest);
     const isAcademicDemoFactoryType = isAcademicDemoFactory(selectedFactoryManifest);
@@ -8370,7 +8360,7 @@ export default function App() {
         ? '.docx,.pdf,.xlsx,.csv'
       : isOperationFactory
         ? '.png,.jpg,.jpeg,.webp,.xlsx,.csv,.pdf,.doc,.docx,.ppt,.pptx,.txt,.md'
-      : isImageFactory
+      : isEcommerceVideoFactory || isImageFactory
         ? '.png,.jpg,.jpeg,.webp'
         : '.png,.jpg,.jpeg,.webp,.xlsx,.csv';
     const validFactoryAttachments = isMedicalVideoFactory
@@ -8620,7 +8610,7 @@ export default function App() {
                         {isMedicalVideoFactory
                           ? '视频质检'
                           : isEcommerceVideoFactory
-                            ? '电商视频批处理'
+                            ? '视频生成'
                             : isAcademicDemoFactoryType
                               ? '学术Demo生成'
                             : isOperationFactory
@@ -8683,7 +8673,7 @@ export default function App() {
                             {isMedicalVideoFactory
                               ? `上传待质检视频，单批最多 ${maxItems} 个。`
                               : isEcommerceVideoFactory
-                                ? `上传商品参考图或表格，单批最多 ${maxItems} 个商品。`
+                                ? `上传参考图，单批最多 ${maxItems} 张。`
                                 : isAcademicDemoFactoryType
                                   ? `上传 Word、PDF、Excel 或 CSV 项目资料，每次最多 ${maxItems} 个文件。`
                                 : isOperationFactory
@@ -8701,22 +8691,26 @@ export default function App() {
                       >
                         <FileAddOutlined />
                         <span>
-                          {isMedicalVideoFactory
-                            ? '添加视频或拖拽到这里'
-                            : isAcademicDemoFactoryType
-                              ? '添加项目资料或拖拽到这里'
+                            {isMedicalVideoFactory
+                              ? '添加视频或拖拽到这里'
+                              : isAcademicDemoFactoryType
+                                ? '添加项目资料或拖拽到这里'
                             : isOperationFactory
                               ? '添加资料/图片/表格或拖拽到这里'
-                              : '添加图片/表格或拖拽到这里'}
+                              : isEcommerceVideoFactory || isImageFactory
+                                ? '添加图片或拖拽到这里'
+                                : '添加图片/表格或拖拽到这里'}
                         </span>
                         <small>
-                          {isMedicalVideoFactory
-                            ? 'mp4、mov、mkv、avi、webm、m4v'
-                            : isAcademicDemoFactoryType
-                              ? 'docx、pdf、xlsx、csv'
+                            {isMedicalVideoFactory
+                              ? 'mp4、mov、mkv、avi、webm、m4v'
+                              : isAcademicDemoFactoryType
+                                ? 'docx、pdf、xlsx、csv'
                             : isOperationFactory
                               ? 'pdf、docx、pptx、图片、xlsx、csv、txt'
-                              : 'png、jpg、webp、xlsx、csv'}
+                              : isEcommerceVideoFactory || isImageFactory
+                                ? 'png、jpg、jpeg、webp'
+                                : 'png、jpg、webp、xlsx、csv'}
                         </small>
                       </button>
                       <input
@@ -8939,15 +8933,6 @@ export default function App() {
                           </>
                         ) : isEcommerceVideoFactory ? (
                           <>
-                            <Form.Item name="platform" label="目标平台" rules={[{ required: true, message: '请选择目标平台' }]}>
-                              <Select
-                                size="large"
-                                options={platformOptions.map((item) => ({
-                                  value: item.key,
-                                  label: `${item.label}${item.imageRatio ? ` / ${item.imageRatio}` : ''}`
-                                }))}
-                              />
-                            </Form.Item>
                             <Form.Item shouldUpdate noStyle>
                               {({ getFieldValue }) => {
                                 const currentPackages = normalizeFactoryPackageDefinitions(
@@ -9000,30 +8985,6 @@ export default function App() {
                                 />
                               </Form.Item>
                             </div>
-                            <div className="factory-prompt-control-block">
-                              <Flex align="center" justify="space-between" gap={8}>
-                                <InlineHelpTitle help="控制生视频模型的画面、风格、镜头语言和画面文字，最终会参与生成视频提示词。">
-                                  <Typography.Text strong>提示词控制</Typography.Text>
-                                </InlineHelpTitle>
-                              </Flex>
-                              <div className="factory-prompt-control-grid">
-                                {promptControlFields.map((field) => (
-                                  <Form.Item key={field.key} name={field.key} label={field.label}>
-                                    {field.inputType === 'textarea' ? (
-                                      <Input.TextArea rows={2} placeholder={field.placeholder} />
-                                    ) : (
-                                      <Input placeholder={field.placeholder} />
-                                    )}
-                                  </Form.Item>
-                                ))}
-                              </div>
-                            </div>
-                            <Form.Item name="instruction" label="补充要求">
-                              <Input.TextArea
-                                rows={3}
-                                placeholder="例如：前三秒突出商品卖点，画面真实，不要生成夸张文字和虚假功能。"
-                              />
-                            </Form.Item>
                           </>
                         ) : isOperationFactory ? (
                           <>
@@ -10523,7 +10484,10 @@ export default function App() {
               const hasTemplateUpdate = isInstalledRoleTemplateOutdated(template, installedRolePackage);
               const fileContract = buildRoleFileContractSummary(template);
               const freeTemplate = isFreeRoleTemplate(template);
-              const executionModeMeta = roleExecutionModeMeta(template.executionProfile);
+              const executionModeMeta = resolveRoleExecutionModeMeta(
+                template.executionProfile,
+                readRoleApplicationType(template)
+              );
               const installAvailability = resolveRoleInstallAvailability(template);
               const installStatusColor = active ? 'green' : installed ? 'blue' : installAvailability.canInstall ? 'default' : 'orange';
               const installStatusLabel = active
@@ -12356,7 +12320,7 @@ export default function App() {
       };
     }
 
-    if (isEcommerceProductVideoFactory(factory)) {
+    if (isReferenceImageVideoFactory(factory)) {
       const packageOptions = readFactoryPackageOptions(factory);
       const packageDefinitions = readFactoryPackagePreset(roleCode, packageOptions);
       const platformOptions = readFactoryPlatformOptions(factory);
@@ -12372,13 +12336,7 @@ export default function App() {
         packageKeys: resolveFactoryPackageSelection(roleCode, packageDefinitions),
         qualityCheckMode: qualityModes[0]?.key ?? 'basic',
         videoDurationSeconds: durationOptions[1] ?? durationOptions[0] ?? 8,
-        videoRatio: platformOptions[0]?.imageRatio ?? ratios[0]?.key ?? '9:16',
-        promptLanguage: '',
-        promptStyle: '',
-        promptGoal: '',
-        promptMustKeep: '',
-        promptAvoid: '',
-        instruction: ''
+        videoRatio: platformOptions[0]?.imageRatio ?? ratios[0]?.key ?? '9:16'
       };
     }
 
@@ -12956,7 +12914,7 @@ export default function App() {
       return;
     }
 
-    if (isEcommerceProductVideoFactory(factory)) {
+    if (isReferenceImageVideoFactory(factory)) {
       const ecommerceAttachments = factoryAttachments.filter((attachment) => isFactoryImageAttachment(attachment));
       const invalidEcommerceAttachments = factoryAttachments.filter(
         (attachment) => !isFactoryImageAttachment(attachment)
@@ -12995,9 +12953,8 @@ export default function App() {
         return;
       }
 
-      const platform = readFactoryPlatformOptions(factory).find((item) => item.key === ecommerceVideoValues.platform);
       const selectedPackageCount = ecommerceVideoValues.packageKeys.length;
-      const title = `${template.name} - ${platform?.label ?? ecommerceVideoValues.platform} - ${ecommerceAttachments.length * selectedPackageCount} 条视频`;
+      const title = `${template.name} - ${ecommerceAttachments.length * selectedPackageCount} 条视频`;
       const input = buildEcommerceProductVideoFactoryTaskInput({
         template,
         factory,
@@ -14675,8 +14632,10 @@ export default function App() {
 }
 
 function isWatchRolePackage(rolePackage: RolePackageManifest | undefined): boolean {
-  const mode = rolePackage?.executionProfile?.mode;
-  return mode === 'watch' || mode === 'hybrid';
+  return isWatchExecutionProfile(
+    rolePackage?.executionProfile,
+    readRoleApplicationType(rolePackage)
+  );
 }
 
 function getRuntimeWatchConfigs(state: DesktopRuntimeState): DesktopRoleWatchConfig[] {
@@ -17359,8 +17318,14 @@ function readFactoryOperationRatios(factory: DigitalFactoryManifest) {
   return factory.contentControls?.ratios?.length ? factory.contentControls.ratios : defaultFactoryOperationRatios;
 }
 
+function isReferenceImageVideoFactoryKind(kind: string | undefined): boolean {
+  return kind === 'ecommerce_product_video_factory' ||
+    kind === 'digital_spokesperson_video_factory' ||
+    kind === 'ad_social_media_video_factory';
+}
+
 function readFactoryVideoDurationOptions(factory: DigitalFactoryManifest): number[] {
-  if (factory.kind === 'ecommerce_product_video_factory') {
+  if (isReferenceImageVideoFactoryKind(factory.kind)) {
     return [6, 10];
   }
 
@@ -17459,6 +17424,10 @@ function isOperationVideoFactory(factory: DigitalFactoryManifest) {
 
 function isEcommerceProductVideoFactory(factory: DigitalFactoryManifest) {
   return readFactoryKind(factory) === 'ecommerce_product_video_factory';
+}
+
+function isReferenceImageVideoFactory(factory: DigitalFactoryManifest) {
+  return isReferenceImageVideoFactoryKind(readFactoryKind(factory));
 }
 
 function isImageGenerationFactory(factory: DigitalFactoryManifest) {
@@ -17584,7 +17553,14 @@ function buildEcommerceProductVideoFactoryTaskInput({
   values: FactoryRunFormValues;
   attachments: ComposerAttachment[];
 }) {
-  const platform = readFactoryPlatformOptions(factory).find((item) => item.key === values.platform);
+  const factoryKind = readFactoryKind(factory);
+  const ratio = readFactoryOperationRatios(factory).find((item) => item.key === values.videoRatio);
+  const platform = {
+    key: 'default_video_ratio',
+    label: '通用视频',
+    imageRatio: ratio?.key ?? values.videoRatio ?? '9:16',
+    notes: '按用户选择的画幅生成视频，发布前人工确认平台规则、版权和品牌表达。'
+  };
   const packageOptions = normalizeFactoryPackageDefinitions(
     values.packageDefinitions,
     readFactoryPackageOptions(factory)
@@ -17593,23 +17569,16 @@ function buildEcommerceProductVideoFactoryTaskInput({
   const selectedPackages = packageOptions.filter((item) => selectedPackageKeys.includes(item.key));
   const qualityMode = readFactoryQualityModes(factory).find((item) => item.key === values.qualityCheckMode);
   const imageAttachments = attachments.filter((attachment) => isFactoryImageAttachment(attachment));
-  const ratio = readFactoryOperationRatios(factory).find((item) => item.key === values.videoRatio);
   const durationOptions = readFactoryVideoDurationOptions(factory);
   const requestedDuration = Number(values.videoDurationSeconds);
   const videoDurationSeconds = durationOptions.includes(requestedDuration)
     ? requestedDuration
     : durationOptions[1] ?? durationOptions[0] ?? 8;
-  const promptControls = buildFactoryPromptControls(values);
   const factoryRequest = {
     applicationType: 'digital_factory',
-    factoryKind: 'ecommerce_product_video_factory',
+    factoryKind,
     factoryName: template.name,
-    platform: {
-      key: platform?.key ?? values.platform ?? 'tiktok_shop',
-      label: platform?.label ?? values.platform ?? 'TikTok Shop',
-      imageRatio: platform?.imageRatio,
-      notes: platform?.notes
-    },
+    platform,
     packages: selectedPackages.map((item) => ({
       key: item.key,
       label: item.label,
@@ -17635,17 +17604,15 @@ function buildEcommerceProductVideoFactoryTaskInput({
       packageFormat: factory.output?.packageFormat ?? 'url_manifest',
       videoFormat: factory.output?.videoFormat ?? 'mp4'
     },
-    promptControls,
     attachments: imageAttachments.map((attachment) => ({
       name: attachment.name,
       size: attachment.size,
       type: attachment.type,
       localPath: attachment.localPath,
       kind: 'product_image'
-    })),
-    instruction: values.instruction?.trim() || undefined
+    }))
   };
-  const taskBrief = `请运行「${template.name}」，为 ${factoryRequest.platform.label} 批量生成电商商品视频。`;
+  const taskBrief = `请运行「${template.name}」，批量生成视频。`;
 
   return JSON.stringify(
     {
@@ -17658,9 +17625,9 @@ function buildEcommerceProductVideoFactoryTaskInput({
       videoDurationSeconds,
       videoRatio: factoryRequest.videoGeneration.ratio,
       instructions: [
-        '按 factory_request 逐项处理每张商品图片。',
-        '只生成用户勾选的商品视频产物包；不要生成未勾选的视频类型。',
-        '提示词必须优先遵守 factory_request.promptControls 和 videoGeneration；画面文字必须使用指定语言，不需要文字时要明确避免画面文字。',
+        '按 factory_request 逐项处理每张参考图片。',
+        '只生成用户勾选的视频产物包；不要生成未勾选的视频类型。',
+        '生视频提示词必须以所选产物包 description 为核心，并遵守 videoGeneration 的时长和画幅。',
         '生成结果只保存视频 URL 元数据；大视频不经过服务端，PC 端按 URL 展示和导出。',
         '如果质检方式为 none，跳过额外智能质检；如果为 basic，只做产物数量、URL、命名和基础元数据检查。'
       ]
