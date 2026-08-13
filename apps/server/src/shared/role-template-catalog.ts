@@ -1153,6 +1153,348 @@ const crossBorderFactoryDefaultPackageKeys: CrossBorderFactoryPackageKey[] = [
   'selling_point_image'
 ];
 
+type ImageFactoryPackageOption = {
+  key: string;
+  label: string;
+  description: string;
+  outputType: 'image';
+};
+
+type ImageFactoryTemplateDefinition = {
+  kind: string;
+  title: string;
+  templateId: string;
+  name: string;
+  industry: string;
+  scenario: string;
+  description: string;
+  businessGoal: string;
+  packageOptions: ImageFactoryPackageOption[];
+  defaultPackageKeys: string[];
+  sampleInputs: string[];
+};
+
+const imageFactoryCommonSkills = [
+  skill('image_package_templates', '专业产物包模板', '把常见图片需求整理为可直接选择的专业产物包，减少用户编写复杂提示词。'),
+  skill('image_ratio_control', '图片比例控制', '按常用图片比例生成适合不同展示场景的图片素材。'),
+  skill('image_batch_generation', '批量生图', '按用户勾选的产物包批量生成图片，并保留每张图片的结果与失败原因。')
+];
+
+const imageFactoryDefaultPlatforms = [
+  {
+    key: 'ratio_1_1',
+    label: '1:1 方图',
+    imageRatio: '1:1',
+    notes: '适合头像、卡片、主视觉、图标和大多数信息流图片。'
+  },
+  {
+    key: 'ratio_3_4',
+    label: '3:4 竖图',
+    imageRatio: '3:4',
+    notes: '适合人像、角色立绘、海报和内容平台竖版图片。'
+  },
+  {
+    key: 'ratio_4_3',
+    label: '4:3 横图',
+    imageRatio: '4:3',
+    notes: '适合场景概念图、工业产品、插画和横向展示图片。'
+  },
+  {
+    key: 'ratio_9_16',
+    label: '9:16 竖屏',
+    imageRatio: '9:16',
+    notes: '适合短视频封面、移动端视觉和竖屏宣传图片。'
+  },
+  {
+    key: 'ratio_16_9',
+    label: '16:9 横屏',
+    imageRatio: '16:9',
+    notes: '适合网页 Banner、横版海报、产品展示和现场投屏图片。'
+  }
+];
+
+function buildImageFactoryManifest(definition: Pick<ImageFactoryTemplateDefinition, 'kind' | 'title' | 'packageOptions' | 'defaultPackageKeys'>) {
+  return {
+    kind: definition.kind,
+    version: '1.0.0',
+    title: definition.title,
+    batch: {
+      maxItems: 50,
+      itemUnit: 'image',
+      inputFileKinds: ['image'],
+      imageExtensions: ['png', 'jpg', 'jpeg', 'webp']
+    },
+    platforms: imageFactoryDefaultPlatforms,
+    packages: definition.packageOptions.map((item) => ({
+      ...item,
+      defaultSelected: definition.defaultPackageKeys.includes(item.key)
+    })),
+    qualityCheck: {
+      defaultMode: 'basic',
+      modes: [
+        { key: 'none', label: '不质检', description: '不额外调用模型，只生成图片。' },
+        { key: 'basic', label: '基础质检', description: '检查文件数量、命名、格式和基础规则。' },
+        { key: 'smart', label: '智能质检', description: '调用图片理解模型检查主体一致性、比例适配和内容可读性。' }
+      ]
+    },
+    output: {
+      cacheDays: 30,
+      defaultImageFormat: 'png',
+      packageFormat: 'url_manifest',
+      folder: 'generated-images'
+    },
+    requiredCapabilities: ['image_generation', 'image_editing'],
+    optionalCapabilities: ['vision'],
+    ui: {
+      primaryActionLabel: '开始生成',
+      uploadHint: '上传参考图片，选择图片比例和产物包；单批最多 50 张图片。',
+      packageSelection: 'checkbox'
+    }
+  };
+}
+
+function buildImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
+  return buildCrossBorderImageFactoryWorkflowGraph({
+    mode: 'generic',
+    defaultPackageKeys: []
+  });
+}
+
+function buildImageFactoryTemplate(definition: ImageFactoryTemplateDefinition): BaseServerRoleTemplateCatalogEntry {
+  return {
+    templateId: definition.templateId,
+    applicationType: 'DIGITAL_FACTORY',
+    version: DESIGNED_ROLE_TEMPLATE_VERSION,
+    name: definition.name,
+    industry: definition.industry,
+    scenario: definition.scenario,
+    description: definition.description,
+    recommendedPlanCode: 'ENTERPRISE_BASIC_MONTHLY',
+    businessGoal: definition.businessGoal,
+    knowledgeSources: ['企业知识库', '视觉风格规范', '历史优质案例', '品牌或项目素材要求'],
+    tools: ['local-filesystem'],
+    skills: imageFactoryCommonSkills,
+    workflowSteps: [
+      {
+        id: 'factory_input',
+        order: 1,
+        type: 'input',
+        name: '接收图片批次',
+        instruction: '接收用户上传的参考图片、图片比例、勾选产物包和质检模式。'
+      },
+      {
+        id: 'gather_factory_rules',
+        order: 2,
+        type: 'knowledge',
+        name: '读取图片规范',
+        instruction: '读取可用的企业知识、品牌要求、项目规范和历史案例；没有明确资料时不自行编造限制。'
+      },
+      {
+        id: 'prepare_batch',
+        order: 3,
+        type: 'llm',
+        name: '整理图片参数',
+        instruction: '把参考图片、图片比例和产物包整理成可并发执行的批次 JSON，并套用对应产物包模板。'
+      },
+      {
+        id: 'generate_images',
+        order: 4,
+        type: 'llm',
+        name: '批量生成图片',
+        instruction: '按用户选择的图片比例和产物包调用图片生成模型，保持参考主体的关键特征一致，输出图片远程 URL 元数据。'
+      },
+      {
+        id: 'quality_check',
+        order: 5,
+        type: 'llm',
+        name: '可选质检',
+        instruction: '根据用户选择执行不质检、基础质检或智能质检，不改变图片生成结果。'
+      },
+      {
+        id: 'factory_output',
+        order: 6,
+        type: 'output',
+        name: '返回图片结果',
+        instruction: '返回批量完成数量、失败项、图片 URL、本地预览和质检摘要。'
+      }
+    ],
+    workflowGraph: buildImageFactoryWorkflowGraph(),
+    dependencyManifestFactory: buildImageFactoryManifest({
+        kind: definition.kind,
+        title: definition.title,
+        packageOptions: definition.packageOptions,
+        defaultPackageKeys: definition.defaultPackageKeys
+      }),
+    sampleInputs: definition.sampleInputs,
+    outputFormat: '图片批次结果，包含原图对应的产物包、图片 URL、本地预览、失败原因和质检摘要。',
+    allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_BASIC_MONTHLY'),
+    approvalPolicy: '生成前由用户选择图片比例和产物包；对外发布前需人工复核内容真实性、品牌合规、素材版权和文字准确性。'
+  };
+}
+
+const horizontalImageFactoryDefinitions: ImageFactoryTemplateDefinition[] = [
+  {
+    templateId: 'factory_anime_images_v1',
+    kind: 'anime_image_factory',
+    title: 'AI动漫图片工厂',
+    name: 'AI动漫图片工厂',
+    industry: '动漫内容 / 视觉创作',
+    scenario: '批量生成动漫角色、场景、分镜、表情和宣传视觉素材',
+    description: '面向动漫创作者、IP 团队和内容运营人员，把参考设定图或文字方向整理为可直接选择的动漫图片产物包，批量生成角色与场景素材。',
+    businessGoal: '降低动漫项目早期概念设计和内容配图成本，让创作者可以快速获得风格统一、方便筛选的视觉草稿。',
+    packageOptions: [
+      { key: 'character_illustration', label: '角色立绘', description: '生成完整角色立绘，保持角色设定、服饰、发型、配色和关键道具一致，画面主体完整、姿态自然、适合角色展示。', outputType: 'image' },
+      { key: 'character_turnaround', label: '角色三视图', description: '生成角色正面、侧面和背面设定展示，保持比例、服饰结构和配色一致，适合后续建模或绘制参考。', outputType: 'image' },
+      { key: 'scene_concept', label: '场景概念图', description: '生成符合故事背景的动漫场景概念图，明确前中后景、光线氛围和空间关系，避免无关主体抢占画面。', outputType: 'image' },
+      { key: 'storyboard_frame', label: '漫画分镜', description: '生成单格或连续分镜参考，突出人物动作、镜头关系和叙事重点，画面文字保持少量且清晰。', outputType: 'image' },
+      { key: 'chibi_character', label: 'Q版形象', description: '生成简洁可爱的 Q 版角色，保留原角色最重要的发型、服装、颜色和道具特征。', outputType: 'image' },
+      { key: 'character_expression_sheet', label: '表情设定图', description: '生成同一角色的多种表情参考，保持脸型、发型和服装一致，适合表情包和剧情设定使用。', outputType: 'image' }
+    ],
+    defaultPackageKeys: ['character_illustration', 'scene_concept', 'chibi_character'],
+    sampleInputs: ['上传角色参考图，生成角色立绘、Q版形象和表情设定图。', '上传场景草图，生成统一动漫风格的场景概念图和漫画分镜。']
+  },
+  {
+    templateId: 'factory_game_images_v1',
+    kind: 'game_image_factory',
+    title: 'AI游戏图片工厂',
+    name: 'AI游戏图片工厂',
+    industry: '游戏研发 / 视觉资产',
+    scenario: '批量生成游戏角色、场景、武器道具、卡牌和 UI 视觉资产',
+    description: '面向游戏团队和独立开发者，把游戏设定、参考图或概念方向整理为角色原画、场景概念和道具设计等可筛选的视觉资产。',
+    businessGoal: '加快游戏前期概念验证和资产备选产出，减少反复寻找参考图和手工制作初稿的时间。',
+    packageOptions: [
+      { key: 'character_concept', label: '角色原画', description: '生成完整游戏角色原画，突出职业定位、服装结构、装备细节和轮廓识别度，保持设定一致。', outputType: 'image' },
+      { key: 'environment_concept', label: '场景概念图', description: '生成游戏环境概念图，明确空间层次、光照氛围、地标元素和可探索区域，不添加无关风格元素。', outputType: 'image' },
+      { key: 'weapon_prop_design', label: '武器道具设计', description: '生成武器、装备或关键道具设计图，突出结构、材质、比例和功能识别，不改变核心造型。', outputType: 'image' },
+      { key: 'card_illustration', label: '卡牌立绘', description: '生成适合卡牌展示的角色或物件立绘，主体集中、边缘清晰、预留卡面信息区域。', outputType: 'image' },
+      { key: 'monster_design', label: '怪物设计', description: '生成具有明确体型、材质和攻击特征的怪物设计，保持轮廓可识别，避免肢体数量和结构错误。', outputType: 'image' },
+      { key: 'game_ui_asset', label: '游戏界面素材', description: '生成按钮、面板、图标或界面装饰素材，保持视觉层级清晰，文字只在明确要求时生成。', outputType: 'image' }
+    ],
+    defaultPackageKeys: ['character_concept', 'environment_concept', 'weapon_prop_design'],
+    sampleInputs: ['上传角色草图，生成角色原画、卡牌立绘和装备展示图。', '上传游戏世界观资料，生成场景概念图、怪物设计和道具设计。']
+  },
+  {
+    templateId: 'factory_poster_images_v1',
+    kind: 'poster_image_factory',
+    title: 'AI海报图片工厂',
+    name: 'AI海报图片工厂',
+    industry: '品牌宣传 / 营销设计',
+    scenario: '批量生成品牌主视觉、新品发布、活动宣传、节日营销和信息流广告图片',
+    description: '面向企业市场和运营团队，选择海报产物包与图片比例，快速生成多版本宣传视觉，减少从零构图和提示词调试。',
+    businessGoal: '快速准备不同渠道和活动场景的视觉方案，用于内部筛选、设计沟通和后续人工定稿。',
+    packageOptions: [
+      { key: 'brand_key_visual', label: '品牌主视觉', description: '生成围绕品牌核心概念的主视觉画面，构图集中、风格统一、预留标题和品牌信息区域。', outputType: 'image' },
+      { key: 'product_launch_poster', label: '新品发布海报', description: '突出新品主体、核心卖点和发布氛围，画面清晰有层次，避免生成未经确认的产品参数。', outputType: 'image' },
+      { key: 'event_promotion_poster', label: '活动宣传海报', description: '生成适合活动宣传的视觉构图，突出活动主题、时间信息区域和参与氛围，文字保持少量清晰。', outputType: 'image' },
+      { key: 'festival_campaign_poster', label: '节日营销海报', description: '结合节日氛围和品牌视觉生成营销海报，主体醒目、色彩协调，避免堆叠装饰和俗套元素。', outputType: 'image' },
+      { key: 'feed_ad_creative', label: '信息流广告图', description: '生成适合信息流快速浏览的广告视觉，前三秒视觉焦点明确，商品或服务主体清楚，预留文案区域。', outputType: 'image' },
+      { key: 'social_cover', label: '社媒封面图', description: '生成适合公众号、小红书、视频号或其他社媒的封面视觉，主体突出、留白合理、便于后续排版。', outputType: 'image' }
+    ],
+    defaultPackageKeys: ['brand_key_visual', 'product_launch_poster', 'social_cover'],
+    sampleInputs: ['上传品牌标志和产品图，生成新品发布海报、品牌主视觉和社媒封面。', '选择节日营销产物包，生成多种比例的活动宣传图片。']
+  },
+  {
+    templateId: 'factory_portrait_images_v1',
+    kind: 'portrait_image_factory',
+    title: 'AI人像图片工厂',
+    name: 'AI人像图片工厂',
+    industry: '人像内容 / 品牌形象',
+    scenario: '批量生成职业肖像、生活方式写真、古风人像、头像和品牌模特视觉',
+    description: '面向个人用户、企业品牌和内容团队，把人物参考图整理为职业形象、写真、头像和场景人像等产物包，尽量保持人物身份特征稳定。',
+    businessGoal: '降低人像拍摄和多场景视觉准备成本，为个人形象、品牌宣传和内容创作快速提供可筛选方案。',
+    packageOptions: [
+      { key: 'professional_headshot', label: '职业形象照', description: '生成干净可信的职业肖像，保持人物脸部特征、发型和身份一致，适合个人简介、企业资料和职业展示。', outputType: 'image' },
+      { key: 'lifestyle_portrait', label: '生活方式写真', description: '生成自然生活场景人像，动作和表情真实放松，环境服务于人物主体，避免过度磨皮和不自然姿态。', outputType: 'image' },
+      { key: 'traditional_style_portrait', label: '古风人像', description: '生成具有明确服饰、妆发和场景氛围的古风人像，保留人物身份特征，服饰结构完整。', outputType: 'image' },
+      { key: 'avatar_portrait', label: '头像组图', description: '生成适合头像使用的多种构图，脸部清晰、背景简洁、人物比例自然，便于不同平台裁切。', outputType: 'image' },
+      { key: 'brand_model_image', label: '品牌模特图', description: '生成适合品牌展示的模特视觉，人物姿态自然，商品或品牌主体清晰，避免改变服装和产品细节。', outputType: 'image' },
+      { key: 'scene_character_portrait', label: '场景人像', description: '把人物放入指定生活、工作或旅行场景，保持人物身份、服饰和关键特征一致。', outputType: 'image' }
+    ],
+    defaultPackageKeys: ['professional_headshot', 'lifestyle_portrait', 'avatar_portrait'],
+    sampleInputs: ['上传人物参考图，生成职业形象照、头像组图和生活方式写真。', '上传服装或品牌参考图，生成品牌模特图和场景人像。']
+  },
+  {
+    templateId: 'factory_ui_icon_images_v1',
+    kind: 'ui_icon_image_factory',
+    title: 'AI图标UI图片工厂',
+    name: 'AI图标 UI 图片工厂',
+    industry: '产品设计 / UI视觉',
+    scenario: '批量生成功能图标、UI插画、网页 Banner、启动页和空状态素材',
+    description: '面向产品、设计和开发团队，把产品主题和参考风格整理为图标、UI 插画与界面配图，方便快速准备产品原型和视觉备选。',
+    businessGoal: '提升产品早期视觉探索和界面素材准备效率，让非专业用户也能快速得到风格一致的 UI 视觉草稿。',
+    packageOptions: [
+      { key: 'feature_icon_set', label: '功能图标组', description: '生成同一套视觉语言的功能图标，保持线条、比例、视角、颜色和背景规则一致，适合产品功能入口。', outputType: 'image' },
+      { key: 'ui_illustration', label: 'UI插画', description: '生成适合页面展示的 UI 插画，主题明确、构图简洁、留白合理，不堆叠无关装饰。', outputType: 'image' },
+      { key: 'web_banner', label: '网页 Banner', description: '生成适合网页首屏或功能页的横向视觉，主体和信息区域分明，预留文字排版空间。', outputType: 'image' },
+      { key: 'app_splash', label: '应用启动页', description: '生成适合应用启动页的简洁视觉，品牌识别明确、构图稳定、避免过多细节影响加载展示。', outputType: 'image' },
+      { key: 'empty_state_illustration', label: '空状态插画', description: '生成适合无数据、完成、错误或引导状态的插画，情绪表达清晰，主体简洁友好。', outputType: 'image' },
+      { key: 'component_visual', label: '组件配图', description: '生成适合卡片、弹窗、表单或功能模块的配图，尺寸感明确、内容不抢占界面信息。', outputType: 'image' }
+    ],
+    defaultPackageKeys: ['feature_icon_set', 'ui_illustration', 'empty_state_illustration'],
+    sampleInputs: ['上传产品界面截图，生成同风格功能图标组、空状态插画和组件配图。', '输入产品主题，生成网页 Banner、启动页和 UI 插画。']
+  },
+  {
+    templateId: 'factory_industrial_product_images_v1',
+    kind: 'industrial_product_image_factory',
+    title: 'AI工业产品图片工厂',
+    name: 'AI工业产品图片工厂',
+    industry: '工业设计 / 产品展示',
+    scenario: '批量生成工业产品渲染、结构展示、工业场景、包装效果和概念设计图片',
+    description: '面向制造企业、工业设计和产品研发团队，把产品照片、草图或规格资料转化为产品展示和方案沟通所需的工业视觉素材。',
+    businessGoal: '减少工业产品早期展示、方案沟通和包装预览中的重复制图工作，让团队更快比较不同视觉方向。',
+    packageOptions: [
+      { key: 'product_rendering', label: '产品渲染图', description: '生成干净专业的工业产品渲染图，保持结构、材质、颜色和接口位置一致，突出产品完整外观。', outputType: 'image' },
+      { key: 'structure_exploded_view', label: '结构展示图', description: '生成产品结构或部件展示图，明确层级和对应关系，不编造内部结构或未经确认的零部件。', outputType: 'image' },
+      { key: 'industrial_scene', label: '工业场景图', description: '把产品放入真实工业、实验室或使用场景，突出产品与环境的关系，避免虚假功能和夸张效果。', outputType: 'image' },
+      { key: 'packaging_mockup', label: '包装效果图', description: '生成产品包装或包装陈列效果，保留产品和包装核心信息，预留可供设计师后续排版的区域。', outputType: 'image' },
+      { key: 'material_scheme', label: '材质方案图', description: '围绕材质、颜色、表面处理和工艺效果生成对比方案，保持产品结构不变，便于内部选型。', outputType: 'image' },
+      { key: 'concept_design', label: '概念设计图', description: '生成基于现有产品方向的概念外观方案，明确哪些是概念变化，避免误称为已量产结构。', outputType: 'image' }
+    ],
+    defaultPackageKeys: ['product_rendering', 'industrial_scene', 'material_scheme'],
+    sampleInputs: ['上传产品照片，生成产品渲染图、工业场景图和材质方案图。', '上传产品草图，生成结构展示图、包装效果图和概念设计图。']
+  },
+  {
+    templateId: 'factory_graphic_content_images_v1',
+    kind: 'graphic_content_image_factory',
+    title: 'AI图文素材图片工厂',
+    name: 'AI图文素材图片工厂',
+    industry: '内容运营 / 图文传播',
+    scenario: '批量生成科普插图、知识卡片、绘本插画、表情包和公众号配图',
+    description: '面向自媒体、教育和内容团队，把主题或参考资料整理为适合传播的图文视觉素材，重点保持内容清晰和版式可编辑。',
+    businessGoal: '降低日常图文配图和知识视觉化成本，让内容团队快速获得可筛选、可继续排版的素材。',
+    packageOptions: [
+      { key: 'science_illustration', label: '科普插图', description: '生成围绕明确知识主题的科普插图，主体关系清楚、信息表达克制，不添加资料中没有的结论。', outputType: 'image' },
+      { key: 'knowledge_card', label: '知识卡片', description: '生成适合知识传播的卡片视觉，层级清晰、留白合理，文字区域便于后续人工排版和校对。', outputType: 'image' },
+      { key: 'picture_book_page', label: '绘本插画', description: '生成适合绘本页面的角色与场景插画，风格统一、叙事明确、画面适合连续阅读。', outputType: 'image' },
+      { key: 'meme_sticker', label: '表情包素材', description: '生成情绪明确、动作易识别的表情包素材，主体简洁，文字仅在明确要求时保留。', outputType: 'image' },
+      { key: 'official_account_visual', label: '公众号配图', description: '生成适合文章头图、章节配图和观点插图的视觉，主体清晰、风格稳重、便于裁切。', outputType: 'image' },
+      { key: 'infographic_visual', label: '信息图视觉', description: '生成适合数据或流程说明的信息图视觉草稿，结构清晰，具体数字和结论只使用明确提供的内容。', outputType: 'image' }
+    ],
+    defaultPackageKeys: ['science_illustration', 'knowledge_card', 'official_account_visual'],
+    sampleInputs: ['上传科普资料，生成科普插图、知识卡片和公众号配图。', '输入故事梗概，生成绘本插画、表情包素材和章节配图。']
+  },
+  {
+    templateId: 'factory_artistic_creation_images_v1',
+    kind: 'artistic_creation_image_factory',
+    title: 'AI艺术创作图片工厂',
+    name: 'AI艺术创作图片工厂',
+    industry: '艺术创作 / 视觉灵感',
+    scenario: '批量生成国风、油画、水彩、数字艺术、抽象创意和艺术海报图片',
+    description: '面向设计师、创作者和文创团队，把主题、参考图或艺术方向整理为不同风格的创作草稿，用于灵感探索、方案比较和后续创作。',
+    businessGoal: '帮助用户快速尝试多种艺术表达方向，减少反复编写复杂提示词的门槛，同时保留人工创作和定稿空间。',
+    packageOptions: [
+      { key: 'traditional_chinese_art', label: '国风国画', description: '生成具有明确构图、笔墨和留白关系的国风视觉，主体清晰、气韵统一，避免堆叠无关元素。', outputType: 'image' },
+      { key: 'watercolor_art', label: '水彩插画', description: '生成透明叠色、纸张肌理和自然笔触明显的水彩风格画面，保持主题主体和色彩关系稳定。', outputType: 'image' },
+      { key: 'oil_painting', label: '油画创作', description: '生成具有明确笔触、厚涂质感和光影层次的油画风格画面，主体结构完整、色彩不过度混乱。', outputType: 'image' },
+      { key: 'digital_art', label: '数字艺术', description: '生成具有数字绘画质感的艺术视觉，强化主题、构图和色彩设计，避免只追求复杂特效。', outputType: 'image' },
+      { key: 'abstract_creation', label: '抽象创意', description: '围绕主题生成抽象构成、形状、色彩和空间关系，保持画面有明确视觉重心。', outputType: 'image' },
+      { key: 'art_poster', label: '艺术海报', description: '生成适合展览、活动或艺术项目展示的海报视觉，构图有识别度并预留标题和信息区域。', outputType: 'image' }
+    ],
+    defaultPackageKeys: ['traditional_chinese_art', 'watercolor_art', 'digital_art'],
+    sampleInputs: ['上传一张参考图，生成国风国画、水彩插画和数字艺术三个方向。', '输入艺术主题，生成抽象创意、油画创作和艺术海报。']
+  }
+];
+
 const ecommerceProductVideoFactoryPlatforms = [
   { key: 'tiktok_shop', label: 'TikTok Shop', imageRatio: '9:16', notes: '竖屏节奏快，前三秒突出商品外观、核心卖点或使用效果。' },
   { key: 'temu', label: 'Temu', imageRatio: '1:1', notes: '画面直接，强调价格感、使用场景和清晰主体。' },
@@ -1452,7 +1794,12 @@ function buildMedicalCaseVideoFactoryManifest() {
   };
 }
 
-function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
+function buildCrossBorderImageFactoryWorkflowGraph(options: {
+  mode?: 'ecommerce' | 'generic';
+  defaultPackageKeys?: string[];
+} = {}): ServerRoleWorkflowGraph {
+  const mode = options.mode ?? 'ecommerce';
+  const isGenericImageFactory = mode === 'generic';
   const nodes: ServerRoleWorkflowGraphNode[] = [
     {
       id: 'start',
@@ -1463,8 +1810,10 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
     {
       id: 'factory_input',
       type: 'input',
-      name: '接收商品批次',
-      instruction: '接收商品图片、图片比例、勾选产物包和质检模式；单批最多 50 张图片。',
+      name: isGenericImageFactory ? '接收图片批次' : '接收商品批次',
+      instruction: isGenericImageFactory
+        ? '接收参考图片、图片比例、勾选产物包和质检模式；单批最多 50 张图片。'
+        : '接收商品图片、图片比例、勾选产物包和质检模式；单批最多 50 张图片。',
       inputVariables: ['start.text', 'start.files', 'start.images', 'start.spreadsheets'],
       outputVariables: ['task_brief'],
       config: {
@@ -1476,16 +1825,20 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
     {
       id: 'gather_factory_rules',
       type: 'knowledge',
-      name: '读取品牌图片规范',
-      instruction: '读取企业知识库里的品牌素材规范、禁用词、图片风格要求和历史优质商品图案例。',
+      name: isGenericImageFactory ? '读取视觉规范' : '读取品牌图片规范',
+      instruction: isGenericImageFactory
+        ? '读取企业知识库里的视觉风格、项目规范、禁用内容和历史优质案例；没有明确资料时不自行编造限制。'
+        : '读取企业知识库里的品牌素材规范、禁用词、图片风格要求和历史优质商品图案例。',
       inputVariables: ['task_brief', 'factory_request'],
       outputVariables: ['knowledge_context']
     },
     {
       id: 'prepare_batch',
       type: 'data',
-      name: '整理批次参数',
-      instruction: '把用户输入、附件和工厂面板参数整理成稳定 JSON，供后续节点读取。',
+      name: isGenericImageFactory ? '整理图片参数' : '整理批次参数',
+      instruction: isGenericImageFactory
+        ? '把用户输入、参考图片和工厂面板参数整理成稳定 JSON，供后续节点读取。'
+        : '把用户输入、附件和工厂面板参数整理成稳定 JSON，供后续节点读取。',
       inputVariables: ['start.files', 'factory_request'],
       outputVariables: ['factory_request', 'factory_items', 'selected_packages', 'target_platform', 'quality_check_mode', 'package_instructions'],
       config: {
@@ -1500,6 +1853,9 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
           'const platform = request.platform && typeof request.platform === "object" ? request.platform : { key: "ratio_1_1", label: "1:1 方图", imageRatio: "1:1" };\n' +
           'const imageTextLanguage = typeof request.imageTextLanguage === "string" && request.imageTextLanguage.trim() ? request.imageTextLanguage.trim() : "中文";\n' +
           'const imageRatio = typeof platform.imageRatio === "string" && platform.imageRatio.trim() ? platform.imageRatio.trim() : "1:1";\n' +
+          'const factoryName = typeof request.factoryName === "string" && request.factoryName.trim() ? request.factoryName.trim() : "图片";\n' +
+          `const imageBrief = ${isGenericImageFactory ? '`生成${imageRatio}比例的${factoryName}视觉素材。`' : '`生成${imageRatio}比例的电商商品图片。`'};\n` +
+          `const referenceInstruction = ${isGenericImageFactory ? '"以用户上传的参考图片作为严格参考，保持主体的关键外观、颜色、结构、材质和纹理一致。"' : '"以用户上传的商品图片作为严格参考，保持商品主体、颜色、结构、材质、Logo、纹理和关键细节一致。"'};\n` +
           'const languageInstruction = imageTextLanguage === "不生成文字" ? "画面中不要生成任何文字、字母或数字，商品原有 Logo 除外。" : `如画面需要文字，文字统一使用${imageTextLanguage}，并保持少量、清晰、可读。`;\n' +
           'const qualityCheckMode = typeof request.qualityCheckMode === "string" ? request.qualityCheckMode : "basic";\n' +
           'const packageInstructions = [];\n' +
@@ -1509,9 +1865,9 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
           '    sku: "*",\n' +
           '    packageKey: String(packageItem.key),\n' +
           '    prompt: [\n' +
-          '      `生成${imageRatio}比例的电商商品图片。`,\n' +
+          '      imageBrief,\n' +
           '      languageInstruction,\n' +
-          '      "以用户上传的商品图片作为严格参考，保持商品主体、颜色、结构、材质、Logo、纹理和关键细节一致。",\n' +
+          '      referenceInstruction,\n' +
           '      packageItem.description ? String(packageItem.description).trim() : `生成${packageItem.label || packageItem.key}。`\n' +
           '    ].filter(Boolean).join("\\n")\n' +
           '  });\n' +
@@ -1530,15 +1886,17 @@ function buildCrossBorderImageFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
     {
       id: 'generate_images',
       type: 'llm',
-      name: '批量生成商品图',
-      instruction: '按内置产物包模板和图片比例调用图片生成模型。只处理用户勾选的产物包，保持商品主体一致，输出图片远程 URL 元数据；大图片不经过服务端。',
+      name: isGenericImageFactory ? '批量生成图片' : '批量生成商品图',
+      instruction: isGenericImageFactory
+        ? '按内置产物包模板和图片比例调用图片生成模型。只处理用户勾选的产物包，保持参考主体和关键视觉特征一致，输出图片远程 URL 元数据；大图片不经过服务端。'
+        : '按内置产物包模板和图片比例调用图片生成模型。只处理用户勾选的产物包，保持商品主体一致，输出图片远程 URL 元数据；大图片不经过服务端。',
       modelProfileId: 'qiu-image-editing-default',
       inputVariables: ['package_instructions', 'start.images'],
       outputVariables: ['factory_generated_images'],
       config: {
         llmTaskType: 'image_editing',
         outputMode: 'json',
-        packageKeys: crossBorderFactoryDefaultPackageKeys,
+        packageKeys: options.defaultPackageKeys ?? crossBorderFactoryDefaultPackageKeys,
         concurrency: 8,
         requiredToolActions: [
           { toolId: 'local-filesystem', action: 'filesystem.download_remote_file' }
@@ -4419,6 +4777,7 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_BASIC_MONTHLY'),
     approvalPolicy: '本工厂只生成演示草稿和本地展示包；项目结论、数据真实性、公式和引用来源必须由用户人工确认后再公开展示。'
   },
+  ...horizontalImageFactoryDefinitions.map(buildImageFactoryTemplate),
 ];
 
 const designedServerRoleTemplateCatalog: BaseServerRoleTemplateCatalogEntry[] = [
@@ -4436,6 +4795,14 @@ const allServerRoleTemplateCatalogCandidates: BaseServerRoleTemplateCatalogEntry
 export const productionRoleTemplateIds = [
   'template_document_assistant',
   'factory_cross_border_product_images_v1',
+  'factory_anime_images_v1',
+  'factory_game_images_v1',
+  'factory_poster_images_v1',
+  'factory_portrait_images_v1',
+  'factory_ui_icon_images_v1',
+  'factory_industrial_product_images_v1',
+  'factory_graphic_content_images_v1',
+  'factory_artistic_creation_images_v1',
   'factory_ecommerce_product_videos_v1',
   'factory_medical_case_video_screening_v1',
   'factory_operation_video_v1',

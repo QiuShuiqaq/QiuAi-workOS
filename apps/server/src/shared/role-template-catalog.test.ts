@@ -159,7 +159,7 @@ test('server role template catalog only exposes the approved production set', ()
   const expectedEmployeeTemplateIds = expectedTemplateIds.filter((templateId) => !templateId.startsWith('factory_'));
 
   assert.equal(expectedEmployeeTemplateIds.length, 1);
-  assert.equal(expectedFactoryTemplateIds.length, 5);
+  assert.equal(expectedFactoryTemplateIds.length, 13);
   assert.equal(serverRoleTemplateCatalog.length, expectedTemplateIds.length);
   assert.deepEqual(serverRoleTemplateCatalog.map((template) => template.templateId), expectedTemplateIds);
 
@@ -194,6 +194,14 @@ test('server role template catalog only exposes the approved production set', ()
 
   const factoryManifestKinds = new Set([
     'cross_border_product_image_factory',
+    'anime_image_factory',
+    'game_image_factory',
+    'poster_image_factory',
+    'portrait_image_factory',
+    'ui_icon_image_factory',
+    'industrial_product_image_factory',
+    'graphic_content_image_factory',
+    'artistic_creation_image_factory',
     'ecommerce_product_video_factory',
     'medical_case_video_screening_factory',
     'operation_video_factory',
@@ -277,7 +285,10 @@ test('server role template catalog only exposes the approved production set', ()
         expectedMaxItems,
         `${template.templateId} factory batch maxItems must be ${expectedMaxItems}`
       );
-      if (factoryManifest.kind === 'cross_border_product_image_factory') {
+      if (
+        factoryManifest.kind === 'cross_border_product_image_factory' ||
+        String(factoryManifest.kind).endsWith('_image_factory')
+      ) {
         assert.equal(factoryManifest.promptControls, undefined, `${template.templateId} should not expose prompt controls`);
         const workflowSource = JSON.stringify(template.workflowGraph);
         assert.match(workflowSource, /imageTextLanguage/, `${template.templateId} must expose image text language in request`);
@@ -299,6 +310,13 @@ test('server role template catalog only exposes the approved production set', ()
           platforms.length >= 5 && platforms.every((item) => readRecord(item)?.imageRatio),
           `${template.templateId} must expose image ratio options`
         );
+        if (factoryManifest.kind !== 'cross_border_product_image_factory') {
+          assert.equal(
+            platforms.some((item) => /amazon|tiktok|temu|shopee|lazada|ebay|walmart|shein/i.test(String(readRecord(item)?.label ?? ''))),
+            false,
+            `${template.templateId} generic image factory must not expose ecommerce platform labels`
+          );
+        }
       }
       assert.ok(
         template.workflowGraph.nodes.some((node) => node.type === 'input'),

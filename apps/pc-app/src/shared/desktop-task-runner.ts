@@ -4565,7 +4565,7 @@ function completeWorkflowRuntimeFactoryOutputNode(input: {
     };
   }
 
-  if (factoryKind === 'cross_border_product_image_factory') {
+  if (isImageFactoryRuntimeKind(factoryKind)) {
     const generatedImages = input.pool.get('factory_generated_images');
     if (generatedImages === undefined) {
       return undefined;
@@ -4583,8 +4583,9 @@ function completeWorkflowRuntimeFactoryOutputNode(input: {
       (item) => isWorkflowRuntimeRecord(item) && readWorkflowRuntimeString(item.status) === 'failed'
     ).length;
     const qualityReport = input.pool.get('quality_report');
+    const factoryName = readWorkflowRuntimeString(factoryRequest?.factoryName) ?? '图片工厂';
     const summary = [
-      `AI电商图片工厂已完成：${completed}/${items.length} 张图片`,
+      `${factoryName}已完成：${completed}/${items.length} 张图片`,
       `失败：${failed}`,
       qualityReport !== undefined ? '质检结果已生成。' : undefined
     ].filter(Boolean).join('\n');
@@ -4609,7 +4610,7 @@ function completeWorkflowRuntimeFactoryOutputNode(input: {
           input.task.taskId,
           'info',
           'WORKFLOW_RUNTIME_FACTORY_OUTPUT_COMPLETED',
-          'Ecommerce image factory output returned without an extra model call.',
+          'Image factory output returned without an extra model call.',
           input.createdAt,
           sanitizeLogSuffix(input.node.id),
           {
@@ -4624,7 +4625,7 @@ function completeWorkflowRuntimeFactoryOutputNode(input: {
       generatedArtifacts: [],
       inputVariables: input.node.inputVariables ?? ['factory_generated_images', 'quality_report'],
       outputVariables,
-      message: 'Ecommerce image factory output returned without an extra model call.'
+      message: 'Image factory output returned without an extra model call.'
     };
   }
 
@@ -5574,6 +5575,8 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
 
   const targetPlatform = readFactoryRuntimePlatform(input.pool.get('target_platform'));
   const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
+  const outputConfig = isWorkflowRuntimeRecord(factoryRequest?.output) ? factoryRequest.output : undefined;
+  const outputFolder = readWorkflowRuntimeString(outputConfig?.folder) ?? 'product-images';
   const promptControls = readFactoryRuntimePromptControls(factoryRequest?.promptControls);
   const packageInstructions = readFactoryRuntimePackageInstructions(input.pool.get('package_instructions'));
   const concurrency = clampWorkflowRuntimeLimit(
@@ -5632,9 +5635,9 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
     workspaceId: input.workspaceId,
     results: batchRun.results,
     mediaKind: 'image',
-    folder: 'product-images',
+    folder: outputFolder,
     createdAt: input.createdAt,
-    logSuffix: `${input.node.id}-factory-images`
+    logSuffix: `${input.node.id}-${sanitizeLogSuffix(outputFolder)}`
   });
   const results = localAssetSave.results;
   const completed = results.filter((item) => item.status === 'completed').length;
@@ -10193,10 +10196,7 @@ function isOptionalCrossBorderFactoryPromptNode(
   node: WorkflowGraphNode,
   rolePackage?: RolePackageManifest
 ): boolean {
-  const isCrossBorderFactory =
-    rolePackage?.templateId === 'factory_cross_border_product_images_v1' ||
-    rolePackage?.roleCode === 'cross-border-image-factory' ||
-    rolePackage?.roleCode.includes('cross-border') === true;
+  const isCrossBorderFactory = isImageFactoryRolePackage(rolePackage);
 
   return (
     isCrossBorderFactory &&
@@ -10210,16 +10210,35 @@ function isOptionalCrossBorderFactoryQualityCheckNode(
   rolePackage?: RolePackageManifest
 ): boolean {
   const isSupportedFactory =
-    rolePackage?.templateId === 'factory_cross_border_product_images_v1' ||
+    isImageFactoryRolePackage(rolePackage) ||
     rolePackage?.templateId === 'factory_ecommerce_product_videos_v1' ||
-    rolePackage?.roleCode === 'cross-border-image-factory' ||
-    rolePackage?.roleCode.includes('cross-border') === true ||
     rolePackage?.roleCode.includes('ecommerce') === true;
 
   return (
     isSupportedFactory &&
     node.id === 'quality_check' &&
     getWorkflowEffectiveModelTaskType(node) === 'vision'
+  );
+}
+
+function isImageFactoryRuntimeKind(factoryKind: string | undefined) {
+  return factoryKind === 'cross_border_product_image_factory' || factoryKind?.endsWith('_image_factory') === true;
+}
+
+function isImageFactoryRolePackage(rolePackage?: RolePackageManifest) {
+  const kind = readWorkflowRuntimeString(
+    rolePackage?.dependencyManifest?.factory &&
+      isWorkflowRuntimeRecord(rolePackage.dependencyManifest.factory)
+      ? rolePackage.dependencyManifest.factory.kind
+      : undefined
+  );
+  return (
+    isImageFactoryRuntimeKind(kind) ||
+    rolePackage?.templateId === 'factory_cross_border_product_images_v1' ||
+    (rolePackage?.templateId?.startsWith('factory_') === true &&
+      rolePackage.templateId.endsWith('_images_v1')) ||
+    rolePackage?.roleCode === 'cross-border-image-factory' ||
+    rolePackage?.roleCode.includes('cross-border') === true
   );
 }
 

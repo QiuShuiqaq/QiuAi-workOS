@@ -197,6 +197,10 @@ import zhipuLogoUrl from './assets/model-providers/zhipu-color.svg';
 import ArtifactWorkspace, {
   type ArtifactRevisionDraft
 } from './ArtifactWorkspace';
+import {
+  getFactoryPreviewRemoteSrc,
+  hasFactoryPreviewSource
+} from './factory-preview';
 import { PromptSnippetBoard } from './PromptSnippetBoard';
 
 type SectionKey =
@@ -7161,7 +7165,6 @@ export default function App() {
   }
 
   function renderFactoryImagePreviewModal() {
-    const imageSrc = previewFactoryImage ? getFactoryPreviewImageSrc(previewFactoryImage) : '';
     const title = previewFactoryImage
       ? `${getFactoryPreviewItemDisplayName(previewFactoryImage)} / ${previewFactoryImage.packageLabel}`
       : '图片预览';
@@ -7191,8 +7194,12 @@ export default function App() {
         onCancel={() => setPreviewFactoryImage(null)}
       >
         <div className="factory-preview-modal-body">
-          {imageSrc ? (
-            <img className="factory-preview-modal-image" src={imageSrc} alt={title} />
+          {previewFactoryImage && hasFactoryPreviewSource(previewFactoryImage) ? (
+            <FactoryPreviewImage
+              item={previewFactoryImage}
+              className="factory-preview-modal-image"
+              alt={title}
+            />
           ) : (
             <Empty description="没有可预览的图片地址" />
           )}
@@ -7992,22 +7999,21 @@ export default function App() {
                                 </div>
                                 <div className="factory-preview-grid">
                                   {previewItems.map((item) => {
-                                    const imageSrc = getFactoryPreviewImageSrc(item);
                                     return (
                                       <button
                                         key={item.id}
                                         type="button"
                                         className={`factory-preview-tile ${item.status}`}
-                                        disabled={!imageSrc}
+                                        disabled={!hasFactoryPreviewSource(item)}
                                         title={item.error ?? `${getFactoryPreviewItemDisplayName(item)} / ${item.packageLabel}`}
                                         onClick={() => setPreviewFactoryImage(item)}
                                       >
                                         <span className="factory-preview-thumb">
-                                          {imageSrc ? (
-                                            <img src={imageSrc} alt={`${getFactoryPreviewItemDisplayName(item)} ${item.packageLabel}`} loading="lazy" />
-                                          ) : (
-                                            <FileImageOutlined />
-                                          )}
+                                          <FactoryPreviewImage
+                                            item={item}
+                                            alt={`${getFactoryPreviewItemDisplayName(item)} ${item.packageLabel}`}
+                                            loading="lazy"
+                                          />
                                         </span>
                                         <span className="factory-preview-caption">
                                           <span>{getFactoryPreviewItemDisplayName(item)}</span>
@@ -8321,7 +8327,7 @@ export default function App() {
     const isMedicalVideoFactory = isMedicalCaseVideoFactory(selectedFactoryManifest);
     const isEcommerceVideoFactory = isEcommerceProductVideoFactory(selectedFactoryManifest);
     const isOperationFactory = isOperationVideoFactory(selectedFactoryManifest);
-    const isEcommerceImageFactory = isCrossBorderProductImageFactory(selectedFactoryManifest);
+    const isImageFactory = isImageGenerationFactory(selectedFactoryManifest);
     const isAcademicDemoFactoryType = isAcademicDemoFactory(selectedFactoryManifest);
     const packageOptions = readFactoryPackageOptions(selectedFactoryManifest);
     const platformOptions = readFactoryPlatformOptions(selectedFactoryManifest);
@@ -8363,7 +8369,7 @@ export default function App() {
         ? '.docx,.pdf,.xlsx,.csv'
       : isOperationFactory
         ? '.png,.jpg,.jpeg,.webp,.xlsx,.csv,.pdf,.doc,.docx,.ppt,.pptx,.txt,.md'
-      : isEcommerceImageFactory
+      : isImageFactory
         ? '.png,.jpg,.jpeg,.webp'
         : '.png,.jpg,.jpeg,.webp,.xlsx,.csv';
     const validFactoryAttachments = isMedicalVideoFactory
@@ -9261,20 +9267,20 @@ export default function App() {
                           <>
                             <Form.Item
                               name="platform"
-                              label={isEcommerceImageFactory ? '图片比例' : '目标平台'}
-                              rules={[{ required: true, message: isEcommerceImageFactory ? '请选择图片比例' : '请选择目标平台' }]}
+                              label={isImageFactory ? '图片比例' : '目标平台'}
+                              rules={[{ required: true, message: isImageFactory ? '请选择图片比例' : '请选择目标平台' }]}
                             >
                               <Select
                                 size="large"
                                 options={platformOptions.map((item) => ({
                                   value: item.key,
-                                  label: isEcommerceImageFactory
+                                  label: isImageFactory
                                     ? item.label
                                     : `${item.label}${item.imageRatio ? ` / ${item.imageRatio}` : ''}`
                                 }))}
                               />
                             </Form.Item>
-                            {isEcommerceImageFactory ? (
+                            {isImageFactory ? (
                               <Form.Item name="promptLanguage" label="图片文字语言" rules={[{ required: true, message: '请选择图片文字语言' }]}>
                                 <Select size="large" options={ecommerceImageTextLanguageOptions} />
                               </Form.Item>
@@ -9323,7 +9329,7 @@ export default function App() {
                                 }))}
                               />
                             </Form.Item>
-                            {!isEcommerceImageFactory ? (
+                            {!isImageFactory ? (
                               <>
                                 <Form.Item
                                   name="enableImageUnderstanding"
@@ -9809,22 +9815,21 @@ export default function App() {
                 </div>
                 <div className="factory-preview-grid">
                   {previewItems.map((item) => {
-                    const imageSrc = getFactoryPreviewImageSrc(item);
                     return (
                       <button
                         key={item.id}
                         type="button"
                         className={`factory-preview-tile ${item.status}`}
-                        disabled={!imageSrc}
+                        disabled={!hasFactoryPreviewSource(item)}
                         title={item.error ?? `${getFactoryPreviewItemDisplayName(item)} / ${item.packageLabel}`}
                         onClick={() => setPreviewFactoryImage(item)}
                       >
                         <span className="factory-preview-thumb">
-                          {imageSrc ? (
-                            <img src={imageSrc} alt={`${getFactoryPreviewItemDisplayName(item)} ${item.packageLabel}`} loading="lazy" />
-                          ) : (
-                            <FileImageOutlined />
-                          )}
+                          <FactoryPreviewImage
+                            item={item}
+                            alt={`${getFactoryPreviewItemDisplayName(item)} ${item.packageLabel}`}
+                            loading="lazy"
+                          />
                         </span>
                         <span className="factory-preview-caption">
                           <span>{getFactoryPreviewItemDisplayName(item)}</span>
@@ -12437,7 +12442,7 @@ export default function App() {
       packageKeys: resolveFactoryPackageSelection(roleCode, packageDefinitions),
       qualityCheckMode: qualityModes[0]?.key ?? 'basic',
       enableImageUnderstanding: false,
-      promptLanguage: isCrossBorderProductImageFactory(factory) ? '中文' : '',
+      promptLanguage: isImageGenerationFactory(factory) ? '中文' : '',
       promptStyle: '',
       promptGoal: '',
       promptMustKeep: '',
@@ -16024,13 +16029,6 @@ function formatFactoryPreviewMeta(preview: FactoryArtifactPreview) {
   return `完成 ${preview.completed}/${preview.total}${failedText} · 并发 ${preview.concurrency}${platformText}`;
 }
 
-function getFactoryPreviewImageSrc(item: FactoryArtifactPreviewItem) {
-  return toFactoryPreviewImageSrc(item.thumbnailPath)
-    ?? toFactoryPreviewImageSrc(item.localPath)
-    ?? toFactoryPreviewImageSrc(item.remoteUrl)
-    ?? '';
-}
-
 function getFactoryPreviewImageFileName(item: FactoryArtifactPreviewItem) {
   const extension = getFactoryPreviewImageExtension(item.remoteUrl ?? item.thumbnailPath ?? item.localPath) ?? 'png';
   const displayName = sanitizeFactoryPreviewFileNamePart(getFactoryPreviewItemDisplayName(item)) || 'product';
@@ -16086,6 +16084,70 @@ function toFactoryPreviewImageSrc(value: string | undefined) {
   }
 
   return `file:///${normalized.replace(/\\/g, '/').replace(/^\/+/, '')}`;
+}
+
+interface FactoryPreviewImageProps {
+  item: FactoryArtifactPreviewItem;
+  alt: string;
+  className?: string;
+  loading?: 'eager' | 'lazy';
+}
+
+function FactoryPreviewImage({
+  item,
+  alt,
+  className,
+  loading
+}: FactoryPreviewImageProps) {
+  const remoteSrc = toFactoryPreviewImageSrc(getFactoryPreviewRemoteSrc(item));
+  const [src, setSrc] = useState(remoteSrc ?? '');
+
+  useEffect(() => {
+    let cancelled = false;
+    setSrc(remoteSrc ?? '');
+
+    const localPath = item.localPath?.trim();
+    const getPreviewUrl = window.qiuDesktop?.getArtifactPreviewUrl;
+    if (!localPath || !getPreviewUrl) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void getPreviewUrl(localPath)
+      .then((localPreviewUrl) => {
+        if (!cancelled) {
+          setSrc(localPreviewUrl);
+        }
+      })
+      .catch(() => {
+        // Keep the provider URL when a local preview token cannot be created.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [item.localPath, remoteSrc]);
+
+  if (!src) {
+    return <FileImageOutlined />;
+  }
+
+  return (
+    <img
+      className={className}
+      src={src}
+      alt={alt}
+      loading={loading}
+      onError={() => {
+        if (remoteSrc && src !== remoteSrc) {
+          setSrc(remoteSrc);
+        } else {
+          setSrc('');
+        }
+      }}
+    />
+  );
 }
 
 function createChatTaskTitle(input: string) {
@@ -17366,8 +17428,9 @@ function isEcommerceProductVideoFactory(factory: DigitalFactoryManifest) {
   return readFactoryKind(factory) === 'ecommerce_product_video_factory';
 }
 
-function isCrossBorderProductImageFactory(factory: DigitalFactoryManifest) {
-  return readFactoryKind(factory) === 'cross_border_product_image_factory';
+function isImageGenerationFactory(factory: DigitalFactoryManifest) {
+  const kind = readFactoryKind(factory);
+  return kind === 'cross_border_product_image_factory' || kind.endsWith('_image_factory');
 }
 
 function isAcademicDemoFactory(factory: DigitalFactoryManifest) {
@@ -17427,7 +17490,7 @@ function buildFactoryTaskInput({
     qualityCheckMode: values.qualityCheckMode ?? 'basic',
     qualityCheckLabel: qualityMode?.label ?? values.qualityCheckMode ?? 'basic',
     enableImageUnderstanding: false,
-    imageTextLanguage: isCrossBorderProductImageFactory(factory) ? values.promptLanguage?.trim() || '中文' : undefined,
+    imageTextLanguage: isImageGenerationFactory(factory) ? values.promptLanguage?.trim() || '中文' : undefined,
     itemCount: imageAttachments.length,
     maxItems: readFactoryMaxItems(factory),
     output: {
@@ -17435,7 +17498,7 @@ function buildFactoryTaskInput({
       packageFormat: factory.output?.packageFormat ?? 'url_manifest',
       folder: factory.output?.folder ?? 'product-images'
     },
-    promptControls: isCrossBorderProductImageFactory(factory) ? undefined : promptControls,
+    promptControls: isImageGenerationFactory(factory) ? undefined : promptControls,
     attachments: imageAttachments.map((attachment) => ({
       name: attachment.name,
       size: attachment.size,
@@ -17443,11 +17506,11 @@ function buildFactoryTaskInput({
       localPath: attachment.localPath,
       kind: 'product_image'
     })),
-    instruction: isCrossBorderProductImageFactory(factory) ? undefined : values.instruction?.trim() || undefined
+    instruction: isImageGenerationFactory(factory) ? undefined : values.instruction?.trim() || undefined
   };
-  const taskBrief = isCrossBorderProductImageFactory(factory)
-    ? `请运行「${template.name}」，按 ${platform?.label ?? values.platform} 批量生成电商商品图。`
-    : `请运行「${template.name}」，为 ${platform?.label ?? values.platform} 批量生成跨境商品图。`;
+  const taskBrief = isImageGenerationFactory(factory)
+    ? `请运行「${template.name}」，按 ${platform?.label ?? values.platform} 批量生成图片。`
+    : `请运行「${template.name}」，为 ${platform?.label ?? values.platform} 批量生成内容。`;
 
   return JSON.stringify(
     {
@@ -17458,13 +17521,13 @@ function buildFactoryTaskInput({
       qualityCheckMode: factoryRequest.qualityCheckMode,
       imageCount: imageAttachments.length,
       instructions: [
-        '按 factory_request 逐项处理每张商品图片。',
-        isCrossBorderProductImageFactory(factory)
+        '按 factory_request 逐项处理每张参考图片。',
+        isImageGenerationFactory(factory)
           ? '直接使用图片比例和产物包内置模板生成生图提示词。'
           : factoryRequest.enableImageUnderstanding
             ? '已开启图片理解增强：先用图片理解模型分析商品图并生成分包提示词。'
             : '未开启图片理解增强：直接使用平台、产物包和提示词控制生成基础生图提示词。',
-        isCrossBorderProductImageFactory(factory)
+        isImageGenerationFactory(factory)
           ? '只使用当前产物包模板中的要求；不要额外要求用户编写复杂提示词。'
           : '提示词生成必须优先遵守 factory_request.promptControls；不要出现的内容必须写入 negativePrompt。',
         '只生成用户勾选的产物包；不要生成未勾选的图片类型。',
