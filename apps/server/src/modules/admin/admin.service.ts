@@ -73,6 +73,8 @@ import {
 
 const PLAN_DISPLAY_ORDER = [
   'PERSONAL_FREE',
+  'PERSONAL_MEMBER_MONTHLY',
+  'PERSONAL_MEMBER_ANNUAL',
   'ENTERPRISE_BASIC_MONTHLY',
   'ENTERPRISE_BASIC_ANNUAL',
   'ENTERPRISE_STANDARD_MONTHLY',
@@ -266,6 +268,14 @@ type DesktopIssueMessageRecord = {
   workspace?: {
     name: string;
   } | null;
+};
+
+type AdminAiPointBucketForDeduction = {
+  id: string;
+  sourceType: string;
+  availablePoints: number;
+  expiresAt: Date | null;
+  createdAt: Date;
 };
 
 @Injectable()
@@ -1770,6 +1780,27 @@ export class AdminService {
         }
       });
 
+      if (points > 0) {
+        await tx.aiPointCreditBucket.create({
+          data: {
+            workspaceId,
+            sourceType: 'ADMIN_GRANT',
+            totalPoints: points,
+            availablePoints: points,
+            reservedPoints: 0,
+            startsAt: new Date(),
+            metadata: this.toJsonValue({
+              note,
+              reason,
+              source: 'admin-console'
+            })
+          }
+        });
+      } else {
+        await this.ensureAdminAiPointBucketCoverage(tx, workspaceId, currentWallet);
+        await this.deductAdminAiPointBuckets(tx, workspaceId, Math.abs(points));
+      }
+
       await tx.aiPointLedgerEntry.create({
         data: {
           workspaceId,
@@ -2878,6 +2909,120 @@ export class AdminService {
     return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
   }
 
+  private async ensureAdminAiPointBucketCoverage(
+    tx: Prisma.TransactionClient,
+    workspaceId: string,
+    wallet: {
+      balancePoints: number;
+      reservedPoints: number;
+    }
+  ): Promise<void> {
+    const availablePoints = Math.max(0, wallet.balancePoints - wallet.reservedPoints);
+    if (availablePoints <= 0) {
+      return;
+    }
+
+    const activeBuckets = await tx.aiPointCreditBucket.findMany({
+      where: {
+        workspaceId,
+        status: 'ACTIVE',
+        availablePoints: {
+          gt: 0
+        },
+        OR: [
+          { expiresAt: null },
+          {
+            expiresAt: {
+              gt: new Date()
+            }
+          }
+        ]
+      },
+      select: {
+        availablePoints: true
+      }
+    });
+    const bucketAvailablePoints = activeBuckets.reduce(
+      (total, bucket) => total + Math.max(0, bucket.availablePoints),
+      0
+    );
+    const missingPoints = availablePoints - bucketAvailablePoints;
+    if (missingPoints <= 0) {
+      return;
+    }
+
+    await tx.aiPointCreditBucket.create({
+      data: {
+        workspaceId,
+        sourceType: 'MIGRATED_BALANCE',
+        totalPoints: missingPoints,
+        availablePoints: missingPoints,
+        reservedPoints: 0,
+        startsAt: new Date(),
+        metadata: {
+          source: 'admin-adjustment-legacy-wallet-balance'
+        }
+      }
+    });
+  }
+
+  private async deductAdminAiPointBuckets(
+    tx: Prisma.TransactionClient,
+    workspaceId: string,
+    points: number
+  ): Promise<void> {
+    const buckets = await tx.aiPointCreditBucket.findMany({
+      where: {
+        workspaceId,
+        status: 'ACTIVE',
+        availablePoints: {
+          gt: 0
+        },
+        OR: [
+          { expiresAt: null },
+          {
+            expiresAt: {
+              gt: new Date()
+            }
+          }
+        ]
+      },
+      select: {
+        id: true,
+        sourceType: true,
+        availablePoints: true,
+        expiresAt: true,
+        createdAt: true
+      }
+    });
+
+    let remainingPoints = points;
+    for (const bucket of buckets.sort(compareAdminAiPointBucketsForDeduction)) {
+      if (remainingPoints <= 0) {
+        break;
+      }
+      const pointsToDeduct = Math.min(bucket.availablePoints, remainingPoints);
+      await tx.aiPointCreditBucket.update({
+        where: { id: bucket.id },
+        data: {
+          availablePoints: {
+            decrement: pointsToDeduct
+          }
+        }
+      });
+      remainingPoints -= pointsToDeduct;
+    }
+
+    if (remainingPoints > 0) {
+      throw new BadRequestException({
+        error: {
+          code: 'AI_POINTS_BUCKET_BALANCE_INVALID',
+          message: 'AI point bucket balance is not enough for this adjustment.'
+        }
+      });
+    }
+  }
+
   private async recordAdminAction(
     tx: Prisma.TransactionClient,
     input: {
@@ -3137,5 +3282,39 @@ export class AdminService {
 
   private normalizeEmail(email: string): string {
     return email.trim().toLowerCase();
+  }
+}
+
+function compareAdminAiPointBucketsForDeduction(
+  left: AdminAiPointBucketForDeduction,
+  right: AdminAiPointBucketForDeduction
+): number {
+  const priorityDiff = getAdminAiPointBucketDeductionPriority(left.sourceType) -
+    getAdminAiPointBucketDeductionPriority(right.sourceType);
+  if (priorityDiff !== 0) {
+    return priorityDiff;
+  }
+
+  const leftExpiresAt = left.expiresAt?.getTime() ?? Number.POSITIVE_INFINITY;
+  const rightExpiresAt = right.expiresAt?.getTime() ?? Number.POSITIVE_INFINITY;
+  if (leftExpiresAt !== rightExpiresAt) {
+    return leftExpiresAt - rightExpiresAt;
+  }
+
+  return left.createdAt.getTime() - right.createdAt.getTime();
+}
+
+function getAdminAiPointBucketDeductionPriority(sourceType: string): number {
+  switch (sourceType) {
+    case 'SUBSCRIPTION_MONTHLY':
+      return 0;
+    case 'ADMIN_GRANT':
+      return 1;
+    case 'MIGRATED_BALANCE':
+      return 2;
+    case 'PURCHASE_PERMANENT':
+      return 3;
+    default:
+      return 99;
   }
 }

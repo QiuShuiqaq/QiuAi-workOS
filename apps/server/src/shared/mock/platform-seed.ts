@@ -166,6 +166,21 @@ const personalFreeEntitlements = [
   { featureKey: 'canUseEnterpriseKPIDashboard', enabled: false }
 ];
 
+const personalMemberEntitlements = [
+  { featureKey: 'maxRoleInstances', enabled: true, limitValue: 10, limitUnit: 'count' },
+  { featureKey: 'maxDigitalFactories', enabled: true, limitValue: 20, limitUnit: 'count' },
+  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100000, limitUnit: 'count' },
+  { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 1, limitUnit: 'count' },
+  { featureKey: 'maxMembers', enabled: true, limitValue: 1, limitUnit: 'count' },
+  { featureKey: 'canCreateDepartment', enabled: false },
+  { featureKey: 'canInviteMember', enabled: false },
+  { featureKey: 'canUseApprovalPolicy', enabled: false },
+  { featureKey: 'canUseAuditLog', enabled: false },
+  { featureKey: 'canUseAdvancedToolConnector', enabled: false },
+  { featureKey: 'canUseCostBudget', enabled: false },
+  { featureKey: 'canUseEnterpriseKPIDashboard', enabled: false }
+];
+
 const enterpriseBasicEntitlements = [
   { featureKey: 'maxRoleInstances', enabled: true, limitValue: 10, limitUnit: 'count' },
   { featureKey: 'maxDigitalFactories', enabled: true, limitValue: 1, limitUnit: 'count' },
@@ -262,6 +277,24 @@ export const demoPlans: MockPlanDetail[] = [
     currency: 'CNY',
     description: 'Free personal workspace for basic AI employee setup.',
     entitlements: personalFreeEntitlements
+  },
+  {
+    code: 'PERSONAL_MEMBER_MONTHLY',
+    name: '个人会员（月付）',
+    billingCycle: 'MONTHLY',
+    priceCents: 1800,
+    currency: 'CNY',
+    description: '适合个人用户使用数字员工和数字工厂。会员不自动赠送 AI 点数。',
+    entitlements: personalMemberEntitlements
+  },
+  {
+    code: 'PERSONAL_MEMBER_ANNUAL',
+    name: '个人会员（年付）',
+    billingCycle: 'ANNUAL',
+    priceCents: 18000,
+    currency: 'CNY',
+    description: '个人会员年付，适合长期使用数字工厂的个人用户。',
+    entitlements: personalMemberEntitlements
   },
   {
     code: 'ENTERPRISE_BASIC_MONTHLY',

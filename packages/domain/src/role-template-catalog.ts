@@ -121,6 +121,8 @@ export const defaultRoleTemplateCatalog: RoleTemplateCatalogEntry[] = [
     recommendedPlanCode: 'PERSONAL_FREE',
     allowedPlanCodes: [
       'PERSONAL_FREE',
+      'PERSONAL_MEMBER_MONTHLY',
+      'PERSONAL_MEMBER_ANNUAL',
       'ENTERPRISE_BASIC_MONTHLY',
       'ENTERPRISE_BASIC_ANNUAL',
       'ENTERPRISE_STANDARD_MONTHLY',

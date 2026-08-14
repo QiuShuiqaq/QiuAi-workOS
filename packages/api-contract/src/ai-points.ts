@@ -19,6 +19,28 @@ export interface AiPointWalletSummary {
   updatedAt: string;
 }
 
+export type AiPointCreditBucketSourceType =
+  | 'subscription_monthly'
+  | 'purchase_permanent'
+  | 'admin_grant'
+  | 'migrated_balance';
+
+export type AiPointCreditBucketStatus = 'active' | 'expired' | 'cancelled';
+
+export interface AiPointCreditBucketSummary {
+  id: string;
+  workspaceId: string;
+  sourceType: AiPointCreditBucketSourceType;
+  totalPoints: number;
+  availablePoints: number;
+  reservedPoints: number;
+  startsAt: string;
+  expiresAt?: string;
+  status: AiPointCreditBucketStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AiPointLedgerEntrySummary {
   id: string;
   workspaceId: string;
@@ -47,6 +69,7 @@ export interface GetAiPointOverviewResponse {
     wallet: AiPointWalletSummary;
     deviceQuota?: DesktopDeviceAiQuotaSummary;
     recentLedgerEntries: AiPointLedgerEntrySummary[];
+    creditBuckets?: AiPointCreditBucketSummary[];
     routes: OfficialModelRouteSummary[];
   };
 }

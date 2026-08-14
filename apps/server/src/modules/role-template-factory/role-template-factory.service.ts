@@ -54,6 +54,8 @@ import {
 
 const planCodes = [
   'PERSONAL_FREE',
+  'PERSONAL_MEMBER_MONTHLY',
+  'PERSONAL_MEMBER_ANNUAL',
   'ENTERPRISE_BASIC_MONTHLY',
   'ENTERPRISE_BASIC_ANNUAL',
   'ENTERPRISE_STANDARD_MONTHLY',
@@ -2258,10 +2260,12 @@ export class RoleTemplateFactoryService {
   }
 
   private expandDefaultAllowedPlanCodes(planCode: string): string[] {
+    const personalMemberPlanCodes = ['PERSONAL_MEMBER_MONTHLY', 'PERSONAL_MEMBER_ANNUAL'];
     switch (planCode) {
       case 'ENTERPRISE_BASIC_MONTHLY':
       case 'ENTERPRISE_BASIC_ANNUAL':
         return [
+          ...personalMemberPlanCodes,
           'ENTERPRISE_BASIC_MONTHLY',
           'ENTERPRISE_BASIC_ANNUAL',
           'ENTERPRISE_STANDARD_MONTHLY',
@@ -2272,6 +2276,7 @@ export class RoleTemplateFactoryService {
       case 'ENTERPRISE_STANDARD_MONTHLY':
       case 'ENTERPRISE_STANDARD_ANNUAL':
         return [
+          ...personalMemberPlanCodes,
           'ENTERPRISE_STANDARD_MONTHLY',
           'ENTERPRISE_STANDARD_ANNUAL',
           'ENTERPRISE_PRO_MONTHLY',
@@ -2279,7 +2284,7 @@ export class RoleTemplateFactoryService {
         ];
       case 'ENTERPRISE_PRO_MONTHLY':
       case 'ENTERPRISE_PRO_ANNUAL':
-        return ['ENTERPRISE_PRO_MONTHLY', 'ENTERPRISE_PRO_ANNUAL'];
+        return [...personalMemberPlanCodes, 'ENTERPRISE_PRO_MONTHLY', 'ENTERPRISE_PRO_ANNUAL'];
       case 'ENTERPRISE_MONTHLY':
       case 'ENTERPRISE_ANNUAL':
         return ['ENTERPRISE_MONTHLY', 'ENTERPRISE_ANNUAL'];

@@ -20,6 +20,18 @@ import { officialModelRouteSeeds } from './official-model-routes';
 
 type OfficialCapability = 'TEXT' | 'REASONING' | 'IMAGE' | 'VIDEO';
 type OfficialRouteStatus = 'ACTIVE' | 'DISABLED';
+type AiPointCreditBucketSourceType =
+  | 'SUBSCRIPTION_MONTHLY'
+  | 'PURCHASE_PERMANENT'
+  | 'ADMIN_GRANT'
+  | 'MIGRATED_BALANCE';
+
+interface AiPointBucketAllocation {
+  bucketId: string;
+  sourceType: AiPointCreditBucketSourceType;
+  points: number;
+  expiresAt?: string;
+}
 
 interface OfficialRouteRecord {
   routeKey: string;
@@ -132,21 +144,37 @@ export class AiPointsService {
       };
     }
 
-    const wallet = await this.ensureWallet(workspaceId);
-    const [ledgerEntries, quota] = await Promise.all([
+    await this.ensureWallet(workspaceId);
+    await this.expireWorkspaceCreditBuckets(workspaceId);
+    const [ledgerEntries, quota, creditBuckets] = await Promise.all([
       this.prismaService.aiPointLedgerEntry.findMany({
         where: { workspaceId },
         orderBy: { createdAt: 'desc' },
         take: 20
       }),
-      device ? this.ensureDeviceQuota(device) : undefined
+      device ? this.ensureDeviceQuota(device) : undefined,
+      this.prismaService.aiPointCreditBucket.findMany({
+        where: {
+          workspaceId,
+          status: {
+            not: 'CANCELLED'
+          }
+        },
+        orderBy: [
+          { status: 'asc' },
+          { expiresAt: 'asc' },
+          { createdAt: 'desc' }
+        ],
+        take: 20
+      })
     ]);
+    const refreshedWallet = await this.ensureWallet(workspaceId);
 
     return {
       data: {
         wallet: isLocalDevelopmentUnlimitedEnabled()
           ? this.buildMockWallet(workspaceId)
-          : toWalletSummary(wallet),
+          : toWalletSummary(refreshedWallet),
         deviceQuota: quota ? toDeviceQuotaSummary(quota) : undefined,
         recentLedgerEntries: ledgerEntries.map((entry) => ({
           id: entry.id,
@@ -160,6 +188,7 @@ export class AiPointsService {
           description: entry.description ?? undefined,
           createdAt: entry.createdAt.toISOString()
         })),
+        creditBuckets: creditBuckets.map(toCreditBucketSummary),
         routes: routes.map(toRouteSummary)
       }
     };
@@ -388,6 +417,165 @@ export class AiPointsService {
     });
   }
 
+  private async expireWorkspaceCreditBuckets(workspaceId: string, now = new Date()): Promise<void> {
+    if (!isDatabasePersistenceEnabled() || isLocalDevelopmentUnlimitedEnabled()) {
+      return;
+    }
+
+    await this.prismaService.$transaction(async (tx) => {
+      await tx.aiPointWallet.upsert({
+        where: { workspaceId },
+        update: {},
+        create: {
+          workspaceId,
+          balancePoints: 0,
+          reservedPoints: 0
+        }
+      });
+      await this.expireWorkspaceCreditBucketsInTransaction(tx, workspaceId, now);
+    });
+  }
+
+  private async expireWorkspaceCreditBucketsInTransaction(
+    tx: Prisma.TransactionClient,
+    workspaceId: string,
+    now: Date
+  ): Promise<void> {
+    const expiredBuckets = await tx.aiPointCreditBucket.findMany({
+      where: {
+        workspaceId,
+        status: 'ACTIVE',
+        expiresAt: {
+          lte: now
+        }
+      },
+      select: {
+        id: true,
+        availablePoints: true
+      }
+    });
+
+    if (expiredBuckets.length === 0) {
+      return;
+    }
+
+    const wallet = await tx.aiPointWallet.upsert({
+      where: { workspaceId },
+      update: {},
+      create: {
+        workspaceId,
+        balancePoints: 0,
+        reservedPoints: 0
+      }
+    });
+    const expiringAvailablePoints = expiredBuckets.reduce(
+      (total, bucket) => total + Math.max(0, bucket.availablePoints),
+      0
+    );
+    const pointsToExpire = Math.min(
+      expiringAvailablePoints,
+      Math.max(0, wallet.balancePoints - wallet.reservedPoints)
+    );
+
+    await tx.aiPointCreditBucket.updateMany({
+      where: {
+        id: {
+          in: expiredBuckets.map((bucket) => bucket.id)
+        }
+      },
+      data: {
+        availablePoints: 0,
+        status: 'EXPIRED'
+      }
+    });
+
+    if (pointsToExpire <= 0) {
+      return;
+    }
+
+    const updatedWallet = await tx.aiPointWallet.update({
+      where: { workspaceId },
+      data: {
+        balancePoints: {
+          decrement: pointsToExpire
+        }
+      }
+    });
+
+    await tx.aiPointLedgerEntry.create({
+      data: {
+        workspaceId,
+        type: 'ADJUSTMENT',
+        status: 'COMPLETED',
+        points: -pointsToExpire,
+        balanceAfter: updatedWallet.balancePoints - updatedWallet.reservedPoints,
+        description: 'Expired unused AI point credits.',
+        metadata: {
+          source: 'ai-point-credit-bucket-expiry',
+          bucketIds: expiredBuckets.map((bucket) => bucket.id)
+        }
+      }
+    });
+  }
+
+  private async ensureLegacyWalletCoveredByBucketsInTransaction(
+    tx: Prisma.TransactionClient,
+    workspaceId: string,
+    wallet: {
+      balancePoints: number;
+      reservedPoints: number;
+    },
+    now: Date
+  ): Promise<void> {
+    const walletAvailablePoints = Math.max(0, wallet.balancePoints - wallet.reservedPoints);
+    if (walletAvailablePoints <= 0) {
+      return;
+    }
+
+    const activeBuckets = await tx.aiPointCreditBucket.findMany({
+      where: {
+        workspaceId,
+        status: 'ACTIVE',
+        availablePoints: {
+          gt: 0
+        },
+        OR: [
+          { expiresAt: null },
+          {
+            expiresAt: {
+              gt: now
+            }
+          }
+        ]
+      },
+      select: {
+        availablePoints: true
+      }
+    });
+    const bucketAvailablePoints = activeBuckets.reduce(
+      (total, bucket) => total + Math.max(0, bucket.availablePoints),
+      0
+    );
+    const missingPoints = walletAvailablePoints - bucketAvailablePoints;
+    if (missingPoints <= 0) {
+      return;
+    }
+
+    await tx.aiPointCreditBucket.create({
+      data: {
+        workspaceId,
+        sourceType: 'MIGRATED_BALANCE',
+        totalPoints: missingPoints,
+        availablePoints: missingPoints,
+        reservedPoints: 0,
+        startsAt: now,
+        metadata: {
+          source: 'legacy-wallet-balance'
+        }
+      }
+    });
+  }
+
   private async ensureDeviceQuota(device: VerifiedDesktopDevice) {
     const period = currentMonthPeriod();
     const existing = await this.prismaService.desktopDeviceAiQuota.findUnique({
@@ -444,6 +632,8 @@ export class AiPointsService {
     }
 
     return this.prismaService.$transaction(async (tx) => {
+      const now = new Date();
+      await this.expireWorkspaceCreditBucketsInTransaction(tx, input.workspaceId, now);
       const wallet = await tx.aiPointWallet.upsert({
         where: { workspaceId: input.workspaceId },
         update: {},
@@ -458,10 +648,11 @@ export class AiPointsService {
         throw new ForbiddenException({
           error: {
             code: 'AI_POINTS_INSUFFICIENT',
-            message: 'AI 点数不足，请先购买或联系管理员分配。'
+          message: 'AI 点数不足，请先购买或联系管理员分配。'
           }
         });
       }
+      await this.ensureLegacyWalletCoveredByBucketsInTransaction(tx, input.workspaceId, wallet, now);
 
       const quota = await this.ensureDeviceQuotaInTransaction(tx, input.workspaceId, input.desktopDeviceId);
       if (quota.status !== 'ACTIVE') {
@@ -485,6 +676,11 @@ export class AiPointsService {
         });
       }
 
+      const bucketAllocations = await this.reserveCreditBucketsInTransaction(tx, {
+        workspaceId: input.workspaceId,
+        points: input.points,
+        now
+      });
       const updatedWallet = await tx.aiPointWallet.update({
         where: { workspaceId: input.workspaceId },
         data: {
@@ -510,11 +706,102 @@ export class AiPointsService {
           status: 'PENDING',
           points: input.points,
           balanceAfter: updatedWallet.balancePoints - updatedWallet.reservedPoints,
-          description: 'Official model route point reservation.'
+          description: 'Official model route point reservation.',
+          metadata: toReservationMetadata(bucketAllocations)
         }
       });
       return { id: entry.id };
     });
+  }
+
+  private async reserveCreditBucketsInTransaction(
+    tx: Prisma.TransactionClient,
+    input: {
+      workspaceId: string;
+      points: number;
+      now: Date;
+    }
+  ): Promise<AiPointBucketAllocation[]> {
+    const buckets = await tx.aiPointCreditBucket.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        status: 'ACTIVE',
+        availablePoints: {
+          gt: 0
+        },
+        startsAt: {
+          lte: input.now
+        },
+        OR: [
+          { expiresAt: null },
+          {
+            expiresAt: {
+              gt: input.now
+            }
+          }
+        ]
+      },
+      select: {
+        id: true,
+        sourceType: true,
+        availablePoints: true,
+        expiresAt: true,
+        createdAt: true
+      }
+    });
+
+    const allocations: AiPointBucketAllocation[] = [];
+    let remainingPoints = input.points;
+    for (const bucket of buckets.sort(compareCreditBucketsForDeduction)) {
+      if (remainingPoints <= 0) {
+        break;
+      }
+
+      const points = Math.min(bucket.availablePoints, remainingPoints);
+      const updated = await tx.aiPointCreditBucket.updateMany({
+        where: {
+          id: bucket.id,
+          availablePoints: {
+            gte: points
+          }
+        },
+        data: {
+          availablePoints: {
+            decrement: points
+          },
+          reservedPoints: {
+            increment: points
+          }
+        }
+      });
+      if (updated.count !== 1) {
+        throw new ServiceUnavailableException({
+          error: {
+            code: 'AI_POINTS_RESERVATION_CONFLICT',
+            message: 'AI points are being used by another task. Please retry.'
+          }
+        });
+      }
+
+      allocations.push({
+        bucketId: bucket.id,
+        sourceType: bucket.sourceType as AiPointCreditBucketSourceType,
+        points,
+        expiresAt: bucket.expiresAt?.toISOString()
+      });
+      remainingPoints -= points;
+    }
+
+    if (remainingPoints > 0) {
+      throw new ForbiddenException({
+        error: {
+          code: 'AI_POINTS_INSUFFICIENT',
+          message: 'AI 点数不足，请先购买或联系管理员分配。'
+        }
+      });
+    }
+
+    return allocations;
   }
 
   private async settlePoints(input: {
@@ -537,6 +824,13 @@ export class AiPointsService {
     }
 
     return this.prismaService.$transaction(async (tx) => {
+      const reservation = await tx.aiPointLedgerEntry.findUnique({
+        where: { id: input.reservationId },
+        select: { metadata: true }
+      });
+      const bucketAllocations = readReservationBucketAllocations(reservation?.metadata);
+      await this.settleReservedCreditBucketsInTransaction(tx, bucketAllocations);
+
       const wallet = await tx.aiPointWallet.update({
         where: { workspaceId: input.workspaceId },
         data: {
@@ -575,11 +869,37 @@ export class AiPointsService {
           status: 'COMPLETED',
           points: -input.points,
           balanceAfter: wallet.balancePoints - wallet.reservedPoints,
-          description: 'Official model route point settlement.'
+          description: 'Official model route point settlement.',
+          metadata: toReservationMetadata(bucketAllocations)
         }
       });
       return wallet;
     });
+  }
+
+  private async settleReservedCreditBucketsInTransaction(
+    tx: Prisma.TransactionClient,
+    allocations: AiPointBucketAllocation[]
+  ): Promise<void> {
+    for (const allocation of allocations) {
+      if (allocation.points <= 0) {
+        continue;
+      }
+
+      await tx.aiPointCreditBucket.updateMany({
+        where: {
+          id: allocation.bucketId,
+          reservedPoints: {
+            gte: allocation.points
+          }
+        },
+        data: {
+          reservedPoints: {
+            decrement: allocation.points
+          }
+        }
+      });
+    }
   }
 
   private async releasePoints(input: {
@@ -602,9 +922,23 @@ export class AiPointsService {
     }
 
     await this.prismaService.$transaction(async (tx) => {
+      const now = new Date();
+      const reservation = await tx.aiPointLedgerEntry.findUnique({
+        where: { id: input.reservationId },
+        select: { metadata: true }
+      });
+      const bucketAllocations = readReservationBucketAllocations(reservation?.metadata);
+      const expiredReleasedPoints = await this.releaseReservedCreditBucketsInTransaction(tx, bucketAllocations, now);
       const wallet = await tx.aiPointWallet.update({
         where: { workspaceId: input.workspaceId },
         data: {
+          ...(expiredReleasedPoints > 0
+            ? {
+                balancePoints: {
+                  decrement: expiredReleasedPoints
+                }
+              }
+            : {}),
           reservedPoints: {
             decrement: input.points
           }
@@ -634,10 +968,66 @@ export class AiPointsService {
           status: 'COMPLETED',
           points: input.points,
           balanceAfter: wallet.balancePoints - wallet.reservedPoints,
-          description: 'Official model route reservation released.'
+          description: 'Official model route reservation released.',
+          metadata: toReservationMetadata(bucketAllocations)
         }
       });
     });
+  }
+
+  private async releaseReservedCreditBucketsInTransaction(
+    tx: Prisma.TransactionClient,
+    allocations: AiPointBucketAllocation[],
+    now: Date
+  ): Promise<number> {
+    let expiredReleasedPoints = 0;
+    for (const allocation of allocations) {
+      if (allocation.points <= 0) {
+        continue;
+      }
+
+      const bucket = await tx.aiPointCreditBucket.findUnique({
+        where: { id: allocation.bucketId },
+        select: {
+          id: true,
+          status: true,
+          expiresAt: true
+        }
+      });
+      if (!bucket) {
+        continue;
+      }
+
+      const isStillUsable = bucket.status === 'ACTIVE' && (!bucket.expiresAt || bucket.expiresAt > now);
+      const updated = await tx.aiPointCreditBucket.updateMany({
+        where: {
+          id: bucket.id,
+          reservedPoints: {
+            gte: allocation.points
+          }
+        },
+        data: {
+          ...(isStillUsable
+            ? {
+                availablePoints: {
+                  increment: allocation.points
+                }
+              }
+            : {
+                status: 'EXPIRED' as const
+              }),
+          reservedPoints: {
+            decrement: allocation.points
+          }
+        }
+      });
+
+      if (updated.count === 1 && !isStillUsable) {
+        expiredReleasedPoints += allocation.points;
+      }
+    }
+
+    return expiredReleasedPoints;
   }
 
   private async ensureDeviceQuotaInTransaction(
@@ -1064,6 +1454,34 @@ function toWalletSummary(wallet: {
   };
 }
 
+function toCreditBucketSummary(bucket: {
+  id: string;
+  workspaceId: string;
+  sourceType: string;
+  totalPoints: number;
+  availablePoints: number;
+  reservedPoints: number;
+  startsAt: Date;
+  expiresAt: Date | null;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: bucket.id,
+    workspaceId: bucket.workspaceId,
+    sourceType: bucket.sourceType.toLowerCase(),
+    totalPoints: bucket.totalPoints,
+    availablePoints: bucket.availablePoints,
+    reservedPoints: bucket.reservedPoints,
+    startsAt: bucket.startsAt.toISOString(),
+    expiresAt: bucket.expiresAt?.toISOString(),
+    status: bucket.status.toLowerCase(),
+    createdAt: bucket.createdAt.toISOString(),
+    updatedAt: bucket.updatedAt.toISOString()
+  };
+}
+
 function toDeviceQuotaSummary(quota: {
   desktopDeviceId: string;
   period: string;
@@ -1096,7 +1514,95 @@ function isOfficialResultPollRequest(request: OfficialInvokeRequest): boolean {
 }
 
 function userFacingRouteModelName(route: OfficialRouteRecord): string {
-  return route.displayName.replace(/^官方通道\s*·\s*/, '').trim() || route.displayName;
+  return route.displayName.replace(/^官方通道\s*[·路]\s*/, '').trim() || route.displayName;
+}
+
+function toReservationMetadata(allocations: AiPointBucketAllocation[]): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify({
+    bucketAllocations: allocations
+  })) as Prisma.InputJsonValue;
+}
+
+function readReservationBucketAllocations(metadata: Prisma.JsonValue | null | undefined): AiPointBucketAllocation[] {
+  const record = readRecord(metadata);
+  const rawAllocations = record?.bucketAllocations;
+  if (!Array.isArray(rawAllocations)) {
+    return [];
+  }
+
+  return rawAllocations.flatMap((item): AiPointBucketAllocation[] => {
+    const record = readRecord(item);
+    const bucketId = typeof record?.bucketId === 'string' ? record.bucketId.trim() : '';
+    const sourceType = readCreditBucketSourceType(record?.sourceType);
+    const points = Number(record?.points);
+    if (!bucketId || !sourceType || !Number.isFinite(points) || points <= 0) {
+      return [];
+    }
+
+    return [
+      {
+        bucketId,
+        sourceType,
+        points: Math.trunc(points),
+        expiresAt: typeof record?.expiresAt === 'string' ? record.expiresAt : undefined
+      }
+    ];
+  });
+}
+
+function readCreditBucketSourceType(value: unknown): AiPointCreditBucketSourceType | undefined {
+  if (
+    value === 'SUBSCRIPTION_MONTHLY' ||
+    value === 'PURCHASE_PERMANENT' ||
+    value === 'ADMIN_GRANT' ||
+    value === 'MIGRATED_BALANCE'
+  ) {
+    return value;
+  }
+
+  return undefined;
+}
+
+function compareCreditBucketsForDeduction(
+  left: {
+    sourceType: string;
+    expiresAt: Date | null;
+    createdAt: Date;
+  },
+  right: {
+    sourceType: string;
+    expiresAt: Date | null;
+    createdAt: Date;
+  }
+): number {
+  const priorityDiff = getCreditBucketDeductionPriority(left.sourceType) -
+    getCreditBucketDeductionPriority(right.sourceType);
+  if (priorityDiff !== 0) {
+    return priorityDiff;
+  }
+
+  const leftExpiresAt = left.expiresAt?.getTime() ?? Number.POSITIVE_INFINITY;
+  const rightExpiresAt = right.expiresAt?.getTime() ?? Number.POSITIVE_INFINITY;
+  if (leftExpiresAt !== rightExpiresAt) {
+    return leftExpiresAt - rightExpiresAt;
+  }
+
+  return left.createdAt.getTime() - right.createdAt.getTime();
+}
+
+function getCreditBucketDeductionPriority(sourceType: string): number {
+  switch (sourceType) {
+    case 'SUBSCRIPTION_MONTHLY':
+      return 0;
+    case 'ADMIN_GRANT':
+      return 1;
+    case 'MIGRATED_BALANCE':
+      return 2;
+    case 'PURCHASE_PERMANENT':
+      return 3;
+    default:
+      return 99;
+  }
 }
 
 function sanitizeOfficialProviderError(error: unknown) {

@@ -50,7 +50,9 @@ const ids = {
     enterpriseStandardMonthly: '60000000-0000-4000-8000-000000000007',
     enterpriseStandardAnnual: '60000000-0000-4000-8000-000000000008',
     enterpriseProMonthly: '60000000-0000-4000-8000-000000000009',
-    enterpriseProAnnual: '60000000-0000-4000-8000-000000000010'
+    enterpriseProAnnual: '60000000-0000-4000-8000-000000000010',
+    personalMemberMonthly: '60000000-0000-4000-8000-000000000011',
+    personalMemberAnnual: '60000000-0000-4000-8000-000000000012'
   },
   subscriptions: {
     personal: '70000000-0000-4000-8000-000000000001',
@@ -66,6 +68,21 @@ const personalFreeEntitlements = [
   { featureKey: 'maxRoleInstances', enabled: true, limitValue: 3, limitUnit: 'count' },
   { featureKey: 'maxDigitalFactories', enabled: true, limitValue: 0, limitUnit: 'count' },
   { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100, limitUnit: 'count' },
+  { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 1, limitUnit: 'count' },
+  { featureKey: 'maxMembers', enabled: true, limitValue: 1, limitUnit: 'count' },
+  { featureKey: 'canCreateDepartment', enabled: false },
+  { featureKey: 'canInviteMember', enabled: false },
+  { featureKey: 'canUseApprovalPolicy', enabled: false },
+  { featureKey: 'canUseAuditLog', enabled: false },
+  { featureKey: 'canUseAdvancedToolConnector', enabled: false },
+  { featureKey: 'canUseCostBudget', enabled: false },
+  { featureKey: 'canUseEnterpriseKPIDashboard', enabled: false }
+] as const;
+
+const personalMemberEntitlements = [
+  { featureKey: 'maxRoleInstances', enabled: true, limitValue: 10, limitUnit: 'count' },
+  { featureKey: 'maxDigitalFactories', enabled: true, limitValue: 20, limitUnit: 'count' },
+  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100000, limitUnit: 'count' },
   { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 1, limitUnit: 'count' },
   { featureKey: 'maxMembers', enabled: true, limitValue: 1, limitUnit: 'count' },
   { featureKey: 'canCreateDepartment', enabled: false },
@@ -148,6 +165,28 @@ const plans = [
     currency: 'CNY',
     status: 'ACTIVE',
     entitlements: personalFreeEntitlements
+  },
+  {
+    id: ids.plans.personalMemberMonthly,
+    code: 'PERSONAL_MEMBER_MONTHLY',
+    name: '个人会员（月付）',
+    description: '适合个人用户使用数字员工和数字工厂。会员不自动赠送 AI 点数，可按需搭配月度 AI 点数包或单独充值。',
+    billingCycle: 'MONTHLY',
+    priceCents: 1800,
+    currency: 'CNY',
+    status: 'ACTIVE',
+    entitlements: personalMemberEntitlements
+  },
+  {
+    id: ids.plans.personalMemberAnnual,
+    code: 'PERSONAL_MEMBER_ANNUAL',
+    name: '个人会员（年付）',
+    description: '个人会员年付，适合长期使用数字工厂的个人用户。会员不自动赠送 AI 点数。',
+    billingCycle: 'ANNUAL',
+    priceCents: 18000,
+    currency: 'CNY',
+    status: 'ACTIVE',
+    entitlements: personalMemberEntitlements
   },
   {
     id: ids.plans.enterpriseBasicMonthly,

@@ -7,6 +7,8 @@ import { ListPlansResponseDto } from './dto/list-plans-response.dto';
 
 const PLAN_DISPLAY_ORDER = [
   'PERSONAL_FREE',
+  'PERSONAL_MEMBER_MONTHLY',
+  'PERSONAL_MEMBER_ANNUAL',
   'ENTERPRISE_BASIC_MONTHLY',
   'ENTERPRISE_BASIC_ANNUAL',
   'ENTERPRISE_STANDARD_MONTHLY',

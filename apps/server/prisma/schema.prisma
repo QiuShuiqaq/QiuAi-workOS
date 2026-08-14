@@ -51,6 +51,8 @@ enum InvitationStatus {
 
 enum PlanCode {
   PERSONAL_FREE
+  PERSONAL_MEMBER_MONTHLY
+  PERSONAL_MEMBER_ANNUAL
   ENTERPRISE_BASIC_MONTHLY
   ENTERPRISE_BASIC_ANNUAL
   ENTERPRISE_STANDARD_MONTHLY
@@ -239,6 +241,19 @@ enum AiPointLedgerEntryStatus {
   CANCELLED
 }
 
+enum AiPointCreditBucketSourceType {
+  SUBSCRIPTION_MONTHLY
+  PURCHASE_PERMANENT
+  ADMIN_GRANT
+  MIGRATED_BALANCE
+}
+
+enum AiPointCreditBucketStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
 enum OfficialModelRouteCapability {
   TEXT
   REASONING
@@ -351,6 +366,7 @@ model Workspace {
   desktopBindingCodes DesktopBindingCode[]
   desktopDevices DesktopDevice[]
   aiPointWallet AiPointWallet?
+  aiPointCreditBuckets AiPointCreditBucket[]
   aiPointLedgerEntries AiPointLedgerEntry[]
   desktopDeviceAiQuotas DesktopDeviceAiQuota[]
   desktopIssueReports DesktopIssueReport[]
@@ -524,6 +540,33 @@ model AiPointWallet {
   @@map("ai_point_wallets")
 }
 
+model AiPointCreditBucket {
+  id              String                        @id @default(uuid()) @db.Uuid
+  workspaceId     String                        @map("workspace_id") @db.Uuid
+  sourceType      AiPointCreditBucketSourceType @map("source_type")
+  subscriptionId  String?                       @map("subscription_id") @db.Uuid
+  billingOrderId  String?                       @map("billing_order_id") @db.Uuid
+  totalPoints     Int                           @map("total_points")
+  availablePoints Int                           @map("available_points")
+  reservedPoints  Int                           @default(0) @map("reserved_points")
+  startsAt        DateTime                      @default(now()) @map("starts_at")
+  expiresAt       DateTime?                     @map("expires_at")
+  status          AiPointCreditBucketStatus     @default(ACTIVE)
+  metadata        Json?
+  createdAt       DateTime                      @default(now()) @map("created_at")
+  updatedAt       DateTime                      @updatedAt @map("updated_at")
+
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  subscription  Subscription?  @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  billingOrder  BillingOrder?  @relation(fields: [billingOrderId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, status, expiresAt])
+  @@index([workspaceId, sourceType])
+  @@index([subscriptionId])
+  @@index([billingOrderId])
+  @@map("ai_point_credit_buckets")
+}
+
 model AiPointLedgerEntry {
   id              String                   @id @default(uuid()) @db.Uuid
   workspaceId     String                   @map("workspace_id") @db.Uuid
@@ -671,6 +714,7 @@ model Subscription {
   workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   plan          Plan           @relation(fields: [planId], references: [id], onDelete: Restrict)
   billingOrders BillingOrder[]
+  aiPointCreditBuckets AiPointCreditBucket[]
 
   @@index([workspaceId])
   @@index([planId])
@@ -740,6 +784,7 @@ model BillingOrder {
   plan           Plan                 @relation(fields: [planId], references: [id], onDelete: Restrict)
   subscription   Subscription?        @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
   transactions   PaymentTransaction[]
+  aiPointCreditBuckets AiPointCreditBucket[]
 
   @@index([workspaceId])
   @@index([billingAccountId])
