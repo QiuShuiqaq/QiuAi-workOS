@@ -209,9 +209,12 @@ async function launchInstaller(installerPath: string, options: { quitBeforeLaunc
   const extension = path.extname(installerPath).toLowerCase();
 
   if (options.quitBeforeLaunch && (extension === '.exe' || extension === '.msi')) {
-    scheduleInstallerLaunchAfterQuit(installerPath, extension);
+    scheduleInstallerLaunchAfterQuit(installerPath, extension, process.pid);
     setTimeout(() => {
       app.quit();
+      setTimeout(() => {
+        app.exit(0);
+      }, 1800);
     }, 250);
     return true;
   }
@@ -241,18 +244,27 @@ async function launchInstaller(installerPath: string, options: { quitBeforeLaunc
   return true;
 }
 
-function scheduleInstallerLaunchAfterQuit(installerPath: string, extension: string) {
-  const escapedInstallerPath = JSON.stringify(installerPath);
+function scheduleInstallerLaunchAfterQuit(installerPath: string, extension: string, appProcessId: number) {
+  const escapedInstallerPath = toPowerShellSingleQuotedString(installerPath);
+  const waitForQuitCommand = [
+    `$installerPath = ${escapedInstallerPath};`,
+    `$appProcessId = ${appProcessId};`,
+    '$deadline = (Get-Date).AddSeconds(45);',
+    'while ((Get-Date) -lt $deadline) {',
+    '  $runningProcess = Get-Process -Id $appProcessId -ErrorAction SilentlyContinue;',
+    '  if ($null -eq $runningProcess) { break; }',
+    '  Start-Sleep -Milliseconds 500;',
+    '}',
+    'Start-Sleep -Milliseconds 600;'
+  ].join(' ');
   const command =
     extension === '.msi'
       ? [
-          `$installerPath = ${escapedInstallerPath};`,
-          'Start-Sleep -Milliseconds 2500;',
+          waitForQuitCommand,
           "Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', $installerPath)"
         ].join(' ')
       : [
-          `$installerPath = ${escapedInstallerPath};`,
-          'Start-Sleep -Milliseconds 2500;',
+          waitForQuitCommand,
           'Start-Process -FilePath $installerPath'
         ].join(' ');
   const child = spawn('powershell.exe', [
@@ -269,6 +281,10 @@ function scheduleInstallerLaunchAfterQuit(installerPath: string, extension: stri
     windowsHide: true
   });
   child.unref();
+}
+
+function toPowerShellSingleQuotedString(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
 }
 
 async function validateDownloadedInstallerPath(installerPath: string) {
@@ -327,7 +343,9 @@ export async function installDownloadedDesktopUpdate(
   };
 }
 
-export async function downloadAndInstallDesktopUpdate(): Promise<DesktopUpdateInstallResult> {
+export async function downloadAndInstallDesktopUpdate(
+  onProgress?: DesktopUpdateDownloadProgressCallback
+): Promise<DesktopUpdateInstallResult> {
   const update = await checkForDesktopUpdates();
   const release = update.latestRelease;
 
@@ -335,7 +353,7 @@ export async function downloadAndInstallDesktopUpdate(): Promise<DesktopUpdateIn
     throw new Error('No desktop update is available.');
   }
 
-  const installer = await downloadReleaseInstaller(release);
+  const installer = await downloadReleaseInstaller(release, onProgress);
   const shouldQuit = await launchInstaller(installer.installerPath, { quitBeforeLaunch: true });
 
   return {

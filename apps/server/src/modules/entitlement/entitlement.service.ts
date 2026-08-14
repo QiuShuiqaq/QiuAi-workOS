@@ -20,8 +20,12 @@ type PlanForCheck = {
   entitlements: EntitlementForCheck[];
 };
 
+type WorkspaceTypeForEntitlement = 'personal' | 'enterprise';
+
 const PLAN_ORDER: PlanCode[] = [
   'PERSONAL_FREE',
+  'PERSONAL_MEMBER_MONTHLY',
+  'PERSONAL_MEMBER_ANNUAL',
   'ENTERPRISE_BASIC_MONTHLY',
   'ENTERPRISE_BASIC_ANNUAL',
   'ENTERPRISE_STANDARD_MONTHLY',
@@ -71,15 +75,20 @@ export class EntitlementService {
   }
 
   private checkMock(input: CheckEntitlementRequestDto): CheckEntitlementResponseDto {
+    const workspace = this.store.getWorkspace(input.workspaceId);
     const subscription = this.store.getSubscription(input.workspaceId);
     const plan = this.store.getPlan(input.workspaceId);
+    const plansForCheck = this.filterPlansByWorkspaceType(
+      this.toPlansForCheck(demoPlans),
+      workspace?.workspaceType
+    );
 
     if (!subscription || !plan || !this.isSubscriptionUsable(subscription.status)) {
       return {
         allowed: false,
         reason: 'subscription_inactive',
         featureKey: input.featureKey,
-        requiredPlan: this.findRequiredPlan(this.toPlansForCheck(demoPlans), input.featureKey, input.requestedAmount)
+        requiredPlan: this.findRequiredPlan(plansForCheck, input.featureKey, input.requestedAmount)
       };
     }
 
@@ -90,36 +99,45 @@ export class EntitlementService {
       },
       featureKey: input.featureKey,
       requestedAmount: input.requestedAmount,
-      allPlans: this.toPlansForCheck(demoPlans)
+      allPlans: plansForCheck
     });
   }
 
   private async checkDatabase(input: CheckEntitlementRequestDto): Promise<CheckEntitlementResponseDto> {
-    const subscription = await this.prismaService.subscription.findFirst({
-      where: {
-        workspaceId: input.workspaceId
-      },
-      include: {
-        plan: {
-          include: {
-            entitlements: true
-          }
+    const [workspace, subscription, allPlans] = await Promise.all([
+      this.prismaService.workspace.findUnique({
+        where: {
+          id: input.workspaceId
         }
-      },
-      orderBy: {
-        createdAt: 'desc'
-      }
-    });
-
-    const allPlans = await this.prismaService.plan.findMany({
-      where: {
-        status: 'ACTIVE'
-      },
-      include: {
-        entitlements: true
-      }
-    });
-    const plansForCheck = this.toPlansForCheck(allPlans);
+      }),
+      this.prismaService.subscription.findFirst({
+        where: {
+          workspaceId: input.workspaceId
+        },
+        include: {
+          plan: {
+            include: {
+              entitlements: true
+            }
+          }
+        },
+        orderBy: {
+          createdAt: 'desc'
+        }
+      }),
+      this.prismaService.plan.findMany({
+        where: {
+          status: 'ACTIVE'
+        },
+        include: {
+          entitlements: true
+        }
+      })
+    ]);
+    const plansForCheck = this.filterPlansByWorkspaceType(
+      this.toPlansForCheck(allPlans),
+      workspace?.type === 'ENTERPRISE' ? 'enterprise' : 'personal'
+    );
 
     if (!subscription || !this.isSubscriptionUsable(subscription.status)) {
       return {
@@ -214,6 +232,21 @@ export class EntitlementService {
       code: plan.code as PlanCode,
       entitlements: plan.entitlements
     }));
+  }
+
+  private filterPlansByWorkspaceType(
+    plans: PlanForCheck[],
+    workspaceType: WorkspaceTypeForEntitlement | undefined
+  ): PlanForCheck[] {
+    if (workspaceType === 'enterprise') {
+      return plans.filter((plan) => !plan.code.startsWith('PERSONAL_'));
+    }
+
+    if (workspaceType === 'personal') {
+      return plans.filter((plan) => !plan.code.startsWith('ENTERPRISE_'));
+    }
+
+    return plans;
   }
 
   private isSubscriptionUsable(status: string): boolean {

@@ -283,6 +283,8 @@ test('server role template catalog only exposes the approved production set', ()
     'academic_project_demo_factory'
   ]);
   const enterpriseFactoryAllowedPlanCodes = [
+    'PERSONAL_MEMBER_MONTHLY',
+    'PERSONAL_MEMBER_ANNUAL',
     'ENTERPRISE_BASIC_MONTHLY',
     'ENTERPRISE_BASIC_ANNUAL',
     'ENTERPRISE_STANDARD_MONTHLY',

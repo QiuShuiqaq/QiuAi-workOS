@@ -1,5 +1,6 @@
 export * from './auth';
 export * from './admin';
+export * from './ai-points';
 export * from './asset-center';
 export * from './dependency-manifest';
 export * from './desktop-sync';
@@ -20,6 +21,7 @@ export * from './role';
 export * from './task';
 export * from './workspace';
 export * from './plan-catalog';
+export * from './referral';
 export * from './role-template';
 export * from './tool-action-registry';
 export * from './workflow-graph';

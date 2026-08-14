@@ -7,6 +7,7 @@ import {
   CloudDownloadOutlined,
   CloudSyncOutlined,
   CloseOutlined,
+  CreditCardOutlined,
   DatabaseOutlined,
   DeleteOutlined,
   CompassOutlined,
@@ -75,9 +76,11 @@ import { type ChangeEvent, type DragEvent, type ReactNode, useEffect, useMemo, u
 
 import type {
   DesktopAgreementStatus,
+  DesktopAiPointOverview,
   DesktopAuthorizedRoleTemplateCatalog,
   DesktopAuthorizedRoleTemplateSummary,
   DesktopBackupSummary,
+  DesktopReferralOverview,
   DesktopIssueCategory,
   DesktopIssueReportSubmitRequest,
   DesktopIssueSeverity,
@@ -156,6 +159,7 @@ import {
   isWatchExecutionProfile,
   resolveRoleExecutionModeMeta
 } from '../shared/role-execution-mode';
+import { buildMissingOfficialRoleModelCredentialBindings } from '../shared/official-model-defaults';
 import {
   createCustomCompatibleModelProfile,
   selectModelProfileForPreset,
@@ -165,6 +169,7 @@ import {
 import {
   createCredentialId,
   findDefaultModelCredential,
+  isOfficialPointsModelProfile,
   listProviderModelCredentials,
   resolveModelProfileCredential,
   upsertDefaultModelCredential
@@ -218,7 +223,7 @@ type SectionKey =
   | 'tools'
   | 'knowledge'
   | 'settings';
-type AccountModalKey = 'enterprise' | 'help' | 'release' | 'download' | 'logout';
+type AccountModalKey = 'enterprise' | 'purchase' | 'help' | 'release' | 'download' | 'logout';
 type DesktopThemePreference = 'light' | 'system';
 type DesktopDensityPreference = 'comfortable' | 'compact';
 type ProviderModelCapabilityFilter = 'all' | ModelCapability;
@@ -3129,6 +3134,12 @@ export default function App() {
   const [isSavingModelProfile, setIsSavingModelProfile] = useState(false);
   const [isTestingModel, setIsTestingModel] = useState(false);
   const [isPullingProviderModels, setIsPullingProviderModels] = useState(false);
+  const [aiPointOverview, setAiPointOverview] = useState<DesktopAiPointOverview | null>(null);
+  const [isLoadingAiPointOverview, setIsLoadingAiPointOverview] = useState(false);
+  const [aiPointNotice, setAiPointNotice] = useState('');
+  const [referralOverview, setReferralOverview] = useState<DesktopReferralOverview | null>(null);
+  const [isLoadingReferralOverview, setIsLoadingReferralOverview] = useState(false);
+  const [referralNotice, setReferralNotice] = useState('');
   const [modelApiKeyClearRequested, setModelApiKeyClearRequested] = useState(false);
   const [latestPulledModelCatalog, setLatestPulledModelCatalog] = useState<{
     profileId: string;
@@ -3362,6 +3373,31 @@ export default function App() {
   useEffect(() => {
     setSelectedConversationArtifactId('');
   }, [selectedTaskId]);
+
+  useEffect(() => {
+    if (selectedSection !== 'models') {
+      return;
+    }
+
+    void loadAiPointOverview();
+    void loadReferralOverview();
+  }, [
+    selectedSection,
+    runtimeState.localRuntime.workspaceId,
+    runtimeState.serverConnection.state
+  ]);
+
+  useEffect(() => {
+    void loadReferralOverview();
+    if (runtimeState.localRuntime.workspaceId !== pendingWorkspaceId) {
+      void loadAiPointOverview();
+    } else {
+      setAiPointOverview(null);
+    }
+  }, [
+    runtimeState.localRuntime.workspaceId,
+    runtimeState.serverConnection.state
+  ]);
 
   const desktopRoleTemplates = useMemo(() => {
     return authorizedRoleTemplateCatalog.templates.map(toDesktopRoleTemplate);
@@ -3774,6 +3810,65 @@ export default function App() {
       setRuntimeState(await window.qiuDesktop.getRuntimeState());
     } finally {
       setIsRefreshing(false);
+    }
+  }
+
+  async function loadAiPointOverview() {
+    if (!window.qiuDesktop) {
+      return;
+    }
+
+    if (runtimeState.localRuntime.workspaceId === pendingWorkspaceId) {
+      setAiPointOverview(null);
+      setAiPointNotice('绑定账号后可查看官方通道 AI 点数。');
+      return;
+    }
+
+    setIsLoadingAiPointOverview(true);
+    setAiPointNotice('');
+    try {
+      const overview = await window.qiuDesktop.getAiPointOverview();
+      setAiPointOverview(overview);
+    } catch (error) {
+      setAiPointOverview(null);
+      setAiPointNotice(error instanceof Error ? error.message : 'AI 点数读取失败，请稍后重试。');
+    } finally {
+      setIsLoadingAiPointOverview(false);
+    }
+  }
+
+  async function loadReferralOverview() {
+    if (!window.qiuDesktop) {
+      return;
+    }
+
+    if (runtimeState.localRuntime.workspaceId === pendingWorkspaceId) {
+      setReferralOverview({
+        workspaceId: pendingWorkspaceId,
+        accountStatus: 'unregistered',
+        canInvite: false,
+        invitedPaidCount: 0,
+        earnedPoints: 0,
+        policy: {
+          inviteeRewardPoints: 300,
+          inviterRewardPoints: 500,
+          rewardExpiresInDays: 90
+        }
+      });
+      setReferralNotice('');
+      return;
+    }
+
+    setIsLoadingReferralOverview(true);
+    setReferralNotice('');
+    try {
+      const overview = await window.qiuDesktop.getReferralOverview();
+      setReferralOverview(overview);
+    } catch (error) {
+      setReferralOverview(null);
+      setReferralNotice(error instanceof Error ? error.message : '账号状态读取失败，请稍后重试。');
+    } finally {
+      setIsLoadingReferralOverview(false);
     }
   }
 
@@ -4404,6 +4499,14 @@ export default function App() {
     setAccountModal(modal);
     setSelectedLegalDocumentId('');
     setAccountMenuOpen(false);
+    if (modal === 'purchase') {
+      void loadAiPointOverview();
+      void loadReferralOverview();
+    }
+  }
+
+  function openEnterpriseLoginPage() {
+    void openLocalPath(buildWebConsoleLoginUrl(runtimeState.app.serverBaseUrl));
   }
 
   async function copyDeviceDiagnostics() {
@@ -4448,6 +4551,19 @@ export default function App() {
       const nextState = await window.qiuDesktop.unbindDesktopDevice();
       setRuntimeState(nextState);
       setAuthorizedRoleTemplateCatalog(initialAuthorizedRoleTemplateCatalog);
+      setAiPointOverview(null);
+      setReferralOverview({
+        workspaceId: pendingWorkspaceId,
+        accountStatus: 'unregistered',
+        canInvite: false,
+        invitedPaidCount: 0,
+        earnedPoints: 0,
+        policy: {
+          inviteeRewardPoints: 300,
+          inviterRewardPoints: 500,
+          rewardExpiresInDays: 90
+        }
+      });
       setAccountModal(null);
       setOnboardingOpen(false);
     } catch (error) {
@@ -5236,6 +5352,13 @@ export default function App() {
         </div>
 
         <div className="product-titlebar-actions">
+          <Button
+            size="small"
+            icon={<CreditCardOutlined />}
+            onClick={() => openAccountModal('purchase')}
+          >
+            购买中心
+          </Button>
           {isEnterpriseUnbound ? (
             <span className="tutorial-titlebar-bind-enterprise-target">
               <Button
@@ -5288,6 +5411,16 @@ export default function App() {
   }
 
   function renderProductRail() {
+    const planCode = authorizedRoleTemplateCatalog.deviceCapacity?.planCode;
+    const accountStatus = referralOverview?.accountStatus ?? resolveAccountPlanStatus(planCode, isEnterpriseUnbound);
+    const qAiPointText = isEnterpriseUnbound
+      ? '登录后查看'
+      : aiPointOverview
+        ? formatAiPoints(aiPointOverview.wallet.availablePoints)
+        : isLoadingAiPointOverview
+          ? '读取中'
+          : '未读取';
+
     return (
       <aside className="product-rail">
         <div className="product-rail-actions">
@@ -5315,6 +5448,25 @@ export default function App() {
                     {connectionLabel(runtimeState.serverConnection.state)}
                   </Typography.Text>
                 </span>
+              </div>
+              <div className="account-popover-status">
+                <div>
+                  <span>账号状态</span>
+                  <Tag color={accountPlanStatusColor(accountStatus)}>{accountPlanStatusLabel(accountStatus)}</Tag>
+                </div>
+                <div>
+                  <span>AI 点数</span>
+                  <Typography.Text>{qAiPointText}</Typography.Text>
+                </div>
+                {referralOverview?.canInvite && referralOverview.referralCode ? (
+                  <div>
+                    <span>我的邀请码</span>
+                    <Typography.Text copyable={{ text: referralOverview.referralCode }}>
+                      {referralOverview.referralCode}
+                    </Typography.Text>
+                  </div>
+                ) : null}
+                {referralNotice ? <Typography.Text type="secondary">{referralNotice}</Typography.Text> : null}
               </div>
               <div className="account-popover-list">
                 <button type="button" onClick={() => openAccountModal('enterprise')}>
@@ -6029,6 +6181,10 @@ export default function App() {
           <Typography.Text type="secondary">
             未绑定时可直接使用免费版；绑定企业后，桌面端会自动接入对应企业工作区。
           </Typography.Text>
+          <Space size={8}>
+            <Typography.Link onClick={openEnterpriseLoginPage}>进入企业端</Typography.Link>
+            <Typography.Text type="secondary">用于获取企业绑定码</Typography.Text>
+          </Space>
           {onboardingNotice ? <Typography.Text type="danger">{onboardingNotice}</Typography.Text> : null}
         </Form>
       </Modal>
@@ -6139,7 +6295,17 @@ export default function App() {
     const selectedLegalDocument = accountLegalDocuments.find(
       (document) => document.id === selectedLegalDocumentId
     );
-    const accountModalWidth = accountModal === 'release' ? 860 : accountModal === 'help' ? 760 : 680;
+    const accountModalWidth =
+      accountModal === 'release' || accountModal === 'purchase' ? 860 : accountModal === 'help' ? 760 : 680;
+    const currentPlanCode = authorizedRoleTemplateCatalog.deviceCapacity?.planCode;
+    const purchaseStatus = resolvePurchaseStatus(currentPlanCode, isEnterpriseUnbound);
+    const aiPointBalanceText = isEnterpriseUnbound
+      ? '绑定账号后可查看'
+      : aiPointOverview
+        ? formatAiPoints(aiPointOverview.wallet.availablePoints)
+        : isLoadingAiPointOverview
+          ? '读取中'
+          : '未读取';
 
     return (
       <Modal
@@ -6230,6 +6396,88 @@ export default function App() {
               <Button icon={<InfoCircleOutlined />} onClick={() => void copyDeviceDiagnostics()}>
                 复制诊断信息
               </Button>
+            </Space>
+          </Space>
+        ) : null}
+
+        {accountModal === 'purchase' ? (
+          <Space direction="vertical" size={16} className="account-modal-body">
+            <Descriptions column={1} size="small" bordered>
+              <Descriptions.Item label="当前版本">
+                <Tag color={purchaseStatus.color}>{purchaseStatus.label}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="AI 点数">
+                <Space size={8} wrap>
+                  <Typography.Text>{aiPointBalanceText}</Typography.Text>
+                  {!isEnterpriseUnbound && aiPointOverview && aiPointOverview.wallet.reservedPoints > 0 ? (
+                    <Tag color="orange">冻结 {formatAiPoints(aiPointOverview.wallet.reservedPoints)}</Tag>
+                  ) : null}
+                  {!isEnterpriseUnbound ? (
+                    <Button
+                      size="small"
+                      icon={<ReloadOutlined />}
+                      loading={isLoadingAiPointOverview}
+                      onClick={() => loadAiPointOverview()}
+                    >
+                      刷新
+                    </Button>
+                  ) : null}
+                </Space>
+              </Descriptions.Item>
+              <Descriptions.Item label="购买入口">
+                {isEnterpriseUnbound
+                  ? '请先登录或注册账号，再完成会员和 AI 点数购买。'
+                  : purchaseStatus.isEnterprise
+                    ? '企业套餐和企业 AI 点数由管理员在企业端统一处理。'
+                    : '个人会员和 AI 点数可在购买中心完成。'}
+              </Descriptions.Item>
+            </Descriptions>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+              <Card size="small" title="免费版">
+                <Space direction="vertical" size={8}>
+                  <Typography.Title level={4} style={{ margin: 0 }}>
+                    ¥0
+                  </Typography.Title>
+                  <Typography.Text type="secondary">适合体验基础数字员工。</Typography.Text>
+                  <Tag>当前基础权益</Tag>
+                </Space>
+              </Card>
+              <Card size="small" title="会员版（月付）">
+                <Space direction="vertical" size={8}>
+                  <Typography.Title level={4} style={{ margin: 0 }}>
+                    ¥30 / 月
+                  </Typography.Title>
+                  <Typography.Text type="secondary">适合个人用户使用数字工厂。</Typography.Text>
+                  <Tag color="blue">可搭配月度 AI 点数包</Tag>
+                </Space>
+              </Card>
+              <Card size="small" title="会员版（年付）">
+                <Space direction="vertical" size={8}>
+                  <Typography.Title level={4} style={{ margin: 0 }}>
+                    ¥300 / 年
+                  </Typography.Title>
+                  <Typography.Text type="secondary">适合长期稳定使用。</Typography.Text>
+                  <Tag color="green">年付更省</Tag>
+                </Space>
+              </Card>
+            </div>
+
+            <Card size="small" title="AI 点数">
+              <Space direction="vertical" size={8}>
+                <Typography.Text>月度 AI 点数包：适合每月固定使用，价格更低，到期未用完会过期。</Typography.Text>
+                <Typography.Text>AI 点数充值：适合按需补充，长期有效，100 点 = 1 元。</Typography.Text>
+                <Typography.Text type="secondary">
+                  会员不自动赠送 AI 点数，用户可以在开通会员时一起选择月度 AI 点数包。
+                </Typography.Text>
+              </Space>
+            </Card>
+
+            <Space wrap>
+              <Button type="primary" icon={<GlobalOutlined />} onClick={openEnterpriseLoginPage}>
+                {purchaseStatus.isEnterprise ? '进入企业端' : '登录后购买'}
+              </Button>
+              {aiPointNotice ? <Typography.Text type="secondary">{aiPointNotice}</Typography.Text> : null}
             </Space>
           </Space>
         ) : null}
@@ -7256,7 +7504,7 @@ export default function App() {
           incompatibleSelection.requirementProfile.capabilities,
           incompatibleSelection.requirementProfile.purpose
         )} 不能选择 ${incompatibleSelection.runtimeProfile
-          ? `${incompatibleSelection.runtimeProfile.providerName} / ${incompatibleSelection.runtimeProfile.modelName}`
+          ? modelProfileDisplayName(incompatibleSelection.runtimeProfile)
           : incompatibleSelection.runtimeModelProfileId}。`
       );
       return;
@@ -7493,7 +7741,7 @@ export default function App() {
       return {
         key: requirement.profile.id,
         capability: modelRequirementSlotLabel(requirement.profile),
-        model: `${displayProfile.providerName} / ${displayProfile.modelName}`,
+        model: modelProfileDisplayName(displayProfile),
         ready: requirement.ready
       };
     });
@@ -10157,7 +10405,7 @@ export default function App() {
                         title={
                           <Space size={6} wrap>
                             <Typography.Text strong>
-                              {displayProfile.providerName} / {displayProfile.modelName}
+                              {modelProfileDisplayName(displayProfile)}
                             </Typography.Text>
                             <Tag>{modelRequirementSlotLabel(requirement.profile)}</Tag>
                             {isRuntimeOverride ? <Tag color="blue">实际调用</Tag> : null}
@@ -11036,6 +11284,9 @@ export default function App() {
     const selectedProviderApiKeyUrl = selectedModelProfile
       ? modelProviderApiKeyUrls[selectedModelProfile.providerId]
       : undefined;
+    const selectedModelIsOfficial = selectedModelProfile
+      ? isOfficialPointsModelProfile(selectedModelProfile)
+      : false;
 
     return (
       <>
@@ -11077,6 +11328,23 @@ export default function App() {
             <Tag color={runtimeState.modelCredentials.length > 0 ? 'green' : 'default'}>
               默认 Key {runtimeState.modelCredentials.filter((credential) => credential.isDefault).length}
             </Tag>
+            <Tag color={aiPointOverview ? 'gold' : 'default'}>
+              AI 点数 {aiPointOverview ? `可用 ${formatAiPoints(aiPointOverview.wallet.availablePoints)}` : '未读取'}
+            </Tag>
+            {aiPointOverview && aiPointOverview.wallet.reservedPoints > 0 ? (
+              <Tag color="orange">冻结 {formatAiPoints(aiPointOverview.wallet.reservedPoints)}</Tag>
+            ) : null}
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              loading={isLoadingAiPointOverview}
+              onClick={() => loadAiPointOverview()}
+            >
+              刷新点数
+            </Button>
+            {aiPointNotice ? (
+              <Typography.Text type="secondary">{aiPointNotice}</Typography.Text>
+            ) : null}
           </div>
 
           {filteredCustomModelProfiles.length > 0 ? (
@@ -11268,44 +11536,57 @@ export default function App() {
         >
           {selectedModelProfile ? (
             <Form<ModelFormValues> form={modelForm} layout="vertical" onFinish={saveModelProfile}>
-              <Form.Item label="API Key">
-                <Space.Compact style={{ width: '100%' }}>
-                  <Form.Item name="apiKey" noStyle>
-                    <Input.Password
-                      placeholder="作为该供应商默认 Key，只保存在本机"
-                      onChange={() => setModelApiKeyClearRequested(false)}
-                    />
+              {selectedModelIsOfficial ? (
+                <Card size="small" bordered className="role-model-requirements-card">
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    <Typography.Text strong>{modelProfileDisplayName(selectedModelProfile)}</Typography.Text>
+                    <Typography.Text type="secondary">
+                      官方通道使用 AI 点数，无需填写 API Key，也不需要拉取供应商模型。
+                    </Typography.Text>
+                  </Space>
+                </Card>
+              ) : (
+                <>
+                  <Form.Item label="API Key">
+                    <Space.Compact style={{ width: '100%' }}>
+                      <Form.Item name="apiKey" noStyle>
+                        <Input.Password
+                          placeholder="作为该供应商默认 Key，只保存在本机"
+                          onChange={() => setModelApiKeyClearRequested(false)}
+                        />
+                      </Form.Item>
+                      {selectedModelDefaultCredential ? (
+                        <Button
+                          danger
+                          onClick={() => {
+                            modelForm.setFieldValue('apiKey', '');
+                            setModelApiKeyClearRequested(true);
+                            setModelTestNotice('已标记清空默认 API Key，点击保存后生效。');
+                          }}
+                        >
+                          清空 Key
+                        </Button>
+                      ) : null}
+                      {selectedProviderApiKeyUrl ? (
+                        <Button
+                          icon={<GlobalOutlined />}
+                          onClick={() => void openLocalPath(selectedProviderApiKeyUrl)}
+                        >
+                          获取 API Key
+                        </Button>
+                      ) : null}
+                    </Space.Compact>
                   </Form.Item>
-                  {selectedModelDefaultCredential ? (
-                    <Button
-                      danger
-                      onClick={() => {
-                        modelForm.setFieldValue('apiKey', '');
-                        setModelApiKeyClearRequested(true);
-                        setModelTestNotice('已标记清空默认 API Key，点击保存后生效。');
-                      }}
-                    >
-                      清空 Key
-                    </Button>
-                  ) : null}
-                  {selectedProviderApiKeyUrl ? (
-                    <Button
-                      icon={<GlobalOutlined />}
-                      onClick={() => void openLocalPath(selectedProviderApiKeyUrl)}
-                    >
-                      获取 API Key
-                    </Button>
-                  ) : null}
-                </Space.Compact>
-              </Form.Item>
-              <div className="inline-form-grid">
-                <Form.Item name="providerName" label="供应商" rules={[{ required: true }]}>
-                  <Input />
-                </Form.Item>
-                <Form.Item name="modelName" label="模型" rules={[{ required: true }]}>
-                  <Input />
-                </Form.Item>
-              </div>
+                  <div className="inline-form-grid">
+                    <Form.Item name="providerName" label="供应商" rules={[{ required: true }]}>
+                      <Input />
+                    </Form.Item>
+                    <Form.Item name="modelName" label="模型" rules={[{ required: true }]}>
+                      <Input />
+                    </Form.Item>
+                  </div>
+                </>
+              )}
               <Form.Item
                 name="capabilities"
                 label={
@@ -11316,6 +11597,7 @@ export default function App() {
                 rules={[{ required: true, message: '请选择模型能力' }]}
               >
                 <Select
+                  disabled={selectedModelIsOfficial}
                   placeholder="按模型真实输入输出选择"
                   options={primaryModelCapabilityOptions.map((option) => ({
                     label: `${option.label} - ${option.description}`,
@@ -11351,16 +11633,28 @@ export default function App() {
               <Form.Item name="purpose" hidden>
                 <Input />
               </Form.Item>
+              {selectedModelIsOfficial ? (
+                <>
+                  <Form.Item name="providerName" hidden>
+                    <Input />
+                  </Form.Item>
+                  <Form.Item name="modelName" hidden>
+                    <Input />
+                  </Form.Item>
+                </>
+              ) : null}
 
               <Divider style={{ margin: '8px 0 16px' }} />
-              <div className="inline-form-grid">
-                <Form.Item name="apiBaseUrl" label="API Base URL">
-                  <Input placeholder="https://api.openai.com/v1" />
-                </Form.Item>
-                <Form.Item name="monthlyBudgetCents" label="月度预算（分）">
-                  <InputNumber min={0} step={100} style={{ width: '100%' }} />
-                </Form.Item>
-              </div>
+              {!selectedModelIsOfficial ? (
+                <div className="inline-form-grid">
+                  <Form.Item name="apiBaseUrl" label="API Base URL">
+                    <Input placeholder="https://api.openai.com/v1" />
+                  </Form.Item>
+                  <Form.Item name="monthlyBudgetCents" label="月度预算（分）">
+                    <InputNumber min={0} step={100} style={{ width: '100%' }} />
+                  </Form.Item>
+                </div>
+              ) : null}
               <div className="inline-form-grid">
                 <Form.Item name="temperature" label="温度">
                   <InputNumber min={0} max={2} step={0.1} style={{ width: '100%' }} />
@@ -11375,7 +11669,7 @@ export default function App() {
                   options={runtimeState.modelProfiles
                     .filter((profile) => profile.id !== selectedModelProfile.id)
                     .map((profile) => ({
-                      label: `${modelCapabilitySummary(profile.capabilities, profile.purpose)} · ${profile.providerName}/${profile.modelName}`,
+                      label: `${modelCapabilitySummary(profile.capabilities, profile.purpose)} · ${modelProfileDisplayName(profile)}`,
                       value: profile.id
                     }))}
                 />
@@ -11392,20 +11686,24 @@ export default function App() {
                       ? '停用'
                       : '启用'}
                   </Button>
-                  <Button
-                    icon={<ReloadOutlined />}
-                    loading={isTestingModel}
-                    onClick={() => void testSelectedModelConnection()}
-                  >
-                    测试模型
-                  </Button>
-                  <Button
-                    icon={<CloudDownloadOutlined />}
-                    loading={isPullingProviderModels}
-                    onClick={() => void pullSelectedProviderModels()}
-                  >
-                    拉取模型
-                  </Button>
+                  {!selectedModelIsOfficial ? (
+                    <>
+                      <Button
+                        icon={<ReloadOutlined />}
+                        loading={isTestingModel}
+                        onClick={() => void testSelectedModelConnection()}
+                      >
+                        测试模型
+                      </Button>
+                      <Button
+                        icon={<CloudDownloadOutlined />}
+                        loading={isPullingProviderModels}
+                        onClick={() => void pullSelectedProviderModels()}
+                      >
+                        拉取模型
+                      </Button>
+                    </>
+                  ) : null}
                 </Space>
                 {modelTestNotice ? (
                   <Typography.Text
@@ -11509,13 +11807,14 @@ export default function App() {
             roleConfigRoleCode
           );
           const isRuntimeOverride = runtimeProfile.id !== profile.id;
+          const isOfficialRuntimeProfile = isOfficialPointsModelProfile(runtimeProfile);
 
           return (
             <div className="role-model-credential-editor">
               <Flex align="flex-start" justify="space-between" gap={12} wrap="wrap">
                 <Space direction="vertical" size={2}>
                   <Typography.Text strong>
-                    {runtimeProfile.providerName} / {runtimeProfile.modelName}
+                    {modelProfileDisplayName(runtimeProfile)}
                   </Typography.Text>
                   <Space size={6} wrap>
                     <Tag>{modelCapabilitySummary(profile.capabilities, profile.purpose)}</Tag>
@@ -11550,6 +11849,7 @@ export default function App() {
               <Form.Item
                 name={modePath}
                 rules={[{ required: true, message: '请选择 API Key 使用方式' }]}
+                hidden={isOfficialRuntimeProfile}
               >
                 <Radio.Group
                   optionType="button"
@@ -11566,57 +11866,63 @@ export default function App() {
                 />
               </Form.Item>
 
-              <Form.Item noStyle shouldUpdate>
-                {({ getFieldValue: readModeFieldValue }) => {
-                  const mode = (readModeFieldValue(modePath) ?? 'provider_default') as ModelCredentialBindingMode;
+              {isOfficialRuntimeProfile ? (
+                <Typography.Text type="secondary">
+                  官方通道使用 AI 点数，无需配置 API Key。
+                </Typography.Text>
+              ) : (
+                <Form.Item noStyle shouldUpdate>
+                  {({ getFieldValue: readModeFieldValue }) => {
+                    const mode = (readModeFieldValue(modePath) ?? 'provider_default') as ModelCredentialBindingMode;
 
-                  if (mode === 'credential_ref') {
-                    return (
-                      <Form.Item
-                        name={['modelCredentialBindings', profile.id, 'credentialId']}
-                        rules={[{ required: true, message: '请选择已有 Key' }]}
-                      >
-                        <Select
-                          placeholder="选择已有 Key"
-                          options={providerCredentials.map((credential) => ({
-                            label: `${credential.label}${credential.isDefault ? '（默认）' : ''}`,
-                            value: credential.id
-                          }))}
-                        />
-                      </Form.Item>
-                    );
-                  }
-
-                  if (mode === 'inline') {
-                    return (
-                      <div className="inline-form-grid">
+                    if (mode === 'credential_ref') {
+                      return (
                         <Form.Item
-                          name={['modelCredentialBindings', profile.id, 'apiBaseUrl']}
-                          label="API Base URL"
-                          initialValue={runtimeProfile.apiBaseUrl}
+                          name={['modelCredentialBindings', profile.id, 'credentialId']}
+                          rules={[{ required: true, message: '请选择已有 Key' }]}
                         >
-                          <Input placeholder={runtimeProfile.apiBaseUrl ?? 'https://api.example.com/v1'} />
+                          <Select
+                            placeholder="选择已有 Key"
+                            options={providerCredentials.map((credential) => ({
+                              label: `${credential.label}${credential.isDefault ? '（默认）' : ''}`,
+                              value: credential.id
+                            }))}
+                          />
                         </Form.Item>
-                        <Form.Item
-                          name={['modelCredentialBindings', profile.id, 'apiKey']}
-                          label="专用 API Key"
-                          rules={[{ required: true, message: '请输入专用 API Key' }]}
-                        >
-                          <Input.Password placeholder="只给当前应用使用" />
-                        </Form.Item>
-                      </div>
-                    );
-                  }
+                      );
+                    }
 
-                  return (
-                    <Typography.Text type={defaultCredential ? 'secondary' : 'danger'}>
-                      {defaultCredential
-                        ? `将使用 ${defaultCredential.label}`
-                        : `尚未配置 ${runtimeProfile.providerName} 默认 Key，可先去“模型配置”填写，或选择“单独输入 Key”。`}
-                    </Typography.Text>
-                  );
-                }}
-              </Form.Item>
+                    if (mode === 'inline') {
+                      return (
+                        <div className="inline-form-grid">
+                          <Form.Item
+                            name={['modelCredentialBindings', profile.id, 'apiBaseUrl']}
+                            label="API Base URL"
+                            initialValue={runtimeProfile.apiBaseUrl}
+                          >
+                            <Input placeholder={runtimeProfile.apiBaseUrl ?? 'https://api.example.com/v1'} />
+                          </Form.Item>
+                          <Form.Item
+                            name={['modelCredentialBindings', profile.id, 'apiKey']}
+                            label="专用 API Key"
+                            rules={[{ required: true, message: '请输入专用 API Key' }]}
+                          >
+                            <Input.Password placeholder="只给当前应用使用" />
+                          </Form.Item>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <Typography.Text type={defaultCredential ? 'secondary' : 'danger'}>
+                        {defaultCredential
+                          ? `将使用 ${defaultCredential.label}`
+                          : `尚未配置 ${runtimeProfile.providerName} 默认 Key，可先去“模型配置”填写，或选择“单独输入 Key”。`}
+                      </Typography.Text>
+                    );
+                  }}
+                </Form.Item>
+              )}
             </div>
           );
         }}
@@ -12180,29 +12486,49 @@ export default function App() {
         current.localRuntime.knowledgeBindingIds,
         installedRolePackage.requiredKnowledgeSources.map((source) => getKnowledgeBindingId(source))
       );
+      const userConfiguredRoleModelCredentialBindings = values?.modelCredentialBindings
+        ? buildRoleModelCredentialBindingsFromForm(
+            installedRolePackage.roleCode,
+            installedRolePackage.modelProfileIds,
+            values.modelCredentialBindings,
+            modelProfiles
+          )
+        : [];
+      const baseRoleModelCredentialBindings = values?.modelCredentialBindings
+        ? [
+            ...current.roleModelCredentialBindings.filter(
+              (binding) => binding.roleCode !== installedRolePackage.roleCode
+            ),
+            ...userConfiguredRoleModelCredentialBindings
+          ]
+        : current.roleModelCredentialBindings;
+      const defaultOfficialRoleModelCredentialBindings =
+        buildMissingOfficialRoleModelCredentialBindings({
+          rolePackage: installedRolePackage,
+          modelProfiles,
+          currentBindings: baseRoleModelCredentialBindings,
+          updatedAt: now
+        });
+      const roleModelCredentialBindings = [
+        ...baseRoleModelCredentialBindings,
+        ...defaultOfficialRoleModelCredentialBindings
+      ];
       const enabledModelProfileIds = mergeUniqueStrings(
         mergeUniqueStrings(
-          current.localRuntime.enabledModelProfileIds,
-          installedRolePackage.modelProfileIds
+          mergeUniqueStrings(
+            current.localRuntime.enabledModelProfileIds,
+            installedRolePackage.modelProfileIds
+          ),
+          readRuntimeModelProfileIdsFromRoleConfigForm(values?.modelCredentialBindings)
         ),
-        readRuntimeModelProfileIdsFromRoleConfigForm(values?.modelCredentialBindings)
+        defaultOfficialRoleModelCredentialBindings
+          .map((binding) => binding.runtimeModelProfileId)
+          .filter((profileId): profileId is string => Boolean(profileId))
       );
       const enabledToolIds = mergeUniqueStrings(
         current.localRuntime.enabledToolIds,
         installedRolePackage.toolIds
       );
-      const roleModelCredentialBindings = values?.modelCredentialBindings
-        ? [
-            ...current.roleModelCredentialBindings.filter(
-              (binding) => binding.roleCode !== installedRolePackage.roleCode
-            ),
-            ...buildRoleModelCredentialBindingsFromForm(
-              installedRolePackage.roleCode,
-              installedRolePackage.modelProfileIds,
-              values.modelCredentialBindings
-            )
-          ]
-        : current.roleModelCredentialBindings;
       const currentActiveRolePackage = current.localRuntime.activeRoleCode
         ? rolePackages.find((rolePackage) => rolePackage.roleCode === current.localRuntime.activeRoleCode)
         : undefined;
@@ -13360,6 +13686,51 @@ export default function App() {
     setIsSavingModelProfile(true);
     setModelTestNotice('');
 
+    if (isOfficialPointsModelProfile(selectedModelProfile)) {
+      try {
+        const currentState = runtimeStateRef.current;
+        const capabilities = readModelProfileCapabilities(selectedModelProfile);
+        const updatedProfile: ModelProfile = {
+          ...selectedModelProfile,
+          purpose: purposeForModelCapabilities(capabilities, selectedModelProfile.purpose),
+          capabilities,
+          temperature: values.temperature,
+          maxTokens: values.maxTokens,
+          monthlyBudgetCents: values.monthlyBudgetCents,
+          fallbackProfileId: values.fallbackProfileId || undefined
+        };
+        const nextState: DesktopRuntimeState = {
+          ...currentState,
+          modelProfiles: currentState.modelProfiles.map((profile) =>
+            profile.id === selectedModelProfile.id ? updatedProfile : profile
+          ),
+          localRuntime: {
+            ...currentState.localRuntime,
+            enabledModelProfileIds: mergeUniqueStrings(
+              currentState.localRuntime.enabledModelProfileIds,
+              [updatedProfile.id]
+            )
+          }
+        };
+
+        if (window.qiuDesktop) {
+          await window.qiuDesktop.saveRuntimeState(nextState);
+        }
+
+        runtimeStateRef.current = nextState;
+        setRuntimeState(nextState);
+        setModelConfigOpen(false);
+        message.success('官方通道配置已保存。');
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'unknown error';
+        setModelTestNotice(`保存官方通道配置失败：${errorMessage}`);
+        message.error('官方通道配置保存失败，请重试。');
+      } finally {
+        setIsSavingModelProfile(false);
+      }
+      return;
+    }
+
     const capabilities = normalizePrimaryModelCapabilities(
       values.capabilities,
       values.purpose ?? selectedModelProfile.purpose
@@ -13503,6 +13874,12 @@ export default function App() {
       return;
     }
 
+    if (isOfficialPointsModelProfile(selectedModelProfile)) {
+      setModelTestResult(null);
+      setModelTestNotice('官方通道无需本地测试，实际任务会通过 AI 点数通道调用。');
+      return;
+    }
+
     setIsTestingModel(true);
     setModelTestNotice('');
     setModelTestResult(null);
@@ -13563,6 +13940,12 @@ export default function App() {
 
   async function pullSelectedProviderModels() {
     if (!selectedModelProfile || !window.qiuDesktop) {
+      return;
+    }
+
+    if (isOfficialPointsModelProfile(selectedModelProfile)) {
+      setModelTestResult(null);
+      setModelTestNotice('官方通道无需拉取模型，线路由 QiuAI 统一维护。');
       return;
     }
 
@@ -14030,14 +14413,28 @@ export default function App() {
     const nextRoleModelCredentialBindings = buildRoleModelCredentialBindingsFromForm(
       normalizedPreviewRolePackage.roleCode,
       normalizedPreviewRolePackage.modelProfileIds,
-      values.modelCredentialBindings
+      values.modelCredentialBindings,
+      nextModelProfiles
     );
+    const previewRoleModelCredentialBindings = [
+      ...nextRoleModelCredentialBindings,
+      ...buildMissingOfficialRoleModelCredentialBindings({
+        rolePackage: normalizedPreviewRolePackage,
+        modelProfiles: nextModelProfiles,
+        currentBindings: nextRoleModelCredentialBindings
+      })
+    ];
     const nextEnabledModelProfileIds = mergeUniqueStrings(
       mergeUniqueStrings(
-        runtimeState.localRuntime.enabledModelProfileIds,
-        normalizedPreviewRolePackage.modelProfileIds
+        mergeUniqueStrings(
+          runtimeState.localRuntime.enabledModelProfileIds,
+          normalizedPreviewRolePackage.modelProfileIds
+        ),
+        readRuntimeModelProfileIdsFromRoleConfigForm(values.modelCredentialBindings)
       ),
-      readRuntimeModelProfileIdsFromRoleConfigForm(values.modelCredentialBindings)
+      previewRoleModelCredentialBindings
+        .map((binding) => binding.runtimeModelProfileId)
+        .filter((profileId): profileId is string => Boolean(profileId))
     );
     const firstUnreadyModelProfileId = findFirstUnreadyRequiredModelProfileId(
       nextModelProfiles,
@@ -14046,7 +14443,7 @@ export default function App() {
       {
         roleCode: normalizedPreviewRolePackage.roleCode,
         credentials: runtimeState.modelCredentials,
-        roleBindings: nextRoleModelCredentialBindings
+        roleBindings: previewRoleModelCredentialBindings
       }
     );
 
@@ -15307,6 +15704,7 @@ function sectionMeta(section: SectionKey) {
 function accountModalTitle(modal: AccountModalKey | null) {
   const titles: Record<AccountModalKey, string> = {
     enterprise: '设备信息',
+    purchase: '购买中心',
     help: '帮助中心',
     release: '协议与声明',
     download: '版本与更新',
@@ -15314,6 +15712,78 @@ function accountModalTitle(modal: AccountModalKey | null) {
   };
 
   return modal ? titles[modal] : '';
+}
+
+function resolvePurchaseStatus(planCode: string | undefined, isUnbound: boolean) {
+  if (isUnbound) {
+    return {
+      label: '免费版（未绑定账号）',
+      color: 'default',
+      isEnterprise: false
+    };
+  }
+
+  if (planCode?.startsWith('ENTERPRISE_')) {
+    return {
+      label: '企业版',
+      color: 'green',
+      isEnterprise: true
+    };
+  }
+
+  if (planCode?.startsWith('PERSONAL_MEMBER_')) {
+    return {
+      label: '个人会员',
+      color: 'blue',
+      isEnterprise: false
+    };
+  }
+
+  return {
+    label: '免费版（已绑定账号）',
+    color: 'default',
+    isEnterprise: false
+  };
+}
+
+function resolveAccountPlanStatus(planCode: string | undefined, isUnbound: boolean): DesktopReferralOverview['accountStatus'] {
+  if (isUnbound) return 'unregistered';
+  if (planCode?.startsWith('ENTERPRISE_')) return 'enterprise';
+  if (planCode?.startsWith('PERSONAL_MEMBER_')) return 'member';
+  return 'free';
+}
+
+function accountPlanStatusLabel(status: DesktopReferralOverview['accountStatus']) {
+  return {
+    unregistered: '未注册',
+    free: '免费版',
+    member: '会员版',
+    enterprise: '企业版'
+  }[status];
+}
+
+function accountPlanStatusColor(status: DesktopReferralOverview['accountStatus']) {
+  return {
+    unregistered: 'default',
+    free: 'default',
+    member: 'blue',
+    enterprise: 'green'
+  }[status];
+}
+
+function buildWebConsoleLoginUrl(serverBaseUrl: string) {
+  try {
+    const url = new URL(serverBaseUrl);
+    if ((url.hostname === '127.0.0.1' || url.hostname === 'localhost') && url.port === '4000') {
+      url.port = '3001';
+    }
+    url.pathname = '/login';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return 'https://workos.qiuaihub.com/login';
+  }
 }
 
 function connectionLabel(state: DesktopRuntimeState['serverConnection']['state']) {
@@ -15595,6 +16065,14 @@ function formatEstimatedCostCents(value?: number) {
   }
 
   return `约 ¥${(value / 100).toFixed(2)}`;
+}
+
+function formatAiPoints(value?: number) {
+  if (value === undefined || value === null) {
+    return '—';
+  }
+
+  return `${Math.max(0, Math.floor(value)).toLocaleString('zh-CN')} 点`;
 }
 
 function isUserDeliverableArtifact(artifact: DesktopTaskDetail['artifacts'][number]) {
@@ -18759,7 +19237,7 @@ function isPendingModelProviderProfile(profile: ModelProfile): boolean {
 }
 
 function isCustomModelConfigurationProfile(profile: ModelProfile): boolean {
-  if (isPendingModelProviderProfile(profile)) {
+  if (isPendingModelProviderProfile(profile) || isOfficialPointsModelProfile(profile)) {
     return false;
   }
 
@@ -19023,14 +19501,27 @@ function buildRoleModelCredentialFormValues(
 function buildRoleModelCredentialBindingsFromForm(
   roleCode: string,
   modelProfileIds: string[],
-  values: RoleConfigFormValues['modelCredentialBindings'] | undefined
+  values: RoleConfigFormValues['modelCredentialBindings'] | undefined,
+  modelProfiles: ModelProfile[] = []
 ): RoleModelCredentialBinding[] {
   const now = new Date().toISOString();
+  const modelProfilesById = new Map(modelProfiles.map((profile) => [profile.id, profile]));
 
   return modelProfileIds.map((modelProfileId) => {
     const value = values?.[modelProfileId];
     const mode = value?.mode ?? 'provider_default';
     const runtimeModelProfileId = value?.runtimeModelProfileId?.trim() || modelProfileId;
+    const runtimeProfile = modelProfilesById.get(runtimeModelProfileId);
+
+    if (runtimeProfile && isOfficialPointsModelProfile(runtimeProfile)) {
+      return {
+        roleCode,
+        modelProfileId,
+        runtimeModelProfileId,
+        mode: 'provider_default',
+        updatedAt: now
+      };
+    }
 
     if (mode === 'credential_ref' && value?.credentialId) {
       return {
@@ -19255,7 +19746,15 @@ function readRuntimeModelProfileIdsForRole(
 
 function resolveModelProfileLabel(modelProfiles: ModelProfile[], profileId: string): string {
   const profile = modelProfiles.find((item) => item.id === profileId);
-  return profile ? `${profile.providerName} / ${profile.modelName}` : profileId;
+  return profile ? modelProfileDisplayName(profile) : profileId;
+}
+
+function modelProfileDisplayName(profile: ModelProfile): string {
+  if (isOfficialPointsModelProfile(profile)) {
+    return `官方通道 · ${profile.modelName}`;
+  }
+
+  return `${profile.providerName} / ${profile.modelName}`;
 }
 
 function modelRequirementSlotLabel(profile: ModelProfile): string {
@@ -19401,7 +19900,7 @@ function buildCompatibleRuntimeModelOptions(
 
   return dedupedProfiles.map((profile) => ({
     value: profile.id,
-    label: `${profile.providerName} / ${profile.modelName} · ${modelCapabilitySummary(profile.capabilities, profile.purpose)}`
+    label: `${modelProfileDisplayName(profile)} · ${modelCapabilitySummary(profile.capabilities, profile.purpose)}`
   }));
 }
 

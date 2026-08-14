@@ -4,6 +4,7 @@ import type {
   AdminPlanDetail,
   AdminWorkspaceDetail,
   AdminWorkspaceStatus,
+  AdjustAdminWorkspaceAiPointsRequest,
   AdminWorkspaceSummary,
   CreateAdminDesktopBindingCodeRequest,
   CreateAdminWorkspaceInvitationRequest,
@@ -22,6 +23,7 @@ import {
   PlusOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
+  ThunderboltOutlined,
   StopOutlined,
   TeamOutlined
 } from '@ant-design/icons';
@@ -81,6 +83,10 @@ type CreatedBindingCodeNotice = {
   expiresAt?: string;
 };
 
+type AiPointsModalState = {
+  workspace: AdminWorkspaceSummary;
+};
+
 function formatDate(value?: string) {
   if (!value) {
     return '-';
@@ -116,6 +122,10 @@ function formatCurrency(amountCents?: number, currency = 'CNY') {
     style: 'currency',
     currency
   }).format(amountCents / 100);
+}
+
+function formatAiPoints(points?: number) {
+  return `${new Intl.NumberFormat('zh-CN').format(points ?? 0)} 点`;
 }
 
 function workspaceTone(status: string): 'default' | 'success' | 'warning' {
@@ -214,11 +224,14 @@ export function AdminWorkspacesPageClient({
   const [creatingBindingCode, setCreatingBindingCode] = useState(false);
   const [createdBindingCodeNotice, setCreatedBindingCodeNotice] = useState<CreatedBindingCodeNotice | null>(null);
   const [revokingDeviceId, setRevokingDeviceId] = useState<string | null>(null);
+  const [aiPointsModal, setAiPointsModal] = useState<AiPointsModalState | null>(null);
+  const [adjustingAiPoints, setAdjustingAiPoints] = useState(false);
   const [createWorkspaceForm] = Form.useForm<CreateAdminWorkspaceRequest>();
   const [authorizeForm] = Form.useForm<GrantAdminWorkspaceAuthorizationRequest>();
   const [statusForm] = Form.useForm<WorkspaceStatusForm>();
   const [invitationForm] = Form.useForm<CreateAdminWorkspaceInvitationRequest>();
   const [bindingCodeForm] = Form.useForm<CreateAdminDesktopBindingCodeRequest>();
+  const [aiPointsForm] = Form.useForm<AdjustAdminWorkspaceAiPointsRequest>();
 
   const enterprisePlans = useMemo(
     () => plans.filter((plan) => plan.billingCycle !== 'FREE'),
@@ -334,6 +347,15 @@ export function AdminWorkspacesPageClient({
     });
   }
 
+  function openAiPointsAdjustment(workspace: AdminWorkspaceSummary) {
+    setAiPointsModal({ workspace });
+    aiPointsForm.setFieldsValue({
+      points: 10000,
+      reason: '手动发放 AI 点数',
+      note: ''
+    });
+  }
+
   function openStatusChange(workspace: AdminWorkspaceSummary, status: AdminWorkspaceStatus) {
     setStatusModal({
       workspace,
@@ -405,6 +427,40 @@ export function AdminWorkspacesPageClient({
       message.error(errorMessage);
     } finally {
       setAuthorizing(false);
+    }
+  }
+
+  async function handleAdjustAiPoints(values: AdjustAdminWorkspaceAiPointsRequest) {
+    if (!aiPointsModal) {
+      return;
+    }
+
+    setAdjustingAiPoints(true);
+    try {
+      const response = await createBrowserApiClient().adjustAdminWorkspaceAiPoints(
+        aiPointsModal.workspace.id,
+        {
+          points: values.points,
+          reason: values.reason.trim(),
+          note: values.note?.trim() || undefined
+        }
+      );
+      setRows((current) =>
+        current.map((workspace) =>
+          workspace.id === aiPointsModal.workspace.id ? response.data.workspace : workspace
+        )
+      );
+      setDetail((current) =>
+        current?.workspace.id === aiPointsModal.workspace.id ? response.data : current
+      );
+      message.success('AI 点数已调整');
+      setAiPointsModal(null);
+      aiPointsForm.resetFields();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '调整 AI 点数失败';
+      message.error(errorMessage);
+    } finally {
+      setAdjustingAiPoints(false);
     }
   }
 
@@ -694,6 +750,9 @@ export function AdminWorkspacesPageClient({
           >
             手动授权
           </Button>
+          <Button icon={<ThunderboltOutlined />} onClick={() => openAiPointsAdjustment(workspace)}>
+            AI 点数
+          </Button>
           {workspace.status === 'active' ? (
             <>
               <Button icon={<StopOutlined />} onClick={() => openStatusChange(workspace, 'SUSPENDED')}>
@@ -815,6 +874,9 @@ export function AdminWorkspacesPageClient({
               <Button type="primary" onClick={() => openAuthorization(detail.workspace)}>
                 手动授权
               </Button>
+              <Button icon={<ThunderboltOutlined />} onClick={() => openAiPointsAdjustment(detail.workspace)}>
+                AI 点数
+              </Button>
               {detail.workspace.status === 'active' ? (
                 <>
                   <Button onClick={() => openStatusChange(detail.workspace, 'SUSPENDED')}>停用</Button>
@@ -853,7 +915,32 @@ export function AdminWorkspacesPageClient({
               <Descriptions.Item label="桌面设备">
                 {detail.workspace.desktopDeviceCount}
               </Descriptions.Item>
+              <Descriptions.Item label="AI 点数余额">
+                {formatAiPoints(detail.aiPointWallet?.availablePoints)}
+                {detail.aiPointWallet?.reservedPoints ? (
+                  <Typography.Text type="secondary">
+                    {' '}冻结 {formatAiPoints(detail.aiPointWallet.reservedPoints)}
+                  </Typography.Text>
+                ) : null}
+              </Descriptions.Item>
             </Descriptions>
+
+            <Card
+              size="small"
+              title="AI 点数"
+              extra={
+                <Button size="small" icon={<ThunderboltOutlined />} onClick={() => openAiPointsAdjustment(detail.workspace)}>
+                  调整点数
+                </Button>
+              }
+            >
+              <Space wrap>
+                <Tag color="blue">可用 {formatAiPoints(detail.aiPointWallet?.availablePoints)}</Tag>
+                <Tag>余额 {formatAiPoints(detail.aiPointWallet?.balancePoints)}</Tag>
+                <Tag>冻结 {formatAiPoints(detail.aiPointWallet?.reservedPoints)}</Tag>
+                <Typography.Text type="secondary">100 AI点 = 1 RMB</Typography.Text>
+              </Space>
+            </Card>
 
             {createdInvitationNotice ? (
               <Alert
@@ -1140,6 +1227,42 @@ export function AdminWorkspacesPageClient({
             rules={[{ required: true, message: '请输入有效分钟数' }]}
           >
             <InputNumber min={1} max={60} style={{ width: '100%' }} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={`调整 AI 点数：${aiPointsModal?.workspace.name ?? ''}`}
+        open={Boolean(aiPointsModal)}
+        onCancel={() => setAiPointsModal(null)}
+        onOk={() => aiPointsForm.submit()}
+        confirmLoading={adjustingAiPoints}
+        okText="确认调整"
+      >
+        <Alert
+          showIcon
+          type="info"
+          message="AI 点数用于 QiuAI 官方通道"
+          description="正数表示发放点数，负数表示扣减点数。100 AI点 = 1 RMB，后台会记录操作日志。"
+          style={{ marginBottom: 16 }}
+        />
+        <Form layout="vertical" form={aiPointsForm} onFinish={handleAdjustAiPoints}>
+          <Form.Item
+            name="points"
+            label="调整点数"
+            rules={[{ required: true, message: '请输入调整点数' }]}
+          >
+            <InputNumber step={100} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item
+            name="reason"
+            label="原因"
+            rules={[{ required: true, message: '请输入调整原因' }]}
+          >
+            <Input placeholder="例如：用户购买点数、活动赠送、人工扣减" />
+          </Form.Item>
+          <Form.Item name="note" label="备注">
+            <Input.TextArea rows={3} placeholder="可选，记录收款金额、沟通记录或订单备注" />
           </Form.Item>
         </Form>
       </Modal>

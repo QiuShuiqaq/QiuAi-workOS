@@ -2,8 +2,11 @@ import type {
   AuthSessionResponse,
   CreateAdminAssetDefinitionRequest,
   CreateAdminAssetDefinitionResponse,
+  CreateAdminOfficialModelApiKeyRequest,
+  CreateAdminOfficialModelApiKeyResponse,
   CreateBillingOrderRequest,
   CreateBillingOrderResponse,
+  GetReferralOverviewResponse,
   LoginRequest,
   LoginResponse,
   LogoutResponse,
@@ -18,6 +21,8 @@ import type {
   CancelAdminWorkspaceInvitationResponse,
   CheckDesktopUpdateQuery,
   ArchiveAdminDesktopReleaseResponse,
+  AdjustAdminWorkspaceAiPointsRequest,
+  AdjustAdminWorkspaceAiPointsResponse,
   CheckDesktopUpdateResponse,
   CreateAdminDesktopReleaseRequest,
   CreateAdminDesktopReleaseResponse,
@@ -58,6 +63,7 @@ import type {
   ListAdminDesktopReleasesResponse,
   ListAdminIssueMessagesQuery,
   ListAdminIssueMessagesResponse,
+  ListAdminOfficialModelRoutesResponse,
   ListAdminRoleTemplatesResponse,
   ListToolActionCatalogResponse,
   CancelWorkspaceInvitationResponse,
@@ -93,6 +99,8 @@ import type {
   UpdateAdminAssetDefinitionResponse,
   UpdateAdminIssueMessageRequest,
   UpdateAdminIssueMessageResponse,
+  UpdateAdminOfficialModelApiKeyRequest,
+  UpdateAdminOfficialModelApiKeyResponse,
   UpdateAdminWorkspaceStatusRequest,
   UpdateAdminWorkspaceStatusResponse,
   UploadAdminDesktopReleaseAssetResponse,
@@ -110,7 +118,9 @@ import type {
   UpdateAdminPlanResponse,
   UploadEnterpriseKnowledgePdfRequest,
   UploadEnterpriseKnowledgePdfResponse,
-  ActivateEnterpriseKnowledgeVersionResponse
+  ActivateEnterpriseKnowledgeVersionResponse,
+  ValidateReferralCodeRequest,
+  ValidateReferralCodeResponse
 } from '@qiuai/api-contract';
 
 export interface QiuApiClientOptions {
@@ -177,6 +187,27 @@ export class QiuApiClient {
 
   listAdminToolActionCatalog(): Promise<ListToolActionCatalogResponse> {
     return this.get('/api/v1/admin/tool-actions');
+  }
+
+  listAdminOfficialModelRoutes(): Promise<ListAdminOfficialModelRoutesResponse> {
+    return this.get('/api/v1/admin/official-model-routes');
+  }
+
+  createAdminOfficialModelApiKey(
+    routeKey: string,
+    input: CreateAdminOfficialModelApiKeyRequest
+  ): Promise<CreateAdminOfficialModelApiKeyResponse> {
+    return this.post(
+      `/api/v1/admin/official-model-routes/${encodeURIComponent(routeKey)}/api-keys`,
+      input
+    );
+  }
+
+  updateAdminOfficialModelApiKey(
+    apiKeyId: string,
+    input: UpdateAdminOfficialModelApiKeyRequest
+  ): Promise<UpdateAdminOfficialModelApiKeyResponse> {
+    return this.patch(`/api/v1/admin/official-model-api-keys/${encodeURIComponent(apiKeyId)}`, input);
   }
 
   listAdminAssets(
@@ -446,6 +477,16 @@ export class QiuApiClient {
     );
   }
 
+  adjustAdminWorkspaceAiPoints(
+    workspaceId: string,
+    input: AdjustAdminWorkspaceAiPointsRequest
+  ): Promise<AdjustAdminWorkspaceAiPointsResponse> {
+    return this.post(
+      `/api/v1/admin/workspaces/${encodeURIComponent(workspaceId)}/ai-points/adjust`,
+      input
+    );
+  }
+
   updateAdminWorkspaceStatus(
     workspaceId: string,
     input: UpdateAdminWorkspaceStatusRequest
@@ -490,6 +531,17 @@ export class QiuApiClient {
     input: CreateBillingOrderRequest
   ): Promise<CreateBillingOrderResponse> {
     return this.post(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/billing/orders`, input);
+  }
+
+  getReferralOverview(workspaceId: string): Promise<GetReferralOverviewResponse> {
+    return this.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/referrals/me`);
+  }
+
+  validateReferralCode(
+    workspaceId: string,
+    input: ValidateReferralCodeRequest
+  ): Promise<ValidateReferralCodeResponse> {
+    return this.post(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/referrals/validate`, input);
   }
 
   syncAlipayOrder(orderNo: string): Promise<SyncAlipayOrderResponse> {

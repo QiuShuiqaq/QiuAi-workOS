@@ -14,7 +14,7 @@ export interface ModelCredentialResolutionInput {
 
 export interface ModelCredentialResolution {
   profile: ModelProfile;
-  source: 'role_inline' | 'credential_ref' | 'provider_default' | 'missing';
+  source: 'official_points' | 'role_inline' | 'credential_ref' | 'provider_default' | 'missing';
   credential?: ModelCredential;
   binding?: RoleModelCredentialBinding;
   configured: boolean;
@@ -30,6 +30,14 @@ const minimaxChinaApiBaseUrl = 'https://api.minimaxi.com/v1';
 export function resolveModelProfileCredential(
   input: ModelCredentialResolutionInput
 ): ModelCredentialResolution {
+  if (isOfficialPointsModelProfile(input.profile)) {
+    return {
+      profile: input.profile,
+      source: 'official_points',
+      configured: true
+    };
+  }
+
   const credentials = input.credentials ?? [];
   const roleBindings = input.roleBindings ?? [];
   const roleBinding = input.roleCode
@@ -88,6 +96,10 @@ export function resolveModelProfileCredential(
     binding: roleBinding,
     configured: false
   };
+}
+
+export function isOfficialPointsModelProfile(profile: ModelProfile): boolean {
+  return profile.billingMode === 'official_points' && Boolean(profile.officialRouteKey?.trim());
 }
 
 function findRoleBindingForModelProfile(

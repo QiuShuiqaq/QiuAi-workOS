@@ -21,7 +21,7 @@ const PLAN_GROUPS = [
     monthlyCode: "ENTERPRISE_BASIC_MONTHLY",
     annualCode: "ENTERPRISE_BASIC_ANNUAL",
     name: { zh: "企业基础版", en: "Enterprise Basic" },
-    fitFor: { zh: "适合小团队试点数字员工和 AI 工作流。", en: "For small teams piloting digital workers and AI workflows." },
+    fitFor: { zh: "适合小团队试点数字员工和 AI 工作流，支持 10 台设备。", en: "For small teams piloting digital workers and AI workflows, with 10 devices." },
     highlight: false,
   },
   {
@@ -29,7 +29,7 @@ const PLAN_GROUPS = [
     monthlyCode: "ENTERPRISE_STANDARD_MONTHLY",
     annualCode: "ENTERPRISE_STANDARD_ANNUAL",
     name: { zh: "企业标准版", en: "Enterprise Standard" },
-    fitFor: { zh: "适合多个部门正常使用数字员工和数字工厂。", en: "For multi-department use of workers and factories." },
+    fitFor: { zh: "适合多个岗位正常使用数字员工和数字工厂，支持 30 台设备。", en: "For teams using workers and factories across roles, with 30 devices." },
     highlight: true,
   },
   {
@@ -37,7 +37,7 @@ const PLAN_GROUPS = [
     monthlyCode: "ENTERPRISE_PRO_MONTHLY",
     annualCode: "ENTERPRISE_PRO_ANNUAL",
     name: { zh: "企业专业版", en: "Enterprise Professional" },
-    fitFor: { zh: "适合多设备、高频生产和批量任务场景。", en: "For multi-device, high-frequency, and batch production." },
+    fitFor: { zh: "适合高频生产和较大团队使用，支持 80 台设备。", en: "For high-frequency production and larger teams, with 80 devices." },
     highlight: false,
   },
 ] as const;
@@ -71,16 +71,16 @@ function factoryAccessText(groupKey: string, lang: SiteLanguage) {
   const zhText =
     {
       FREE: "数字工厂：暂不开放",
-      BASIC: "数字工厂：基础开放",
-      STANDARD: "数字工厂：标准开放",
-      PRO: "数字工厂：全量开放",
+      BASIC: "数字工厂：全部开放",
+      STANDARD: "数字工厂：全部开放",
+      PRO: "数字工厂：全部开放",
     }[groupKey] ?? "数字工厂：按套餐开放";
   const enText =
     {
       FREE: "Digital factories: not included",
-      BASIC: "Digital factories: basic access",
-      STANDARD: "Digital factories: standard access",
-      PRO: "Digital factories: full access",
+      BASIC: "Digital factories: included",
+      STANDARD: "Digital factories: included",
+      PRO: "Digital factories: included",
     }[groupKey] ?? "Digital factories: plan-based access";
   return lang === "zh" ? zhText : enText;
 }
@@ -204,6 +204,12 @@ export function ProductPricing({
                   <dt>{isZh ? "数字工厂" : "Digital factories"}</dt>
                   <dd>{factoryAccessText(group.key, lang)}</dd>
                 </div>
+                {!isFree && period === "ANNUAL" ? (
+                  <div>
+                    <dt>{isZh ? "年付权益" : "Annual benefit"}</dt>
+                    <dd>{isZh ? "可定制 1 个数字工厂" : "1 custom digital factory"}</dd>
+                  </div>
+                ) : null}
               </dl>
               <a className={group.highlight ? "is-primary" : undefined} href={targetUrl}>
                 {isFree ? (isZh ? "免费注册" : "Register free") : isZh ? "前往购买中心" : "Open purchase center"}
@@ -223,7 +229,9 @@ export function ProductPricing({
       </div>
 
       <p className="product-pricing__footnote">
-        {isZh ? "软件套餐费用不包含模型供应商收取的 API 调用费用。" : "Software plans do not include API usage fees charged by model providers."}
+        {isZh
+          ? "软件套餐费用不包含模型供应商收取的 API 调用费用。年付定制权益解释权以运营方为准。"
+          : "Software plans do not include API usage fees charged by model providers. Annual customization benefits are subject to operator interpretation."}
       </p>
     </div>
   );

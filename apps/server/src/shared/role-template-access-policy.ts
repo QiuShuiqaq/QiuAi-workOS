@@ -2,6 +2,8 @@ import type { PlanCode } from './types/plan-code';
 
 export const allDigitalEmployeePlanCodes: readonly PlanCode[] = [
   'PERSONAL_FREE',
+  'PERSONAL_MEMBER_MONTHLY',
+  'PERSONAL_MEMBER_ANNUAL',
   'ENTERPRISE_BASIC_MONTHLY',
   'ENTERPRISE_BASIC_ANNUAL',
   'ENTERPRISE_STANDARD_MONTHLY',

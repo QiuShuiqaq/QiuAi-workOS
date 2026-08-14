@@ -19,6 +19,14 @@ assert.equal(state.runtimeSnapshot.tasks.length, 0);
 assert.equal(state.taskDetails?.length, 0);
 assert.deepEqual(state.knowledgeSources, []);
 
+assert.ok(state.modelProfiles.some((profile) => profile.id === 'qiu-official-text-1'));
+assert.ok(state.modelProfiles.some((profile) => profile.id === 'qiu-official-image-1'));
+assert.ok(state.modelProfiles.some((profile) => profile.id === 'qiu-official-video-1'));
+assert.equal(
+  state.modelProfiles.some((profile) => profile.billingMode === 'official_points' && /DeepSeek|GRSAI|MiniMax|Hailuo|gpt-image|nano-banana/i.test(`${profile.providerName} ${profile.modelName}`)),
+  false
+);
+
 validateLocalRuntimeContract(state.localRuntime);
 
 for (const rolePackage of state.rolePackages) {

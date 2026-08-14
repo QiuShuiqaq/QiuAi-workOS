@@ -9,8 +9,16 @@
 
 import type {
   DesktopRuntimeSnapshot,
+  ModelProfile,
   ListDesktopServerToolActionCatalogResponse
 } from './desktop-contract.js';
+import type {
+  InvokeOfficialModelRequest,
+  InvokeOfficialModelResponse,
+  GetAiPointOverviewResponse,
+  ListOfficialModelRoutesResponse
+} from '@qiuai/api-contract/ai-points';
+import type { GetReferralOverviewResponse } from '@qiuai/api-contract/referral';
 
 interface RedeemDesktopBindingCodeRequest {
   bindingCode: string;
@@ -268,6 +276,119 @@ export async function fetchWorkspaceDesktopToolActionCatalog(
   }
 
   return body as ListDesktopServerToolActionCatalogResponse;
+}
+
+export async function fetchAiPointOverview(
+  baseUrl: string,
+  workspaceId: string,
+  deviceToken: string
+): Promise<GetAiPointOverviewResponse> {
+  const response = await fetch(
+    `${normalizeBaseUrl(baseUrl)}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/ai-points/overview`,
+    {
+      headers: {
+        accept: 'application/json',
+        'x-qiuai-device-token': deviceToken
+      }
+    }
+  );
+
+  const body = (await response.json()) as GetAiPointOverviewResponse | { error?: { message?: string } };
+  if (!response.ok) {
+    const errorBody = body as { error?: { message?: string } };
+    const message = errorBody.error?.message ?? `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return body as GetAiPointOverviewResponse;
+}
+
+export async function fetchReferralOverview(
+  baseUrl: string,
+  workspaceId: string,
+  deviceToken: string
+): Promise<GetReferralOverviewResponse> {
+  const response = await fetch(
+    `${normalizeBaseUrl(baseUrl)}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/referrals/me`,
+    {
+      headers: {
+        accept: 'application/json',
+        'x-qiuai-device-token': deviceToken
+      }
+    }
+  );
+
+  const body = (await response.json()) as GetReferralOverviewResponse | { error?: { message?: string } };
+  if (!response.ok) {
+    const errorBody = body as { error?: { message?: string } };
+    const message = errorBody.error?.message ?? `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return body as GetReferralOverviewResponse;
+}
+
+export async function fetchOfficialModelRoutes(
+  baseUrl: string,
+  workspaceId: string,
+  deviceToken: string
+): Promise<ListOfficialModelRoutesResponse> {
+  const response = await fetch(
+    `${normalizeBaseUrl(baseUrl)}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/ai-points/routes`,
+    {
+      headers: {
+        accept: 'application/json',
+        'x-qiuai-device-token': deviceToken
+      }
+    }
+  );
+
+  const body = (await response.json()) as ListOfficialModelRoutesResponse | { error?: { message?: string } };
+  if (!response.ok) {
+    const errorBody = body as { error?: { message?: string } };
+    const message = errorBody.error?.message ?? `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return body as ListOfficialModelRoutesResponse;
+}
+
+export async function invokeOfficialModelRoute(
+  baseUrl: string,
+  workspaceId: string,
+  deviceToken: string,
+  profile: ModelProfile,
+  request: Omit<InvokeOfficialModelRequest, 'officialRouteKey'>
+): Promise<InvokeOfficialModelResponse> {
+  const officialRouteKey = profile.officialRouteKey?.trim();
+  if (!officialRouteKey) {
+    throw new Error('Official route key is missing.');
+  }
+
+  const response = await fetch(
+    `${normalizeBaseUrl(baseUrl)}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/desktop/official-model/invoke`,
+    {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        'x-qiuai-device-token': deviceToken
+      },
+      body: JSON.stringify({
+        ...request,
+        officialRouteKey
+      } satisfies InvokeOfficialModelRequest)
+    }
+  );
+
+  const body = (await response.json()) as InvokeOfficialModelResponse | { error?: { message?: string } };
+  if (!response.ok) {
+    const errorBody = body as { error?: { message?: string } };
+    const message = errorBody.error?.message ?? `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return body as InvokeOfficialModelResponse;
 }
 
 export async function fetchEnterpriseKnowledgeRuntimeContext(

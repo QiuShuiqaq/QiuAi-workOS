@@ -7,6 +7,7 @@ import {
   retiredServerRoleTemplateIds,
   serverRoleTemplateCatalog
 } from '../src/shared/role-template-catalog';
+import { officialModelRouteSeeds } from '../src/modules/ai-points/official-model-routes';
 
 const prisma = new PrismaClient();
 const syncManagedCatalogsOnly = process.argv.includes('--managed-catalogs-only');
@@ -49,7 +50,9 @@ const ids = {
     enterpriseStandardMonthly: '60000000-0000-4000-8000-000000000007',
     enterpriseStandardAnnual: '60000000-0000-4000-8000-000000000008',
     enterpriseProMonthly: '60000000-0000-4000-8000-000000000009',
-    enterpriseProAnnual: '60000000-0000-4000-8000-000000000010'
+    enterpriseProAnnual: '60000000-0000-4000-8000-000000000010',
+    personalMemberMonthly: '60000000-0000-4000-8000-000000000011',
+    personalMemberAnnual: '60000000-0000-4000-8000-000000000012'
   },
   subscriptions: {
     personal: '70000000-0000-4000-8000-000000000001',
@@ -76,11 +79,26 @@ const personalFreeEntitlements = [
   { featureKey: 'canUseEnterpriseKPIDashboard', enabled: false }
 ] as const;
 
-const enterpriseBasicEntitlements = [
+const personalMemberEntitlements = [
   { featureKey: 'maxRoleInstances', enabled: true, limitValue: 10, limitUnit: 'count' },
-  { featureKey: 'maxDigitalFactories', enabled: true, limitValue: 1, limitUnit: 'count' },
+  { featureKey: 'maxDigitalFactories', enabled: true, limitValue: 20, limitUnit: 'count' },
   { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100000, limitUnit: 'count' },
-  { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 3, limitUnit: 'count' },
+  { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 1, limitUnit: 'count' },
+  { featureKey: 'maxMembers', enabled: true, limitValue: 1, limitUnit: 'count' },
+  { featureKey: 'canCreateDepartment', enabled: false },
+  { featureKey: 'canInviteMember', enabled: false },
+  { featureKey: 'canUseApprovalPolicy', enabled: false },
+  { featureKey: 'canUseAuditLog', enabled: false },
+  { featureKey: 'canUseAdvancedToolConnector', enabled: false },
+  { featureKey: 'canUseCostBudget', enabled: false },
+  { featureKey: 'canUseEnterpriseKPIDashboard', enabled: false }
+] as const;
+
+const enterpriseBasicEntitlements = [
+  { featureKey: 'maxRoleInstances', enabled: true, limitValue: 999999, limitUnit: 'count' },
+  { featureKey: 'maxDigitalFactories', enabled: true, limitValue: 999999, limitUnit: 'count' },
+  { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100000, limitUnit: 'count' },
+  { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 10, limitUnit: 'count' },
   { featureKey: 'maxMembers', enabled: true, limitValue: 5, limitUnit: 'count' },
   { featureKey: 'canCreateDepartment', enabled: true },
   { featureKey: 'canInviteMember', enabled: true },
@@ -92,10 +110,10 @@ const enterpriseBasicEntitlements = [
 ] as const;
 
 const enterpriseStandardEntitlements = [
-  { featureKey: 'maxRoleInstances', enabled: true, limitValue: 30, limitUnit: 'count' },
-  { featureKey: 'maxDigitalFactories', enabled: true, limitValue: 3, limitUnit: 'count' },
+  { featureKey: 'maxRoleInstances', enabled: true, limitValue: 999999, limitUnit: 'count' },
+  { featureKey: 'maxDigitalFactories', enabled: true, limitValue: 999999, limitUnit: 'count' },
   { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100000, limitUnit: 'count' },
-  { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 10, limitUnit: 'count' },
+  { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 30, limitUnit: 'count' },
   { featureKey: 'maxMembers', enabled: true, limitValue: 20, limitUnit: 'count' },
   { featureKey: 'canCreateDepartment', enabled: true },
   { featureKey: 'canInviteMember', enabled: true },
@@ -107,10 +125,10 @@ const enterpriseStandardEntitlements = [
 ] as const;
 
 const enterpriseProEntitlements = [
-  { featureKey: 'maxRoleInstances', enabled: true, limitValue: 100, limitUnit: 'count' },
-  { featureKey: 'maxDigitalFactories', enabled: true, limitValue: 10, limitUnit: 'count' },
+  { featureKey: 'maxRoleInstances', enabled: true, limitValue: 999999, limitUnit: 'count' },
+  { featureKey: 'maxDigitalFactories', enabled: true, limitValue: 999999, limitUnit: 'count' },
   { featureKey: 'maxTasksPerMonth', enabled: true, limitValue: 100000, limitUnit: 'count' },
-  { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 50, limitUnit: 'count' },
+  { featureKey: 'maxDesktopDevices', enabled: true, limitValue: 80, limitUnit: 'count' },
   { featureKey: 'maxMembers', enabled: true, limitValue: 100, limitUnit: 'count' },
   { featureKey: 'canCreateDepartment', enabled: true },
   { featureKey: 'canInviteMember', enabled: true },
@@ -149,12 +167,34 @@ const plans = [
     entitlements: personalFreeEntitlements
   },
   {
+    id: ids.plans.personalMemberMonthly,
+    code: 'PERSONAL_MEMBER_MONTHLY',
+    name: '个人会员（月付）',
+    description: '适合个人用户使用数字员工和数字工厂。会员不自动赠送 AI 点数，可按需搭配月度 AI 点数包或单独充值。',
+    billingCycle: 'MONTHLY',
+    priceCents: 3000,
+    currency: 'CNY',
+    status: 'ACTIVE',
+    entitlements: personalMemberEntitlements
+  },
+  {
+    id: ids.plans.personalMemberAnnual,
+    code: 'PERSONAL_MEMBER_ANNUAL',
+    name: '个人会员（年付）',
+    description: '个人会员年付，适合长期使用数字工厂的个人用户。会员不自动赠送 AI 点数。',
+    billingCycle: 'ANNUAL',
+    priceCents: 30000,
+    currency: 'CNY',
+    status: 'ACTIVE',
+    entitlements: personalMemberEntitlements
+  },
+  {
     id: ids.plans.enterpriseBasicMonthly,
     code: 'ENTERPRISE_BASIC_MONTHLY',
     name: '企业基础版（月付）',
-    description: '适合小团队试点，开放企业设备授权和基础数字工厂能力。',
+    description: '适合小团队试点，开放 10 台设备、企业知识库、数字员工和数字工厂。',
     billingCycle: 'MONTHLY',
-    priceCents: 58800,
+    priceCents: 28800,
     currency: 'CNY',
     status: 'ACTIVE',
     entitlements: enterpriseBasicEntitlements
@@ -163,9 +203,9 @@ const plans = [
     id: ids.plans.enterpriseBasicAnnual,
     code: 'ENTERPRISE_BASIC_ANNUAL',
     name: '企业基础版（年付）',
-    description: '企业基础版年付，按 10 个月计费，相当于买 10 个月送 2 个月。',
+    description: '企业基础版年付，按 10 个月计费；可定制 1 个数字工厂，解释权以运营方为准。',
     billingCycle: 'ANNUAL',
-    priceCents: 588000,
+    priceCents: 288000,
     currency: 'CNY',
     status: 'ACTIVE',
     entitlements: enterpriseBasicEntitlements
@@ -174,9 +214,9 @@ const plans = [
     id: ids.plans.enterpriseStandardMonthly,
     code: 'ENTERPRISE_STANDARD_MONTHLY',
     name: '企业标准版（月付）',
-    description: '适合正常企业团队使用，开放更多设备授权和标准数字工厂能力。',
+    description: '适合正常企业团队使用，开放 30 台设备、企业知识库、数字员工和数字工厂。',
     billingCycle: 'MONTHLY',
-    priceCents: 108800,
+    priceCents: 58800,
     currency: 'CNY',
     status: 'ACTIVE',
     entitlements: enterpriseStandardEntitlements
@@ -185,9 +225,9 @@ const plans = [
     id: ids.plans.enterpriseStandardAnnual,
     code: 'ENTERPRISE_STANDARD_ANNUAL',
     name: '企业标准版（年付）',
-    description: '企业标准版年付，按 10 个月计费，相当于买 10 个月送 2 个月。',
+    description: '企业标准版年付，按 10 个月计费；可定制 1 个数字工厂，解释权以运营方为准。',
     billingCycle: 'ANNUAL',
-    priceCents: 1088000,
+    priceCents: 588000,
     currency: 'CNY',
     status: 'ACTIVE',
     entitlements: enterpriseStandardEntitlements
@@ -196,9 +236,9 @@ const plans = [
     id: ids.plans.enterpriseProMonthly,
     code: 'ENTERPRISE_PRO_MONTHLY',
     name: '企业专业版（月付）',
-    description: '适合多团队或高频生产使用，开放更高设备授权和完整数字工厂能力。',
+    description: '适合多团队或高频生产使用，开放 80 台设备、企业知识库、数字员工和数字工厂。',
     billingCycle: 'MONTHLY',
-    priceCents: 288800,
+    priceCents: 88800,
     currency: 'CNY',
     status: 'ACTIVE',
     entitlements: enterpriseProEntitlements
@@ -207,9 +247,9 @@ const plans = [
     id: ids.plans.enterpriseProAnnual,
     code: 'ENTERPRISE_PRO_ANNUAL',
     name: '企业专业版（年付）',
-    description: '企业专业版年付，按 10 个月计费，相当于买 10 个月送 2 个月。',
+    description: '企业专业版年付，按 10 个月计费；可定制 1 个数字工厂，解释权以运营方为准。',
     billingCycle: 'ANNUAL',
-    priceCents: 2888000,
+    priceCents: 888000,
     currency: 'CNY',
     status: 'ACTIVE',
     entitlements: enterpriseProEntitlements
@@ -782,10 +822,126 @@ async function seedAssetDefinitions() {
   }
 }
 
+async function seedOfficialModelRoutes() {
+  for (const route of officialModelRouteSeeds) {
+    await prisma.officialModelRoute.upsert({
+      where: {
+        routeKey: route.routeKey
+      },
+      update: {
+        displayName: route.displayName,
+        capability: route.capability,
+        status: route.status,
+        pointPrice: route.pointPrice,
+        providerId: route.providerId,
+        providerName: route.providerName,
+        modelName: route.modelName,
+        apiBaseUrl: route.apiBaseUrl,
+        apiKeyEnvName: route.apiKeyEnvName,
+        providerConfig: route.providerConfig,
+        sortOrder: route.sortOrder
+      },
+      create: {
+        routeKey: route.routeKey,
+        displayName: route.displayName,
+        capability: route.capability,
+        status: route.status,
+        pointPrice: route.pointPrice,
+        providerId: route.providerId,
+        providerName: route.providerName,
+        modelName: route.modelName,
+        apiBaseUrl: route.apiBaseUrl,
+        apiKeyEnvName: route.apiKeyEnvName,
+        providerConfig: route.providerConfig,
+        sortOrder: route.sortOrder
+      }
+    });
+  }
+}
+
+async function seedOfficialModelApiKeys() {
+  for (const route of officialModelRouteSeeds) {
+    const apiKey = process.env[route.apiKeyEnvName]?.trim();
+    if (!apiKey) {
+      continue;
+    }
+
+    const existingId = await findOfficialModelApiKeyId(route.routeKey, route.apiKeyEnvName);
+    const data = {
+      label: `${route.displayName} · env`,
+      providerId: route.providerId,
+      apiKeySecret: apiKey,
+      apiKeyLastFour: maskApiKeyLastFour(apiKey),
+      maxConcurrency: defaultOfficialApiKeyConcurrency(route.providerId),
+      rpmLimit: defaultOfficialApiKeyRpmLimit(route.providerId),
+      metadata: {
+        source: 'env',
+        envName: route.apiKeyEnvName
+      }
+    };
+
+    if (existingId) {
+      await prisma.officialModelApiKey.update({
+        where: {
+          id: existingId
+        },
+        data
+      });
+    } else {
+      await prisma.officialModelApiKey.create({
+        data: {
+          routeKey: route.routeKey,
+          ...data
+        }
+      });
+    }
+  }
+}
+
+async function findOfficialModelApiKeyId(routeKey: string, envName: string) {
+  const existing = await prisma.officialModelApiKey.findFirst({
+    where: {
+      routeKey,
+      metadata: {
+        path: ['envName'],
+        equals: envName
+      }
+    },
+    select: {
+      id: true
+    }
+  });
+
+  return existing?.id;
+}
+
+function maskApiKeyLastFour(apiKey: string) {
+  return apiKey.slice(-4) || '****';
+}
+
+function defaultOfficialApiKeyConcurrency(providerId: string) {
+  switch (providerId) {
+    case 'deepseek':
+      return 500;
+    case 'grsai':
+      return 16;
+    case 'minimax':
+      return 4;
+    default:
+      return 1;
+  }
+}
+
+function defaultOfficialApiKeyRpmLimit(providerId: string) {
+  return providerId === 'minimax' ? 16 : undefined;
+}
+
 async function main() {
   if (syncManagedCatalogsOnly) {
     await seedAssetDefinitions();
     await seedRoleTemplates();
+    await seedOfficialModelRoutes();
+    await seedOfficialModelApiKeys();
     return;
   }
 
@@ -797,6 +953,8 @@ async function main() {
   await seedBilling();
   await seedAssetDefinitions();
   await seedRoleTemplates();
+  await seedOfficialModelRoutes();
+  await seedOfficialModelApiKeys();
 }
 
 main()

@@ -26,6 +26,9 @@ import {
   listOpenAiCompatibleModels,
   testDesktopModelConnection
 } from './model-chat.js';
+import { invokeOfficialModelChat } from './official-model-route.js';
+import { getDesktopAiPointOverview } from './ai-point-overview.js';
+import { getDesktopReferralOverview } from './referral-overview.js';
 import { selectKnowledgeSourcePath } from './knowledge-source.js';
 import {
   cleanupExpiredArtifactCache,
@@ -61,6 +64,8 @@ const channels = {
   updateDownloadProgress: 'qiuai:desktop:update-download-progress',
   listAuthorizedRoleTemplates: 'qiuai:desktop:list-authorized-role-templates',
   syncRuntimeState: 'qiuai:desktop:sync-runtime-state',
+  getAiPointOverview: 'qiuai:desktop:get-ai-point-overview',
+  getReferralOverview: 'qiuai:desktop:get-referral-overview',
   saveRuntimeState: 'qiuai:desktop:save-runtime-state',
   listWorkspaceBackups: 'qiuai:desktop:list-workspace-backups',
   createWorkspaceBackup: 'qiuai:desktop:create-workspace-backup',
@@ -102,11 +107,17 @@ export function registerDesktopIpc() {
     })
   );
   ipcMain.handle(channels.installDesktopUpdate, async (_, request) => installDownloadedDesktopUpdate(request));
-  ipcMain.handle(channels.downloadAndInstallUpdate, () => downloadAndInstallDesktopUpdate());
+  ipcMain.handle(channels.downloadAndInstallUpdate, (event) =>
+    downloadAndInstallDesktopUpdate((progress) => {
+      event.sender.send(channels.updateDownloadProgress, progress);
+    })
+  );
   ipcMain.handle(channels.listAuthorizedRoleTemplates, () => listAuthorizedRoleTemplates());
   ipcMain.handle(channels.syncRuntimeState, async (_, state) => {
     return syncDesktopRuntimeState(state);
   });
+  ipcMain.handle(channels.getAiPointOverview, () => getDesktopAiPointOverview());
+  ipcMain.handle(channels.getReferralOverview, () => getDesktopReferralOverview());
   ipcMain.handle(channels.saveRuntimeState, async (_, state) => {
     await saveDesktopRuntimeState(getDesktopAppInfo().userDataPath, state);
     return true;
@@ -125,7 +136,7 @@ export function registerDesktopIpc() {
     return restoreWorkspaceBackupBundle(getDesktopAppInfo().userDataPath, bundlePath);
   });
   ipcMain.handle(channels.invokeModelChat, async (_, request) => {
-    return invokeOpenAiCompatibleModelChat(request);
+    return (await invokeOfficialModelChat(request)) ?? invokeOpenAiCompatibleModelChat(request);
   });
   ipcMain.handle(channels.testModelConnection, async (_, request) => {
     return testDesktopModelConnection(request);

@@ -215,6 +215,8 @@ export interface ModelProfile {
   providerName: string;
   modelName: string;
   purpose: ModelPurpose;
+  billingMode?: 'user_api_key' | 'official_points';
+  officialRouteKey?: string;
   capabilities?: ModelCapability[];
   capabilityMetadata?: ModelCapabilityMetadata;
   verifiedCapabilities?: ModelCapability[];

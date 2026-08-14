@@ -46,7 +46,7 @@ export class AdminPlanDetailDto {
   @ApiProperty({ example: 'MONTHLY' })
   billingCycle!: string;
 
-  @ApiProperty({ example: 58800, required: false })
+  @ApiProperty({ example: 28800, required: false })
   priceCents?: number;
 
   @ApiProperty({ example: 'CNY', required: false })
@@ -65,6 +65,200 @@ export class AdminPlanDetailDto {
 export class ListAdminPlansResponseDto {
   @ApiProperty({ type: [AdminPlanDetailDto] })
   data!: AdminPlanDetailDto[];
+}
+
+export class AdminOfficialModelApiKeySummaryDto {
+  @ApiProperty({ example: 'api-key-id' })
+  id!: string;
+
+  @ApiProperty({ example: 'official-image-1' })
+  routeKey!: string;
+
+  @ApiProperty({ example: '图片线路一 · 主 key' })
+  label!: string;
+
+  @ApiProperty({ example: 'grsai' })
+  providerId!: string;
+
+  @ApiProperty({ example: 'abcd' })
+  apiKeyLastFour!: string;
+
+  @ApiProperty({ enum: ['active', 'disabled', 'cooldown'] })
+  status!: 'active' | 'disabled' | 'cooldown';
+
+  @ApiProperty({ example: 16 })
+  maxConcurrency!: number;
+
+  @ApiProperty({ example: 3 })
+  currentConcurrency!: number;
+
+  @ApiPropertyOptional({ example: 16 })
+  rpmLimit?: number;
+
+  @ApiPropertyOptional({ example: '2026-08-14T00:00:00.000Z' })
+  cooldownUntil?: string;
+
+  @ApiProperty({ example: 0 })
+  failureCount!: number;
+
+  @ApiPropertyOptional({ example: '2026-08-14T00:00:00.000Z' })
+  lastUsedAt?: string;
+
+  @ApiPropertyOptional({ example: 'Provider timeout.' })
+  lastError?: string;
+
+  @ApiProperty({ example: 100 })
+  sortOrder!: number;
+
+  @ApiProperty({ example: '2026-08-14T00:00:00.000Z' })
+  createdAt!: string;
+
+  @ApiProperty({ example: '2026-08-14T00:00:00.000Z' })
+  updatedAt!: string;
+}
+
+export class AdminOfficialModelRouteSummaryDto {
+  @ApiProperty({ example: 'official-image-1' })
+  routeKey!: string;
+
+  @ApiProperty({ example: '官方通道 · 图片线路一' })
+  displayName!: string;
+
+  @ApiProperty({ enum: ['text', 'reasoning', 'image', 'video'] })
+  capability!: 'text' | 'reasoning' | 'image' | 'video';
+
+  @ApiProperty({ enum: ['active', 'disabled'] })
+  status!: 'active' | 'disabled';
+
+  @ApiProperty({ example: 30 })
+  pointPrice!: number;
+
+  @ApiProperty({ example: 'grsai' })
+  providerId!: string;
+
+  @ApiProperty({ example: 'GRSAI' })
+  providerName!: string;
+
+  @ApiProperty({ example: 'gpt-image-2' })
+  modelName!: string;
+
+  @ApiProperty({ example: 'https://grsai.dakka.com.cn/v1' })
+  apiBaseUrl!: string;
+
+  @ApiProperty({ example: 'QIUAI_OFFICIAL_GRSAI_API_KEY' })
+  apiKeyEnvName!: string;
+
+  @ApiProperty({ example: 30 })
+  sortOrder!: number;
+
+  @ApiProperty({ example: 1 })
+  activeKeyCount!: number;
+
+  @ApiProperty({ example: 16 })
+  totalMaxConcurrency!: number;
+
+  @ApiProperty({ example: 3 })
+  currentConcurrency!: number;
+
+  @ApiProperty({ type: [AdminOfficialModelApiKeySummaryDto] })
+  apiKeys!: AdminOfficialModelApiKeySummaryDto[];
+}
+
+export class ListAdminOfficialModelRoutesResponseDto {
+  @ApiProperty({ type: [AdminOfficialModelRouteSummaryDto] })
+  data!: AdminOfficialModelRouteSummaryDto[];
+}
+
+export class CreateAdminOfficialModelApiKeyRequestDto {
+  @ApiPropertyOptional({ example: '图片线路一 · 主 key' })
+  @IsOptional()
+  @IsString()
+  label?: string;
+
+  @ApiProperty({ example: 'sk-...' })
+  @IsString()
+  @MinLength(1)
+  apiKey!: string;
+
+  @ApiPropertyOptional({ enum: ['active', 'disabled', 'cooldown'] })
+  @IsOptional()
+  @IsIn(['active', 'disabled', 'cooldown'])
+  status?: 'active' | 'disabled' | 'cooldown';
+
+  @ApiPropertyOptional({ example: 16 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  @Type(() => Number)
+  maxConcurrency?: number;
+
+  @ApiPropertyOptional({ example: 16, nullable: true })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10000)
+  @Type(() => Number)
+  rpmLimit?: number | null;
+
+  @ApiPropertyOptional({ example: 100 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100000)
+  @Type(() => Number)
+  sortOrder?: number;
+}
+
+export class CreateAdminOfficialModelApiKeyResponseDto {
+  @ApiProperty({ type: AdminOfficialModelApiKeySummaryDto })
+  data!: AdminOfficialModelApiKeySummaryDto;
+}
+
+export class UpdateAdminOfficialModelApiKeyRequestDto {
+  @ApiPropertyOptional({ example: '图片线路一 · 备用 key' })
+  @IsOptional()
+  @IsString()
+  label?: string;
+
+  @ApiPropertyOptional({ example: 'sk-...' })
+  @IsOptional()
+  @IsString()
+  apiKey?: string;
+
+  @ApiPropertyOptional({ enum: ['active', 'disabled', 'cooldown'] })
+  @IsOptional()
+  @IsIn(['active', 'disabled', 'cooldown'])
+  status?: 'active' | 'disabled' | 'cooldown';
+
+  @ApiPropertyOptional({ example: 16 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  @Type(() => Number)
+  maxConcurrency?: number;
+
+  @ApiPropertyOptional({ example: 16, nullable: true })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10000)
+  @Type(() => Number)
+  rpmLimit?: number | null;
+
+  @ApiPropertyOptional({ example: 100 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100000)
+  @Type(() => Number)
+  sortOrder?: number;
+}
+
+export class UpdateAdminOfficialModelApiKeyResponseDto {
+  @ApiProperty({ type: AdminOfficialModelApiKeySummaryDto })
+  data!: AdminOfficialModelApiKeySummaryDto;
 }
 
 export class DesktopReleaseSummaryDto {
@@ -542,7 +736,7 @@ export class UpdateAdminPlanRequestDto {
   @IsString()
   description?: string | null;
 
-  @ApiPropertyOptional({ example: 58800, nullable: true })
+  @ApiPropertyOptional({ example: 28800, nullable: true })
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -906,6 +1100,23 @@ export class RevokeAdminDesktopDeviceResponseDto {
   data!: AdminDesktopDeviceSummaryDto;
 }
 
+export class AdminAiPointWalletSummaryDto {
+  @ApiProperty({ example: '20000000-0000-4000-8000-000000000002' })
+  workspaceId!: string;
+
+  @ApiProperty({ example: 10000 })
+  balancePoints!: number;
+
+  @ApiProperty({ example: 0 })
+  reservedPoints!: number;
+
+  @ApiProperty({ example: 10000 })
+  availablePoints!: number;
+
+  @ApiProperty({ example: '2026-08-14T00:00:00.000Z' })
+  updatedAt!: string;
+}
+
 export class AdminWorkspaceDetailDto {
   @ApiProperty({ type: AdminWorkspaceSummaryDto })
   workspace!: AdminWorkspaceSummaryDto;
@@ -915,6 +1126,9 @@ export class AdminWorkspaceDetailDto {
 
   @ApiProperty({ type: BillingAccountSummaryDto, nullable: true })
   billingAccount!: BillingAccountSummaryDto | null;
+
+  @ApiProperty({ type: AdminAiPointWalletSummaryDto, nullable: true })
+  aiPointWallet!: AdminAiPointWalletSummaryDto | null;
 
   @ApiProperty({ type: [AdminWorkspaceMemberSummaryDto] })
   members!: AdminWorkspaceMemberSummaryDto[];
@@ -1033,6 +1247,30 @@ export class UpdateAdminWorkspaceStatusRequestDto {
 }
 
 export class UpdateAdminWorkspaceStatusResponseDto {
+  @ApiProperty({ type: AdminWorkspaceDetailDto })
+  data!: AdminWorkspaceDetailDto;
+}
+
+export class AdjustAdminWorkspaceAiPointsRequestDto {
+  @ApiProperty({ example: 10000 })
+  @IsInt()
+  @Min(-100000000)
+  @Max(100000000)
+  @Type(() => Number)
+  points!: number;
+
+  @ApiProperty({ example: 'customer prepaid AI points' })
+  @IsString()
+  @MinLength(1)
+  reason!: string;
+
+  @ApiPropertyOptional({ example: '100 AI点 = 1 RMB' })
+  @IsOptional()
+  @IsString()
+  note?: string;
+}
+
+export class AdjustAdminWorkspaceAiPointsResponseDto {
   @ApiProperty({ type: AdminWorkspaceDetailDto })
   data!: AdminWorkspaceDetailDto;
 }

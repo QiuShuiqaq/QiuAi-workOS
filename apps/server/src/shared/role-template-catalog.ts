@@ -3053,10 +3053,12 @@ function defaultWorkflowSteps(template: BaseServerRoleTemplateCatalogEntry): Ser
 }
 
 function allowedPlanCodesFrom(planCode: string): string[] {
+  const personalMemberPlanCodes = ['PERSONAL_MEMBER_MONTHLY', 'PERSONAL_MEMBER_ANNUAL'];
   switch (planCode) {
     case 'PERSONAL_FREE':
       return [
         'PERSONAL_FREE',
+        ...personalMemberPlanCodes,
         'ENTERPRISE_BASIC_MONTHLY',
         'ENTERPRISE_BASIC_ANNUAL',
         'ENTERPRISE_STANDARD_MONTHLY',
@@ -3067,6 +3069,7 @@ function allowedPlanCodesFrom(planCode: string): string[] {
     case 'ENTERPRISE_BASIC_MONTHLY':
     case 'ENTERPRISE_BASIC_ANNUAL':
       return [
+        ...personalMemberPlanCodes,
         'ENTERPRISE_BASIC_MONTHLY',
         'ENTERPRISE_BASIC_ANNUAL',
         'ENTERPRISE_STANDARD_MONTHLY',
@@ -3077,6 +3080,7 @@ function allowedPlanCodesFrom(planCode: string): string[] {
     case 'ENTERPRISE_STANDARD_MONTHLY':
     case 'ENTERPRISE_STANDARD_ANNUAL':
       return [
+        ...personalMemberPlanCodes,
         'ENTERPRISE_STANDARD_MONTHLY',
         'ENTERPRISE_STANDARD_ANNUAL',
         'ENTERPRISE_PRO_MONTHLY',
@@ -3084,7 +3088,7 @@ function allowedPlanCodesFrom(planCode: string): string[] {
       ];
     case 'ENTERPRISE_PRO_MONTHLY':
     case 'ENTERPRISE_PRO_ANNUAL':
-      return ['ENTERPRISE_PRO_MONTHLY', 'ENTERPRISE_PRO_ANNUAL'];
+      return [...personalMemberPlanCodes, 'ENTERPRISE_PRO_MONTHLY', 'ENTERPRISE_PRO_ANNUAL'];
     default:
       return [planCode];
   }

@@ -14,6 +14,7 @@ import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
+import { ReferralsService } from '../referrals/referrals.service';
 import {
   buildAlipayCheckoutUrl,
   formatAmountCny,
@@ -44,6 +45,8 @@ import {
 } from './dto/billing-overview-response.dto';
 
 const ONLINE_BILLING_PLAN_CODES = [
+  'PERSONAL_MEMBER_MONTHLY',
+  'PERSONAL_MEMBER_ANNUAL',
   'ENTERPRISE_BASIC_MONTHLY',
   'ENTERPRISE_BASIC_ANNUAL',
   'ENTERPRISE_STANDARD_MONTHLY',
@@ -81,7 +84,9 @@ export class BillingService {
     @Inject(PrismaService)
     private readonly prismaService: PrismaService,
     @Inject(AuthService)
-    private readonly authService: AuthService
+    private readonly authService: AuthService,
+    @Inject(ReferralsService)
+    private readonly referralsService: ReferralsService
   ) {}
 
   async getOverview(workspaceId: string, cookieHeader?: string): Promise<GetBillingOverviewResponseDto> {
@@ -513,41 +518,53 @@ export class BillingService {
           })
         : undefined;
 
-    const order = await this.prismaService.billingOrder.create({
-      data: {
-        workspaceId,
-        billingAccountId: billingAccount.id,
-        planId: plan.id,
-        subscriptionId: workspace.subscriptions[0]?.id,
-        orderNo,
-        provider,
-        status: 'PENDING',
-        subject,
-        amountCents,
-        currency,
-        billingCycle: plan.billingCycle,
-        periodStart: period?.start,
-        periodEnd: period?.end,
-        paymentUrl,
-        expiresAt: this.addMinutes(now, 30),
-        metadata: {
-          paymentProviderReady: true,
-          paymentIntegrationStage: 'ALIPAY_PAGE_PAY_READY',
-          alipayNotifyPath: getAlipayNotifyPath(),
-          alipayReturnPath: getAlipayReturnPath()
-        },
-        transactions: {
-          create: {
-            provider,
-            status: 'INITIATED',
-            amountCents,
-            currency
+    const order = await this.prismaService.$transaction(async (tx) => {
+      const createdOrder = await tx.billingOrder.create({
+        data: {
+          workspaceId,
+          billingAccountId: billingAccount.id,
+          planId: plan.id,
+          subscriptionId: workspace.subscriptions[0]?.id,
+          orderNo,
+          provider,
+          status: 'PENDING',
+          subject,
+          amountCents,
+          currency,
+          billingCycle: plan.billingCycle,
+          periodStart: period?.start,
+          periodEnd: period?.end,
+          paymentUrl,
+          expiresAt: this.addMinutes(now, 30),
+          metadata: {
+            paymentProviderReady: true,
+            paymentIntegrationStage: 'ALIPAY_PAGE_PAY_READY',
+            alipayNotifyPath: getAlipayNotifyPath(),
+            alipayReturnPath: getAlipayReturnPath(),
+            referralCodeApplied: this.isPersonalMemberPlanCode(plan.code) && Boolean(input.referralCode?.trim())
+          },
+          transactions: {
+            create: {
+              provider,
+              status: 'INITIATED',
+              amountCents,
+              currency
+            }
           }
+        },
+        include: {
+          plan: true
         }
-      },
-      include: {
-        plan: true
-      }
+      });
+
+      await this.referralsService.createPendingInviteForOrder(tx, {
+        workspaceId,
+        billingOrderId: createdOrder.id,
+        planCode: plan.code,
+        referralCode: input.referralCode
+      });
+
+      return createdOrder;
     });
 
     return this.toBillingOrderSummary(order);
@@ -683,6 +700,10 @@ export class BillingService {
       );
 
       const subscriptionId = await this.activateSubscriptionForPaidOrder(order, tx);
+      await this.referralsService.grantRewardsForPaidOrder(tx, {
+        billingOrderId: order.id,
+        paidAt: now
+      });
 
       return tx.billingOrder.update({
         where: {
@@ -958,6 +979,10 @@ export class BillingService {
 
   private isSupportedPlanCode(planCode: string): planCode is PlanCode {
     return ONLINE_BILLING_PLAN_CODES.includes(planCode as (typeof ONLINE_BILLING_PLAN_CODES)[number]);
+  }
+
+  private isPersonalMemberPlanCode(planCode: string): boolean {
+    return planCode === 'PERSONAL_MEMBER_MONTHLY' || planCode === 'PERSONAL_MEMBER_ANNUAL';
   }
 
   private toBillingAccountSummary(account: {

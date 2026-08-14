@@ -2,6 +2,7 @@
 
 import {
   ApartmentOutlined,
+  ApiOutlined,
   AuditOutlined,
   AppstoreAddOutlined,
   CloudDownloadOutlined,
@@ -38,6 +39,7 @@ function selectedKey(pathname: string) {
   if (pathname.startsWith('/workspaces')) return 'workspaces';
   if (pathname.startsWith('/desktop-releases')) return 'desktop-releases';
   if (pathname.startsWith('/issue-messages')) return 'issue-messages';
+  if (pathname.startsWith('/official-routes')) return 'official-routes';
   if (pathname.startsWith('/assets')) return 'assets';
   if (pathname.startsWith('/audit')) return 'audit';
   if (pathname.startsWith('/factories')) return 'factories';
@@ -114,6 +116,11 @@ export function AdminShell({ currentAccount, children }: AdminShellProps) {
               key: 'workspaces',
               icon: <ApartmentOutlined />,
               label: <Link href="/workspaces">企业管理</Link>
+            },
+            {
+              key: 'official-routes',
+              icon: <ApiOutlined />,
+              label: <Link href="/official-routes">官方线路</Link>
             },
             {
               key: 'templates',
