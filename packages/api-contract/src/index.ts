@@ -1,5 +1,6 @@
 export * from './auth';
 export * from './admin';
+export * from './ai-points';
 export * from './asset-center';
 export * from './dependency-manifest';
 export * from './desktop-sync';

@@ -7,6 +7,7 @@ import {
   retiredServerRoleTemplateIds,
   serverRoleTemplateCatalog
 } from '../src/shared/role-template-catalog';
+import { officialModelRouteSeeds } from '../src/modules/ai-points/official-model-routes';
 
 const prisma = new PrismaClient();
 const syncManagedCatalogsOnly = process.argv.includes('--managed-catalogs-only');
@@ -782,10 +783,48 @@ async function seedAssetDefinitions() {
   }
 }
 
+async function seedOfficialModelRoutes() {
+  for (const route of officialModelRouteSeeds) {
+    await prisma.officialModelRoute.upsert({
+      where: {
+        routeKey: route.routeKey
+      },
+      update: {
+        displayName: route.displayName,
+        capability: route.capability,
+        status: route.status,
+        pointPrice: route.pointPrice,
+        providerId: route.providerId,
+        providerName: route.providerName,
+        modelName: route.modelName,
+        apiBaseUrl: route.apiBaseUrl,
+        apiKeyEnvName: route.apiKeyEnvName,
+        providerConfig: route.providerConfig,
+        sortOrder: route.sortOrder
+      },
+      create: {
+        routeKey: route.routeKey,
+        displayName: route.displayName,
+        capability: route.capability,
+        status: route.status,
+        pointPrice: route.pointPrice,
+        providerId: route.providerId,
+        providerName: route.providerName,
+        modelName: route.modelName,
+        apiBaseUrl: route.apiBaseUrl,
+        apiKeyEnvName: route.apiKeyEnvName,
+        providerConfig: route.providerConfig,
+        sortOrder: route.sortOrder
+      }
+    });
+  }
+}
+
 async function main() {
   if (syncManagedCatalogsOnly) {
     await seedAssetDefinitions();
     await seedRoleTemplates();
+    await seedOfficialModelRoutes();
     return;
   }
 
@@ -797,6 +836,7 @@ async function main() {
   await seedBilling();
   await seedAssetDefinitions();
   await seedRoleTemplates();
+  await seedOfficialModelRoutes();
 }
 
 main()

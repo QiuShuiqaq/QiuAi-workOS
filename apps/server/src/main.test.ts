@@ -1800,3 +1800,182 @@ test('desktop template authorization requires an explicit loopback local-develop
     }
   }
 });
+
+test('official model routes expose only QiuAI line labels to desktop clients', async () => {
+  const previousEnvironment = {
+    persistenceMode: process.env.WORKOS_PERSISTENCE_MODE,
+    deployTarget: process.env.WORKOS_DEPLOY_TARGET,
+    appEnvironment: process.env.APP_ENV,
+    nodeEnvironment: process.env.NODE_ENV,
+    serverHost: process.env.SERVER_HOST,
+    localUnlimited: process.env.WORKOS_LOCAL_DEV_UNLIMITED,
+    deepseekKey: process.env.QIUAI_OFFICIAL_DEEPSEEK_API_KEY
+  };
+  const originalFetch = globalThis.fetch;
+
+  process.env.WORKOS_PERSISTENCE_MODE = 'mock';
+  process.env.WORKOS_DEPLOY_TARGET = 'local';
+  process.env.APP_ENV = 'local';
+  process.env.NODE_ENV = 'development';
+  process.env.SERVER_HOST = '127.0.0.1';
+  process.env.WORKOS_LOCAL_DEV_UNLIMITED = 'true';
+  process.env.QIUAI_OFFICIAL_DEEPSEEK_API_KEY = 'test-official-key';
+
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: 'official text response'
+          }
+        }
+      ],
+      usage: {
+        prompt_tokens: 12,
+        completion_tokens: 7
+      }
+    }), {
+      status: 200,
+      headers: {
+        'content-type': 'application/json'
+      }
+    })) as typeof fetch;
+
+  const app = await createApplication();
+  app.useLogger(false);
+
+  try {
+    await app.init();
+
+    const bindingCodeResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/workspaces/enterprise/desktop/binding-codes',
+      headers: {
+        cookie: 'mock-session=enterprise'
+      },
+      payload: {}
+    });
+    assert.equal(bindingCodeResponse.statusCode, 201);
+    const bindingCode = JSON.parse(bindingCodeResponse.body).data.bindingCode as string;
+
+    const redeemResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/desktop/bindings/redeem',
+      payload: {
+        bindingCode,
+        runtimeId: 'official-route-runtime',
+        deviceId: 'official-route-device',
+        deviceName: 'Official Route Desktop',
+        platform: 'windows',
+        appVersion: '1.1.1'
+      }
+    });
+    assert.equal(redeemResponse.statusCode, 201);
+    const deviceToken = JSON.parse(redeemResponse.body).data.deviceToken as string;
+
+    const routesResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/workspaces/enterprise/ai-points/routes',
+      headers: {
+        'x-qiuai-device-token': deviceToken
+      }
+    });
+    assert.equal(routesResponse.statusCode, 200);
+    const routesBody = JSON.parse(routesResponse.body) as {
+      data: Array<{ displayName: string; routeKey: string }>;
+    };
+    assert.ok(routesBody.data.some((route) => route.displayName === '官方通道 · 文本线路一'));
+    assert.equal(
+      routesBody.data.some((route) => /DeepSeek|GRSAI|MiniMax|Hailuo|gpt-image|nano-banana/i.test(route.displayName)),
+      false
+    );
+
+    const overviewResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/workspaces/enterprise/ai-points/overview',
+      headers: {
+        'x-qiuai-device-token': deviceToken
+      }
+    });
+    assert.equal(overviewResponse.statusCode, 200);
+    assert.equal(JSON.parse(overviewResponse.body).data.wallet.availablePoints, 999999);
+
+    const invokeResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/workspaces/enterprise/desktop/official-model/invoke',
+      headers: {
+        'content-type': 'application/json',
+        'x-qiuai-device-token': deviceToken
+      },
+      payload: {
+        officialRouteKey: 'official-text-1',
+        messages: [
+          {
+            role: 'user',
+            content: 'hello'
+          }
+        ]
+      }
+    });
+    assert.equal(invokeResponse.statusCode, 201);
+    const invokeBody = JSON.parse(invokeResponse.body).data as {
+      provider: string;
+      modelName: string;
+      content: string;
+      pointsCharged: number;
+    };
+    assert.equal(invokeBody.provider, 'QiuAI官方通道');
+    assert.equal(invokeBody.modelName, '文本线路一');
+    assert.equal(invokeBody.content, 'official text response');
+    assert.equal(invokeBody.pointsCharged, 1);
+    assert.equal(
+      /DeepSeek|GRSAI|MiniMax|Hailuo|gpt-image|nano-banana/i.test(JSON.stringify(invokeBody)),
+      false
+    );
+  } finally {
+    await app.close();
+    globalThis.fetch = originalFetch;
+
+    if (previousEnvironment.persistenceMode === undefined) {
+      delete process.env.WORKOS_PERSISTENCE_MODE;
+    } else {
+      process.env.WORKOS_PERSISTENCE_MODE = previousEnvironment.persistenceMode;
+    }
+
+    if (previousEnvironment.deployTarget === undefined) {
+      delete process.env.WORKOS_DEPLOY_TARGET;
+    } else {
+      process.env.WORKOS_DEPLOY_TARGET = previousEnvironment.deployTarget;
+    }
+
+    if (previousEnvironment.appEnvironment === undefined) {
+      delete process.env.APP_ENV;
+    } else {
+      process.env.APP_ENV = previousEnvironment.appEnvironment;
+    }
+
+    if (previousEnvironment.nodeEnvironment === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = previousEnvironment.nodeEnvironment;
+    }
+
+    if (previousEnvironment.serverHost === undefined) {
+      delete process.env.SERVER_HOST;
+    } else {
+      process.env.SERVER_HOST = previousEnvironment.serverHost;
+    }
+
+    if (previousEnvironment.localUnlimited === undefined) {
+      delete process.env.WORKOS_LOCAL_DEV_UNLIMITED;
+    } else {
+      process.env.WORKOS_LOCAL_DEV_UNLIMITED = previousEnvironment.localUnlimited;
+    }
+
+    if (previousEnvironment.deepseekKey === undefined) {
+      delete process.env.QIUAI_OFFICIAL_DEEPSEEK_API_KEY;
+    } else {
+      process.env.QIUAI_OFFICIAL_DEEPSEEK_API_KEY = previousEnvironment.deepseekKey;
+    }
+  }
+});

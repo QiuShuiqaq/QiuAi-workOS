@@ -15,6 +15,11 @@ import type {
   ToolManifest
 } from '../shared/desktop-contract.js';
 import {
+  isOfficialModelProfileEnabledByDefault,
+  officialModelProfiles
+} from '../shared/desktop-state.js';
+import { buildMissingOfficialRoleModelCredentialBindings } from '../shared/official-model-defaults.js';
+import {
   ensureDesktopStorageLayout,
   getDesktopStorageLayout,
   normalizeWorkspaceId
@@ -120,7 +125,9 @@ export async function loadDesktopRuntimeState(
   const databaseSnapshot = await readWorkspaceSnapshotBundle(layout, requestedWorkspaceId);
   const databaseState = databaseSnapshot ? readPersistedDesktopRuntimeState(databaseSnapshot) : undefined;
   if (databaseState) {
-    const sanitizedState = removeRetiredBuiltInRolePackages(databaseState);
+    const sanitizedState = ensureOfficialRuntimeDefaults(
+      ensureOfficialModelProfiles(removeRetiredBuiltInRolePackages(databaseState))
+    );
     if (sanitizedState !== databaseState) {
       await saveDesktopRuntimeState(userDataPath, sanitizedState);
     }
@@ -129,7 +136,9 @@ export async function loadDesktopRuntimeState(
 
   const persistedState = readSplitDesktopRuntimeState(layout);
   if (persistedState) {
-    const sanitizedState = removeRetiredBuiltInRolePackages(persistedState);
+    const sanitizedState = ensureOfficialRuntimeDefaults(
+      ensureOfficialModelProfiles(removeRetiredBuiltInRolePackages(persistedState))
+    );
     await saveDesktopRuntimeState(userDataPath, sanitizedState);
     return sanitizedState;
   }
@@ -154,7 +163,9 @@ export async function loadDesktopRuntimeState(
     roleModelCredentialBindings: legacyState.roleModelCredentialBindings ?? []
   };
 
-  const sanitizedLegacyState = removeRetiredBuiltInRolePackages(normalizedLegacyState);
+  const sanitizedLegacyState = ensureOfficialRuntimeDefaults(
+    ensureOfficialModelProfiles(removeRetiredBuiltInRolePackages(normalizedLegacyState))
+  );
   await saveDesktopRuntimeState(userDataPath, sanitizedLegacyState);
   return sanitizedLegacyState;
 }
@@ -224,6 +235,57 @@ function removeRetiredBuiltInRolePackages(state: DesktopRuntimeState): DesktopRu
     },
     taskDetails: state.taskDetails?.filter((task) => !removedRoleCodes.has(task.roleCode))
   };
+}
+
+function ensureOfficialModelProfiles(state: DesktopRuntimeState): DesktopRuntimeState {
+  const profileIds = new Set(state.modelProfiles.map((profile) => profile.id));
+  const missingProfiles = officialModelProfiles.filter((profile) => !profileIds.has(profile.id));
+  if (missingProfiles.length === 0) {
+    return state;
+  }
+
+  const enabledModelProfileIds = [
+    ...state.localRuntime.enabledModelProfileIds,
+    ...missingProfiles
+      .filter(isOfficialModelProfileEnabledByDefault)
+      .map((profile) => profile.id)
+  ];
+
+  return {
+    ...state,
+    modelProfiles: [...missingProfiles, ...state.modelProfiles],
+    localRuntime: {
+      ...state.localRuntime,
+      enabledModelProfileIds: [...new Set(enabledModelProfileIds)]
+    }
+  };
+}
+
+function ensureOfficialRuntimeDefaults(state: DesktopRuntimeState): DesktopRuntimeState {
+  if (state.rolePackages.length === 0) {
+    return state;
+  }
+
+  const createdAt = new Date().toISOString();
+  const nextBindings = [...state.roleModelCredentialBindings];
+
+  for (const rolePackage of state.rolePackages) {
+    nextBindings.push(
+      ...buildMissingOfficialRoleModelCredentialBindings({
+        rolePackage,
+        modelProfiles: state.modelProfiles,
+        currentBindings: nextBindings,
+        updatedAt: createdAt
+      })
+    );
+  }
+
+  return nextBindings.length === state.roleModelCredentialBindings.length
+    ? state
+    : {
+        ...state,
+        roleModelCredentialBindings: nextBindings
+      };
 }
 
 function readRuntimeIdentity(filePath: string): StoredRuntimeIdentity | undefined {
@@ -661,6 +723,10 @@ function isModelProfile(value: unknown): value is ModelProfile {
       record.purpose === 'audio') &&
     (record.capabilities === undefined ||
       (Array.isArray(record.capabilities) && record.capabilities.every(isModelCapability))) &&
+    (record.billingMode === undefined ||
+      record.billingMode === 'user_api_key' ||
+      record.billingMode === 'official_points') &&
+    (record.officialRouteKey === undefined || typeof record.officialRouteKey === 'string') &&
     (record.apiBaseUrl === undefined || typeof record.apiBaseUrl === 'string') &&
     (record.apiKey === undefined || typeof record.apiKey === 'string') &&
     (record.temperature === undefined || typeof record.temperature === 'number') &&

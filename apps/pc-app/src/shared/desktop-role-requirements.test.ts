@@ -11,6 +11,7 @@ import {
   readWorkflowRequiredModelProfileIds
 } from './desktop-role-requirements.js';
 import type { ModelCredential, ModelProfile, RoleModelCredentialBinding, RolePackageManifest } from './desktop-contract.js';
+import { officialModelProfiles } from './desktop-state.js';
 
 const rolePackage: RolePackageManifest = {
   roleCode: 'ai-test-role',
@@ -727,5 +728,83 @@ const misconfiguredVisionStatus = misconfiguredVisionStatuses.find(
 );
 assert.equal(misconfiguredVisionStatus?.ready, false);
 assert.equal(misconfiguredVisionStatus?.issue, 'incompatible');
+
+const officialImageFactoryStatuses = getRoleModelRuntimeRequirementStatuses(
+  [imageEditingSlotProfile, ...officialModelProfiles],
+  ['qiu-image-editing-default', 'qiu-official-image-1'],
+  imageFactoryRolePackage,
+  {
+    roleCode: imageFactoryRolePackage.roleCode,
+    roleBindings: [
+      {
+        roleCode: imageFactoryRolePackage.roleCode,
+        modelProfileId: 'qiu-image-editing-default',
+        runtimeModelProfileId: 'qiu-official-image-1',
+        mode: 'provider_default',
+        updatedAt: '2026-08-14T00:00:00.000Z'
+      }
+    ]
+  }
+);
+const officialImageEditingStatus = officialImageFactoryStatuses.find(
+  (status) => status.profile.id === 'qiu-image-editing-default'
+);
+assert.equal(officialImageEditingStatus?.runtimeProfile?.id, 'qiu-official-image-1');
+assert.equal(officialImageEditingStatus?.configured, true);
+assert.equal(officialImageEditingStatus?.enabled, true);
+assert.equal(officialImageEditingStatus?.ready, true);
+
+const officialVideoFactoryPackage: RolePackageManifest = {
+  ...imageFactoryRolePackage,
+  roleCode: 'official-video-factory',
+  workflowGraph: {
+    version: '1.0.0',
+    entryNodeId: 'start',
+    nodes: [
+      { id: 'start', type: 'start', name: 'Start' },
+      {
+        id: 'generate_video',
+        type: 'llm',
+        name: 'Generate video',
+        config: {
+          llmTaskType: 'video_generation'
+        }
+      }
+    ],
+    edges: [
+      {
+        id: 'start-generate',
+        sourceNodeId: 'start',
+        targetNodeId: 'generate_video',
+        condition: { type: 'always' }
+      }
+    ]
+  },
+  modelProfileIds: ['qiu-video-generation-default']
+};
+const officialVideoStatuses = getRoleModelRuntimeRequirementStatuses(
+  [createPlaceholderModelProfile('qiu-video-generation-default'), ...officialModelProfiles],
+  ['qiu-video-generation-default', 'qiu-official-video-2'],
+  officialVideoFactoryPackage,
+  {
+    roleCode: officialVideoFactoryPackage.roleCode,
+    roleBindings: [
+      {
+        roleCode: officialVideoFactoryPackage.roleCode,
+        modelProfileId: 'qiu-video-generation-default',
+        runtimeModelProfileId: 'qiu-official-video-2',
+        mode: 'provider_default',
+        updatedAt: '2026-08-14T00:00:00.000Z'
+      }
+    ]
+  }
+);
+const officialVideoStatus = officialVideoStatuses.find(
+  (status) => status.profile.id === 'qiu-video-generation-default'
+);
+assert.equal(officialVideoStatus?.runtimeProfile?.id, 'qiu-official-video-2');
+assert.equal(officialVideoStatus?.configured, true);
+assert.equal(officialVideoStatus?.enabled, true);
+assert.equal(officialVideoStatus?.ready, true);
 
 console.log('Desktop role requirements passed.');

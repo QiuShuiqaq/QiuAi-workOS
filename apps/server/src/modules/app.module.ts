@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 
 import { AdminModule } from './admin/admin.module';
+import { AiPointsModule } from './ai-points/ai-points.module';
 import { AssetCenterModule } from './asset-center/asset-center.module';
 import { AuthModule } from './auth/auth.module';
 import { DesktopSyncModule } from './desktop-sync/desktop-sync.module';
@@ -25,6 +26,7 @@ import { MockPlatformStoreModule } from '../shared/mock/mock-platform-store.modu
       isGlobal: true
     }),
     AdminModule,
+    AiPointsModule,
     AssetCenterModule,
     AuthModule,
     DesktopSyncModule,

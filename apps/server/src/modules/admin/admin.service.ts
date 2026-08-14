@@ -9,7 +9,7 @@ import {
   NotFoundException,
   ServiceUnavailableException
 } from '@nestjs/common';
-import type { BillingCycle, PlanCode, Prisma, WorkspaceMemberRole } from '@prisma/client';
+import type { AiPointWallet, BillingCycle, PlanCode, Prisma, WorkspaceMemberRole } from '@prisma/client';
 
 import { hashPassword } from '../../shared/auth/password-hash';
 import { saveDesktopReleaseAsset } from '../../shared/desktop-release-assets';
@@ -32,6 +32,8 @@ import {
   AdminWorkspaceInvitationSummaryDto,
   AdminWorkspaceSummaryDto,
   ArchiveAdminDesktopReleaseResponseDto,
+  AdjustAdminWorkspaceAiPointsRequestDto,
+  AdjustAdminWorkspaceAiPointsResponseDto,
   CancelAdminWorkspaceInvitationResponseDto,
   CreateAdminDesktopReleaseRequestDto,
   CreateAdminDesktopReleaseResponseDto,
@@ -153,6 +155,12 @@ type WorkspaceDetailRecord = WorkspaceSummaryRecord & {
     contactEmail: string | null;
     defaultProvider: string | null;
     createdAt: Date;
+    updatedAt: Date;
+  } | null;
+  aiPointWallet: {
+    workspaceId: string;
+    balancePoints: number;
+    reservedPoints: number;
     updatedAt: Date;
   } | null;
   billingOrders: Array<{
@@ -1708,6 +1716,97 @@ export class AdminService {
     };
   }
 
+  async adjustWorkspaceAiPoints(
+    workspaceId: string,
+    input: AdjustAdminWorkspaceAiPointsRequestDto,
+    cookieHeader?: string
+  ): Promise<AdjustAdminWorkspaceAiPointsResponseDto> {
+    const operator = await this.requireAdminOperator(cookieHeader);
+    this.requireDatabaseMode();
+
+    const points = Math.trunc(Number(input.points));
+    if (!Number.isFinite(points) || points === 0) {
+      throw new BadRequestException({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'AI points adjustment must be a non-zero integer.'
+        }
+      });
+    }
+    const reason = this.requireNonEmptyText(input.reason, 'AI points adjustment reason cannot be empty.');
+    const note = input.note?.trim() || undefined;
+
+    const workspace = await this.prismaService.workspace.findUnique({
+      where: { id: workspaceId }
+    });
+    if (!workspace) {
+      throw this.workspaceNotFound(workspaceId);
+    }
+
+    await this.prismaService.$transaction(async (tx) => {
+      const currentWallet = await tx.aiPointWallet.upsert({
+        where: { workspaceId },
+        update: {},
+        create: {
+          workspaceId,
+          balancePoints: 0,
+          reservedPoints: 0
+        }
+      });
+      const nextBalancePoints = currentWallet.balancePoints + points;
+      if (nextBalancePoints < currentWallet.reservedPoints) {
+        throw new BadRequestException({
+          error: {
+            code: 'AI_POINTS_BALANCE_INVALID',
+            message: 'AI 点数余额不能低于正在使用中的冻结点数。'
+          }
+        });
+      }
+
+      const wallet = await tx.aiPointWallet.update({
+        where: { workspaceId },
+        data: {
+          balancePoints: nextBalancePoints
+        }
+      });
+
+      await tx.aiPointLedgerEntry.create({
+        data: {
+          workspaceId,
+          type: points > 0 ? 'GRANT' : 'ADJUSTMENT',
+          status: 'COMPLETED',
+          points,
+          balanceAfter: wallet.balancePoints - wallet.reservedPoints,
+          description: reason,
+          metadata: this.toJsonValue({
+            note,
+            source: 'admin-console'
+          })
+        }
+      });
+
+      await this.recordAdminAction(tx, {
+        operatorAccountId: operator.account.id,
+        action: 'ADJUST_AI_POINTS',
+        targetType: 'workspace',
+        targetId: workspaceId,
+        summary: `Adjusted AI points for ${workspace.name}: ${points}`,
+        metadata: {
+          points,
+          reason,
+          note,
+          balancePoints: wallet.balancePoints,
+          reservedPoints: wallet.reservedPoints,
+          availablePoints: wallet.balancePoints - wallet.reservedPoints
+        }
+      });
+    });
+
+    return {
+      data: await this.getWorkspaceDetailData(workspaceId)
+    };
+  }
+
   async updateWorkspaceStatus(
     workspaceId: string,
     input: UpdateAdminWorkspaceStatusRequestDto,
@@ -2395,6 +2494,7 @@ export class AdminService {
         },
         take: 20
       },
+      aiPointWallet: true,
       desktopDevices: {
         orderBy: {
           boundAt: 'desc' as const
@@ -2452,6 +2552,9 @@ export class AdminService {
             createdAt: workspace.billingAccount.createdAt.toISOString(),
             updatedAt: workspace.billingAccount.updatedAt.toISOString()
           }
+        : null,
+      aiPointWallet: workspace.aiPointWallet
+        ? this.toAdminAiPointWalletSummary(workspace.aiPointWallet)
         : null,
       members: workspace.memberships.map((member) => ({
         id: member.id,
@@ -2590,6 +2693,18 @@ export class AdminService {
       desktopDeviceCount: workspace._count.desktopDevices,
       billingOrderCount: workspace._count.billingOrders,
       updatedAt: workspace.updatedAt.toISOString()
+    };
+  }
+
+  private toAdminAiPointWalletSummary(
+    wallet: Pick<AiPointWallet, 'workspaceId' | 'balancePoints' | 'reservedPoints' | 'updatedAt'>
+  ) {
+    return {
+      workspaceId: wallet.workspaceId,
+      balancePoints: wallet.balancePoints,
+      reservedPoints: wallet.reservedPoints,
+      availablePoints: wallet.balancePoints - wallet.reservedPoints,
+      updatedAt: wallet.updatedAt.toISOString()
     };
   }
 

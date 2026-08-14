@@ -22,7 +22,108 @@ export interface CreateDesktopRuntimeStateInput {
 
 const initialRolePackages: RolePackageManifest[] = [];
 
-const initialModelProfiles: ModelProfile[] = [
+export const officialModelProfiles: ModelProfile[] = [
+  {
+    id: 'qiu-official-text-1',
+    providerId: 'qiuai-official',
+    providerName: 'QiuAI官方通道',
+    modelName: '文本线路一',
+    purpose: 'general',
+    billingMode: 'official_points',
+    officialRouteKey: 'official-text-1',
+    capabilities: ['text'],
+    temperature: 0.4,
+    maxTokens: 4096,
+    monthlyBudgetCents: 0
+  },
+  {
+    id: 'qiu-official-reasoning-1',
+    providerId: 'qiuai-official',
+    providerName: 'QiuAI官方通道',
+    modelName: '推理线路一',
+    purpose: 'reasoning',
+    billingMode: 'official_points',
+    officialRouteKey: 'official-reasoning-1',
+    capabilities: ['reasoning_text', 'text'],
+    temperature: 0.2,
+    maxTokens: 8192,
+    fallbackProfileId: 'qiu-official-text-1',
+    monthlyBudgetCents: 0
+  },
+  {
+    id: 'qiu-official-image-1',
+    providerId: 'qiuai-official',
+    providerName: 'QiuAI官方通道',
+    modelName: '图片线路一',
+    purpose: 'vision',
+    billingMode: 'official_points',
+    officialRouteKey: 'official-image-1',
+    capabilities: ['image_generation', 'text_to_image', 'image_to_image', 'image_editing'],
+    temperature: 0.2,
+    maxTokens: 4096,
+    monthlyBudgetCents: 0
+  },
+  {
+    id: 'qiu-official-image-2',
+    providerId: 'qiuai-official',
+    providerName: 'QiuAI官方通道',
+    modelName: '图片线路二',
+    purpose: 'vision',
+    billingMode: 'official_points',
+    officialRouteKey: 'official-image-2',
+    capabilities: ['image_generation', 'text_to_image', 'image_to_image', 'image_editing'],
+    temperature: 0.2,
+    maxTokens: 4096,
+    monthlyBudgetCents: 0
+  },
+  {
+    id: 'qiu-official-video-1',
+    providerId: 'qiuai-official',
+    providerName: 'QiuAI官方通道',
+    modelName: '视频线路一',
+    purpose: 'vision',
+    billingMode: 'official_points',
+    officialRouteKey: 'official-video-1',
+    capabilities: ['video_generation', 'text_to_video', 'image_to_video'],
+    temperature: 0.2,
+    maxTokens: 4096,
+    monthlyBudgetCents: 0
+  },
+  {
+    id: 'qiu-official-video-2',
+    providerId: 'qiuai-official',
+    providerName: 'QiuAI官方通道',
+    modelName: '视频线路二',
+    purpose: 'vision',
+    billingMode: 'official_points',
+    officialRouteKey: 'official-video-2',
+    capabilities: ['video_generation', 'text_to_video', 'image_to_video'],
+    temperature: 0.2,
+    maxTokens: 4096,
+    monthlyBudgetCents: 0
+  },
+  {
+    id: 'qiu-official-video-3',
+    providerId: 'qiuai-official',
+    providerName: 'QiuAI官方通道',
+    modelName: '视频线路三',
+    purpose: 'vision',
+    billingMode: 'official_points',
+    officialRouteKey: 'official-video-3',
+    capabilities: ['video_generation', 'text_to_video', 'image_to_video'],
+    temperature: 0.2,
+    maxTokens: 4096,
+    monthlyBudgetCents: 0
+  }
+];
+
+export function isOfficialModelProfileEnabledByDefault(profile: ModelProfile): boolean {
+  return profile.billingMode === 'official_points'
+    ? profile.id !== 'qiu-official-reasoning-1' && profile.id !== 'qiu-official-video-3'
+    : profile.purpose !== 'reasoning';
+}
+
+const semanticModelProfiles: ModelProfile[] = [
   {
     id: 'qiu-general-default',
     providerId: 'provider-pending',
@@ -104,6 +205,11 @@ const initialModelProfiles: ModelProfile[] = [
   }
 ];
 
+const initialModelProfiles: ModelProfile[] = [
+  ...officialModelProfiles,
+  ...semanticModelProfiles
+];
+
 
 export function createInitialDesktopRuntimeState(
   input: CreateDesktopRuntimeStateInput
@@ -115,7 +221,7 @@ export function createInitialDesktopRuntimeState(
   const lastTaskAtByRole = lastTaskAtMap(runtimeTasks);
   const enabledToolIds: string[] = [];
   const enabledModelProfileIds = initialModelProfiles
-    .filter((modelProfile) => modelProfile.purpose !== 'reasoning')
+    .filter(isOfficialModelProfileEnabledByDefault)
     .map((modelProfile) => modelProfile.id);
   const installedAt = input.lastSyncedAt ?? new Date().toISOString();
 

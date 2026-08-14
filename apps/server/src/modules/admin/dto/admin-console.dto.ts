@@ -906,6 +906,23 @@ export class RevokeAdminDesktopDeviceResponseDto {
   data!: AdminDesktopDeviceSummaryDto;
 }
 
+export class AdminAiPointWalletSummaryDto {
+  @ApiProperty({ example: '20000000-0000-4000-8000-000000000002' })
+  workspaceId!: string;
+
+  @ApiProperty({ example: 10000 })
+  balancePoints!: number;
+
+  @ApiProperty({ example: 0 })
+  reservedPoints!: number;
+
+  @ApiProperty({ example: 10000 })
+  availablePoints!: number;
+
+  @ApiProperty({ example: '2026-08-14T00:00:00.000Z' })
+  updatedAt!: string;
+}
+
 export class AdminWorkspaceDetailDto {
   @ApiProperty({ type: AdminWorkspaceSummaryDto })
   workspace!: AdminWorkspaceSummaryDto;
@@ -915,6 +932,9 @@ export class AdminWorkspaceDetailDto {
 
   @ApiProperty({ type: BillingAccountSummaryDto, nullable: true })
   billingAccount!: BillingAccountSummaryDto | null;
+
+  @ApiProperty({ type: AdminAiPointWalletSummaryDto, nullable: true })
+  aiPointWallet!: AdminAiPointWalletSummaryDto | null;
 
   @ApiProperty({ type: [AdminWorkspaceMemberSummaryDto] })
   members!: AdminWorkspaceMemberSummaryDto[];
@@ -1033,6 +1053,30 @@ export class UpdateAdminWorkspaceStatusRequestDto {
 }
 
 export class UpdateAdminWorkspaceStatusResponseDto {
+  @ApiProperty({ type: AdminWorkspaceDetailDto })
+  data!: AdminWorkspaceDetailDto;
+}
+
+export class AdjustAdminWorkspaceAiPointsRequestDto {
+  @ApiProperty({ example: 10000 })
+  @IsInt()
+  @Min(-100000000)
+  @Max(100000000)
+  @Type(() => Number)
+  points!: number;
+
+  @ApiProperty({ example: 'customer prepaid AI points' })
+  @IsString()
+  @MinLength(1)
+  reason!: string;
+
+  @ApiPropertyOptional({ example: '100 AI点 = 1 RMB' })
+  @IsOptional()
+  @IsString()
+  note?: string;
+}
+
+export class AdjustAdminWorkspaceAiPointsResponseDto {
   @ApiProperty({ type: AdminWorkspaceDetailDto })
   data!: AdminWorkspaceDetailDto;
 }

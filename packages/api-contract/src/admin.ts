@@ -1,5 +1,6 @@
 import type { BillingAccountSummary, BillingOrderSummary, BillingSubscriptionSummary } from './billing';
 import type { EntitlementSummary, PlanDetail } from './commercial';
+import type { AiPointWalletSummary } from './ai-points';
 import type {
   CreateDesktopBindingCodeRequest,
   DesktopBindingCodeSummary,
@@ -124,6 +125,7 @@ export interface AdminWorkspaceDetail {
   workspace: AdminWorkspaceSummary;
   subscription: BillingSubscriptionSummary | null;
   billingAccount: BillingAccountSummary | null;
+  aiPointWallet: AiPointWalletSummary | null;
   members: AdminWorkspaceMemberSummary[];
   invitations: WorkspaceInvitationSummary[];
   recentOrders: BillingOrderSummary[];
@@ -175,6 +177,16 @@ export interface UpdateAdminWorkspaceStatusRequest {
 }
 
 export interface UpdateAdminWorkspaceStatusResponse {
+  data: AdminWorkspaceDetail;
+}
+
+export interface AdjustAdminWorkspaceAiPointsRequest {
+  points: number;
+  reason: string;
+  note?: string;
+}
+
+export interface AdjustAdminWorkspaceAiPointsResponse {
   data: AdminWorkspaceDetail;
 }
 

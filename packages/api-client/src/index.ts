@@ -18,6 +18,8 @@ import type {
   CancelAdminWorkspaceInvitationResponse,
   CheckDesktopUpdateQuery,
   ArchiveAdminDesktopReleaseResponse,
+  AdjustAdminWorkspaceAiPointsRequest,
+  AdjustAdminWorkspaceAiPointsResponse,
   CheckDesktopUpdateResponse,
   CreateAdminDesktopReleaseRequest,
   CreateAdminDesktopReleaseResponse,
@@ -442,6 +444,16 @@ export class QiuApiClient {
   ): Promise<GrantAdminWorkspaceAuthorizationResponse> {
     return this.post(
       `/api/v1/admin/workspaces/${encodeURIComponent(workspaceId)}/manual-authorizations`,
+      input
+    );
+  }
+
+  adjustAdminWorkspaceAiPoints(
+    workspaceId: string,
+    input: AdjustAdminWorkspaceAiPointsRequest
+  ): Promise<AdjustAdminWorkspaceAiPointsResponse> {
+    return this.post(
+      `/api/v1/admin/workspaces/${encodeURIComponent(workspaceId)}/ai-points/adjust`,
       input
     );
   }

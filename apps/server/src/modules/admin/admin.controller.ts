@@ -5,6 +5,8 @@ import type { FastifyRequest } from 'fastify';
 import { AdminService } from './admin.service';
 import {
   ArchiveAdminDesktopReleaseResponseDto,
+  AdjustAdminWorkspaceAiPointsRequestDto,
+  AdjustAdminWorkspaceAiPointsResponseDto,
   CancelAdminWorkspaceInvitationResponseDto,
   CreateAdminDesktopReleaseRequestDto,
   CreateAdminDesktopReleaseResponseDto,
@@ -263,6 +265,16 @@ export class AdminController {
     @Req() request: FastifyRequest
   ): Promise<GrantAdminWorkspaceAuthorizationResponseDto> {
     return this.adminService.grantWorkspaceAuthorization(workspaceId, body, request.headers.cookie);
+  }
+
+  @Post('workspaces/:workspaceId/ai-points/adjust')
+  @ApiOkResponse({ type: AdjustAdminWorkspaceAiPointsResponseDto })
+  adjustWorkspaceAiPoints(
+    @Param('workspaceId') workspaceId: string,
+    @Body() body: AdjustAdminWorkspaceAiPointsRequestDto,
+    @Req() request: FastifyRequest
+  ): Promise<AdjustAdminWorkspaceAiPointsResponseDto> {
+    return this.adminService.adjustWorkspaceAiPoints(workspaceId, body, request.headers.cookie);
   }
 
   @Get('action-logs')

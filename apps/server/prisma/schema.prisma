@@ -224,6 +224,38 @@ enum DesktopIssueStatus {
   CLOSED
 }
 
+enum AiPointLedgerEntryType {
+  PURCHASE
+  GRANT
+  RESERVE
+  SETTLE
+  RELEASE
+  ADJUSTMENT
+}
+
+enum AiPointLedgerEntryStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+enum OfficialModelRouteCapability {
+  TEXT
+  REASONING
+  IMAGE
+  VIDEO
+}
+
+enum OfficialModelRouteStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum DesktopDeviceAiQuotaStatus {
+  ACTIVE
+  DISABLED
+}
+
 enum KnowledgeBaseScope {
   ENTERPRISE
   LOCAL
@@ -318,6 +350,9 @@ model Workspace {
   desktopRuntimeSyncs DesktopRuntimeSync[]
   desktopBindingCodes DesktopBindingCode[]
   desktopDevices DesktopDevice[]
+  aiPointWallet AiPointWallet?
+  aiPointLedgerEntries AiPointLedgerEntry[]
+  desktopDeviceAiQuotas DesktopDeviceAiQuota[]
   desktopIssueReports DesktopIssueReport[]
   knowledgeBases KnowledgeBase[]
   invitations    Invitation[]
@@ -465,6 +500,8 @@ model DesktopDevice {
   bindingCodes DesktopBindingCode[]
   agreementAcceptances DesktopAgreementAcceptance[]
   issueReports DesktopIssueReport[]
+  aiQuota DesktopDeviceAiQuota?
+  aiPointLedgerEntries AiPointLedgerEntry[]
 
   @@unique([workspaceId, runtimeId])
   @@unique([workspaceId, deviceId])
@@ -472,6 +509,84 @@ model DesktopDevice {
   @@index([status])
   @@index([lastSeenAt])
   @@map("desktop_devices")
+}
+
+model AiPointWallet {
+  id             String   @id @default(uuid()) @db.Uuid
+  workspaceId    String   @unique @map("workspace_id") @db.Uuid
+  balancePoints  Int      @default(0) @map("balance_points")
+  reservedPoints Int      @default(0) @map("reserved_points")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("ai_point_wallets")
+}
+
+model AiPointLedgerEntry {
+  id              String                   @id @default(uuid()) @db.Uuid
+  workspaceId     String                   @map("workspace_id") @db.Uuid
+  desktopDeviceId String?                  @map("desktop_device_id") @db.Uuid
+  routeKey        String?                  @map("route_key")
+  type            AiPointLedgerEntryType
+  status          AiPointLedgerEntryStatus @default(COMPLETED)
+  points          Int
+  balanceAfter    Int?                     @map("balance_after")
+  description     String?
+  metadata        Json?
+  createdAt       DateTime                 @default(now()) @map("created_at")
+  updatedAt       DateTime                 @updatedAt @map("updated_at")
+
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  desktopDevice DesktopDevice? @relation(fields: [desktopDeviceId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([desktopDeviceId, createdAt])
+  @@index([routeKey])
+  @@index([type, status])
+  @@map("ai_point_ledger_entries")
+}
+
+model OfficialModelRoute {
+  id                 String                       @id @default(uuid()) @db.Uuid
+  routeKey           String                       @unique @map("route_key")
+  displayName        String                       @map("display_name")
+  capability         OfficialModelRouteCapability
+  status             OfficialModelRouteStatus     @default(ACTIVE)
+  pointPrice         Int                          @default(1) @map("point_price")
+  providerId         String                       @map("provider_id")
+  providerName       String                       @map("provider_name")
+  modelName          String                       @map("model_name")
+  apiBaseUrl         String                       @map("api_base_url")
+  apiKeyEnvName      String                       @map("api_key_env_name")
+  providerConfig     Json                         @default("{}") @map("provider_config")
+  sortOrder          Int                          @default(1000) @map("sort_order")
+  createdAt          DateTime                     @default(now()) @map("created_at")
+  updatedAt          DateTime                     @updatedAt @map("updated_at")
+
+  @@index([capability, status, sortOrder])
+  @@map("official_model_routes")
+}
+
+model DesktopDeviceAiQuota {
+  id                  String                     @id @default(uuid()) @db.Uuid
+  workspaceId          String                     @map("workspace_id") @db.Uuid
+  desktopDeviceId      String                     @unique @map("desktop_device_id") @db.Uuid
+  monthlyLimitPoints   Int?                       @map("monthly_limit_points")
+  usedPointsThisMonth  Int                        @default(0) @map("used_points_this_month")
+  reservedPoints       Int                        @default(0) @map("reserved_points")
+  period               String
+  status               DesktopDeviceAiQuotaStatus @default(ACTIVE)
+  createdAt            DateTime                   @default(now()) @map("created_at")
+  updatedAt            DateTime                   @updatedAt @map("updated_at")
+
+  workspace     Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  desktopDevice DesktopDevice @relation(fields: [desktopDeviceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, period])
+  @@index([status])
+  @@map("desktop_device_ai_quotas")
 }
 
 model DesktopAgreementAcceptance {

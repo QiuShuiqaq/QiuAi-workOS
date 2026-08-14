@@ -75,6 +75,7 @@ import { type ChangeEvent, type DragEvent, type ReactNode, useEffect, useMemo, u
 
 import type {
   DesktopAgreementStatus,
+  DesktopAiPointOverview,
   DesktopAuthorizedRoleTemplateCatalog,
   DesktopAuthorizedRoleTemplateSummary,
   DesktopBackupSummary,
@@ -156,6 +157,7 @@ import {
   isWatchExecutionProfile,
   resolveRoleExecutionModeMeta
 } from '../shared/role-execution-mode';
+import { buildMissingOfficialRoleModelCredentialBindings } from '../shared/official-model-defaults';
 import {
   createCustomCompatibleModelProfile,
   selectModelProfileForPreset,
@@ -165,6 +167,7 @@ import {
 import {
   createCredentialId,
   findDefaultModelCredential,
+  isOfficialPointsModelProfile,
   listProviderModelCredentials,
   resolveModelProfileCredential,
   upsertDefaultModelCredential
@@ -3129,6 +3132,9 @@ export default function App() {
   const [isSavingModelProfile, setIsSavingModelProfile] = useState(false);
   const [isTestingModel, setIsTestingModel] = useState(false);
   const [isPullingProviderModels, setIsPullingProviderModels] = useState(false);
+  const [aiPointOverview, setAiPointOverview] = useState<DesktopAiPointOverview | null>(null);
+  const [isLoadingAiPointOverview, setIsLoadingAiPointOverview] = useState(false);
+  const [aiPointNotice, setAiPointNotice] = useState('');
   const [modelApiKeyClearRequested, setModelApiKeyClearRequested] = useState(false);
   const [latestPulledModelCatalog, setLatestPulledModelCatalog] = useState<{
     profileId: string;
@@ -3362,6 +3368,18 @@ export default function App() {
   useEffect(() => {
     setSelectedConversationArtifactId('');
   }, [selectedTaskId]);
+
+  useEffect(() => {
+    if (selectedSection !== 'models') {
+      return;
+    }
+
+    void loadAiPointOverview();
+  }, [
+    selectedSection,
+    runtimeState.localRuntime.workspaceId,
+    runtimeState.serverConnection.state
+  ]);
 
   const desktopRoleTemplates = useMemo(() => {
     return authorizedRoleTemplateCatalog.templates.map(toDesktopRoleTemplate);
@@ -3774,6 +3792,30 @@ export default function App() {
       setRuntimeState(await window.qiuDesktop.getRuntimeState());
     } finally {
       setIsRefreshing(false);
+    }
+  }
+
+  async function loadAiPointOverview() {
+    if (!window.qiuDesktop) {
+      return;
+    }
+
+    if (runtimeState.localRuntime.workspaceId === pendingWorkspaceId) {
+      setAiPointOverview(null);
+      setAiPointNotice('绑定账号后可查看官方通道 AI 点数。');
+      return;
+    }
+
+    setIsLoadingAiPointOverview(true);
+    setAiPointNotice('');
+    try {
+      const overview = await window.qiuDesktop.getAiPointOverview();
+      setAiPointOverview(overview);
+    } catch (error) {
+      setAiPointOverview(null);
+      setAiPointNotice(error instanceof Error ? error.message : 'AI 点数读取失败，请稍后重试。');
+    } finally {
+      setIsLoadingAiPointOverview(false);
     }
   }
 
@@ -7256,7 +7298,7 @@ export default function App() {
           incompatibleSelection.requirementProfile.capabilities,
           incompatibleSelection.requirementProfile.purpose
         )} 不能选择 ${incompatibleSelection.runtimeProfile
-          ? `${incompatibleSelection.runtimeProfile.providerName} / ${incompatibleSelection.runtimeProfile.modelName}`
+          ? modelProfileDisplayName(incompatibleSelection.runtimeProfile)
           : incompatibleSelection.runtimeModelProfileId}。`
       );
       return;
@@ -7493,7 +7535,7 @@ export default function App() {
       return {
         key: requirement.profile.id,
         capability: modelRequirementSlotLabel(requirement.profile),
-        model: `${displayProfile.providerName} / ${displayProfile.modelName}`,
+        model: modelProfileDisplayName(displayProfile),
         ready: requirement.ready
       };
     });
@@ -10157,7 +10199,7 @@ export default function App() {
                         title={
                           <Space size={6} wrap>
                             <Typography.Text strong>
-                              {displayProfile.providerName} / {displayProfile.modelName}
+                              {modelProfileDisplayName(displayProfile)}
                             </Typography.Text>
                             <Tag>{modelRequirementSlotLabel(requirement.profile)}</Tag>
                             {isRuntimeOverride ? <Tag color="blue">实际调用</Tag> : null}
@@ -11036,6 +11078,9 @@ export default function App() {
     const selectedProviderApiKeyUrl = selectedModelProfile
       ? modelProviderApiKeyUrls[selectedModelProfile.providerId]
       : undefined;
+    const selectedModelIsOfficial = selectedModelProfile
+      ? isOfficialPointsModelProfile(selectedModelProfile)
+      : false;
 
     return (
       <>
@@ -11077,6 +11122,23 @@ export default function App() {
             <Tag color={runtimeState.modelCredentials.length > 0 ? 'green' : 'default'}>
               默认 Key {runtimeState.modelCredentials.filter((credential) => credential.isDefault).length}
             </Tag>
+            <Tag color={aiPointOverview ? 'gold' : 'default'}>
+              AI 点数 {aiPointOverview ? `可用 ${formatAiPoints(aiPointOverview.wallet.availablePoints)}` : '未读取'}
+            </Tag>
+            {aiPointOverview && aiPointOverview.wallet.reservedPoints > 0 ? (
+              <Tag color="orange">冻结 {formatAiPoints(aiPointOverview.wallet.reservedPoints)}</Tag>
+            ) : null}
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              loading={isLoadingAiPointOverview}
+              onClick={() => loadAiPointOverview()}
+            >
+              刷新点数
+            </Button>
+            {aiPointNotice ? (
+              <Typography.Text type="secondary">{aiPointNotice}</Typography.Text>
+            ) : null}
           </div>
 
           {filteredCustomModelProfiles.length > 0 ? (
@@ -11268,44 +11330,57 @@ export default function App() {
         >
           {selectedModelProfile ? (
             <Form<ModelFormValues> form={modelForm} layout="vertical" onFinish={saveModelProfile}>
-              <Form.Item label="API Key">
-                <Space.Compact style={{ width: '100%' }}>
-                  <Form.Item name="apiKey" noStyle>
-                    <Input.Password
-                      placeholder="作为该供应商默认 Key，只保存在本机"
-                      onChange={() => setModelApiKeyClearRequested(false)}
-                    />
+              {selectedModelIsOfficial ? (
+                <Card size="small" bordered className="role-model-requirements-card">
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    <Typography.Text strong>{modelProfileDisplayName(selectedModelProfile)}</Typography.Text>
+                    <Typography.Text type="secondary">
+                      官方通道使用 AI 点数，无需填写 API Key，也不需要拉取供应商模型。
+                    </Typography.Text>
+                  </Space>
+                </Card>
+              ) : (
+                <>
+                  <Form.Item label="API Key">
+                    <Space.Compact style={{ width: '100%' }}>
+                      <Form.Item name="apiKey" noStyle>
+                        <Input.Password
+                          placeholder="作为该供应商默认 Key，只保存在本机"
+                          onChange={() => setModelApiKeyClearRequested(false)}
+                        />
+                      </Form.Item>
+                      {selectedModelDefaultCredential ? (
+                        <Button
+                          danger
+                          onClick={() => {
+                            modelForm.setFieldValue('apiKey', '');
+                            setModelApiKeyClearRequested(true);
+                            setModelTestNotice('已标记清空默认 API Key，点击保存后生效。');
+                          }}
+                        >
+                          清空 Key
+                        </Button>
+                      ) : null}
+                      {selectedProviderApiKeyUrl ? (
+                        <Button
+                          icon={<GlobalOutlined />}
+                          onClick={() => void openLocalPath(selectedProviderApiKeyUrl)}
+                        >
+                          获取 API Key
+                        </Button>
+                      ) : null}
+                    </Space.Compact>
                   </Form.Item>
-                  {selectedModelDefaultCredential ? (
-                    <Button
-                      danger
-                      onClick={() => {
-                        modelForm.setFieldValue('apiKey', '');
-                        setModelApiKeyClearRequested(true);
-                        setModelTestNotice('已标记清空默认 API Key，点击保存后生效。');
-                      }}
-                    >
-                      清空 Key
-                    </Button>
-                  ) : null}
-                  {selectedProviderApiKeyUrl ? (
-                    <Button
-                      icon={<GlobalOutlined />}
-                      onClick={() => void openLocalPath(selectedProviderApiKeyUrl)}
-                    >
-                      获取 API Key
-                    </Button>
-                  ) : null}
-                </Space.Compact>
-              </Form.Item>
-              <div className="inline-form-grid">
-                <Form.Item name="providerName" label="供应商" rules={[{ required: true }]}>
-                  <Input />
-                </Form.Item>
-                <Form.Item name="modelName" label="模型" rules={[{ required: true }]}>
-                  <Input />
-                </Form.Item>
-              </div>
+                  <div className="inline-form-grid">
+                    <Form.Item name="providerName" label="供应商" rules={[{ required: true }]}>
+                      <Input />
+                    </Form.Item>
+                    <Form.Item name="modelName" label="模型" rules={[{ required: true }]}>
+                      <Input />
+                    </Form.Item>
+                  </div>
+                </>
+              )}
               <Form.Item
                 name="capabilities"
                 label={
@@ -11316,6 +11391,7 @@ export default function App() {
                 rules={[{ required: true, message: '请选择模型能力' }]}
               >
                 <Select
+                  disabled={selectedModelIsOfficial}
                   placeholder="按模型真实输入输出选择"
                   options={primaryModelCapabilityOptions.map((option) => ({
                     label: `${option.label} - ${option.description}`,
@@ -11351,16 +11427,28 @@ export default function App() {
               <Form.Item name="purpose" hidden>
                 <Input />
               </Form.Item>
+              {selectedModelIsOfficial ? (
+                <>
+                  <Form.Item name="providerName" hidden>
+                    <Input />
+                  </Form.Item>
+                  <Form.Item name="modelName" hidden>
+                    <Input />
+                  </Form.Item>
+                </>
+              ) : null}
 
               <Divider style={{ margin: '8px 0 16px' }} />
-              <div className="inline-form-grid">
-                <Form.Item name="apiBaseUrl" label="API Base URL">
-                  <Input placeholder="https://api.openai.com/v1" />
-                </Form.Item>
-                <Form.Item name="monthlyBudgetCents" label="月度预算（分）">
-                  <InputNumber min={0} step={100} style={{ width: '100%' }} />
-                </Form.Item>
-              </div>
+              {!selectedModelIsOfficial ? (
+                <div className="inline-form-grid">
+                  <Form.Item name="apiBaseUrl" label="API Base URL">
+                    <Input placeholder="https://api.openai.com/v1" />
+                  </Form.Item>
+                  <Form.Item name="monthlyBudgetCents" label="月度预算（分）">
+                    <InputNumber min={0} step={100} style={{ width: '100%' }} />
+                  </Form.Item>
+                </div>
+              ) : null}
               <div className="inline-form-grid">
                 <Form.Item name="temperature" label="温度">
                   <InputNumber min={0} max={2} step={0.1} style={{ width: '100%' }} />
@@ -11375,7 +11463,7 @@ export default function App() {
                   options={runtimeState.modelProfiles
                     .filter((profile) => profile.id !== selectedModelProfile.id)
                     .map((profile) => ({
-                      label: `${modelCapabilitySummary(profile.capabilities, profile.purpose)} · ${profile.providerName}/${profile.modelName}`,
+                      label: `${modelCapabilitySummary(profile.capabilities, profile.purpose)} · ${modelProfileDisplayName(profile)}`,
                       value: profile.id
                     }))}
                 />
@@ -11392,20 +11480,24 @@ export default function App() {
                       ? '停用'
                       : '启用'}
                   </Button>
-                  <Button
-                    icon={<ReloadOutlined />}
-                    loading={isTestingModel}
-                    onClick={() => void testSelectedModelConnection()}
-                  >
-                    测试模型
-                  </Button>
-                  <Button
-                    icon={<CloudDownloadOutlined />}
-                    loading={isPullingProviderModels}
-                    onClick={() => void pullSelectedProviderModels()}
-                  >
-                    拉取模型
-                  </Button>
+                  {!selectedModelIsOfficial ? (
+                    <>
+                      <Button
+                        icon={<ReloadOutlined />}
+                        loading={isTestingModel}
+                        onClick={() => void testSelectedModelConnection()}
+                      >
+                        测试模型
+                      </Button>
+                      <Button
+                        icon={<CloudDownloadOutlined />}
+                        loading={isPullingProviderModels}
+                        onClick={() => void pullSelectedProviderModels()}
+                      >
+                        拉取模型
+                      </Button>
+                    </>
+                  ) : null}
                 </Space>
                 {modelTestNotice ? (
                   <Typography.Text
@@ -11509,13 +11601,14 @@ export default function App() {
             roleConfigRoleCode
           );
           const isRuntimeOverride = runtimeProfile.id !== profile.id;
+          const isOfficialRuntimeProfile = isOfficialPointsModelProfile(runtimeProfile);
 
           return (
             <div className="role-model-credential-editor">
               <Flex align="flex-start" justify="space-between" gap={12} wrap="wrap">
                 <Space direction="vertical" size={2}>
                   <Typography.Text strong>
-                    {runtimeProfile.providerName} / {runtimeProfile.modelName}
+                    {modelProfileDisplayName(runtimeProfile)}
                   </Typography.Text>
                   <Space size={6} wrap>
                     <Tag>{modelCapabilitySummary(profile.capabilities, profile.purpose)}</Tag>
@@ -11550,6 +11643,7 @@ export default function App() {
               <Form.Item
                 name={modePath}
                 rules={[{ required: true, message: '请选择 API Key 使用方式' }]}
+                hidden={isOfficialRuntimeProfile}
               >
                 <Radio.Group
                   optionType="button"
@@ -11566,57 +11660,63 @@ export default function App() {
                 />
               </Form.Item>
 
-              <Form.Item noStyle shouldUpdate>
-                {({ getFieldValue: readModeFieldValue }) => {
-                  const mode = (readModeFieldValue(modePath) ?? 'provider_default') as ModelCredentialBindingMode;
+              {isOfficialRuntimeProfile ? (
+                <Typography.Text type="secondary">
+                  官方通道使用 AI 点数，无需配置 API Key。
+                </Typography.Text>
+              ) : (
+                <Form.Item noStyle shouldUpdate>
+                  {({ getFieldValue: readModeFieldValue }) => {
+                    const mode = (readModeFieldValue(modePath) ?? 'provider_default') as ModelCredentialBindingMode;
 
-                  if (mode === 'credential_ref') {
-                    return (
-                      <Form.Item
-                        name={['modelCredentialBindings', profile.id, 'credentialId']}
-                        rules={[{ required: true, message: '请选择已有 Key' }]}
-                      >
-                        <Select
-                          placeholder="选择已有 Key"
-                          options={providerCredentials.map((credential) => ({
-                            label: `${credential.label}${credential.isDefault ? '（默认）' : ''}`,
-                            value: credential.id
-                          }))}
-                        />
-                      </Form.Item>
-                    );
-                  }
-
-                  if (mode === 'inline') {
-                    return (
-                      <div className="inline-form-grid">
+                    if (mode === 'credential_ref') {
+                      return (
                         <Form.Item
-                          name={['modelCredentialBindings', profile.id, 'apiBaseUrl']}
-                          label="API Base URL"
-                          initialValue={runtimeProfile.apiBaseUrl}
+                          name={['modelCredentialBindings', profile.id, 'credentialId']}
+                          rules={[{ required: true, message: '请选择已有 Key' }]}
                         >
-                          <Input placeholder={runtimeProfile.apiBaseUrl ?? 'https://api.example.com/v1'} />
+                          <Select
+                            placeholder="选择已有 Key"
+                            options={providerCredentials.map((credential) => ({
+                              label: `${credential.label}${credential.isDefault ? '（默认）' : ''}`,
+                              value: credential.id
+                            }))}
+                          />
                         </Form.Item>
-                        <Form.Item
-                          name={['modelCredentialBindings', profile.id, 'apiKey']}
-                          label="专用 API Key"
-                          rules={[{ required: true, message: '请输入专用 API Key' }]}
-                        >
-                          <Input.Password placeholder="只给当前应用使用" />
-                        </Form.Item>
-                      </div>
-                    );
-                  }
+                      );
+                    }
 
-                  return (
-                    <Typography.Text type={defaultCredential ? 'secondary' : 'danger'}>
-                      {defaultCredential
-                        ? `将使用 ${defaultCredential.label}`
-                        : `尚未配置 ${runtimeProfile.providerName} 默认 Key，可先去“模型配置”填写，或选择“单独输入 Key”。`}
-                    </Typography.Text>
-                  );
-                }}
-              </Form.Item>
+                    if (mode === 'inline') {
+                      return (
+                        <div className="inline-form-grid">
+                          <Form.Item
+                            name={['modelCredentialBindings', profile.id, 'apiBaseUrl']}
+                            label="API Base URL"
+                            initialValue={runtimeProfile.apiBaseUrl}
+                          >
+                            <Input placeholder={runtimeProfile.apiBaseUrl ?? 'https://api.example.com/v1'} />
+                          </Form.Item>
+                          <Form.Item
+                            name={['modelCredentialBindings', profile.id, 'apiKey']}
+                            label="专用 API Key"
+                            rules={[{ required: true, message: '请输入专用 API Key' }]}
+                          >
+                            <Input.Password placeholder="只给当前应用使用" />
+                          </Form.Item>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <Typography.Text type={defaultCredential ? 'secondary' : 'danger'}>
+                        {defaultCredential
+                          ? `将使用 ${defaultCredential.label}`
+                          : `尚未配置 ${runtimeProfile.providerName} 默认 Key，可先去“模型配置”填写，或选择“单独输入 Key”。`}
+                      </Typography.Text>
+                    );
+                  }}
+                </Form.Item>
+              )}
             </div>
           );
         }}
@@ -12180,29 +12280,49 @@ export default function App() {
         current.localRuntime.knowledgeBindingIds,
         installedRolePackage.requiredKnowledgeSources.map((source) => getKnowledgeBindingId(source))
       );
+      const userConfiguredRoleModelCredentialBindings = values?.modelCredentialBindings
+        ? buildRoleModelCredentialBindingsFromForm(
+            installedRolePackage.roleCode,
+            installedRolePackage.modelProfileIds,
+            values.modelCredentialBindings,
+            modelProfiles
+          )
+        : [];
+      const baseRoleModelCredentialBindings = values?.modelCredentialBindings
+        ? [
+            ...current.roleModelCredentialBindings.filter(
+              (binding) => binding.roleCode !== installedRolePackage.roleCode
+            ),
+            ...userConfiguredRoleModelCredentialBindings
+          ]
+        : current.roleModelCredentialBindings;
+      const defaultOfficialRoleModelCredentialBindings =
+        buildMissingOfficialRoleModelCredentialBindings({
+          rolePackage: installedRolePackage,
+          modelProfiles,
+          currentBindings: baseRoleModelCredentialBindings,
+          updatedAt: now
+        });
+      const roleModelCredentialBindings = [
+        ...baseRoleModelCredentialBindings,
+        ...defaultOfficialRoleModelCredentialBindings
+      ];
       const enabledModelProfileIds = mergeUniqueStrings(
         mergeUniqueStrings(
-          current.localRuntime.enabledModelProfileIds,
-          installedRolePackage.modelProfileIds
+          mergeUniqueStrings(
+            current.localRuntime.enabledModelProfileIds,
+            installedRolePackage.modelProfileIds
+          ),
+          readRuntimeModelProfileIdsFromRoleConfigForm(values?.modelCredentialBindings)
         ),
-        readRuntimeModelProfileIdsFromRoleConfigForm(values?.modelCredentialBindings)
+        defaultOfficialRoleModelCredentialBindings
+          .map((binding) => binding.runtimeModelProfileId)
+          .filter((profileId): profileId is string => Boolean(profileId))
       );
       const enabledToolIds = mergeUniqueStrings(
         current.localRuntime.enabledToolIds,
         installedRolePackage.toolIds
       );
-      const roleModelCredentialBindings = values?.modelCredentialBindings
-        ? [
-            ...current.roleModelCredentialBindings.filter(
-              (binding) => binding.roleCode !== installedRolePackage.roleCode
-            ),
-            ...buildRoleModelCredentialBindingsFromForm(
-              installedRolePackage.roleCode,
-              installedRolePackage.modelProfileIds,
-              values.modelCredentialBindings
-            )
-          ]
-        : current.roleModelCredentialBindings;
       const currentActiveRolePackage = current.localRuntime.activeRoleCode
         ? rolePackages.find((rolePackage) => rolePackage.roleCode === current.localRuntime.activeRoleCode)
         : undefined;
@@ -13360,6 +13480,51 @@ export default function App() {
     setIsSavingModelProfile(true);
     setModelTestNotice('');
 
+    if (isOfficialPointsModelProfile(selectedModelProfile)) {
+      try {
+        const currentState = runtimeStateRef.current;
+        const capabilities = readModelProfileCapabilities(selectedModelProfile);
+        const updatedProfile: ModelProfile = {
+          ...selectedModelProfile,
+          purpose: purposeForModelCapabilities(capabilities, selectedModelProfile.purpose),
+          capabilities,
+          temperature: values.temperature,
+          maxTokens: values.maxTokens,
+          monthlyBudgetCents: values.monthlyBudgetCents,
+          fallbackProfileId: values.fallbackProfileId || undefined
+        };
+        const nextState: DesktopRuntimeState = {
+          ...currentState,
+          modelProfiles: currentState.modelProfiles.map((profile) =>
+            profile.id === selectedModelProfile.id ? updatedProfile : profile
+          ),
+          localRuntime: {
+            ...currentState.localRuntime,
+            enabledModelProfileIds: mergeUniqueStrings(
+              currentState.localRuntime.enabledModelProfileIds,
+              [updatedProfile.id]
+            )
+          }
+        };
+
+        if (window.qiuDesktop) {
+          await window.qiuDesktop.saveRuntimeState(nextState);
+        }
+
+        runtimeStateRef.current = nextState;
+        setRuntimeState(nextState);
+        setModelConfigOpen(false);
+        message.success('官方通道配置已保存。');
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'unknown error';
+        setModelTestNotice(`保存官方通道配置失败：${errorMessage}`);
+        message.error('官方通道配置保存失败，请重试。');
+      } finally {
+        setIsSavingModelProfile(false);
+      }
+      return;
+    }
+
     const capabilities = normalizePrimaryModelCapabilities(
       values.capabilities,
       values.purpose ?? selectedModelProfile.purpose
@@ -13503,6 +13668,12 @@ export default function App() {
       return;
     }
 
+    if (isOfficialPointsModelProfile(selectedModelProfile)) {
+      setModelTestResult(null);
+      setModelTestNotice('官方通道无需本地测试，实际任务会通过 AI 点数通道调用。');
+      return;
+    }
+
     setIsTestingModel(true);
     setModelTestNotice('');
     setModelTestResult(null);
@@ -13563,6 +13734,12 @@ export default function App() {
 
   async function pullSelectedProviderModels() {
     if (!selectedModelProfile || !window.qiuDesktop) {
+      return;
+    }
+
+    if (isOfficialPointsModelProfile(selectedModelProfile)) {
+      setModelTestResult(null);
+      setModelTestNotice('官方通道无需拉取模型，线路由 QiuAI 统一维护。');
       return;
     }
 
@@ -14030,14 +14207,28 @@ export default function App() {
     const nextRoleModelCredentialBindings = buildRoleModelCredentialBindingsFromForm(
       normalizedPreviewRolePackage.roleCode,
       normalizedPreviewRolePackage.modelProfileIds,
-      values.modelCredentialBindings
+      values.modelCredentialBindings,
+      nextModelProfiles
     );
+    const previewRoleModelCredentialBindings = [
+      ...nextRoleModelCredentialBindings,
+      ...buildMissingOfficialRoleModelCredentialBindings({
+        rolePackage: normalizedPreviewRolePackage,
+        modelProfiles: nextModelProfiles,
+        currentBindings: nextRoleModelCredentialBindings
+      })
+    ];
     const nextEnabledModelProfileIds = mergeUniqueStrings(
       mergeUniqueStrings(
-        runtimeState.localRuntime.enabledModelProfileIds,
-        normalizedPreviewRolePackage.modelProfileIds
+        mergeUniqueStrings(
+          runtimeState.localRuntime.enabledModelProfileIds,
+          normalizedPreviewRolePackage.modelProfileIds
+        ),
+        readRuntimeModelProfileIdsFromRoleConfigForm(values.modelCredentialBindings)
       ),
-      readRuntimeModelProfileIdsFromRoleConfigForm(values.modelCredentialBindings)
+      previewRoleModelCredentialBindings
+        .map((binding) => binding.runtimeModelProfileId)
+        .filter((profileId): profileId is string => Boolean(profileId))
     );
     const firstUnreadyModelProfileId = findFirstUnreadyRequiredModelProfileId(
       nextModelProfiles,
@@ -14046,7 +14237,7 @@ export default function App() {
       {
         roleCode: normalizedPreviewRolePackage.roleCode,
         credentials: runtimeState.modelCredentials,
-        roleBindings: nextRoleModelCredentialBindings
+        roleBindings: previewRoleModelCredentialBindings
       }
     );
 
@@ -15595,6 +15786,14 @@ function formatEstimatedCostCents(value?: number) {
   }
 
   return `约 ¥${(value / 100).toFixed(2)}`;
+}
+
+function formatAiPoints(value?: number) {
+  if (value === undefined || value === null) {
+    return '—';
+  }
+
+  return `${Math.max(0, Math.floor(value)).toLocaleString('zh-CN')} 点`;
 }
 
 function isUserDeliverableArtifact(artifact: DesktopTaskDetail['artifacts'][number]) {
@@ -18759,7 +18958,7 @@ function isPendingModelProviderProfile(profile: ModelProfile): boolean {
 }
 
 function isCustomModelConfigurationProfile(profile: ModelProfile): boolean {
-  if (isPendingModelProviderProfile(profile)) {
+  if (isPendingModelProviderProfile(profile) || isOfficialPointsModelProfile(profile)) {
     return false;
   }
 
@@ -19023,14 +19222,27 @@ function buildRoleModelCredentialFormValues(
 function buildRoleModelCredentialBindingsFromForm(
   roleCode: string,
   modelProfileIds: string[],
-  values: RoleConfigFormValues['modelCredentialBindings'] | undefined
+  values: RoleConfigFormValues['modelCredentialBindings'] | undefined,
+  modelProfiles: ModelProfile[] = []
 ): RoleModelCredentialBinding[] {
   const now = new Date().toISOString();
+  const modelProfilesById = new Map(modelProfiles.map((profile) => [profile.id, profile]));
 
   return modelProfileIds.map((modelProfileId) => {
     const value = values?.[modelProfileId];
     const mode = value?.mode ?? 'provider_default';
     const runtimeModelProfileId = value?.runtimeModelProfileId?.trim() || modelProfileId;
+    const runtimeProfile = modelProfilesById.get(runtimeModelProfileId);
+
+    if (runtimeProfile && isOfficialPointsModelProfile(runtimeProfile)) {
+      return {
+        roleCode,
+        modelProfileId,
+        runtimeModelProfileId,
+        mode: 'provider_default',
+        updatedAt: now
+      };
+    }
 
     if (mode === 'credential_ref' && value?.credentialId) {
       return {
@@ -19255,7 +19467,15 @@ function readRuntimeModelProfileIdsForRole(
 
 function resolveModelProfileLabel(modelProfiles: ModelProfile[], profileId: string): string {
   const profile = modelProfiles.find((item) => item.id === profileId);
-  return profile ? `${profile.providerName} / ${profile.modelName}` : profileId;
+  return profile ? modelProfileDisplayName(profile) : profileId;
+}
+
+function modelProfileDisplayName(profile: ModelProfile): string {
+  if (isOfficialPointsModelProfile(profile)) {
+    return `官方通道 · ${profile.modelName}`;
+  }
+
+  return `${profile.providerName} / ${profile.modelName}`;
 }
 
 function modelRequirementSlotLabel(profile: ModelProfile): string {
@@ -19401,7 +19621,7 @@ function buildCompatibleRuntimeModelOptions(
 
   return dedupedProfiles.map((profile) => ({
     value: profile.id,
-    label: `${profile.providerName} / ${profile.modelName} · ${modelCapabilitySummary(profile.capabilities, profile.purpose)}`
+    label: `${modelProfileDisplayName(profile)} · ${modelCapabilitySummary(profile.capabilities, profile.purpose)}`
   }));
 }
 
