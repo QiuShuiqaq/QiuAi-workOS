@@ -7,6 +7,7 @@ import {
   CloudDownloadOutlined,
   CloudSyncOutlined,
   CloseOutlined,
+  CreditCardOutlined,
   DatabaseOutlined,
   DeleteOutlined,
   CompassOutlined,
@@ -221,7 +222,7 @@ type SectionKey =
   | 'tools'
   | 'knowledge'
   | 'settings';
-type AccountModalKey = 'enterprise' | 'help' | 'release' | 'download' | 'logout';
+type AccountModalKey = 'enterprise' | 'purchase' | 'help' | 'release' | 'download' | 'logout';
 type DesktopThemePreference = 'light' | 'system';
 type DesktopDensityPreference = 'comfortable' | 'compact';
 type ProviderModelCapabilityFilter = 'all' | ModelCapability;
@@ -4446,6 +4447,13 @@ export default function App() {
     setAccountModal(modal);
     setSelectedLegalDocumentId('');
     setAccountMenuOpen(false);
+    if (modal === 'purchase') {
+      void loadAiPointOverview();
+    }
+  }
+
+  function openEnterpriseLoginPage() {
+    void openLocalPath(buildWebConsoleLoginUrl(runtimeState.app.serverBaseUrl));
   }
 
   async function copyDeviceDiagnostics() {
@@ -5278,6 +5286,13 @@ export default function App() {
         </div>
 
         <div className="product-titlebar-actions">
+          <Button
+            size="small"
+            icon={<CreditCardOutlined />}
+            onClick={() => openAccountModal('purchase')}
+          >
+            购买中心
+          </Button>
           {isEnterpriseUnbound ? (
             <span className="tutorial-titlebar-bind-enterprise-target">
               <Button
@@ -6071,6 +6086,10 @@ export default function App() {
           <Typography.Text type="secondary">
             未绑定时可直接使用免费版；绑定企业后，桌面端会自动接入对应企业工作区。
           </Typography.Text>
+          <Space size={8}>
+            <Typography.Link onClick={openEnterpriseLoginPage}>进入企业端</Typography.Link>
+            <Typography.Text type="secondary">用于获取企业绑定码</Typography.Text>
+          </Space>
           {onboardingNotice ? <Typography.Text type="danger">{onboardingNotice}</Typography.Text> : null}
         </Form>
       </Modal>
@@ -6181,7 +6200,17 @@ export default function App() {
     const selectedLegalDocument = accountLegalDocuments.find(
       (document) => document.id === selectedLegalDocumentId
     );
-    const accountModalWidth = accountModal === 'release' ? 860 : accountModal === 'help' ? 760 : 680;
+    const accountModalWidth =
+      accountModal === 'release' || accountModal === 'purchase' ? 860 : accountModal === 'help' ? 760 : 680;
+    const currentPlanCode = authorizedRoleTemplateCatalog.deviceCapacity?.planCode;
+    const purchaseStatus = resolvePurchaseStatus(currentPlanCode, isEnterpriseUnbound);
+    const aiPointBalanceText = isEnterpriseUnbound
+      ? '绑定账号后可查看'
+      : aiPointOverview
+        ? formatAiPoints(aiPointOverview.wallet.availablePoints)
+        : isLoadingAiPointOverview
+          ? '读取中'
+          : '未读取';
 
     return (
       <Modal
@@ -6272,6 +6301,88 @@ export default function App() {
               <Button icon={<InfoCircleOutlined />} onClick={() => void copyDeviceDiagnostics()}>
                 复制诊断信息
               </Button>
+            </Space>
+          </Space>
+        ) : null}
+
+        {accountModal === 'purchase' ? (
+          <Space direction="vertical" size={16} className="account-modal-body">
+            <Descriptions column={1} size="small" bordered>
+              <Descriptions.Item label="当前版本">
+                <Tag color={purchaseStatus.color}>{purchaseStatus.label}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="AI 点数">
+                <Space size={8} wrap>
+                  <Typography.Text>{aiPointBalanceText}</Typography.Text>
+                  {!isEnterpriseUnbound && aiPointOverview && aiPointOverview.wallet.reservedPoints > 0 ? (
+                    <Tag color="orange">冻结 {formatAiPoints(aiPointOverview.wallet.reservedPoints)}</Tag>
+                  ) : null}
+                  {!isEnterpriseUnbound ? (
+                    <Button
+                      size="small"
+                      icon={<ReloadOutlined />}
+                      loading={isLoadingAiPointOverview}
+                      onClick={() => loadAiPointOverview()}
+                    >
+                      刷新
+                    </Button>
+                  ) : null}
+                </Space>
+              </Descriptions.Item>
+              <Descriptions.Item label="购买入口">
+                {isEnterpriseUnbound
+                  ? '请先登录或注册账号，再完成会员和 AI 点数购买。'
+                  : purchaseStatus.isEnterprise
+                    ? '企业套餐和企业 AI 点数由管理员在企业端统一处理。'
+                    : '个人会员和 AI 点数可在购买中心完成。'}
+              </Descriptions.Item>
+            </Descriptions>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+              <Card size="small" title="免费版">
+                <Space direction="vertical" size={8}>
+                  <Typography.Title level={4} style={{ margin: 0 }}>
+                    ¥0
+                  </Typography.Title>
+                  <Typography.Text type="secondary">适合体验基础数字员工。</Typography.Text>
+                  <Tag>当前基础权益</Tag>
+                </Space>
+              </Card>
+              <Card size="small" title="会员版（月付）">
+                <Space direction="vertical" size={8}>
+                  <Typography.Title level={4} style={{ margin: 0 }}>
+                    ¥18 / 月
+                  </Typography.Title>
+                  <Typography.Text type="secondary">适合个人用户使用数字工厂。</Typography.Text>
+                  <Tag color="blue">可搭配月度 AI 点数包</Tag>
+                </Space>
+              </Card>
+              <Card size="small" title="会员版（年付）">
+                <Space direction="vertical" size={8}>
+                  <Typography.Title level={4} style={{ margin: 0 }}>
+                    ¥180 / 年
+                  </Typography.Title>
+                  <Typography.Text type="secondary">适合长期稳定使用。</Typography.Text>
+                  <Tag color="green">年付更省</Tag>
+                </Space>
+              </Card>
+            </div>
+
+            <Card size="small" title="AI 点数">
+              <Space direction="vertical" size={8}>
+                <Typography.Text>月度 AI 点数包：适合每月固定使用，价格更低，到期未用完会过期。</Typography.Text>
+                <Typography.Text>AI 点数充值：适合按需补充，长期有效，100 点 = 1 元。</Typography.Text>
+                <Typography.Text type="secondary">
+                  会员不自动赠送 AI 点数，用户可以在开通会员时一起选择月度 AI 点数包。
+                </Typography.Text>
+              </Space>
+            </Card>
+
+            <Space wrap>
+              <Button type="primary" icon={<GlobalOutlined />} onClick={openEnterpriseLoginPage}>
+                {purchaseStatus.isEnterprise ? '进入企业端' : '登录后购买'}
+              </Button>
+              {aiPointNotice ? <Typography.Text type="secondary">{aiPointNotice}</Typography.Text> : null}
             </Space>
           </Space>
         ) : null}
@@ -15498,6 +15609,7 @@ function sectionMeta(section: SectionKey) {
 function accountModalTitle(modal: AccountModalKey | null) {
   const titles: Record<AccountModalKey, string> = {
     enterprise: '设备信息',
+    purchase: '购买中心',
     help: '帮助中心',
     release: '协议与声明',
     download: '版本与更新',
@@ -15505,6 +15617,53 @@ function accountModalTitle(modal: AccountModalKey | null) {
   };
 
   return modal ? titles[modal] : '';
+}
+
+function resolvePurchaseStatus(planCode: string | undefined, isUnbound: boolean) {
+  if (isUnbound) {
+    return {
+      label: '免费版（未绑定账号）',
+      color: 'default',
+      isEnterprise: false
+    };
+  }
+
+  if (planCode?.startsWith('ENTERPRISE_')) {
+    return {
+      label: '企业版',
+      color: 'green',
+      isEnterprise: true
+    };
+  }
+
+  if (planCode?.startsWith('PERSONAL_MEMBER_')) {
+    return {
+      label: '个人会员',
+      color: 'blue',
+      isEnterprise: false
+    };
+  }
+
+  return {
+    label: '免费版（已绑定账号）',
+    color: 'default',
+    isEnterprise: false
+  };
+}
+
+function buildWebConsoleLoginUrl(serverBaseUrl: string) {
+  try {
+    const url = new URL(serverBaseUrl);
+    if ((url.hostname === '127.0.0.1' || url.hostname === 'localhost') && url.port === '4000') {
+      url.port = '3001';
+    }
+    url.pathname = '/login';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return 'https://workos.qiuaihub.com/login';
+  }
 }
 
 function connectionLabel(state: DesktopRuntimeState['serverConnection']['state']) {
