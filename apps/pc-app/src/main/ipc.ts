@@ -105,7 +105,11 @@ export function registerDesktopIpc() {
     })
   );
   ipcMain.handle(channels.installDesktopUpdate, async (_, request) => installDownloadedDesktopUpdate(request));
-  ipcMain.handle(channels.downloadAndInstallUpdate, () => downloadAndInstallDesktopUpdate());
+  ipcMain.handle(channels.downloadAndInstallUpdate, (event) =>
+    downloadAndInstallDesktopUpdate((progress) => {
+      event.sender.send(channels.updateDownloadProgress, progress);
+    })
+  );
   ipcMain.handle(channels.listAuthorizedRoleTemplates, () => listAuthorizedRoleTemplates());
   ipcMain.handle(channels.syncRuntimeState, async (_, state) => {
     return syncDesktopRuntimeState(state);

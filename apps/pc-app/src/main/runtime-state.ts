@@ -43,13 +43,13 @@ import {
   knowledgeBindingSourceFromId,
   normalizeKnowledgeBindingId
 } from '../shared/knowledge-bindings.js';
-import { resolveDesktopStoragePathInfo } from './storage-paths.js';
+import { prepareDesktopStoragePathInfo } from './storage-paths.js';
 
 const electronApi = (electron as typeof electron & { default?: typeof electron }).default ?? electron;
 const { app } = electronApi;
 
 const defaultServerBaseUrl = 'https://workos.qiuaihub.com';
-const storagePathInfo = resolveDesktopStoragePathInfo({
+const storagePathInfo = prepareDesktopStoragePathInfo({
   isPackaged: app.isPackaged,
   processExecPath: process.execPath,
   homeDir: os.homedir(),
