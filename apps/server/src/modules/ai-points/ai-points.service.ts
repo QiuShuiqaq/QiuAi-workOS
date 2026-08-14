@@ -108,6 +108,13 @@ interface OfficialInvokeProviderResponse {
 }
 
 const qiuaiOfficialProviderName = 'QiuAI官方通道';
+interface OfficialApiCredential {
+  source: 'key_pool' | 'env';
+  apiKey: string;
+  apiKeyId?: string;
+  leaseId?: string;
+}
+
 const defaultTextTimeoutMs = 45_000;
 const defaultImageTimeoutMs = 1_800_000;
 const defaultVideoTimeoutMs = 1_800_000;
@@ -117,6 +124,13 @@ const grsaiPollInitialIntervalMs = 3_000;
 const pollMaxIntervalMs = 20_000;
 const minimaxSubmitTimeoutMs = 30_000;
 const minimaxPollInitialIntervalMs = 8_000;
+const officialRouteBusyRetryMs = 750;
+const officialRouteQueueWaitMsByCapability: Record<OfficialCapability, number> = {
+  TEXT: 10_000,
+  REASONING: 10_000,
+  IMAGE: 60_000,
+  VIDEO: 60_000
+};
 
 @Injectable()
 export class AiPointsService {
@@ -226,8 +240,15 @@ export class AiPointsService {
 
     const device = await this.requireDesktopDevice(workspaceId, deviceToken);
     if (isOfficialResultPollRequest(request)) {
+      let credential: OfficialApiCredential | undefined;
       try {
-        const providerResponse = await this.invokeProvider(route, request);
+        credential = await this.acquireOfficialApiCredential(route, request);
+        const providerResponse = await this.invokeProvider(route, request, credential.apiKey);
+        if (!isPendingGenerationProviderResponse(providerResponse)) {
+          await this.releaseOfficialApiCredential(credential, {
+            status: 'RELEASED'
+          });
+        }
         const wallet = isDatabasePersistenceEnabled()
           ? await this.ensureWallet(workspaceId)
           : undefined;
@@ -245,6 +266,12 @@ export class AiPointsService {
           }
         };
       } catch (error) {
+        if (credential) {
+          await this.releaseOfficialApiCredential(credential, {
+            status: 'FAILED',
+            error
+          });
+        }
         this.logger.error(
           `Official model route poll failed: route=${route.routeKey}, provider=${route.providerId}, model=${route.modelName}`,
           error instanceof Error ? error.stack : String(error)
@@ -261,8 +288,17 @@ export class AiPointsService {
       points: reservedPoints
     });
 
+    let credential: OfficialApiCredential | undefined;
     try {
-      const providerResponse = await this.invokeProvider(route, request);
+      credential = await this.acquireOfficialApiCredential(route, request);
+      const providerResponse = await this.invokeProvider(route, request, credential.apiKey);
+      if (isPendingGenerationProviderResponse(providerResponse)) {
+        await this.attachProviderJobIdToOfficialApiCredential(credential, providerResponse);
+      } else {
+        await this.releaseOfficialApiCredential(credential, {
+          status: 'RELEASED'
+        });
+      }
       const wallet = await this.settlePoints({
         workspaceId,
         desktopDeviceId: device.id,
@@ -284,6 +320,12 @@ export class AiPointsService {
         }
       };
     } catch (error) {
+      if (credential) {
+        await this.releaseOfficialApiCredential(credential, {
+          status: 'FAILED',
+          error
+        });
+      }
       await this.releasePoints({
         workspaceId,
         desktopDeviceId: device.id,
@@ -404,6 +446,400 @@ export class AiPointsService {
       where: { routeKey }
     });
     return route ?? officialModelRouteSeeds.find((item) => item.routeKey === routeKey);
+  }
+
+  private async acquireOfficialApiCredential(
+    route: OfficialRouteRecord,
+    request: OfficialInvokeRequest
+  ): Promise<OfficialApiCredential> {
+    if (isOfficialResultPollRequest(request)) {
+      return this.resolveOfficialPollApiCredential(route, request);
+    }
+
+    if (!isDatabasePersistenceEnabled()) {
+      return this.requireEnvOfficialApiCredential(route);
+    }
+
+    const deadline = Date.now() + officialRouteQueueWaitMsByCapability[route.capability];
+    for (;;) {
+      const credential = await this.tryAcquireOfficialApiCredential(route, request);
+      if (credential) {
+        return credential;
+      }
+
+      if (Date.now() >= deadline) {
+        throw new ServiceUnavailableException({
+          error: {
+            code: 'OFFICIAL_ROUTE_BUSY',
+            message: '官方通道当前繁忙，请稍后重试。'
+          }
+        });
+      }
+
+      await sleep(officialRouteBusyRetryMs);
+    }
+  }
+
+  private async tryAcquireOfficialApiCredential(
+    route: OfficialRouteRecord,
+    request: OfficialInvokeRequest
+  ): Promise<OfficialApiCredential | undefined> {
+    await this.expireOfficialApiKeyLeases();
+
+    const now = new Date();
+    const [totalKeyCount, keys] = await Promise.all([
+      this.prismaService.officialModelApiKey.count({
+        where: {
+          routeKey: route.routeKey
+        }
+      }),
+      this.prismaService.officialModelApiKey.findMany({
+        where: {
+          routeKey: route.routeKey,
+          status: {
+            in: ['ACTIVE', 'COOLDOWN']
+          }
+        },
+        orderBy: [{ currentConcurrency: 'asc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }]
+      })
+    ]);
+
+    if (keys.length === 0) {
+      return totalKeyCount === 0 ? this.requireEnvOfficialApiCredential(route) : undefined;
+    }
+
+    for (const key of keys) {
+      if (key.cooldownUntil && key.cooldownUntil > now) {
+        continue;
+      }
+      const activeLeaseCount = await this.prismaService.officialModelApiKeyLease.count({
+        where: {
+          status: 'ACTIVE',
+          apiKey: {
+            apiKeySecret: key.apiKeySecret
+          }
+        }
+      });
+      if (activeLeaseCount >= key.maxConcurrency) {
+        continue;
+      }
+      if (key.rpmLimit && key.rpmLimit > 0) {
+        const recentSubmissionCount = await this.prismaService.officialModelApiKeyLease.count({
+          where: {
+            apiKey: {
+              apiKeySecret: key.apiKeySecret
+            },
+            acquiredAt: {
+              gte: new Date(now.getTime() - 60_000)
+            }
+          }
+        });
+        if (recentSubmissionCount >= key.rpmLimit) {
+          continue;
+        }
+      }
+
+      const lease = await this.prismaService.$transaction(async (tx) => {
+        const activeLeasesForSecret = await tx.officialModelApiKeyLease.count({
+          where: {
+            status: 'ACTIVE',
+            apiKey: {
+              apiKeySecret: key.apiKeySecret
+            }
+          }
+        });
+        if (activeLeasesForSecret >= key.maxConcurrency) {
+          return undefined;
+        }
+
+        const updated = await tx.officialModelApiKey.updateMany({
+          where: {
+            id: key.id,
+            status: {
+              in: ['ACTIVE', 'COOLDOWN']
+            },
+            currentConcurrency: {
+              lt: key.maxConcurrency
+            },
+            OR: [{ cooldownUntil: null }, { cooldownUntil: { lte: now } }]
+          },
+          data: {
+            currentConcurrency: {
+              increment: 1
+            },
+            status: 'ACTIVE',
+            lastUsedAt: now
+          }
+        });
+        if (updated.count === 0) {
+          return undefined;
+        }
+
+        return tx.officialModelApiKeyLease.create({
+          data: {
+            apiKeyId: key.id,
+            routeKey: route.routeKey,
+            requestKind: request.taskKind ?? route.capability.toLowerCase(),
+            expiresAt: this.resolveOfficialLeaseExpiresAt(route, request, now),
+            metadata: {
+              source: 'official-route'
+            }
+          }
+        });
+      });
+
+      if (lease) {
+        return {
+          source: 'key_pool',
+          apiKey: key.apiKeySecret,
+          apiKeyId: key.id,
+          leaseId: lease.id
+        };
+      }
+    }
+
+    return undefined;
+  }
+
+  private async resolveOfficialPollApiCredential(
+    route: OfficialRouteRecord,
+    request: OfficialInvokeRequest
+  ): Promise<OfficialApiCredential> {
+    if (!isDatabasePersistenceEnabled()) {
+      return this.requireEnvOfficialApiCredential(route);
+    }
+
+    const providerJobId = request.imageGeneration?.providerJobId?.trim();
+    if (providerJobId) {
+      const lease = await this.prismaService.officialModelApiKeyLease.findFirst({
+        where: {
+          routeKey: route.routeKey,
+          providerJobId,
+          status: 'ACTIVE'
+        },
+        include: {
+          apiKey: true
+        },
+        orderBy: {
+          acquiredAt: 'desc'
+        }
+      });
+      if (lease && lease.apiKey.status !== 'DISABLED') {
+        return {
+          source: 'key_pool',
+          apiKey: lease.apiKey.apiKeySecret,
+          apiKeyId: lease.apiKeyId,
+          leaseId: lease.id
+        };
+      }
+    }
+
+    const fallbackKey = await this.prismaService.officialModelApiKey.findFirst({
+      where: {
+        routeKey: route.routeKey,
+        status: {
+          in: ['ACTIVE', 'COOLDOWN']
+        },
+        OR: [{ cooldownUntil: null }, { cooldownUntil: { lte: new Date() } }]
+      },
+      orderBy: [{ currentConcurrency: 'asc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }]
+    });
+    if (fallbackKey) {
+      return {
+        source: 'key_pool',
+        apiKey: fallbackKey.apiKeySecret,
+        apiKeyId: fallbackKey.id
+      };
+    }
+
+    const totalKeyCount = await this.prismaService.officialModelApiKey.count({
+      where: {
+        routeKey: route.routeKey
+      }
+    });
+    if (totalKeyCount === 0) {
+      return this.requireEnvOfficialApiCredential(route);
+    }
+
+    throw new ServiceUnavailableException({
+      error: {
+        code: 'OFFICIAL_ROUTE_BUSY',
+        message: '官方通道当前繁忙，请稍后重试。'
+      }
+    });
+  }
+
+  private requireEnvOfficialApiCredential(route: OfficialRouteRecord): OfficialApiCredential {
+    const apiKey = process.env[route.apiKeyEnvName]?.trim();
+    if (!apiKey) {
+      throw new ServiceUnavailableException({
+        error: {
+          code: 'OFFICIAL_API_KEY_NOT_CONFIGURED',
+          message: '官方通道暂未配置可用线路。'
+        }
+      });
+    }
+
+    return {
+      source: 'env',
+      apiKey
+    };
+  }
+
+  private resolveOfficialLeaseExpiresAt(
+    route: OfficialRouteRecord,
+    request: OfficialInvokeRequest,
+    now: Date
+  ): Date {
+    const timeoutMs = request.timeoutMs ??
+      (route.capability === 'VIDEO'
+        ? defaultVideoTimeoutMs
+        : route.capability === 'IMAGE'
+          ? defaultImageTimeoutMs
+          : defaultTextTimeoutMs);
+
+    return new Date(now.getTime() + timeoutMs + 5 * 60_000);
+  }
+
+  private async attachProviderJobIdToOfficialApiCredential(
+    credential: OfficialApiCredential,
+    providerResponse: OfficialInvokeProviderResponse
+  ): Promise<void> {
+    if (!credential.leaseId) {
+      return;
+    }
+
+    const providerJobId = readProviderJobIdFromResponse(providerResponse);
+    if (!providerJobId) {
+      return;
+    }
+
+    await this.prismaService.officialModelApiKeyLease.updateMany({
+      where: {
+        id: credential.leaseId,
+        status: 'ACTIVE'
+      },
+      data: {
+        providerJobId,
+        metadata: {
+          source: 'official-route',
+          providerJobId
+        }
+      }
+    });
+  }
+
+  private async releaseOfficialApiCredential(
+    credential: OfficialApiCredential,
+    input: {
+      status: 'RELEASED' | 'FAILED';
+      error?: unknown;
+    }
+  ): Promise<void> {
+    if (!credential.leaseId || !credential.apiKeyId) {
+      return;
+    }
+
+    const now = new Date();
+    const updatedLease = await this.prismaService.officialModelApiKeyLease.updateMany({
+      where: {
+        id: credential.leaseId,
+        status: 'ACTIVE'
+      },
+      data: {
+        status: input.status,
+        releasedAt: now,
+        metadata: {
+          source: 'official-route',
+          releaseReason: input.status.toLowerCase()
+        }
+      }
+    });
+    if (updatedLease.count === 0) {
+      return;
+    }
+
+    const errorMessage = input.error ? truncateText(readErrorMessage(input.error), 500) : undefined;
+    const shouldCooldown = input.status === 'FAILED' && shouldCooldownOfficialApiKey(input.error);
+    const keyUpdateData: Prisma.OfficialModelApiKeyUpdateManyMutationInput = {
+      currentConcurrency: {
+        decrement: 1
+      },
+      ...(input.status === 'FAILED'
+        ? {
+            failureCount: {
+              increment: 1
+            },
+            lastError: errorMessage,
+            ...(shouldCooldown
+              ? {
+                  cooldownUntil: new Date(now.getTime() + officialKeyCooldownMs(input.error)),
+                  status: 'COOLDOWN' as const
+                }
+              : {})
+          }
+        : {
+            failureCount: 0,
+            lastError: null,
+            cooldownUntil: null,
+            status: 'ACTIVE' as const
+          })
+    };
+    await this.prismaService.officialModelApiKey.updateMany({
+      where: {
+        id: credential.apiKeyId,
+        currentConcurrency: {
+          gt: 0
+        }
+      },
+      data: keyUpdateData
+    });
+  }
+
+  private async expireOfficialApiKeyLeases(routeKey?: string): Promise<void> {
+    const expiredLeases = await this.prismaService.officialModelApiKeyLease.findMany({
+      where: {
+        ...(routeKey ? { routeKey } : {}),
+        status: 'ACTIVE',
+        expiresAt: {
+          lt: new Date()
+        }
+      },
+      select: {
+        id: true,
+        apiKeyId: true
+      },
+      take: 100
+    });
+
+    for (const lease of expiredLeases) {
+      const updatedLease = await this.prismaService.officialModelApiKeyLease.updateMany({
+        where: {
+          id: lease.id,
+          status: 'ACTIVE'
+        },
+        data: {
+          status: 'EXPIRED',
+          releasedAt: new Date()
+        }
+      });
+      if (updatedLease.count > 0) {
+        await this.prismaService.officialModelApiKey.updateMany({
+          where: {
+            id: lease.apiKeyId,
+            currentConcurrency: {
+              gt: 0
+            }
+          },
+          data: {
+            currentConcurrency: {
+              decrement: 1
+            },
+            lastError: 'Official route lease expired before release.'
+          }
+        });
+      }
+    }
   }
 
   private async ensureWallet(workspaceId: string) {
@@ -1067,13 +1503,9 @@ export class AiPointsService {
 
   private async invokeProvider(
     route: OfficialRouteRecord,
-    request: OfficialInvokeRequest
+    request: OfficialInvokeRequest,
+    apiKey: string
   ): Promise<OfficialInvokeProviderResponse> {
-    const apiKey = process.env[route.apiKeyEnvName]?.trim();
-    if (!apiKey) {
-      throw new OfficialProviderUnavailableError('Official API key is not configured.');
-    }
-
     const mode = readProviderMode(route.providerConfig);
     if (mode === 'openai_chat') {
       return this.invokeOpenAiChat(route, request, apiKey);
@@ -1514,6 +1946,40 @@ function isOfficialResultPollRequest(request: OfficialInvokeRequest): boolean {
   return request.imageGeneration?.asyncMode === 'poll_once';
 }
 
+function isPendingGenerationProviderResponse(response: OfficialInvokeProviderResponse): boolean {
+  const artifacts = response.artifacts ?? [];
+  if (artifacts.some((artifact) => artifact.metadata?.pending === true)) {
+    return true;
+  }
+  if (artifacts.some((artifact) => artifact.providerJobId && !artifact.remoteUrl && !artifact.localPath)) {
+    return true;
+  }
+
+  const content = parseJsonBody(response.content);
+  const record = readRecord(content);
+  return record?.pending === true || Boolean(record?.providerJobId && !record?.remoteUrl);
+}
+
+function readProviderJobIdFromResponse(response: OfficialInvokeProviderResponse): string | undefined {
+  for (const artifact of response.artifacts ?? []) {
+    const providerJobId = artifact.providerJobId?.trim();
+    if (providerJobId) {
+      return providerJobId;
+    }
+    const metadataJobId = typeof artifact.metadata?.providerJobId === 'string'
+      ? artifact.metadata.providerJobId.trim()
+      : '';
+    if (metadataJobId) {
+      return metadataJobId;
+    }
+  }
+
+  const content = parseJsonBody(response.content);
+  const record = readRecord(content);
+  const providerJobId = typeof record?.providerJobId === 'string' ? record.providerJobId.trim() : '';
+  return providerJobId || undefined;
+}
+
 function userFacingRouteModelName(route: OfficialRouteRecord): string {
   return route.displayName.replace(/^官方通道\s*[·路]\s*/, '').trim() || route.displayName;
 }
@@ -1626,6 +2092,44 @@ function sanitizeOfficialProviderError(error: unknown) {
       message: '官方通道调用失败，请稍后重试或切换其他线路。'
     }
   });
+}
+
+function shouldCooldownOfficialApiKey(error: unknown): boolean {
+  if (!(error instanceof OfficialProviderUnavailableError)) {
+    return false;
+  }
+
+  const message = readErrorMessage(error).toLowerCase();
+  return [
+    '429',
+    'too many',
+    'rate limit',
+    'ratelimit',
+    'concurrency',
+    'busy',
+    'timeout',
+    'timed out',
+    'aborted',
+    'service unavailable',
+    '503',
+    'insufficient balance',
+    'insufficient_balance',
+    '402'
+  ].some((pattern) => message.includes(pattern));
+}
+
+function officialKeyCooldownMs(error: unknown): number {
+  const message = readErrorMessage(error).toLowerCase();
+  if (message.includes('insufficient balance') || message.includes('insufficient_balance') || message.includes('402')) {
+    return 5 * 60_000;
+  }
+  if (message.includes('429') || message.includes('rate limit') || message.includes('ratelimit')) {
+    return 2 * 60_000;
+  }
+  if (message.includes('timeout') || message.includes('timed out') || message.includes('aborted')) {
+    return 60_000;
+  }
+  return 90_000;
 }
 
 async function fetchJson(endpoint: string, init: RequestInit, label: string): Promise<{ body: unknown }> {
@@ -2141,6 +2645,10 @@ function parseJsonBody(bodyText: string): unknown {
 
 function readErrorMessage(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
+function truncateText(value: string, maxLength: number): string {
+  return value.length > maxLength ? value.slice(0, maxLength) : value;
 }
 
 function sleep(ms: number): Promise<void> {

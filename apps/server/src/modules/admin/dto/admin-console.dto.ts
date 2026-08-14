@@ -67,6 +67,200 @@ export class ListAdminPlansResponseDto {
   data!: AdminPlanDetailDto[];
 }
 
+export class AdminOfficialModelApiKeySummaryDto {
+  @ApiProperty({ example: 'api-key-id' })
+  id!: string;
+
+  @ApiProperty({ example: 'official-image-1' })
+  routeKey!: string;
+
+  @ApiProperty({ example: '图片线路一 · 主 key' })
+  label!: string;
+
+  @ApiProperty({ example: 'grsai' })
+  providerId!: string;
+
+  @ApiProperty({ example: 'abcd' })
+  apiKeyLastFour!: string;
+
+  @ApiProperty({ enum: ['active', 'disabled', 'cooldown'] })
+  status!: 'active' | 'disabled' | 'cooldown';
+
+  @ApiProperty({ example: 16 })
+  maxConcurrency!: number;
+
+  @ApiProperty({ example: 3 })
+  currentConcurrency!: number;
+
+  @ApiPropertyOptional({ example: 16 })
+  rpmLimit?: number;
+
+  @ApiPropertyOptional({ example: '2026-08-14T00:00:00.000Z' })
+  cooldownUntil?: string;
+
+  @ApiProperty({ example: 0 })
+  failureCount!: number;
+
+  @ApiPropertyOptional({ example: '2026-08-14T00:00:00.000Z' })
+  lastUsedAt?: string;
+
+  @ApiPropertyOptional({ example: 'Provider timeout.' })
+  lastError?: string;
+
+  @ApiProperty({ example: 100 })
+  sortOrder!: number;
+
+  @ApiProperty({ example: '2026-08-14T00:00:00.000Z' })
+  createdAt!: string;
+
+  @ApiProperty({ example: '2026-08-14T00:00:00.000Z' })
+  updatedAt!: string;
+}
+
+export class AdminOfficialModelRouteSummaryDto {
+  @ApiProperty({ example: 'official-image-1' })
+  routeKey!: string;
+
+  @ApiProperty({ example: '官方通道 · 图片线路一' })
+  displayName!: string;
+
+  @ApiProperty({ enum: ['text', 'reasoning', 'image', 'video'] })
+  capability!: 'text' | 'reasoning' | 'image' | 'video';
+
+  @ApiProperty({ enum: ['active', 'disabled'] })
+  status!: 'active' | 'disabled';
+
+  @ApiProperty({ example: 30 })
+  pointPrice!: number;
+
+  @ApiProperty({ example: 'grsai' })
+  providerId!: string;
+
+  @ApiProperty({ example: 'GRSAI' })
+  providerName!: string;
+
+  @ApiProperty({ example: 'gpt-image-2' })
+  modelName!: string;
+
+  @ApiProperty({ example: 'https://grsai.dakka.com.cn/v1' })
+  apiBaseUrl!: string;
+
+  @ApiProperty({ example: 'QIUAI_OFFICIAL_GRSAI_API_KEY' })
+  apiKeyEnvName!: string;
+
+  @ApiProperty({ example: 30 })
+  sortOrder!: number;
+
+  @ApiProperty({ example: 1 })
+  activeKeyCount!: number;
+
+  @ApiProperty({ example: 16 })
+  totalMaxConcurrency!: number;
+
+  @ApiProperty({ example: 3 })
+  currentConcurrency!: number;
+
+  @ApiProperty({ type: [AdminOfficialModelApiKeySummaryDto] })
+  apiKeys!: AdminOfficialModelApiKeySummaryDto[];
+}
+
+export class ListAdminOfficialModelRoutesResponseDto {
+  @ApiProperty({ type: [AdminOfficialModelRouteSummaryDto] })
+  data!: AdminOfficialModelRouteSummaryDto[];
+}
+
+export class CreateAdminOfficialModelApiKeyRequestDto {
+  @ApiPropertyOptional({ example: '图片线路一 · 主 key' })
+  @IsOptional()
+  @IsString()
+  label?: string;
+
+  @ApiProperty({ example: 'sk-...' })
+  @IsString()
+  @MinLength(1)
+  apiKey!: string;
+
+  @ApiPropertyOptional({ enum: ['active', 'disabled', 'cooldown'] })
+  @IsOptional()
+  @IsIn(['active', 'disabled', 'cooldown'])
+  status?: 'active' | 'disabled' | 'cooldown';
+
+  @ApiPropertyOptional({ example: 16 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  @Type(() => Number)
+  maxConcurrency?: number;
+
+  @ApiPropertyOptional({ example: 16, nullable: true })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10000)
+  @Type(() => Number)
+  rpmLimit?: number | null;
+
+  @ApiPropertyOptional({ example: 100 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100000)
+  @Type(() => Number)
+  sortOrder?: number;
+}
+
+export class CreateAdminOfficialModelApiKeyResponseDto {
+  @ApiProperty({ type: AdminOfficialModelApiKeySummaryDto })
+  data!: AdminOfficialModelApiKeySummaryDto;
+}
+
+export class UpdateAdminOfficialModelApiKeyRequestDto {
+  @ApiPropertyOptional({ example: '图片线路一 · 备用 key' })
+  @IsOptional()
+  @IsString()
+  label?: string;
+
+  @ApiPropertyOptional({ example: 'sk-...' })
+  @IsOptional()
+  @IsString()
+  apiKey?: string;
+
+  @ApiPropertyOptional({ enum: ['active', 'disabled', 'cooldown'] })
+  @IsOptional()
+  @IsIn(['active', 'disabled', 'cooldown'])
+  status?: 'active' | 'disabled' | 'cooldown';
+
+  @ApiPropertyOptional({ example: 16 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  @Type(() => Number)
+  maxConcurrency?: number;
+
+  @ApiPropertyOptional({ example: 16, nullable: true })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10000)
+  @Type(() => Number)
+  rpmLimit?: number | null;
+
+  @ApiPropertyOptional({ example: 100 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100000)
+  @Type(() => Number)
+  sortOrder?: number;
+}
+
+export class UpdateAdminOfficialModelApiKeyResponseDto {
+  @ApiProperty({ type: AdminOfficialModelApiKeySummaryDto })
+  data!: AdminOfficialModelApiKeySummaryDto;
+}
+
 export class DesktopReleaseSummaryDto {
   @ApiProperty({ example: 'release-id' })
   id!: string;

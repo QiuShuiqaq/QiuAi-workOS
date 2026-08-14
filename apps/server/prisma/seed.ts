@@ -859,11 +859,89 @@ async function seedOfficialModelRoutes() {
   }
 }
 
+async function seedOfficialModelApiKeys() {
+  for (const route of officialModelRouteSeeds) {
+    const apiKey = process.env[route.apiKeyEnvName]?.trim();
+    if (!apiKey) {
+      continue;
+    }
+
+    const existingId = await findOfficialModelApiKeyId(route.routeKey, route.apiKeyEnvName);
+    const data = {
+      label: `${route.displayName} · env`,
+      providerId: route.providerId,
+      apiKeySecret: apiKey,
+      apiKeyLastFour: maskApiKeyLastFour(apiKey),
+      maxConcurrency: defaultOfficialApiKeyConcurrency(route.providerId),
+      rpmLimit: defaultOfficialApiKeyRpmLimit(route.providerId),
+      metadata: {
+        source: 'env',
+        envName: route.apiKeyEnvName
+      }
+    };
+
+    if (existingId) {
+      await prisma.officialModelApiKey.update({
+        where: {
+          id: existingId
+        },
+        data
+      });
+    } else {
+      await prisma.officialModelApiKey.create({
+        data: {
+          routeKey: route.routeKey,
+          ...data
+        }
+      });
+    }
+  }
+}
+
+async function findOfficialModelApiKeyId(routeKey: string, envName: string) {
+  const existing = await prisma.officialModelApiKey.findFirst({
+    where: {
+      routeKey,
+      metadata: {
+        path: ['envName'],
+        equals: envName
+      }
+    },
+    select: {
+      id: true
+    }
+  });
+
+  return existing?.id;
+}
+
+function maskApiKeyLastFour(apiKey: string) {
+  return apiKey.slice(-4) || '****';
+}
+
+function defaultOfficialApiKeyConcurrency(providerId: string) {
+  switch (providerId) {
+    case 'deepseek':
+      return 500;
+    case 'grsai':
+      return 16;
+    case 'minimax':
+      return 4;
+    default:
+      return 1;
+  }
+}
+
+function defaultOfficialApiKeyRpmLimit(providerId: string) {
+  return providerId === 'minimax' ? 16 : undefined;
+}
+
 async function main() {
   if (syncManagedCatalogsOnly) {
     await seedAssetDefinitions();
     await seedRoleTemplates();
     await seedOfficialModelRoutes();
+    await seedOfficialModelApiKeys();
     return;
   }
 
@@ -876,6 +954,7 @@ async function main() {
   await seedAssetDefinitions();
   await seedRoleTemplates();
   await seedOfficialModelRoutes();
+  await seedOfficialModelApiKeys();
 }
 
 main()

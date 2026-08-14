@@ -56,6 +56,77 @@ export interface UpdateAdminPlanResponse {
   data: AdminPlanDetail;
 }
 
+export type AdminOfficialModelRouteCapability = 'text' | 'reasoning' | 'image' | 'video';
+export type AdminOfficialModelRouteStatus = 'active' | 'disabled';
+export type AdminOfficialModelApiKeyStatus = 'active' | 'disabled' | 'cooldown';
+
+export interface AdminOfficialModelApiKeySummary {
+  id: string;
+  routeKey: string;
+  label: string;
+  providerId: string;
+  apiKeyLastFour: string;
+  status: AdminOfficialModelApiKeyStatus;
+  maxConcurrency: number;
+  currentConcurrency: number;
+  rpmLimit?: number;
+  cooldownUntil?: string;
+  failureCount: number;
+  lastUsedAt?: string;
+  lastError?: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminOfficialModelRouteSummary {
+  routeKey: string;
+  displayName: string;
+  capability: AdminOfficialModelRouteCapability;
+  status: AdminOfficialModelRouteStatus;
+  pointPrice: number;
+  providerId: string;
+  providerName: string;
+  modelName: string;
+  apiBaseUrl: string;
+  apiKeyEnvName: string;
+  sortOrder: number;
+  activeKeyCount: number;
+  totalMaxConcurrency: number;
+  currentConcurrency: number;
+  apiKeys: AdminOfficialModelApiKeySummary[];
+}
+
+export interface ListAdminOfficialModelRoutesResponse {
+  data: AdminOfficialModelRouteSummary[];
+}
+
+export interface CreateAdminOfficialModelApiKeyRequest {
+  label?: string;
+  apiKey: string;
+  status?: AdminOfficialModelApiKeyStatus;
+  maxConcurrency?: number;
+  rpmLimit?: number | null;
+  sortOrder?: number;
+}
+
+export interface CreateAdminOfficialModelApiKeyResponse {
+  data: AdminOfficialModelApiKeySummary;
+}
+
+export interface UpdateAdminOfficialModelApiKeyRequest {
+  label?: string;
+  apiKey?: string;
+  status?: AdminOfficialModelApiKeyStatus;
+  maxConcurrency?: number;
+  rpmLimit?: number | null;
+  sortOrder?: number;
+}
+
+export interface UpdateAdminOfficialModelApiKeyResponse {
+  data: AdminOfficialModelApiKeySummary;
+}
+
 export interface AdminWorkspaceSummary {
   id: string;
   tenantId: string;

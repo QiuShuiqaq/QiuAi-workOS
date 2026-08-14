@@ -28,6 +28,8 @@ import { buildInvitationUrl, createInvitationToken, hashInvitationToken } from '
 import type { CurrentAccountResponseDto } from '../workspace/dto/current-account-response.dto';
 import {
   AdminPlanDetailDto,
+  AdminOfficialModelApiKeySummaryDto,
+  AdminOfficialModelRouteSummaryDto,
   AdminWorkspaceDetailDto,
   AdminWorkspaceInvitationSummaryDto,
   AdminWorkspaceSummaryDto,
@@ -35,6 +37,8 @@ import {
   AdjustAdminWorkspaceAiPointsRequestDto,
   AdjustAdminWorkspaceAiPointsResponseDto,
   CancelAdminWorkspaceInvitationResponseDto,
+  CreateAdminOfficialModelApiKeyRequestDto,
+  CreateAdminOfficialModelApiKeyResponseDto,
   CreateAdminDesktopReleaseRequestDto,
   CreateAdminDesktopReleaseResponseDto,
   CreateAdminDesktopBindingCodeRequestDto,
@@ -55,6 +59,7 @@ import {
   ListAdminDesktopReleasesResponseDto,
   ListAdminIssueMessagesQueryDto,
   ListAdminIssueMessagesResponseDto,
+  ListAdminOfficialModelRoutesResponseDto,
   ListAdminPlansResponseDto,
   ListAdminWorkspacesQueryDto,
   ListAdminWorkspacesResponseDto,
@@ -62,6 +67,8 @@ import {
   RevokeAdminDesktopDeviceResponseDto,
   UpdateAdminIssueMessageRequestDto,
   UpdateAdminIssueMessageResponseDto,
+  UpdateAdminOfficialModelApiKeyRequestDto,
+  UpdateAdminOfficialModelApiKeyResponseDto,
   UpdateAdminDesktopReleaseRequestDto,
   UpdateAdminDesktopReleaseResponseDto,
   UpdateAdminWorkspaceStatusRequestDto,
@@ -401,6 +408,133 @@ export class AdminService {
 
     return {
       data: this.toAdminPlanDetail(updated)
+    };
+  }
+
+  async listOfficialModelRoutes(cookieHeader?: string): Promise<ListAdminOfficialModelRoutesResponseDto> {
+    await this.requireAdminOperator(cookieHeader);
+    this.requireDatabaseMode();
+
+    const routes = await this.prismaService.officialModelRoute.findMany({
+      include: {
+        apiKeys: {
+          orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
+        }
+      },
+      orderBy: [{ sortOrder: 'asc' }, { routeKey: 'asc' }]
+    });
+
+    return {
+      data: routes.map((route) => this.toAdminOfficialModelRouteSummary(route))
+    };
+  }
+
+  async createOfficialModelApiKey(
+    routeKey: string,
+    input: CreateAdminOfficialModelApiKeyRequestDto,
+    cookieHeader?: string
+  ): Promise<CreateAdminOfficialModelApiKeyResponseDto> {
+    const operator = await this.requireAdminOperator(cookieHeader);
+    this.requireDatabaseMode();
+
+    const normalizedRouteKey = routeKey.trim();
+    const route = await this.prismaService.officialModelRoute.findUnique({
+      where: { routeKey: normalizedRouteKey }
+    });
+    if (!route) {
+      throw this.officialRouteNotFound(normalizedRouteKey);
+    }
+
+    const apiKeySecret = this.requireOfficialApiKeySecret(input.apiKey);
+    const created = await this.prismaService.$transaction(async (tx) => {
+      const key = await tx.officialModelApiKey.create({
+        data: {
+          routeKey: route.routeKey,
+          label: input.label?.trim() || `${route.displayName} · key`,
+          providerId: route.providerId,
+          apiKeySecret,
+          apiKeyLastFour: this.maskOfficialApiKeyLastFour(apiKeySecret),
+          status: this.toOfficialApiKeyStatus(input.status) ?? 'ACTIVE',
+          maxConcurrency: input.maxConcurrency ?? this.defaultOfficialApiKeyConcurrency(route.providerId),
+          rpmLimit: this.normalizeOfficialRpmLimit(
+            input.rpmLimit === undefined ? this.defaultOfficialApiKeyRpmLimit(route.providerId) : input.rpmLimit
+          ),
+          sortOrder: input.sortOrder ?? 1000,
+          metadata: {
+            source: 'admin'
+          }
+        }
+      });
+
+      await this.recordAdminAction(tx, {
+        operatorAccountId: operator.account.id,
+        action: 'CREATE_OFFICIAL_MODEL_API_KEY',
+        targetType: 'official_model_api_key',
+        targetId: key.id,
+        summary: `Created official model API key for ${route.routeKey}`,
+        metadata: {
+          routeKey: route.routeKey,
+          providerId: route.providerId,
+          apiKeyLastFour: key.apiKeyLastFour,
+          maxConcurrency: key.maxConcurrency,
+          rpmLimit: key.rpmLimit
+        }
+      });
+
+      return key;
+    });
+
+    return {
+      data: this.toAdminOfficialModelApiKeySummary(created)
+    };
+  }
+
+  async updateOfficialModelApiKey(
+    apiKeyId: string,
+    input: UpdateAdminOfficialModelApiKeyRequestDto,
+    cookieHeader?: string
+  ): Promise<UpdateAdminOfficialModelApiKeyResponseDto> {
+    const operator = await this.requireAdminOperator(cookieHeader);
+    this.requireDatabaseMode();
+
+    const id = apiKeyId.trim();
+    const current = await this.prismaService.officialModelApiKey.findUnique({
+      where: { id },
+      include: { route: true }
+    });
+    if (!current) {
+      throw this.officialApiKeyNotFound(id);
+    }
+
+    const data = this.buildOfficialApiKeyUpdateData(input);
+    const updated = await this.prismaService.$transaction(async (tx) => {
+      const key = await tx.officialModelApiKey.update({
+        where: { id },
+        data
+      });
+
+      await this.recordAdminAction(tx, {
+        operatorAccountId: operator.account.id,
+        action: 'UPDATE_OFFICIAL_MODEL_API_KEY',
+        targetType: 'official_model_api_key',
+        targetId: key.id,
+        summary: `Updated official model API key for ${current.routeKey}`,
+        metadata: {
+          routeKey: current.routeKey,
+          providerId: current.providerId,
+          apiKeyLastFour: key.apiKeyLastFour,
+          status: key.status,
+          maxConcurrency: key.maxConcurrency,
+          rpmLimit: key.rpmLimit,
+          replacedSecret: Boolean(input.apiKey?.trim())
+        }
+      });
+
+      return key;
+    });
+
+    return {
+      data: this.toAdminOfficialModelApiKeySummary(updated)
     };
   }
 
@@ -2039,6 +2173,105 @@ export class AdminService {
     return data;
   }
 
+  private buildOfficialApiKeyUpdateData(input: UpdateAdminOfficialModelApiKeyRequestDto): Prisma.OfficialModelApiKeyUpdateInput {
+    const data: Prisma.OfficialModelApiKeyUpdateInput = {};
+
+    if (input.label !== undefined) {
+      const label = input.label.trim();
+      if (!label) {
+        throw new BadRequestException({
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'API key label cannot be empty.'
+          }
+        });
+      }
+      data.label = label;
+    }
+
+    if (input.apiKey !== undefined) {
+      const apiKeySecret = this.requireOfficialApiKeySecret(input.apiKey);
+      data.apiKeySecret = apiKeySecret;
+      data.apiKeyLastFour = this.maskOfficialApiKeyLastFour(apiKeySecret);
+    }
+
+    const status = this.toOfficialApiKeyStatus(input.status);
+    if (status) {
+      data.status = status;
+      if (status === 'ACTIVE' || status === 'DISABLED') {
+        data.cooldownUntil = null;
+      }
+      if (status === 'COOLDOWN') {
+        data.cooldownUntil = new Date(Date.now() + 60_000);
+      }
+    }
+
+    if (input.maxConcurrency !== undefined) {
+      data.maxConcurrency = input.maxConcurrency;
+    }
+
+    if (input.rpmLimit !== undefined) {
+      data.rpmLimit = this.normalizeOfficialRpmLimit(input.rpmLimit);
+    }
+
+    if (input.sortOrder !== undefined) {
+      data.sortOrder = input.sortOrder;
+    }
+
+    return data;
+  }
+
+  private requireOfficialApiKeySecret(value: string | undefined): string {
+    const apiKey = value?.trim() ?? '';
+    if (!apiKey) {
+      throw new BadRequestException({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'API key cannot be empty.'
+        }
+      });
+    }
+    return apiKey;
+  }
+
+  private toOfficialApiKeyStatus(value: string | undefined): 'ACTIVE' | 'DISABLED' | 'COOLDOWN' | undefined {
+    if (value === 'active') {
+      return 'ACTIVE';
+    }
+    if (value === 'disabled') {
+      return 'DISABLED';
+    }
+    if (value === 'cooldown') {
+      return 'COOLDOWN';
+    }
+    return undefined;
+  }
+
+  private normalizeOfficialRpmLimit(value: number | null | undefined): number | null {
+    return value && value > 0 ? value : null;
+  }
+
+  private maskOfficialApiKeyLastFour(apiKey: string): string {
+    return apiKey.slice(-4) || '****';
+  }
+
+  private defaultOfficialApiKeyConcurrency(providerId: string): number {
+    switch (providerId) {
+      case 'deepseek':
+        return 500;
+      case 'grsai':
+        return 16;
+      case 'minimax':
+        return 4;
+      default:
+        return 1;
+    }
+  }
+
+  private defaultOfficialApiKeyRpmLimit(providerId: string): number | undefined {
+    return providerId === 'minimax' ? 16 : undefined;
+  }
+
   private normalizeEntitlementInputs(input: UpdateAdminPlanRequestDto['entitlements']) {
     const entitlements = input ?? [];
     const seen = new Set<string>();
@@ -2659,6 +2892,95 @@ export class AdminService {
     };
   }
 
+  private toAdminOfficialModelRouteSummary(route: {
+    routeKey: string;
+    displayName: string;
+    capability: string;
+    status: string;
+    pointPrice: number;
+    providerId: string;
+    providerName: string;
+    modelName: string;
+    apiBaseUrl: string;
+    apiKeyEnvName: string;
+    sortOrder: number;
+    apiKeys: Array<{
+      id: string;
+      routeKey: string;
+      label: string;
+      providerId: string;
+      apiKeyLastFour: string;
+      status: string;
+      maxConcurrency: number;
+      currentConcurrency: number;
+      rpmLimit: number | null;
+      cooldownUntil: Date | null;
+      failureCount: number;
+      lastUsedAt: Date | null;
+      lastError: string | null;
+      sortOrder: number;
+      createdAt: Date;
+      updatedAt: Date;
+    }>;
+  }): AdminOfficialModelRouteSummaryDto {
+    const activeKeys = route.apiKeys.filter((key) => key.status !== 'DISABLED');
+    return {
+      routeKey: route.routeKey,
+      displayName: route.displayName,
+      capability: route.capability.toLowerCase() as AdminOfficialModelRouteSummaryDto['capability'],
+      status: route.status.toLowerCase() as AdminOfficialModelRouteSummaryDto['status'],
+      pointPrice: route.pointPrice,
+      providerId: route.providerId,
+      providerName: route.providerName,
+      modelName: route.modelName,
+      apiBaseUrl: route.apiBaseUrl,
+      apiKeyEnvName: route.apiKeyEnvName,
+      sortOrder: route.sortOrder,
+      activeKeyCount: activeKeys.length,
+      totalMaxConcurrency: activeKeys.reduce((total, key) => total + key.maxConcurrency, 0),
+      currentConcurrency: activeKeys.reduce((total, key) => total + key.currentConcurrency, 0),
+      apiKeys: route.apiKeys.map((key) => this.toAdminOfficialModelApiKeySummary(key))
+    };
+  }
+
+  private toAdminOfficialModelApiKeySummary(key: {
+    id: string;
+    routeKey: string;
+    label: string;
+    providerId: string;
+    apiKeyLastFour: string;
+    status: string;
+    maxConcurrency: number;
+    currentConcurrency: number;
+    rpmLimit: number | null;
+    cooldownUntil: Date | null;
+    failureCount: number;
+    lastUsedAt: Date | null;
+    lastError: string | null;
+    sortOrder: number;
+    createdAt: Date;
+    updatedAt: Date;
+  }): AdminOfficialModelApiKeySummaryDto {
+    return {
+      id: key.id,
+      routeKey: key.routeKey,
+      label: key.label,
+      providerId: key.providerId,
+      apiKeyLastFour: key.apiKeyLastFour,
+      status: key.status.toLowerCase() as AdminOfficialModelApiKeySummaryDto['status'],
+      maxConcurrency: key.maxConcurrency,
+      currentConcurrency: key.currentConcurrency,
+      rpmLimit: key.rpmLimit ?? undefined,
+      cooldownUntil: key.cooldownUntil?.toISOString(),
+      failureCount: key.failureCount,
+      lastUsedAt: key.lastUsedAt?.toISOString(),
+      lastError: key.lastError ?? undefined,
+      sortOrder: key.sortOrder,
+      createdAt: key.createdAt.toISOString(),
+      updatedAt: key.updatedAt.toISOString()
+    };
+  }
+
   private toDesktopReleaseSummary(release: DesktopReleaseRecord) {
     return {
       id: release.id,
@@ -3052,6 +3374,26 @@ export class AdminService {
         code: 'NOT_FOUND',
         message: 'Plan was not found.',
         details: { planCode }
+      }
+    });
+  }
+
+  private officialRouteNotFound(routeKey: string) {
+    return new NotFoundException({
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Official model route was not found.',
+        details: { routeKey }
+      }
+    });
+  }
+
+  private officialApiKeyNotFound(apiKeyId: string) {
+    return new NotFoundException({
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Official model API key was not found.',
+        details: { apiKeyId }
       }
     });
   }

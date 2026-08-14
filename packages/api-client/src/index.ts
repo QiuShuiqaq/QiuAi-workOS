@@ -2,6 +2,8 @@ import type {
   AuthSessionResponse,
   CreateAdminAssetDefinitionRequest,
   CreateAdminAssetDefinitionResponse,
+  CreateAdminOfficialModelApiKeyRequest,
+  CreateAdminOfficialModelApiKeyResponse,
   CreateBillingOrderRequest,
   CreateBillingOrderResponse,
   GetReferralOverviewResponse,
@@ -61,6 +63,7 @@ import type {
   ListAdminDesktopReleasesResponse,
   ListAdminIssueMessagesQuery,
   ListAdminIssueMessagesResponse,
+  ListAdminOfficialModelRoutesResponse,
   ListAdminRoleTemplatesResponse,
   ListToolActionCatalogResponse,
   CancelWorkspaceInvitationResponse,
@@ -96,6 +99,8 @@ import type {
   UpdateAdminAssetDefinitionResponse,
   UpdateAdminIssueMessageRequest,
   UpdateAdminIssueMessageResponse,
+  UpdateAdminOfficialModelApiKeyRequest,
+  UpdateAdminOfficialModelApiKeyResponse,
   UpdateAdminWorkspaceStatusRequest,
   UpdateAdminWorkspaceStatusResponse,
   UploadAdminDesktopReleaseAssetResponse,
@@ -182,6 +187,27 @@ export class QiuApiClient {
 
   listAdminToolActionCatalog(): Promise<ListToolActionCatalogResponse> {
     return this.get('/api/v1/admin/tool-actions');
+  }
+
+  listAdminOfficialModelRoutes(): Promise<ListAdminOfficialModelRoutesResponse> {
+    return this.get('/api/v1/admin/official-model-routes');
+  }
+
+  createAdminOfficialModelApiKey(
+    routeKey: string,
+    input: CreateAdminOfficialModelApiKeyRequest
+  ): Promise<CreateAdminOfficialModelApiKeyResponse> {
+    return this.post(
+      `/api/v1/admin/official-model-routes/${encodeURIComponent(routeKey)}/api-keys`,
+      input
+    );
+  }
+
+  updateAdminOfficialModelApiKey(
+    apiKeyId: string,
+    input: UpdateAdminOfficialModelApiKeyRequest
+  ): Promise<UpdateAdminOfficialModelApiKeyResponse> {
+    return this.patch(`/api/v1/admin/official-model-api-keys/${encodeURIComponent(apiKeyId)}`, input);
   }
 
   listAdminAssets(

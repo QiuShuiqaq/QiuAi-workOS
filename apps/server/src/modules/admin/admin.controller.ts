@@ -8,6 +8,8 @@ import {
   AdjustAdminWorkspaceAiPointsRequestDto,
   AdjustAdminWorkspaceAiPointsResponseDto,
   CancelAdminWorkspaceInvitationResponseDto,
+  CreateAdminOfficialModelApiKeyRequestDto,
+  CreateAdminOfficialModelApiKeyResponseDto,
   CreateAdminDesktopReleaseRequestDto,
   CreateAdminDesktopReleaseResponseDto,
   CreateAdminDesktopBindingCodeRequestDto,
@@ -28,6 +30,7 @@ import {
   ListAdminDesktopReleasesResponseDto,
   ListAdminIssueMessagesQueryDto,
   ListAdminIssueMessagesResponseDto,
+  ListAdminOfficialModelRoutesResponseDto,
   ListAdminPlansResponseDto,
   ListAdminWorkspacesQueryDto,
   ListAdminWorkspacesResponseDto,
@@ -35,6 +38,8 @@ import {
   RevokeAdminDesktopDeviceResponseDto,
   UpdateAdminIssueMessageRequestDto,
   UpdateAdminIssueMessageResponseDto,
+  UpdateAdminOfficialModelApiKeyRequestDto,
+  UpdateAdminOfficialModelApiKeyResponseDto,
   UpdateAdminDesktopReleaseRequestDto,
   UpdateAdminDesktopReleaseResponseDto,
   UploadAdminDesktopReleaseAssetResponseDto,
@@ -71,6 +76,32 @@ export class AdminController {
     @Req() request: FastifyRequest
   ): Promise<UpdateAdminPlanResponseDto> {
     return this.adminService.updatePlan(planCode, body, request.headers.cookie);
+  }
+
+  @Get('official-model-routes')
+  @ApiOkResponse({ type: ListAdminOfficialModelRoutesResponseDto })
+  listOfficialModelRoutes(@Req() request: FastifyRequest): Promise<ListAdminOfficialModelRoutesResponseDto> {
+    return this.adminService.listOfficialModelRoutes(request.headers.cookie);
+  }
+
+  @Post('official-model-routes/:routeKey/api-keys')
+  @ApiOkResponse({ type: CreateAdminOfficialModelApiKeyResponseDto })
+  createOfficialModelApiKey(
+    @Param('routeKey') routeKey: string,
+    @Body() body: CreateAdminOfficialModelApiKeyRequestDto,
+    @Req() request: FastifyRequest
+  ): Promise<CreateAdminOfficialModelApiKeyResponseDto> {
+    return this.adminService.createOfficialModelApiKey(routeKey, body, request.headers.cookie);
+  }
+
+  @Patch('official-model-api-keys/:apiKeyId')
+  @ApiOkResponse({ type: UpdateAdminOfficialModelApiKeyResponseDto })
+  updateOfficialModelApiKey(
+    @Param('apiKeyId') apiKeyId: string,
+    @Body() body: UpdateAdminOfficialModelApiKeyRequestDto,
+    @Req() request: FastifyRequest
+  ): Promise<UpdateAdminOfficialModelApiKeyResponseDto> {
+    return this.adminService.updateOfficialModelApiKey(apiKeyId, body, request.headers.cookie);
   }
 
   @Get('desktop-releases')
