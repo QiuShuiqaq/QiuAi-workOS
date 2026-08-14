@@ -83,6 +83,7 @@ export interface CreateBillingOrderRequest {
   amountCents?: number;
   currency?: string;
   subject?: string;
+  referralCode?: string;
 }
 
 export interface CreateBillingOrderResponse {

@@ -266,6 +266,31 @@ body,
   flex-direction: column;
 }
 
+.account-popover-status {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #eef2f7;
+  background: #f8fafc;
+}
+
+.account-popover-status > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.account-popover-status .ant-typography {
+  margin: 0;
+  color: #0f172a;
+  font-size: 12px;
+}
+
 .account-avatar {
   display: inline-flex;
   align-items: center;

@@ -28,6 +28,7 @@ import {
 } from './model-chat.js';
 import { invokeOfficialModelChat } from './official-model-route.js';
 import { getDesktopAiPointOverview } from './ai-point-overview.js';
+import { getDesktopReferralOverview } from './referral-overview.js';
 import { selectKnowledgeSourcePath } from './knowledge-source.js';
 import {
   cleanupExpiredArtifactCache,
@@ -64,6 +65,7 @@ const channels = {
   listAuthorizedRoleTemplates: 'qiuai:desktop:list-authorized-role-templates',
   syncRuntimeState: 'qiuai:desktop:sync-runtime-state',
   getAiPointOverview: 'qiuai:desktop:get-ai-point-overview',
+  getReferralOverview: 'qiuai:desktop:get-referral-overview',
   saveRuntimeState: 'qiuai:desktop:save-runtime-state',
   listWorkspaceBackups: 'qiuai:desktop:list-workspace-backups',
   createWorkspaceBackup: 'qiuai:desktop:create-workspace-backup',
@@ -115,6 +117,7 @@ export function registerDesktopIpc() {
     return syncDesktopRuntimeState(state);
   });
   ipcMain.handle(channels.getAiPointOverview, () => getDesktopAiPointOverview());
+  ipcMain.handle(channels.getReferralOverview, () => getDesktopReferralOverview());
   ipcMain.handle(channels.saveRuntimeState, async (_, state) => {
     await saveDesktopRuntimeState(getDesktopAppInfo().userDataPath, state);
     return true;

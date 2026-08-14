@@ -80,6 +80,7 @@ import type {
   DesktopAuthorizedRoleTemplateCatalog,
   DesktopAuthorizedRoleTemplateSummary,
   DesktopBackupSummary,
+  DesktopReferralOverview,
   DesktopIssueCategory,
   DesktopIssueReportSubmitRequest,
   DesktopIssueSeverity,
@@ -3136,6 +3137,9 @@ export default function App() {
   const [aiPointOverview, setAiPointOverview] = useState<DesktopAiPointOverview | null>(null);
   const [isLoadingAiPointOverview, setIsLoadingAiPointOverview] = useState(false);
   const [aiPointNotice, setAiPointNotice] = useState('');
+  const [referralOverview, setReferralOverview] = useState<DesktopReferralOverview | null>(null);
+  const [isLoadingReferralOverview, setIsLoadingReferralOverview] = useState(false);
+  const [referralNotice, setReferralNotice] = useState('');
   const [modelApiKeyClearRequested, setModelApiKeyClearRequested] = useState(false);
   const [latestPulledModelCatalog, setLatestPulledModelCatalog] = useState<{
     profileId: string;
@@ -3376,8 +3380,21 @@ export default function App() {
     }
 
     void loadAiPointOverview();
+    void loadReferralOverview();
   }, [
     selectedSection,
+    runtimeState.localRuntime.workspaceId,
+    runtimeState.serverConnection.state
+  ]);
+
+  useEffect(() => {
+    void loadReferralOverview();
+    if (runtimeState.localRuntime.workspaceId !== pendingWorkspaceId) {
+      void loadAiPointOverview();
+    } else {
+      setAiPointOverview(null);
+    }
+  }, [
     runtimeState.localRuntime.workspaceId,
     runtimeState.serverConnection.state
   ]);
@@ -3817,6 +3834,41 @@ export default function App() {
       setAiPointNotice(error instanceof Error ? error.message : 'AI 点数读取失败，请稍后重试。');
     } finally {
       setIsLoadingAiPointOverview(false);
+    }
+  }
+
+  async function loadReferralOverview() {
+    if (!window.qiuDesktop) {
+      return;
+    }
+
+    if (runtimeState.localRuntime.workspaceId === pendingWorkspaceId) {
+      setReferralOverview({
+        workspaceId: pendingWorkspaceId,
+        accountStatus: 'unregistered',
+        canInvite: false,
+        invitedPaidCount: 0,
+        earnedPoints: 0,
+        policy: {
+          inviteeRewardPoints: 300,
+          inviterRewardPoints: 500,
+          rewardExpiresInDays: 90
+        }
+      });
+      setReferralNotice('');
+      return;
+    }
+
+    setIsLoadingReferralOverview(true);
+    setReferralNotice('');
+    try {
+      const overview = await window.qiuDesktop.getReferralOverview();
+      setReferralOverview(overview);
+    } catch (error) {
+      setReferralOverview(null);
+      setReferralNotice(error instanceof Error ? error.message : '账号状态读取失败，请稍后重试。');
+    } finally {
+      setIsLoadingReferralOverview(false);
     }
   }
 
@@ -4449,6 +4501,7 @@ export default function App() {
     setAccountMenuOpen(false);
     if (modal === 'purchase') {
       void loadAiPointOverview();
+      void loadReferralOverview();
     }
   }
 
@@ -4498,6 +4551,19 @@ export default function App() {
       const nextState = await window.qiuDesktop.unbindDesktopDevice();
       setRuntimeState(nextState);
       setAuthorizedRoleTemplateCatalog(initialAuthorizedRoleTemplateCatalog);
+      setAiPointOverview(null);
+      setReferralOverview({
+        workspaceId: pendingWorkspaceId,
+        accountStatus: 'unregistered',
+        canInvite: false,
+        invitedPaidCount: 0,
+        earnedPoints: 0,
+        policy: {
+          inviteeRewardPoints: 300,
+          inviterRewardPoints: 500,
+          rewardExpiresInDays: 90
+        }
+      });
       setAccountModal(null);
       setOnboardingOpen(false);
     } catch (error) {
@@ -5345,6 +5411,16 @@ export default function App() {
   }
 
   function renderProductRail() {
+    const planCode = authorizedRoleTemplateCatalog.deviceCapacity?.planCode;
+    const accountStatus = referralOverview?.accountStatus ?? resolveAccountPlanStatus(planCode, isEnterpriseUnbound);
+    const qAiPointText = isEnterpriseUnbound
+      ? '登录后查看'
+      : aiPointOverview
+        ? formatAiPoints(aiPointOverview.wallet.availablePoints)
+        : isLoadingAiPointOverview
+          ? '读取中'
+          : '未读取';
+
     return (
       <aside className="product-rail">
         <div className="product-rail-actions">
@@ -5372,6 +5448,25 @@ export default function App() {
                     {connectionLabel(runtimeState.serverConnection.state)}
                   </Typography.Text>
                 </span>
+              </div>
+              <div className="account-popover-status">
+                <div>
+                  <span>账号状态</span>
+                  <Tag color={accountPlanStatusColor(accountStatus)}>{accountPlanStatusLabel(accountStatus)}</Tag>
+                </div>
+                <div>
+                  <span>AI 点数</span>
+                  <Typography.Text>{qAiPointText}</Typography.Text>
+                </div>
+                {referralOverview?.canInvite && referralOverview.referralCode ? (
+                  <div>
+                    <span>我的邀请码</span>
+                    <Typography.Text copyable={{ text: referralOverview.referralCode }}>
+                      {referralOverview.referralCode}
+                    </Typography.Text>
+                  </div>
+                ) : null}
+                {referralNotice ? <Typography.Text type="secondary">{referralNotice}</Typography.Text> : null}
               </div>
               <div className="account-popover-list">
                 <button type="button" onClick={() => openAccountModal('enterprise')}>
@@ -6351,7 +6446,7 @@ export default function App() {
               <Card size="small" title="会员版（月付）">
                 <Space direction="vertical" size={8}>
                   <Typography.Title level={4} style={{ margin: 0 }}>
-                    ¥18 / 月
+                    ¥30 / 月
                   </Typography.Title>
                   <Typography.Text type="secondary">适合个人用户使用数字工厂。</Typography.Text>
                   <Tag color="blue">可搭配月度 AI 点数包</Tag>
@@ -6360,7 +6455,7 @@ export default function App() {
               <Card size="small" title="会员版（年付）">
                 <Space direction="vertical" size={8}>
                   <Typography.Title level={4} style={{ margin: 0 }}>
-                    ¥180 / 年
+                    ¥300 / 年
                   </Typography.Title>
                   <Typography.Text type="secondary">适合长期稳定使用。</Typography.Text>
                   <Tag color="green">年付更省</Tag>
@@ -15649,6 +15744,31 @@ function resolvePurchaseStatus(planCode: string | undefined, isUnbound: boolean)
     color: 'default',
     isEnterprise: false
   };
+}
+
+function resolveAccountPlanStatus(planCode: string | undefined, isUnbound: boolean): DesktopReferralOverview['accountStatus'] {
+  if (isUnbound) return 'unregistered';
+  if (planCode?.startsWith('ENTERPRISE_')) return 'enterprise';
+  if (planCode?.startsWith('PERSONAL_MEMBER_')) return 'member';
+  return 'free';
+}
+
+function accountPlanStatusLabel(status: DesktopReferralOverview['accountStatus']) {
+  return {
+    unregistered: '未注册',
+    free: '免费版',
+    member: '会员版',
+    enterprise: '企业版'
+  }[status];
+}
+
+function accountPlanStatusColor(status: DesktopReferralOverview['accountStatus']) {
+  return {
+    unregistered: 'default',
+    free: 'default',
+    member: 'blue',
+    enterprise: 'green'
+  }[status];
 }
 
 function buildWebConsoleLoginUrl(serverBaseUrl: string) {

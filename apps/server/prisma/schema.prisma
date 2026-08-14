@@ -245,6 +245,7 @@ enum AiPointCreditBucketSourceType {
   SUBSCRIPTION_MONTHLY
   PURCHASE_PERMANENT
   ADMIN_GRANT
+  REFERRAL_REWARD
   MIGRATED_BALANCE
 }
 
@@ -252,6 +253,18 @@ enum AiPointCreditBucketStatus {
   ACTIVE
   EXPIRED
   CANCELLED
+}
+
+enum ReferralCodeStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum ReferralInviteStatus {
+  PENDING
+  PAID
+  REWARDED
+  REJECTED
 }
 
 enum OfficialModelRouteCapability {
@@ -304,6 +317,9 @@ model Account {
   acceptedInvitations Invitation[]  @relation("InvitationAcceptedBy")
   desktopBindingCodes DesktopBindingCode[]
   adminActionLogs AdminActionLog[] @relation("AdminActionOperator")
+  referralCodes ReferralCode[] @relation("ReferralCodeOwner")
+  referralInvitesSent ReferralInvite[] @relation("ReferralInviteInviter")
+  referralInvitesReceived ReferralInvite[] @relation("ReferralInviteInvitee")
 
   @@map("accounts")
 }
@@ -372,6 +388,9 @@ model Workspace {
   desktopIssueReports DesktopIssueReport[]
   knowledgeBases KnowledgeBase[]
   invitations    Invitation[]
+  referralCodes ReferralCode[] @relation("ReferralCodeWorkspace")
+  referralInvitesSent ReferralInvite[] @relation("ReferralInviteInviterWorkspace")
+  referralInvitesReceived ReferralInvite[] @relation("ReferralInviteInviteeWorkspace")
 
   @@index([tenantId])
   @@index([ownerAccountId])
@@ -785,6 +804,7 @@ model BillingOrder {
   subscription   Subscription?        @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
   transactions   PaymentTransaction[]
   aiPointCreditBuckets AiPointCreditBucket[]
+  referralInvite ReferralInvite? @relation("ReferralInviteBillingOrder")
 
   @@index([workspaceId])
   @@index([billingAccountId])
@@ -793,6 +813,60 @@ model BillingOrder {
   @@index([status])
   @@index([provider])
   @@map("billing_orders")
+}
+
+model ReferralCode {
+  id               String             @id @default(uuid()) @db.Uuid
+  ownerAccountId   String             @map("owner_account_id") @db.Uuid
+  ownerWorkspaceId String             @map("owner_workspace_id") @db.Uuid
+  code             String             @unique
+  status           ReferralCodeStatus @default(ACTIVE)
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+
+  ownerAccount   Account          @relation("ReferralCodeOwner", fields: [ownerAccountId], references: [id], onDelete: Cascade)
+  ownerWorkspace Workspace        @relation("ReferralCodeWorkspace", fields: [ownerWorkspaceId], references: [id], onDelete: Cascade)
+  invites        ReferralInvite[]
+
+  @@unique([ownerAccountId])
+  @@index([ownerWorkspaceId])
+  @@index([status])
+  @@map("referral_codes")
+}
+
+model ReferralInvite {
+  id                 String               @id @default(uuid()) @db.Uuid
+  referralCodeId     String               @map("referral_code_id") @db.Uuid
+  inviterAccountId   String               @map("inviter_account_id") @db.Uuid
+  inviterWorkspaceId String               @map("inviter_workspace_id") @db.Uuid
+  inviteeAccountId   String               @map("invitee_account_id") @db.Uuid
+  inviteeWorkspaceId String               @map("invitee_workspace_id") @db.Uuid
+  billingOrderId     String               @unique @map("billing_order_id") @db.Uuid
+  status             ReferralInviteStatus @default(PENDING)
+  inviteeRewardPoints Int                 @default(0) @map("invitee_reward_points")
+  inviterRewardPoints Int                 @default(0) @map("inviter_reward_points")
+  paidAt             DateTime?            @map("paid_at")
+  rewardedAt         DateTime?            @map("rewarded_at")
+  rejectedAt         DateTime?            @map("rejected_at")
+  metadata           Json?
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+
+  referralCode     ReferralCode @relation(fields: [referralCodeId], references: [id], onDelete: Restrict)
+  inviterAccount   Account      @relation("ReferralInviteInviter", fields: [inviterAccountId], references: [id], onDelete: Restrict)
+  inviterWorkspace Workspace    @relation("ReferralInviteInviterWorkspace", fields: [inviterWorkspaceId], references: [id], onDelete: Restrict)
+  inviteeAccount   Account      @relation("ReferralInviteInvitee", fields: [inviteeAccountId], references: [id], onDelete: Restrict)
+  inviteeWorkspace Workspace    @relation("ReferralInviteInviteeWorkspace", fields: [inviteeWorkspaceId], references: [id], onDelete: Cascade)
+  billingOrder     BillingOrder @relation("ReferralInviteBillingOrder", fields: [billingOrderId], references: [id], onDelete: Cascade)
+
+  @@index([referralCodeId])
+  @@index([inviterAccountId])
+  @@index([inviteeAccountId])
+  @@index([inviterWorkspaceId])
+  @@index([inviteeWorkspaceId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("referral_invites")
 }
 
 model PaymentTransaction {

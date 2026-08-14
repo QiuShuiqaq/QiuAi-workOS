@@ -43,6 +43,10 @@ test('workspace APIs require an authenticated workspace session', async () => {
       },
       {
         method: 'GET',
+        url: '/api/v1/workspaces/enterprise/referrals/me'
+      },
+      {
+        method: 'GET',
         url: '/api/v1/workspaces/enterprise/organization/overview'
       },
       {
@@ -375,7 +379,7 @@ test('admin role template factory governs publication and workspace visibility',
     assert.equal(factoryQuotaAllowedResponse.statusCode, 200);
     assert.equal(JSON.parse(factoryQuotaAllowedResponse.body).allowed, true);
 
-    const factoryQuotaExceededResponse = await app.inject({
+    const factoryQuotaExpandedResponse = await app.inject({
       method: 'POST',
       url: '/api/v1/entitlements/check',
       headers,
@@ -385,11 +389,8 @@ test('admin role template factory governs publication and workspace visibility',
         requestedAmount: 2
       }
     });
-    assert.equal(factoryQuotaExceededResponse.statusCode, 200);
-    const factoryQuotaExceeded = JSON.parse(factoryQuotaExceededResponse.body);
-    assert.equal(factoryQuotaExceeded.allowed, false);
-    assert.equal(factoryQuotaExceeded.reason, 'quota_exceeded');
-    assert.equal(factoryQuotaExceeded.requiredPlan, 'ENTERPRISE_STANDARD_MONTHLY');
+    assert.equal(factoryQuotaExpandedResponse.statusCode, 200);
+    assert.equal(JSON.parse(factoryQuotaExpandedResponse.body).allowed, true);
 
     const seededTemplatesResponse = await app.inject({
       method: 'GET',
@@ -1101,7 +1102,7 @@ test('admin role template factory governs publication and workspace visibility',
       data: Array<{ id: string; canInstall?: boolean }>;
       deviceCapacity?: { maxDigitalFactories?: number };
     };
-    assert.equal(factoryCapacityCatalog.deviceCapacity?.maxDigitalFactories, 1);
+    assert.equal(factoryCapacityCatalog.deviceCapacity?.maxDigitalFactories, 999999);
     for (const factoryTemplateId of capacityFactoryTemplateIds) {
       assert.equal(
         factoryCapacityCatalog.data.find((template) => template.id === factoryTemplateId)?.canInstall,

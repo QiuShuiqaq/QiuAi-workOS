@@ -13,6 +13,7 @@ import Button from 'antd/es/button';
 import Card from 'antd/es/card';
 import Col from 'antd/es/col';
 import Descriptions from 'antd/es/descriptions';
+import Input from 'antd/es/input';
 import message from 'antd/es/message';
 import Row from 'antd/es/row';
 import Space from 'antd/es/space';
@@ -94,10 +95,18 @@ function entitlementText(plan: PlanDetail | undefined, featureKey: string, fallb
 function digitalFactoryAccessText(planGroupKey: string) {
   return {
     FREE: '暂不开放',
-    BASIC: '基础开放',
-    STANDARD: '标准开放',
-    PRO: '全量开放'
+    BASIC: '全部开放',
+    STANDARD: '全部开放',
+    PRO: '全部开放'
   }[planGroupKey] ?? '按套餐开放';
+}
+
+function isPersonalMemberPlanCode(planCode: string | undefined) {
+  return planCode === 'PERSONAL_MEMBER_MONTHLY' || planCode === 'PERSONAL_MEMBER_ANNUAL';
+}
+
+function isEnterprisePlanCode(planCode: string | undefined) {
+  return Boolean(planCode?.startsWith('ENTERPRISE_'));
 }
 
 function getPlanPaymentDisabledReason(
@@ -111,7 +120,9 @@ function getPlanPaymentDisabledReason(
   const isPaidPlan = plan.billingCycle === 'MONTHLY' || plan.billingCycle === 'ANNUAL';
   if (!isPaidPlan) return '免费套餐无需购买';
   if (options.isApiFallback) return '后端 API 未连接';
-  if (options.workspaceType !== 'enterprise') return '当前仅企业空间可购买套餐';
+  if (options.workspaceType !== 'enterprise' && !isPersonalMemberPlanCode(plan.code)) {
+    return '当前仅企业空间可购买套餐';
+  }
   if (!options.isAlipayConfigured) return '在线支付暂不可用，请联系服务商开通或线下处理';
   if (!plan.priceCents) return '该套餐尚未配置正式价格';
   return undefined;
@@ -125,16 +136,23 @@ export function PurchaseCenterPageClient({
 }: PurchaseCenterPageClientProps) {
   const router = useRouter();
   const [payingPlanCode, setPayingPlanCode] = useState<string | null>(null);
+  const [memberReferralCode, setMemberReferralCode] = useState('');
+  const [referralNotice, setReferralNotice] = useState('');
+  const [isValidatingReferralCode, setIsValidatingReferralCode] = useState(false);
   const activeWorkspace =
     currentAccount.workspaces.find((workspace) => workspace.id === currentAccount.activeWorkspaceId) ??
     currentAccount.workspaces[0];
   const currentPlan = plans.find((plan) => plan.code === activeWorkspace.planCode) ?? plans[0];
   const alipayStatus = billing.paymentProviders.find((provider) => provider.provider === 'ALIPAY');
+  const personalMemberPlans = [
+    plans.find((plan) => plan.code === 'PERSONAL_MEMBER_MONTHLY'),
+    plans.find((plan) => plan.code === 'PERSONAL_MEMBER_ANNUAL')
+  ].filter(Boolean) as PlanDetail[];
   const planGroups = [
     {
       key: 'BASIC',
       name: '企业基础版',
-      fitFor: '适合小团队试点 AI 工作流。',
+      fitFor: '适合小团队试点 AI 工作流，支持 10 台设备。',
       monthly: plans.find((plan) => plan.code === 'ENTERPRISE_BASIC_MONTHLY'),
       annual: plans.find((plan) => plan.code === 'ENTERPRISE_BASIC_ANNUAL'),
       highlight: false
@@ -142,7 +160,7 @@ export function PurchaseCenterPageClient({
     {
       key: 'STANDARD',
       name: '企业标准版',
-      fitFor: '适合多个部门正常使用数字员工和数字工厂。',
+      fitFor: '适合多个岗位正常使用数字员工和数字工厂，支持 30 台设备。',
       monthly: plans.find((plan) => plan.code === 'ENTERPRISE_STANDARD_MONTHLY'),
       annual: plans.find((plan) => plan.code === 'ENTERPRISE_STANDARD_ANNUAL'),
       highlight: true
@@ -150,13 +168,41 @@ export function PurchaseCenterPageClient({
     {
       key: 'PRO',
       name: '企业专业版',
-      fitFor: '适合高频生产、多设备和批量工厂场景。',
+      fitFor: '适合高频生产和较大团队使用，支持 80 台设备。',
       monthly: plans.find((plan) => plan.code === 'ENTERPRISE_PRO_MONTHLY'),
       annual: plans.find((plan) => plan.code === 'ENTERPRISE_PRO_ANNUAL'),
       highlight: false
     }
   ];
   const customPlan = plans.find((plan) => plan.code === 'ENTERPRISE_CUSTOM');
+
+  async function validateMemberReferralCode() {
+    const code = memberReferralCode.trim();
+    if (!code) {
+      setReferralNotice('邀请码为选填项，不填写也可以直接开通会员。');
+      return;
+    }
+
+    setIsValidatingReferralCode(true);
+    setReferralNotice('');
+    try {
+      const response = await createBrowserApiClient().validateReferralCode(activeWorkspace.id, {
+        referralCode: code
+      });
+      setReferralNotice(response.data.message);
+      if (response.data.valid) {
+        message.success(response.data.message);
+      } else {
+        message.warning(response.data.message);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '邀请码验证失败';
+      setReferralNotice(errorMessage);
+      message.error(errorMessage);
+    } finally {
+      setIsValidatingReferralCode(false);
+    }
+  }
 
   async function createAlipayOrder(plan: PlanDetail) {
     if (!plan.priceCents) {
@@ -168,7 +214,8 @@ export function PurchaseCenterPageClient({
     try {
       const response = await createBrowserApiClient().createBillingOrder(activeWorkspace.id, {
         planCode: plan.code,
-        provider: 'ALIPAY'
+        provider: 'ALIPAY',
+        referralCode: isPersonalMemberPlanCode(plan.code) ? memberReferralCode.trim() || undefined : undefined
       });
 
       if (response.data.paymentUrl) {
@@ -281,13 +328,78 @@ export function PurchaseCenterPageClient({
             </Row>
           </Card>
 
+          {!isEnterprisePlanCode(currentPlan.code) && personalMemberPlans.length > 0 ? (
+            <Card title="个人会员" bordered={false}>
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                <Alert
+                  showIcon
+                  type="info"
+                  message="开通会员后可使用数字工厂，AI 点数可按需购买。"
+                  description="邀请码为选填项。使用有效会员邀请码开通会员，双方可获得 AI 点数奖励。"
+                />
+                <Input.Search
+                  allowClear
+                  value={memberReferralCode}
+                  placeholder="邀请码（选填）"
+                  enterButton="验证"
+                  loading={isValidatingReferralCode}
+                  onChange={(event) => {
+                    setMemberReferralCode(event.target.value);
+                    setReferralNotice('');
+                  }}
+                  onSearch={() => void validateMemberReferralCode()}
+                />
+                {referralNotice ? <Typography.Text type="secondary">{referralNotice}</Typography.Text> : null}
+                <Row gutter={[16, 16]}>
+                  {personalMemberPlans.map((plan) => {
+                    const disabledReason = getPlanPaymentDisabledReason(plan, {
+                      isApiFallback,
+                      workspaceType: activeWorkspace.workspaceType,
+                      isAlipayConfigured: Boolean(alipayStatus?.isConfigured)
+                    });
+                    const isCurrentPlan = plan.code === activeWorkspace.planCode;
+                    return (
+                      <Col key={plan.code} xs={24} md={12}>
+                        <Card bordered size="small">
+                          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                            <Space size={8} wrap>
+                              <Typography.Text strong>{plan.name}</Typography.Text>
+                              {isCurrentPlan ? <Tag color="green">当前套餐</Tag> : null}
+                            </Space>
+                            <Typography.Title level={3} style={{ margin: 0 }}>
+                              {planPriceText(plan)} / {billingCycleLabel(plan.billingCycle)}
+                            </Typography.Title>
+                            <Typography.Text type="secondary">
+                              适合个人用户使用数字员工、数字工厂和官方通道 AI 能力。
+                            </Typography.Text>
+                            <Button
+                              block
+                              type={isCurrentPlan ? 'default' : 'primary'}
+                              icon={<CreditCardOutlined />}
+                              disabled={Boolean(disabledReason)}
+                              title={disabledReason}
+                              loading={payingPlanCode === plan.code}
+                              onClick={() => void createAlipayOrder(plan)}
+                            >
+                              {isCurrentPlan ? `续费${billingCycleLabel(plan.billingCycle)}` : `开通${billingCycleLabel(plan.billingCycle)}`}
+                            </Button>
+                          </Space>
+                        </Card>
+                      </Col>
+                    );
+                  })}
+                </Row>
+              </Space>
+            </Card>
+          ) : null}
+
           <Card title="选择企业套餐" bordered={false}>
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
               <Alert
                 showIcon
                 type="info"
                 message="套餐费用不包含模型 API 调用费"
-                description="QiuAI WorkOS 负责企业权限、设备容量、数字员工、数字工厂、知识库和任务管理；模型调用由用户在 PC 端自行配置供应商。年付按 10 个月计费。"
+                description="QiuAI WorkOS 负责企业权限、设备容量、数字员工、数字工厂、知识库和任务管理；模型调用由用户在 PC 端自行配置供应商。年付按 10 个月计费，并可定制 1 个数字工厂。"
               />
               {!alipayStatus?.isConfigured ? (
                 <Alert
@@ -322,6 +434,8 @@ export function PurchaseCenterPageClient({
                             <Typography.Text>绑定设备：{entitlementText(basePlan, 'maxDesktopDevices')}</Typography.Text>
                             <Typography.Text>数字员工：全部开放</Typography.Text>
                             <Typography.Text>数字工厂：{digitalFactoryAccessText(group.key)}</Typography.Text>
+                            <Typography.Text>年付权益：可定制 1 个数字工厂</Typography.Text>
+                            <Typography.Text type="secondary">解释权以运营方为准</Typography.Text>
                           </Space>
                           <Space wrap>
                             {[group.monthly, group.annual].filter(Boolean).map((plan) => {

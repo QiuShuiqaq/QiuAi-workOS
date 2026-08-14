@@ -4,6 +4,7 @@ import type {
   CreateAdminAssetDefinitionResponse,
   CreateBillingOrderRequest,
   CreateBillingOrderResponse,
+  GetReferralOverviewResponse,
   LoginRequest,
   LoginResponse,
   LogoutResponse,
@@ -112,7 +113,9 @@ import type {
   UpdateAdminPlanResponse,
   UploadEnterpriseKnowledgePdfRequest,
   UploadEnterpriseKnowledgePdfResponse,
-  ActivateEnterpriseKnowledgeVersionResponse
+  ActivateEnterpriseKnowledgeVersionResponse,
+  ValidateReferralCodeRequest,
+  ValidateReferralCodeResponse
 } from '@qiuai/api-contract';
 
 export interface QiuApiClientOptions {
@@ -502,6 +505,17 @@ export class QiuApiClient {
     input: CreateBillingOrderRequest
   ): Promise<CreateBillingOrderResponse> {
     return this.post(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/billing/orders`, input);
+  }
+
+  getReferralOverview(workspaceId: string): Promise<GetReferralOverviewResponse> {
+    return this.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/referrals/me`);
+  }
+
+  validateReferralCode(
+    workspaceId: string,
+    input: ValidateReferralCodeRequest
+  ): Promise<ValidateReferralCodeResponse> {
+    return this.post(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/referrals/validate`, input);
   }
 
   syncAlipayOrder(orderNo: string): Promise<SyncAlipayOrderResponse> {

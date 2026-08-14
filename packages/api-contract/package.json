@@ -13,6 +13,10 @@
     "./ai-points": {
       "types": "./dist/ai-points.d.ts",
       "default": "./dist/ai-points.js"
+    },
+    "./referral": {
+      "types": "./dist/referral.d.ts",
+      "default": "./dist/referral.js"
     }
   },
   "scripts": {

@@ -46,7 +46,7 @@ export class AdminPlanDetailDto {
   @ApiProperty({ example: 'MONTHLY' })
   billingCycle!: string;
 
-  @ApiProperty({ example: 58800, required: false })
+  @ApiProperty({ example: 28800, required: false })
   priceCents?: number;
 
   @ApiProperty({ example: 'CNY', required: false })
@@ -542,7 +542,7 @@ export class UpdateAdminPlanRequestDto {
   @IsString()
   description?: string | null;
 
-  @ApiPropertyOptional({ example: 58800, nullable: true })
+  @ApiPropertyOptional({ example: 28800, nullable: true })
   @IsOptional()
   @IsInt()
   @Min(0)

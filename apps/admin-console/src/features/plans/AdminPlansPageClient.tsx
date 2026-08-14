@@ -280,7 +280,7 @@ export function AdminPlansPageClient({ currentAccount, plans }: AdminPlansPageCl
                       ))}
                     </Space>
                     <Typography.Text type="secondary">
-                      企业版基础能力保持一致；设备数量按企业计算，数字员工和数字工厂容量按每台绑定设备分别计算。
+                      企业版基础能力保持一致；主要按可绑定设备数分层，数字员工和数字工厂默认开放。
                     </Typography.Text>
                   </Space>
                 )
@@ -304,7 +304,7 @@ export function AdminPlansPageClient({ currentAccount, plans }: AdminPlansPageCl
             showIcon
             type="info"
             message="这里只展示当前产品化的套餐权益"
-            description="当前前台只展示设备授权。数字员工默认开放，数字工厂由模板 allowedPlanCodes 控制；maxRoleInstances、maxDigitalFactories、maxTasksPerMonth 仅作为兼容字段保留。"
+            description="当前前台只展示设备授权。企业版数字员工和数字工厂默认开放；maxRoleInstances、maxDigitalFactories、maxTasksPerMonth 仅作为兼容字段保留。"
             style={{ marginBottom: 16 }}
           />
 

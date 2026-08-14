@@ -24,6 +24,7 @@ type AiPointCreditBucketSourceType =
   | 'SUBSCRIPTION_MONTHLY'
   | 'PURCHASE_PERMANENT'
   | 'ADMIN_GRANT'
+  | 'REFERRAL_REWARD'
   | 'MIGRATED_BALANCE';
 
 interface AiPointBucketAllocation {
@@ -1555,6 +1556,7 @@ function readCreditBucketSourceType(value: unknown): AiPointCreditBucketSourceTy
     value === 'SUBSCRIPTION_MONTHLY' ||
     value === 'PURCHASE_PERMANENT' ||
     value === 'ADMIN_GRANT' ||
+    value === 'REFERRAL_REWARD' ||
     value === 'MIGRATED_BALANCE'
   ) {
     return value;
@@ -1596,10 +1598,12 @@ function getCreditBucketDeductionPriority(sourceType: string): number {
       return 0;
     case 'ADMIN_GRANT':
       return 1;
-    case 'MIGRATED_BALANCE':
+    case 'REFERRAL_REWARD':
       return 2;
-    case 'PURCHASE_PERMANENT':
+    case 'MIGRATED_BALANCE':
       return 3;
+    case 'PURCHASE_PERMANENT':
+      return 4;
     default:
       return 99;
   }

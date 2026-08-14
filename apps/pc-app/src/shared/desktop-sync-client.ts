@@ -18,6 +18,7 @@ import type {
   GetAiPointOverviewResponse,
   ListOfficialModelRoutesResponse
 } from '@qiuai/api-contract/ai-points';
+import type { GetReferralOverviewResponse } from '@qiuai/api-contract/referral';
 
 interface RedeemDesktopBindingCodeRequest {
   bindingCode: string;
@@ -300,6 +301,31 @@ export async function fetchAiPointOverview(
   }
 
   return body as GetAiPointOverviewResponse;
+}
+
+export async function fetchReferralOverview(
+  baseUrl: string,
+  workspaceId: string,
+  deviceToken: string
+): Promise<GetReferralOverviewResponse> {
+  const response = await fetch(
+    `${normalizeBaseUrl(baseUrl)}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/referrals/me`,
+    {
+      headers: {
+        accept: 'application/json',
+        'x-qiuai-device-token': deviceToken
+      }
+    }
+  );
+
+  const body = (await response.json()) as GetReferralOverviewResponse | { error?: { message?: string } };
+  if (!response.ok) {
+    const errorBody = body as { error?: { message?: string } };
+    const message = errorBody.error?.message ?? `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return body as GetReferralOverviewResponse;
 }
 
 export async function fetchOfficialModelRoutes(

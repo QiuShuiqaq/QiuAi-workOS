@@ -23,6 +23,7 @@ export type AiPointCreditBucketSourceType =
   | 'subscription_monthly'
   | 'purchase_permanent'
   | 'admin_grant'
+  | 'referral_reward'
   | 'migrated_balance';
 
 export type AiPointCreditBucketStatus = 'active' | 'expired' | 'cancelled';

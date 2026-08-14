@@ -21,6 +21,7 @@ import type {
   DesktopArtifactSaveAsRequest,
   DesktopArtifactSaveAsResult,
   DesktopAiPointOverview,
+  DesktopReferralOverview,
   DesktopLocalFileExportRequest,
   DesktopLocalFileExportResult,
   DesktopRemoteFileSaveAsRequest,
@@ -57,6 +58,7 @@ const channels = {
   listAuthorizedRoleTemplates: 'qiuai:desktop:list-authorized-role-templates',
   syncRuntimeState: 'qiuai:desktop:sync-runtime-state',
   getAiPointOverview: 'qiuai:desktop:get-ai-point-overview',
+  getReferralOverview: 'qiuai:desktop:get-referral-overview',
   saveRuntimeState: 'qiuai:desktop:save-runtime-state',
   listWorkspaceBackups: 'qiuai:desktop:list-workspace-backups',
   createWorkspaceBackup: 'qiuai:desktop:create-workspace-backup',
@@ -112,6 +114,8 @@ const bridge: QiuDesktopBridge = {
     ipcRenderer.invoke(channels.syncRuntimeState, state) as Promise<DesktopRuntimeSyncResponse>,
   getAiPointOverview: () =>
     ipcRenderer.invoke(channels.getAiPointOverview) as Promise<DesktopAiPointOverview>,
+  getReferralOverview: () =>
+    ipcRenderer.invoke(channels.getReferralOverview) as Promise<DesktopReferralOverview>,
   saveRuntimeState: (state: DesktopRuntimeState) =>
     ipcRenderer.invoke(channels.saveRuntimeState, state) as Promise<void>,
   listWorkspaceBackups: () =>

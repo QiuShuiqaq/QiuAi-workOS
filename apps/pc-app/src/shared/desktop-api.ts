@@ -212,6 +212,20 @@ export interface DesktopAiPointOverview {
   }>;
 }
 
+export interface DesktopReferralOverview {
+  workspaceId: string;
+  accountStatus: 'unregistered' | 'free' | 'member' | 'enterprise';
+  canInvite: boolean;
+  referralCode?: string;
+  invitedPaidCount: number;
+  earnedPoints: number;
+  policy: {
+    inviteeRewardPoints: number;
+    inviterRewardPoints: number;
+    rewardExpiresInDays: number;
+  };
+}
+
 export type DesktopRoleWatchStatus = 'idle' | 'running' | 'completed' | 'failed' | 'paused';
 export type DesktopRoleWatchApprovalMode = 'readonly' | 'draft' | 'manual_submit';
 
@@ -566,6 +580,7 @@ export interface QiuDesktopBridge {
   listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRoleTemplateCatalog>;
   syncRuntimeState(state: DesktopRuntimeState): Promise<DesktopRuntimeSyncResponse>;
   getAiPointOverview(): Promise<DesktopAiPointOverview>;
+  getReferralOverview(): Promise<DesktopReferralOverview>;
   saveRuntimeState(state: DesktopRuntimeState): Promise<void>;
   listWorkspaceBackups(): Promise<DesktopBackupSummary[]>;
   createWorkspaceBackup(state: DesktopRuntimeState): Promise<DesktopBackupSummary>;

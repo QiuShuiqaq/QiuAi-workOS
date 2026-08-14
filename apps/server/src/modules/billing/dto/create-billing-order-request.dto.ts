@@ -11,7 +11,7 @@ export class CreateBillingOrderRequestDto {
   @IsIn(['ALIPAY'])
   provider?: 'ALIPAY';
 
-  @ApiProperty({ example: 58800, required: false })
+  @ApiProperty({ example: 28800, required: false })
   @IsOptional()
   @IsNumber()
   @Min(1)
@@ -26,4 +26,9 @@ export class CreateBillingOrderRequestDto {
   @IsOptional()
   @IsString()
   subject?: string;
+
+  @ApiProperty({ example: 'QIUAI8K2P', required: false })
+  @IsOptional()
+  @IsString()
+  referralCode?: string;
 }

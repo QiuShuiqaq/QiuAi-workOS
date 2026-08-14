@@ -10,7 +10,7 @@ export class BillingPlanSummaryDto {
   @ApiProperty({ example: 'MONTHLY' })
   billingCycle!: string;
 
-  @ApiProperty({ example: 58800, required: false })
+  @ApiProperty({ example: 28800, required: false })
   priceCents?: number;
 
   @ApiProperty({ example: 'CNY', required: false })
@@ -117,7 +117,7 @@ export class BillingOrderSummaryDto {
   @ApiProperty({ example: 'QiuAI WorkOS 企业基础版（月付）' })
   subject!: string;
 
-  @ApiProperty({ example: 58800 })
+  @ApiProperty({ example: 28800 })
   amountCents!: number;
 
   @ApiProperty({ example: 'CNY' })
