@@ -5,6 +5,12 @@ APP_DIR="${APP_DIR:-/opt/qiuai-workos}"
 
 cd "${APP_DIR}"
 
+echo "==> Cleaning stale Next.js build outputs"
+rm -rf \
+  apps/admin-console/.next \
+  apps/web-console/.next \
+  apps/public-site/.next
+
 if [[ -f ".env" ]]; then
   echo "==> Loading .env"
   set -a
