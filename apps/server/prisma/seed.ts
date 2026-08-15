@@ -11,6 +11,7 @@ import { officialModelRouteSeeds } from '../src/modules/ai-points/official-model
 
 const prisma = new PrismaClient();
 const syncManagedCatalogsOnly = process.argv.includes('--managed-catalogs-only');
+const syncManagedProduction = process.argv.includes('--managed-production-sync');
 
 const ids = {
   accounts: {
@@ -937,7 +938,10 @@ function defaultOfficialApiKeyRpmLimit(providerId: string) {
 }
 
 async function main() {
-  if (syncManagedCatalogsOnly) {
+  if (syncManagedCatalogsOnly || syncManagedProduction) {
+    if (syncManagedProduction) {
+      await seedPlans();
+    }
     await seedAssetDefinitions();
     await seedRoleTemplates();
     await seedOfficialModelRoutes();
@@ -961,7 +965,9 @@ main()
   .then(async () => {
     await prisma.$disconnect();
     console.log(
-      syncManagedCatalogsOnly
+      syncManagedProduction
+        ? 'QiuAI WorkOS managed production sync completed.'
+        : syncManagedCatalogsOnly
         ? 'QiuAI WorkOS managed catalog sync completed.'
         : 'QiuAI WorkOS platform kernel seed completed.'
     );

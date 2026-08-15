@@ -259,7 +259,7 @@ async function checkDatabase() {
     if (missingPlanCodes.length > 0) {
       fail(
         'Required commercial plan records are missing from the database.',
-        `Missing: ${missingPlanCodes.join(', ')}. Run the full seed only for database bootstrap.`
+        `Missing: ${missingPlanCodes.join(', ')}. Run npm run db:sync:managed-production to sync code-managed plans without touching user runtime data.`
       );
     }
 

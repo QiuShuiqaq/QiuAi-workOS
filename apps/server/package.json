@@ -13,6 +13,7 @@
     "prisma:migrate:dev": "prisma migrate dev --schema prisma/schema.prisma",
     "prisma:seed": "tsx prisma/seed.ts",
     "prisma:sync:catalogs": "tsx prisma/seed.ts --managed-catalogs-only",
+    "prisma:sync:managed-production": "tsx prisma/seed.ts --managed-production-sync",
     "prisma:studio": "prisma studio --schema prisma/schema.prisma",
     "lint": "node -e \"console.log('Server lint placeholder.')\"",
     "test": "node --import tsx --test src/main.test.ts src/modules/billing/alipay-gateway.test.ts src/modules/desktop-sync/desktop-sync.contract.test.ts src/modules/invitation/invitation-token.test.ts src/shared/role-template-catalog.test.ts"

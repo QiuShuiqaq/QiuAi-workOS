@@ -16,20 +16,6 @@ else
   exit 1
 fi
 
-echo "==> Stopping existing PM2 processes"
-if command -v pm2 >/dev/null 2>&1; then
-  pm2 stop qiuai-workos-server qiuai-workos-web qiuai-workos-admin qiuai-workos-public 2>/dev/null || true
-  pm2 delete qiuai-workos-server qiuai-workos-web qiuai-workos-admin qiuai-workos-public 2>/dev/null || true
-else
-  echo "PM2 is not available yet; continuing with a fresh build"
-fi
-
-echo "==> Cleaning stale Next.js build outputs"
-rm -rf \
-  apps/admin-console/.next \
-  apps/web-console/.next \
-  apps/public-site/.next
-
 echo "==> Installing dependencies"
 npm ci
 
@@ -44,8 +30,8 @@ if [[ "${WORKOS_PERSISTENCE_MODE:-mock}" == "database" ]]; then
     echo "==> Running full database seed (explicit bootstrap mode)"
     npm run db:seed
   else
-    echo "==> Syncing code-managed templates and asset definitions"
-    npm run db:sync:catalogs
+    echo "==> Syncing code-managed plans, templates, assets, and official model routes"
+    npm run db:sync:managed-production
   fi
 fi
 
@@ -55,7 +41,20 @@ npm run build:deploy
 echo "==> Checking deployment readiness"
 npm run check:deploy
 
-echo "==> Starting PM2 processes"
+if ! command -v pm2 >/dev/null 2>&1; then
+  echo "PM2 is required to start the production processes" >&2
+  exit 1
+fi
+
+echo "==> Starting or reloading PM2 processes"
 pm2 startOrReload deploy/alicloud-ecs/ecosystem.config.cjs --update-env
 pm2 save
+sleep 3
 pm2 status
+
+echo "==> Checking local service ports"
+curl -fsS http://127.0.0.1:4100/api/v1/health >/dev/null
+curl -fsS http://127.0.0.1:3100/login >/dev/null
+curl -fsS http://127.0.0.1:3200/login >/dev/null
+curl -fsS http://127.0.0.1:3300/ >/dev/null
+echo "local service ports: OK"
