@@ -220,6 +220,11 @@ function checkBuildArtifacts() {
   requireFile('apps/web-console/.next/BUILD_ID', 'web build artifact');
   requireFile('apps/admin-console/.next/BUILD_ID', 'admin build artifact');
   requireFile('apps/public-site/.next/BUILD_ID', 'public site build artifact');
+  requireFile(
+    'apps/public-site/.next/standalone/apps/public-site/.next/static',
+    'public site standalone static assets'
+  );
+  requireFile('apps/public-site/.next/standalone/apps/public-site/public/icon-192.png', 'public site standalone public assets');
   requireFile('apps/server/prisma/schema.prisma', 'Prisma schema');
   console.log('build-artifacts: OK');
 }

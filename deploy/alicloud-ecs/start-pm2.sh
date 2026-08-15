@@ -38,6 +38,14 @@ fi
 echo "==> Building QiuAI WorkOS server deployment"
 npm run build:deploy
 
+echo "==> Preparing public site standalone assets"
+mkdir -p apps/public-site/.next/standalone/apps/public-site/.next
+rm -rf \
+  apps/public-site/.next/standalone/apps/public-site/.next/static \
+  apps/public-site/.next/standalone/apps/public-site/public
+cp -R apps/public-site/.next/static apps/public-site/.next/standalone/apps/public-site/.next/static
+cp -R apps/public-site/public apps/public-site/.next/standalone/apps/public-site/public
+
 echo "==> Checking deployment readiness"
 npm run check:deploy
 
