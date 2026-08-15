@@ -5,7 +5,10 @@ import type {
   BillingOrderSummary,
   BillingOverview,
   CurrentAccountResponse,
-  PlanDetail
+  PlanDetail,
+  ListSoftwareCopilotsResponse,
+  SoftwareCopilotBillingCycle,
+  SoftwareCopilotCatalogItem
 } from '@qiuai/api-contract';
 import { QiuMetricCard, QiuPage, QiuStatusTag } from '@qiuai/ui';
 import Alert from 'antd/es/alert';
@@ -14,6 +17,7 @@ import Card from 'antd/es/card';
 import Col from 'antd/es/col';
 import Descriptions from 'antd/es/descriptions';
 import Input from 'antd/es/input';
+import InputNumber from 'antd/es/input-number';
 import message from 'antd/es/message';
 import Row from 'antd/es/row';
 import Space from 'antd/es/space';
@@ -31,6 +35,7 @@ export interface PurchaseCenterPageClientProps {
   currentAccount: CurrentAccountResponse;
   plans: PlanDetail[];
   billing: BillingOverview;
+  softwareCopilots: ListSoftwareCopilotsResponse;
   isApiFallback: boolean;
 }
 
@@ -54,6 +59,10 @@ function planPriceText(plan: PlanDetail) {
   if (plan.billingCycle === 'FREE') return '免费';
   if (!plan.priceCents) return '待配置';
   return formatCurrency(plan.priceCents, plan.currency ?? 'CNY');
+}
+
+function softwareCopilotPriceText(amountCents: number, currency = 'CNY') {
+  return formatCurrency(amountCents, currency);
 }
 
 function formatDateTime(value?: string) {
@@ -132,10 +141,13 @@ export function PurchaseCenterPageClient({
   currentAccount,
   plans,
   billing,
+  softwareCopilots,
   isApiFallback
 }: PurchaseCenterPageClientProps) {
   const router = useRouter();
   const [payingPlanCode, setPayingPlanCode] = useState<string | null>(null);
+  const [payingSoftwareCopilotKey, setPayingSoftwareCopilotKey] = useState<string | null>(null);
+  const [softwareCopilotSeatCounts, setSoftwareCopilotSeatCounts] = useState<Record<string, number>>({});
   const [memberReferralCode, setMemberReferralCode] = useState('');
   const [referralNotice, setReferralNotice] = useState('');
   const [isValidatingReferralCode, setIsValidatingReferralCode] = useState(false);
@@ -230,6 +242,53 @@ export function PurchaseCenterPageClient({
       message.error(error instanceof Error ? error.message : '创建支付订单失败');
     } finally {
       setPayingPlanCode(null);
+    }
+  }
+
+  function getSoftwareCopilotPaymentDisabledReason(item: SoftwareCopilotCatalogItem) {
+    if (isApiFallback) return '后端 API 未连接';
+    if (!alipayStatus?.isConfigured) return '在线支付暂不可用，请联系服务商开通或线下处理';
+    if (!item.entitlement.canPurchase) return item.entitlement.reason ?? '当前账号不能购买该软件副驾';
+    return undefined;
+  }
+
+  async function createSoftwareCopilotAlipayOrder(
+    item: SoftwareCopilotCatalogItem,
+    billingCycle: SoftwareCopilotBillingCycle
+  ) {
+    const disabledReason = getSoftwareCopilotPaymentDisabledReason(item);
+    if (disabledReason) {
+      message.warning(disabledReason);
+      return;
+    }
+
+    const key = `${item.product.code}:${billingCycle}`;
+    const seatCount =
+      activeWorkspace.workspaceType === 'enterprise'
+        ? softwareCopilotSeatCounts[item.product.code] ?? 1
+        : 1;
+
+    setPayingSoftwareCopilotKey(key);
+    try {
+      const response = await createBrowserApiClient().createSoftwareCopilotOrder(activeWorkspace.id, {
+        productCode: item.product.code,
+        billingCycle,
+        seatCount,
+        provider: 'ALIPAY'
+      });
+
+      if (response.data.paymentUrl) {
+        message.success('支付订单已创建');
+        window.location.assign(response.data.paymentUrl);
+        return;
+      }
+
+      message.warning('订单已创建，但支付链接未返回');
+      router.refresh();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '创建软件副驾订单失败');
+    } finally {
+      setPayingSoftwareCopilotKey(null);
     }
   }
 
@@ -485,6 +544,108 @@ export function PurchaseCenterPageClient({
                     </Col>
                   </Row>
                 </Card>
+              ) : null}
+            </Space>
+          </Card>
+
+          <Card title="软件副驾" bordered={false}>
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Alert
+                showIcon
+                type="info"
+                message="软件副驾按软件单独购买"
+                description="个人会员可按月或按年购买。企业购买时填写设备数量，管理员再到“设备与授权”里分配给具体 PC。"
+              />
+              <Row gutter={[16, 16]}>
+                {softwareCopilots.data.map((item) => {
+                  const disabledReason = getSoftwareCopilotPaymentDisabledReason(item);
+                  const seatCount = softwareCopilotSeatCounts[item.product.code] ?? 1;
+                  const monthlyPrice =
+                    activeWorkspace.workspaceType === 'enterprise'
+                      ? item.product.enterpriseMonthlyUnitPriceCents
+                      : item.product.personalMonthlyPriceCents;
+                  const annualPrice =
+                    activeWorkspace.workspaceType === 'enterprise'
+                      ? item.product.enterpriseAnnualUnitPriceCents
+                      : item.product.personalAnnualPriceCents;
+
+                  return (
+                    <Col key={item.product.code} xs={24} md={12} xl={8}>
+                      <Card bordered size="small">
+                        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                          <Space size={8} wrap>
+                            <Typography.Text strong>{item.product.name}</Typography.Text>
+                            <Tag>{item.product.category}</Tag>
+                            {item.entitlement.seatLimit > 0 ? <Tag color="green">已购</Tag> : null}
+                          </Space>
+                          <Typography.Text type="secondary">{item.product.description}</Typography.Text>
+                          <Space size={6} wrap>
+                            {item.product.capabilities.map((capability) => (
+                              <Tag key={capability}>{capability}</Tag>
+                            ))}
+                          </Space>
+                          <Descriptions size="small" column={1}>
+                            <Descriptions.Item label="月付">
+                              {softwareCopilotPriceText(monthlyPrice, item.product.currency)}
+                              {activeWorkspace.workspaceType === 'enterprise' ? ' / 设备' : ''}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="年付">
+                              {softwareCopilotPriceText(annualPrice, item.product.currency)}
+                              {activeWorkspace.workspaceType === 'enterprise' ? ' / 设备' : ''}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="席位">
+                              {item.entitlement.seatLimit > 0
+                                ? `${item.entitlement.assignedSeatCount}/${item.entitlement.seatLimit} 已分配`
+                                : '未购买'}
+                            </Descriptions.Item>
+                          </Descriptions>
+                          {activeWorkspace.workspaceType === 'enterprise' ? (
+                            <InputNumber
+                              min={1}
+                              max={500}
+                              value={seatCount}
+                              addonBefore="设备数量"
+                              style={{ width: '100%' }}
+                              onChange={(value) =>
+                                setSoftwareCopilotSeatCounts((current) => ({
+                                  ...current,
+                                  [item.product.code]: typeof value === 'number' ? value : 1
+                                }))
+                              }
+                            />
+                          ) : null}
+                          <Space wrap>
+                            <Button
+                              type="primary"
+                              icon={<CreditCardOutlined />}
+                              disabled={Boolean(disabledReason)}
+                              title={disabledReason}
+                              loading={payingSoftwareCopilotKey === `${item.product.code}:MONTHLY`}
+                              onClick={() => void createSoftwareCopilotAlipayOrder(item, 'MONTHLY')}
+                            >
+                              月付购买
+                            </Button>
+                            <Button
+                              icon={<CreditCardOutlined />}
+                              disabled={Boolean(disabledReason)}
+                              title={disabledReason}
+                              loading={payingSoftwareCopilotKey === `${item.product.code}:ANNUAL`}
+                              onClick={() => void createSoftwareCopilotAlipayOrder(item, 'ANNUAL')}
+                            >
+                              年付购买
+                            </Button>
+                          </Space>
+                          {disabledReason ? (
+                            <Typography.Text type="secondary">{disabledReason}</Typography.Text>
+                          ) : null}
+                        </Space>
+                      </Card>
+                    </Col>
+                  );
+                })}
+              </Row>
+              {softwareCopilots.data.length === 0 ? (
+                <Alert showIcon type="warning" message="暂未读取到软件副驾目录" />
               ) : null}
             </Space>
           </Card>

@@ -1,4 +1,5 @@
 import type { PlanSummary } from './commercial';
+import type { SoftwareCopilotOrderSummary } from './software-copilot';
 
 export type PaymentProvider = 'ALIPAY';
 
@@ -99,7 +100,9 @@ export interface SyncAlipayOrderResponse {
   data: {
     kind: 'not_found' | 'pending' | 'paid' | 'closed';
     orderNo: string;
+    workspaceId?: string;
     tradeStatus?: string;
     order?: BillingOrderSummary;
+    softwareCopilotOrder?: SoftwareCopilotOrderSummary;
   };
 }

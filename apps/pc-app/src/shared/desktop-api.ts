@@ -1,3 +1,6 @@
+import type { ListSoftwareCopilotsResponse } from '@qiuai/api-contract/software-copilot';
+
+export type { ListSoftwareCopilotsResponse };
 import type {
   DesktopRuntimeSnapshot,
   DesktopArtifactSummary,
@@ -581,6 +584,7 @@ export interface QiuDesktopBridge {
   syncRuntimeState(state: DesktopRuntimeState): Promise<DesktopRuntimeSyncResponse>;
   getAiPointOverview(): Promise<DesktopAiPointOverview>;
   getReferralOverview(): Promise<DesktopReferralOverview>;
+  listSoftwareCopilots(): Promise<ListSoftwareCopilotsResponse>;
   saveRuntimeState(state: DesktopRuntimeState): Promise<void>;
   listWorkspaceBackups(): Promise<DesktopBackupSummary[]>;
   createWorkspaceBackup(state: DesktopRuntimeState): Promise<DesktopBackupSummary>;

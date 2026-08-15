@@ -23,5 +23,6 @@ export * from './workspace';
 export * from './plan-catalog';
 export * from './referral';
 export * from './role-template';
+export * from './software-copilot';
 export * from './tool-action-registry';
 export * from './workflow-graph';

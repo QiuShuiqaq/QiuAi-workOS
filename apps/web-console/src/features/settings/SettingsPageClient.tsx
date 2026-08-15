@@ -7,6 +7,9 @@ import type {
   DesktopBindingCodeSummary,
   DesktopDeviceSummary,
   EntitlementSummary,
+  ListSoftwareCopilotsResponse,
+  SoftwareCopilotCatalogItem,
+  SoftwareCopilotDeviceBindingSummary,
   PlanDetail
 } from '@qiuai/api-contract';
 import { QiuMetricCard, QiuPage, QiuStatusTag } from '@qiuai/ui';
@@ -20,8 +23,10 @@ import message from 'antd/es/message';
 import Modal from 'antd/es/modal';
 import Popconfirm from 'antd/es/popconfirm';
 import Row from 'antd/es/row';
+import Select from 'antd/es/select';
 import Space from 'antd/es/space';
 import Table from 'antd/es/table';
+import Tag from 'antd/es/tag';
 import type { ColumnsType } from 'antd/es/table';
 import Typography from 'antd/es/typography';
 import { useRouter } from 'next/navigation';
@@ -35,6 +40,7 @@ export interface SettingsPageClientProps {
   plans: PlanDetail[];
   desktopDevices: DesktopDeviceSummary[];
   desktopBindingCodes: DesktopBindingCodeSummary[];
+  softwareCopilots: ListSoftwareCopilotsResponse;
   isApiFallback: boolean;
 }
 
@@ -80,10 +86,15 @@ export function SettingsPageClient({
   plans,
   desktopDevices,
   desktopBindingCodes,
+  softwareCopilots,
   isApiFallback
 }: SettingsPageClientProps) {
   const router = useRouter();
   const [isCreatingBindingCode, setIsCreatingBindingCode] = useState(false);
+  const [selectedSoftwareCopilotDeviceIds, setSelectedSoftwareCopilotDeviceIds] = useState<Record<string, string>>({});
+  const [bindingSoftwareCopilotCode, setBindingSoftwareCopilotCode] = useState('');
+  const [revokingSoftwareCopilotBindingId, setRevokingSoftwareCopilotBindingId] = useState('');
+  const [revokingDesktopDeviceId, setRevokingDesktopDeviceId] = useState('');
   const [latestBindingCode, setLatestBindingCode] =
     useState<CreateDesktopBindingCodeResponse['data'] | null>(null);
   const activeWorkspace = currentAccount.workspaces.find(
@@ -155,6 +166,57 @@ export function SettingsPageClient({
       router.refresh();
     } catch (error) {
       message.error(error instanceof Error ? error.message : '作废授权码失败');
+    }
+  }
+
+  async function bindSoftwareCopilotDevice(item: SoftwareCopilotCatalogItem) {
+    const desktopDeviceId = selectedSoftwareCopilotDeviceIds[item.product.code];
+    if (!desktopDeviceId) {
+      message.warning('请选择要授权的 PC 设备');
+      return;
+    }
+    if (item.entitlement.availableSeatCount <= 0) {
+      message.warning('该软件副驾没有可分配的空闲席位');
+      return;
+    }
+
+    setBindingSoftwareCopilotCode(item.product.code);
+    try {
+      await createBrowserApiClient().bindSoftwareCopilotDevice(activeWorkspace.id, item.product.code, {
+        desktopDeviceId
+      });
+      message.success('软件副驾已分配给设备');
+      router.refresh();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '分配软件副驾失败');
+    } finally {
+      setBindingSoftwareCopilotCode('');
+    }
+  }
+
+  async function revokeSoftwareCopilotDeviceBinding(binding: SoftwareCopilotDeviceBindingSummary) {
+    setRevokingSoftwareCopilotBindingId(binding.id);
+    try {
+      await createBrowserApiClient().revokeSoftwareCopilotDeviceBinding(activeWorkspace.id, binding.id);
+      message.success('软件副驾席位已释放');
+      router.refresh();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '释放软件副驾席位失败');
+    } finally {
+      setRevokingSoftwareCopilotBindingId('');
+    }
+  }
+
+  async function revokeDesktopDevice(device: DesktopDeviceSummary) {
+    setRevokingDesktopDeviceId(device.id);
+    try {
+      await createBrowserApiClient().revokeDesktopDevice(activeWorkspace.id, device.id);
+      message.success('PC 设备已解绑');
+      router.refresh();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '解绑 PC 设备失败');
+    } finally {
+      setRevokingDesktopDeviceId('');
     }
   }
 
@@ -280,6 +342,30 @@ export function SettingsPageClient({
       dataIndex: 'lastSyncedAt',
       responsive: ['lg'],
       render: (value: string | undefined) => formatDateTime(value)
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      render: (_value, device) => (
+        <Popconfirm
+          title="确认解绑这台 PC？"
+          description="解绑后，该 PC 不能继续使用企业授权，已分配的软件副驾席位也会释放。"
+          okText="解绑"
+          cancelText="取消"
+          disabled={device.status !== 'ACTIVE'}
+          onConfirm={() => revokeDesktopDevice(device)}
+        >
+          <Button
+            danger
+            size="small"
+            icon={<StopOutlined />}
+            disabled={device.status !== 'ACTIVE'}
+            loading={revokingDesktopDeviceId === device.id}
+          >
+            解绑
+          </Button>
+        </Popconfirm>
+      )
     }
   ];
 
@@ -370,6 +456,106 @@ export function SettingsPageClient({
               pagination={false}
               locale={{ emptyText: '当前还没有绑定的桌面设备' }}
             />
+          </Card>
+
+          <Card title="软件副驾设备授权" bordered={false}>
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Alert
+                showIcon
+                type="info"
+                message="企业购买软件副驾后，需要把席位分配给具体 PC。释放席位不会删除 PC 设备。"
+              />
+              {softwareCopilots.data.filter((item) => item.licenses.length > 0).map((item) => {
+                const activeDevices = desktopDevices.filter((device) => device.status === 'ACTIVE');
+                const authorizedDeviceIds = new Set(
+                  item.activeBindings.map((binding) => binding.desktopDeviceId)
+                );
+                const deviceOptions = activeDevices.map((device) => ({
+                  label: authorizedDeviceIds.has(device.id)
+                    ? `${device.deviceName}（已授权）`
+                    : device.deviceName,
+                  value: device.id,
+                  disabled: authorizedDeviceIds.has(device.id)
+                }));
+
+                return (
+                  <Card key={item.product.code} size="small" bordered>
+                    <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                      <Row gutter={[12, 12]} align="middle">
+                        <Col xs={24} lg={10}>
+                          <Space direction="vertical" size={2}>
+                            <Space size={8} wrap>
+                              <Typography.Text strong>{item.product.name}</Typography.Text>
+                              <Tag>{item.product.category}</Tag>
+                            </Space>
+                            <Typography.Text type="secondary">
+                              {item.entitlement.assignedSeatCount}/{item.entitlement.seatLimit} 已分配，剩余 {item.entitlement.availableSeatCount}
+                            </Typography.Text>
+                          </Space>
+                        </Col>
+                        <Col xs={24} lg={10}>
+                          <Select
+                            allowClear
+                            placeholder="选择 PC 设备"
+                            value={selectedSoftwareCopilotDeviceIds[item.product.code] || undefined}
+                            options={deviceOptions}
+                            style={{ width: '100%' }}
+                            onChange={(value) =>
+                              setSelectedSoftwareCopilotDeviceIds((current) => ({
+                                ...current,
+                                [item.product.code]: value ?? ''
+                              }))
+                            }
+                          />
+                        </Col>
+                        <Col xs={24} lg={4}>
+                          <Button
+                            block
+                            type="primary"
+                            disabled={item.entitlement.availableSeatCount <= 0}
+                            loading={bindingSoftwareCopilotCode === item.product.code}
+                            onClick={() => void bindSoftwareCopilotDevice(item)}
+                          >
+                            分配
+                          </Button>
+                        </Col>
+                      </Row>
+                      {item.activeBindings.length > 0 ? (
+                        <Space size={8} wrap>
+                          {item.activeBindings.map((binding) => (
+                            <Tag key={binding.id} color="blue">
+                              <Space size={6}>
+                                <span>{binding.deviceName}</span>
+                                <Popconfirm
+                                  title="释放这个软件副驾席位？"
+                                  okText="释放"
+                                  cancelText="取消"
+                                  onConfirm={() => revokeSoftwareCopilotDeviceBinding(binding)}
+                                >
+                                  <Button
+                                    size="small"
+                                    type="link"
+                                    danger
+                                    loading={revokingSoftwareCopilotBindingId === binding.id}
+                                  >
+                                    释放
+                                  </Button>
+                                </Popconfirm>
+                              </Space>
+                            </Tag>
+                          ))}
+                        </Space>
+                      ) : (
+                        <Typography.Text type="secondary">还没有分配给任何 PC。</Typography.Text>
+                      )}
+                    </Space>
+                  </Card>
+                );
+              })}
+              {softwareCopilots.data.filter((item) => item.licenses.length > 0).length === 0 ? (
+                <Alert showIcon type="warning" message="当前还没有已购买的软件副驾" />
+              ) : null}
+            </Space>
           </Card>
         </Space>
 

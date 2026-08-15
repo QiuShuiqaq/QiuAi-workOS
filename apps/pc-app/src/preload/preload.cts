@@ -22,6 +22,7 @@ import type {
   DesktopArtifactSaveAsResult,
   DesktopAiPointOverview,
   DesktopReferralOverview,
+  ListSoftwareCopilotsResponse,
   DesktopLocalFileExportRequest,
   DesktopLocalFileExportResult,
   DesktopRemoteFileSaveAsRequest,
@@ -59,6 +60,7 @@ const channels = {
   syncRuntimeState: 'qiuai:desktop:sync-runtime-state',
   getAiPointOverview: 'qiuai:desktop:get-ai-point-overview',
   getReferralOverview: 'qiuai:desktop:get-referral-overview',
+  listSoftwareCopilots: 'qiuai:desktop:list-software-copilots',
   saveRuntimeState: 'qiuai:desktop:save-runtime-state',
   listWorkspaceBackups: 'qiuai:desktop:list-workspace-backups',
   createWorkspaceBackup: 'qiuai:desktop:create-workspace-backup',
@@ -116,6 +118,8 @@ const bridge: QiuDesktopBridge = {
     ipcRenderer.invoke(channels.getAiPointOverview) as Promise<DesktopAiPointOverview>,
   getReferralOverview: () =>
     ipcRenderer.invoke(channels.getReferralOverview) as Promise<DesktopReferralOverview>,
+  listSoftwareCopilots: () =>
+    ipcRenderer.invoke(channels.listSoftwareCopilots) as Promise<ListSoftwareCopilotsResponse>,
   saveRuntimeState: (state: DesktopRuntimeState) =>
     ipcRenderer.invoke(channels.saveRuntimeState, state) as Promise<void>,
   listWorkspaceBackups: () =>

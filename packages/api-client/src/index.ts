@@ -6,6 +6,10 @@ import type {
   CreateAdminOfficialModelApiKeyResponse,
   CreateBillingOrderRequest,
   CreateBillingOrderResponse,
+  BindSoftwareCopilotDeviceRequest,
+  BindSoftwareCopilotDeviceResponse,
+  CreateSoftwareCopilotOrderRequest,
+  CreateSoftwareCopilotOrderResponse,
   GetReferralOverviewResponse,
   LoginRequest,
   LoginResponse,
@@ -84,6 +88,7 @@ import type {
   ListRoleInstancesResponse,
   ListRoleTemplatesResponse,
   ListPlansResponse,
+  ListSoftwareCopilotsResponse,
   ListTasksResponse,
   InstallRoleRequest,
   InstallRoleResponse,
@@ -93,6 +98,8 @@ import type {
   PublishAdminRoleTemplateResponse,
   PublishAdminDesktopReleaseResponse,
   RevokeAdminDesktopDeviceResponse,
+  RevokeDesktopDeviceResponse,
+  RevokeSoftwareCopilotDeviceBindingResponse,
   TestAdminRoleTemplateRequest,
   TestAdminRoleTemplateResponse,
   UpdateAdminAssetDefinitionRequest,
@@ -533,6 +540,38 @@ export class QiuApiClient {
     return this.post(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/billing/orders`, input);
   }
 
+  listSoftwareCopilots(workspaceId: string): Promise<ListSoftwareCopilotsResponse> {
+    return this.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/software-copilots`);
+  }
+
+  createSoftwareCopilotOrder(
+    workspaceId: string,
+    input: CreateSoftwareCopilotOrderRequest
+  ): Promise<CreateSoftwareCopilotOrderResponse> {
+    return this.post(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/software-copilots/orders`, input);
+  }
+
+  bindSoftwareCopilotDevice(
+    workspaceId: string,
+    productCode: string,
+    input: BindSoftwareCopilotDeviceRequest
+  ): Promise<BindSoftwareCopilotDeviceResponse> {
+    return this.post(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/software-copilots/${encodeURIComponent(productCode)}/device-bindings`,
+      input
+    );
+  }
+
+  revokeSoftwareCopilotDeviceBinding(
+    workspaceId: string,
+    bindingId: string
+  ): Promise<RevokeSoftwareCopilotDeviceBindingResponse> {
+    return this.post(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/software-copilot-device-bindings/${encodeURIComponent(bindingId)}/revoke`,
+      {}
+    );
+  }
+
   getReferralOverview(workspaceId: string): Promise<GetReferralOverviewResponse> {
     return this.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/referrals/me`);
   }
@@ -721,6 +760,13 @@ export class QiuApiClient {
   ): Promise<CancelDesktopBindingCodeResponse> {
     return this.post(
       `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/desktop/binding-codes/${encodeURIComponent(bindingCodeId)}/cancel`,
+      {}
+    );
+  }
+
+  revokeDesktopDevice(workspaceId: string, deviceId: string): Promise<RevokeDesktopDeviceResponse> {
+    return this.post(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/desktop/devices/${encodeURIComponent(deviceId)}/revoke`,
       {}
     );
   }

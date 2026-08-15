@@ -2,7 +2,8 @@ import type {
   CurrentAccountResponse,
   ListDesktopBindingCodesResponse,
   ListDesktopDevicesResponse,
-  ListPlansResponse
+  ListPlansResponse,
+  ListSoftwareCopilotsResponse
 } from '@qiuai/api-contract';
 
 import { createServerApiClient } from '../../shared/api/server-api';
@@ -16,6 +17,7 @@ export interface SettingsPageData {
   plans: ListPlansResponse;
   desktopDevices: ListDesktopDevicesResponse;
   desktopBindingCodes: ListDesktopBindingCodesResponse;
+  softwareCopilots: ListSoftwareCopilotsResponse;
   isApiFallback: boolean;
 }
 
@@ -25,10 +27,11 @@ export async function loadSettingsPageData(requestedWorkspaceId?: string): Promi
 
   try {
     const apiClient = await createServerApiClient();
-    const [plans, desktopDevices, desktopBindingCodes] = await Promise.all([
+    const [plans, desktopDevices, desktopBindingCodes, softwareCopilots] = await Promise.all([
       apiClient.listPlans(),
       apiClient.listDesktopDevices(workspaceId),
-      apiClient.listDesktopBindingCodes(workspaceId)
+      apiClient.listDesktopBindingCodes(workspaceId),
+      apiClient.listSoftwareCopilots(workspaceId)
     ]);
     return {
       currentAccount: {
@@ -38,6 +41,7 @@ export async function loadSettingsPageData(requestedWorkspaceId?: string): Promi
       plans,
       desktopDevices,
       desktopBindingCodes,
+      softwareCopilots,
       isApiFallback: false
     };
   } catch (error) {
@@ -53,6 +57,13 @@ export async function loadSettingsPageData(requestedWorkspaceId?: string): Promi
         data: []
       },
       desktopBindingCodes: {
+        data: []
+      },
+      softwareCopilots: {
+        workspaceId,
+        workspaceType:
+          currentAccount.workspaces.find((workspace) => workspace.id === workspaceId)?.workspaceType ??
+          'personal',
         data: []
       },
       isApiFallback: true

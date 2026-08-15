@@ -1,7 +1,8 @@
 import type {
   CurrentAccountResponse,
   GetBillingOverviewResponse,
-  ListPlansResponse
+  ListPlansResponse,
+  ListSoftwareCopilotsResponse
 } from '@qiuai/api-contract';
 
 import { createServerApiClient } from '../../shared/api/server-api';
@@ -14,6 +15,7 @@ export interface PurchasePageData {
   currentAccount: CurrentAccountResponse;
   plans: ListPlansResponse;
   billing: GetBillingOverviewResponse;
+  softwareCopilots: ListSoftwareCopilotsResponse;
   isApiFallback: boolean;
 }
 
@@ -23,9 +25,10 @@ export async function loadPurchasePageData(requestedWorkspaceId?: string): Promi
 
   try {
     const apiClient = await createServerApiClient();
-    const [plans, billing] = await Promise.all([
+    const [plans, billing, softwareCopilots] = await Promise.all([
       apiClient.listPlans(),
-      apiClient.getBillingOverview(workspaceId)
+      apiClient.getBillingOverview(workspaceId),
+      apiClient.listSoftwareCopilots(workspaceId)
     ]);
 
     return {
@@ -35,6 +38,7 @@ export async function loadPurchasePageData(requestedWorkspaceId?: string): Promi
       },
       plans,
       billing,
+      softwareCopilots,
       isApiFallback: false
     };
   } catch (error) {
@@ -47,6 +51,13 @@ export async function loadPurchasePageData(requestedWorkspaceId?: string): Promi
       },
       plans: fallbackPlans,
       billing: createFallbackBillingOverview(workspaceId),
+      softwareCopilots: {
+        workspaceId,
+        workspaceType:
+          currentAccount.workspaces.find((workspace) => workspace.id === workspaceId)?.workspaceType ??
+          'personal',
+        data: []
+      },
       isApiFallback: true
     };
   }

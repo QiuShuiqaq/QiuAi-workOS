@@ -17,6 +17,10 @@
     "./referral": {
       "types": "./dist/referral.d.ts",
       "default": "./dist/referral.js"
+    },
+    "./software-copilot": {
+      "types": "./dist/software-copilot.d.ts",
+      "default": "./dist/software-copilot.js"
     }
   },
   "scripts": {

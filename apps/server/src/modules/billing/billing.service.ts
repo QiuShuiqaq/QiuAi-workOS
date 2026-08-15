@@ -15,6 +15,7 @@ import { isDatabasePersistenceEnabled } from '../../shared/persistence/persisten
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { ReferralsService } from '../referrals/referrals.service';
+import { SoftwareCopilotService } from '../software-copilot/software-copilot.service';
 import {
   buildAlipayCheckoutUrl,
   formatAmountCny,
@@ -65,8 +66,10 @@ export interface AlipayOrderSyncResult {
   data: {
     kind: 'not_found' | 'pending' | 'paid' | 'closed';
     orderNo: string;
+    workspaceId?: string;
     tradeStatus?: string;
     order?: BillingOrderSummaryDto;
+    softwareCopilotOrder?: ReturnType<SoftwareCopilotService['toOrderSummary']>;
   };
 }
 
@@ -86,7 +89,9 @@ export class BillingService {
     @Inject(AuthService)
     private readonly authService: AuthService,
     @Inject(ReferralsService)
-    private readonly referralsService: ReferralsService
+    private readonly referralsService: ReferralsService,
+    @Inject(SoftwareCopilotService)
+    private readonly softwareCopilotService: SoftwareCopilotService
   ) {}
 
   async getOverview(workspaceId: string, cookieHeader?: string): Promise<GetBillingOverviewResponseDto> {
@@ -147,7 +152,7 @@ export class BillingService {
         };
       }
 
-      await this.applyAlipayTradeUpdate({
+      const billingOrder = await this.applyAlipayTradeUpdate({
         orderNo: payload.out_trade_no ?? '',
         tradeNo: payload.trade_no ?? null,
         tradeStatus: payload.trade_status ?? null,
@@ -157,6 +162,19 @@ export class BillingService {
         rawPayload: payload,
         source: 'notify'
       });
+      if (!billingOrder) {
+        const softwareCopilotOrder = await this.softwareCopilotService.applyAlipayTradeUpdate({
+          orderNo: payload.out_trade_no ?? '',
+          tradeNo: payload.trade_no ?? null,
+          tradeStatus: payload.trade_status ?? null,
+          totalAmount: payload.total_amount ?? null,
+          rawPayload: payload,
+          source: 'notify'
+        });
+        if (!softwareCopilotOrder) {
+          throw new Error('ALIPAY_ORDER_NOT_FOUND');
+        }
+      }
 
       return {
         success: true,
@@ -202,7 +220,10 @@ export class BillingService {
         workspaceId: true
       }
     });
-    if (!localOrder) {
+    const softwareCopilotWorkspaceId = localOrder
+      ? undefined
+      : await this.softwareCopilotService.findOrderWorkspaceId(orderNo);
+    if (!localOrder && !softwareCopilotWorkspaceId) {
       return {
         data: {
           kind: 'not_found',
@@ -211,7 +232,8 @@ export class BillingService {
       };
     }
 
-    await this.requireWorkspaceAccess(localOrder.workspaceId, cookieHeader);
+    const workspaceId = localOrder?.workspaceId ?? softwareCopilotWorkspaceId!;
+    await this.requireWorkspaceAccess(workspaceId, cookieHeader);
 
     const trade = await queryAlipayTradeByOrderNo(orderNo);
     if (!trade) {
@@ -223,24 +245,40 @@ export class BillingService {
       };
     }
 
-    const order = await this.applyAlipayTradeUpdate({
-      orderNo: trade.orderNo,
-      tradeNo: trade.tradeNo,
-      tradeStatus: trade.tradeStatus,
-      totalAmount: trade.totalAmount,
-      appId: this.readStringField(trade.raw, 'appId', 'app_id'),
-      sellerId: this.readStringField(trade.raw, 'sellerId', 'seller_id'),
-      rawPayload: trade.raw,
-      source: 'return'
-    });
+    const order = localOrder
+      ? await this.applyAlipayTradeUpdate({
+          orderNo: trade.orderNo,
+          tradeNo: trade.tradeNo,
+          tradeStatus: trade.tradeStatus,
+          totalAmount: trade.totalAmount,
+          appId: this.readStringField(trade.raw, 'appId', 'app_id'),
+          sellerId: this.readStringField(trade.raw, 'sellerId', 'seller_id'),
+          rawPayload: trade.raw,
+          source: 'return'
+        })
+      : null;
+    const softwareCopilotOrder = localOrder
+      ? null
+      : await this.softwareCopilotService.applyAlipayTradeUpdate({
+          orderNo: trade.orderNo,
+          tradeNo: trade.tradeNo,
+          tradeStatus: trade.tradeStatus,
+          totalAmount: trade.totalAmount,
+          rawPayload: trade.raw,
+          source: 'return'
+        });
 
     if (isAlipayTradePaid(trade.tradeStatus)) {
       return {
         data: {
           kind: 'paid',
           orderNo: trade.orderNo,
+          workspaceId,
           tradeStatus: trade.tradeStatus ?? undefined,
-          order: order ? this.toBillingOrderSummary(order) : undefined
+          order: order ? this.toBillingOrderSummary(order) : undefined,
+          softwareCopilotOrder: softwareCopilotOrder
+            ? this.softwareCopilotService.toOrderSummary(softwareCopilotOrder)
+            : undefined
         }
       };
     }
@@ -250,8 +288,12 @@ export class BillingService {
         data: {
           kind: 'closed',
           orderNo: trade.orderNo,
+          workspaceId,
           tradeStatus: trade.tradeStatus ?? undefined,
-          order: order ? this.toBillingOrderSummary(order) : undefined
+          order: order ? this.toBillingOrderSummary(order) : undefined,
+          softwareCopilotOrder: softwareCopilotOrder
+            ? this.softwareCopilotService.toOrderSummary(softwareCopilotOrder)
+            : undefined
         }
       };
     }
@@ -260,8 +302,12 @@ export class BillingService {
       data: {
         kind: 'pending',
         orderNo: trade.orderNo,
+        workspaceId,
         tradeStatus: trade.tradeStatus ?? undefined,
-        order: order ? this.toBillingOrderSummary(order) : undefined
+        order: order ? this.toBillingOrderSummary(order) : undefined,
+        softwareCopilotOrder: softwareCopilotOrder
+          ? this.softwareCopilotService.toOrderSummary(softwareCopilotOrder)
+          : undefined
       }
     };
   }
@@ -651,7 +697,7 @@ export class BillingService {
       }
     });
     if (!order) {
-      throw new Error('BILLING_ORDER_NOT_FOUND');
+      return null;
     }
 
     this.ensureAlipayAmountMatches(order, input.totalAmount);

@@ -44,6 +44,7 @@ import {
   ListDesktopBindingCodesResponse,
   ListDesktopDevicesResponse,
   RedeemDesktopBindingCodeResponse,
+  RevokeDesktopDeviceResponse,
   UpdateDesktopBindingCodeResponse,
   parseAcceptDesktopAgreementRequest,
   parseAgreementAcceptanceStatusQuery,
@@ -562,6 +563,73 @@ export class DesktopSyncService {
 
     return {
       data: devices.map((device) => this.toDeviceSummary(device))
+    };
+  }
+
+  async revokeDevice(
+    workspaceId: string,
+    deviceId: string,
+    cookieHeader?: string
+  ): Promise<RevokeDesktopDeviceResponse> {
+    if (!isDatabasePersistenceEnabled()) {
+      this.assertMockWorkspace(workspaceId);
+      const device = this.mockDevices.find((item) => item.workspaceId === workspaceId && item.id === deviceId);
+      if (!device) {
+        throw new NotFoundException({
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Desktop device was not found.'
+          }
+        });
+      }
+      device.status = 'REVOKED';
+      const { tokenHash: _tokenHash, ...summary } = device;
+      return {
+        data: summary
+      };
+    }
+
+    await this.requireDesktopDeviceManagementAccess(workspaceId, cookieHeader);
+    const existing = await this.prismaService.desktopDevice.findFirst({
+      where: {
+        id: deviceId,
+        workspaceId
+      }
+    });
+    if (!existing) {
+      throw new NotFoundException({
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Desktop device was not found.'
+        }
+      });
+    }
+
+    const revoked = await this.prismaService.$transaction(async (tx) => {
+      await tx.softwareCopilotDeviceBinding.updateMany({
+        where: {
+          workspaceId,
+          desktopDeviceId: deviceId,
+          status: 'ACTIVE'
+        },
+        data: {
+          status: 'REVOKED',
+          revokedAt: new Date()
+        }
+      });
+
+      return tx.desktopDevice.update({
+        where: {
+          id: deviceId
+        },
+        data: {
+          status: 'REVOKED'
+        }
+      });
+    });
+
+    return {
+      data: this.toDeviceSummary(revoked)
     };
   }
 

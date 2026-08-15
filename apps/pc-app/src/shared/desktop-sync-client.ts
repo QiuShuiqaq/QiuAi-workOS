@@ -18,6 +18,7 @@ import type {
   GetAiPointOverviewResponse,
   ListOfficialModelRoutesResponse
 } from '@qiuai/api-contract/ai-points';
+import type { ListSoftwareCopilotsResponse } from '@qiuai/api-contract/software-copilot';
 import type { GetReferralOverviewResponse } from '@qiuai/api-contract/referral';
 
 interface RedeemDesktopBindingCodeRequest {
@@ -326,6 +327,31 @@ export async function fetchReferralOverview(
   }
 
   return body as GetReferralOverviewResponse;
+}
+
+export async function fetchSoftwareCopilots(
+  baseUrl: string,
+  workspaceId: string,
+  deviceToken: string
+): Promise<ListSoftwareCopilotsResponse> {
+  const response = await fetch(
+    `${normalizeBaseUrl(baseUrl)}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/software-copilots`,
+    {
+      headers: {
+        accept: 'application/json',
+        'x-qiuai-device-token': deviceToken
+      }
+    }
+  );
+
+  const body = (await response.json()) as ListSoftwareCopilotsResponse | { error?: { message?: string } };
+  if (!response.ok) {
+    const errorBody = body as { error?: { message?: string } };
+    const message = errorBody.error?.message ?? `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return body as ListSoftwareCopilotsResponse;
 }
 
 export async function fetchOfficialModelRoutes(

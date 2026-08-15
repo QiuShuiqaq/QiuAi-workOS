@@ -16,7 +16,10 @@ export default async function AlipayReturnPage({
   if (orderNo) {
     try {
       const response = await (await createServerApiClient()).syncAlipayOrder(orderNo);
-      const workspaceId = response.data.order?.workspaceId;
+      const workspaceId =
+        response.data.workspaceId ??
+        response.data.order?.workspaceId ??
+        response.data.softwareCopilotOrder?.workspaceId;
       if (workspaceId) {
         redirectHref = `/purchase?workspaceId=${encodeURIComponent(workspaceId)}&payment=alipay_return`;
       }

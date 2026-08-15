@@ -202,6 +202,10 @@ export interface CancelDesktopBindingCodeResponse {
   data: DesktopBindingCodeSummary;
 }
 
+export interface RevokeDesktopDeviceResponse {
+  data: DesktopDeviceSummary;
+}
+
 export interface RedeemDesktopBindingCodeRequest {
   bindingCode: string;
   runtimeId: string;

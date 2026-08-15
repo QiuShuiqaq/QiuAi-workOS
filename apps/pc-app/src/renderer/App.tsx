@@ -7,6 +7,7 @@ import {
   CloudDownloadOutlined,
   CloudSyncOutlined,
   CloseOutlined,
+  ControlOutlined,
   CreditCardOutlined,
   DatabaseOutlined,
   DeleteOutlined,
@@ -74,6 +75,10 @@ import Typography from 'antd/es/typography';
 import zhCN from 'antd/es/locale/zh_CN';
 import { type ChangeEvent, type DragEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 
+import type {
+  ListSoftwareCopilotsResponse,
+  SoftwareCopilotCatalogItem
+} from '@qiuai/api-contract/software-copilot';
 import type {
   DesktopAgreementStatus,
   DesktopAiPointOverview,
@@ -215,6 +220,7 @@ import { PromptSnippetBoard } from './PromptSnippetBoard';
 type SectionKey =
   | 'workbench'
   | 'factories'
+  | 'copilots'
   | 'studio'
   | 'roles'
   | 'logs'
@@ -539,6 +545,7 @@ const sectionItems: Array<{ key: SectionKey; icon: ReactNode; label: string }> =
   { key: 'studio', icon: <ApartmentOutlined />, label: '工作室' },
   { key: 'workbench', icon: <MessageOutlined />, label: '数字员工' },
   { key: 'factories', icon: <BankOutlined />, label: '数字工厂' },
+  { key: 'copilots', icon: <ControlOutlined />, label: '软件副驾' },
   { key: 'roles', icon: <AppstoreOutlined />, label: '数字市场' },
   { key: 'logs', icon: <FileTextOutlined />, label: '日志' },
   { key: 'snippets', icon: <SnippetsOutlined />, label: '标签库' },
@@ -1883,6 +1890,11 @@ const initialAuthorizedRoleTemplateCatalog: DesktopAuthorizedRoleTemplateCatalog
   loadedAt: new Date(0).toISOString(),
   templates: []
 };
+const initialSoftwareCopilotCatalog: ListSoftwareCopilotsResponse = {
+  workspaceId: pendingWorkspaceId,
+  workspaceType: 'personal',
+  data: []
+};
 
 function cloneJsonValue<T>(value: T | undefined): T | undefined {
   return value === undefined ? undefined : (JSON.parse(JSON.stringify(value)) as T);
@@ -3154,6 +3166,10 @@ export default function App() {
   const [isLoadingRoleTemplates, setIsLoadingRoleTemplates] = useState(false);
   const [authorizedRoleTemplateCatalog, setAuthorizedRoleTemplateCatalog] =
     useState<DesktopAuthorizedRoleTemplateCatalog>(initialAuthorizedRoleTemplateCatalog);
+  const [softwareCopilotCatalog, setSoftwareCopilotCatalog] =
+    useState<ListSoftwareCopilotsResponse>(initialSoftwareCopilotCatalog);
+  const [isLoadingSoftwareCopilots, setIsLoadingSoftwareCopilots] = useState(false);
+  const [softwareCopilotNotice, setSoftwareCopilotNotice] = useState('');
   const [hasLoadedPersistedState, setHasLoadedPersistedState] = useState(false);
   const [workspaceBackups, setWorkspaceBackups] = useState<DesktopBackupSummary[]>([]);
   const chatMessageListRef = useRef<HTMLDivElement | null>(null);
@@ -3298,6 +3314,14 @@ export default function App() {
     }
 
     void loadAuthorizedRoleTemplates();
+  }, [hasLoadedPersistedState, runtimeState.localRuntime.workspaceId]);
+
+  useEffect(() => {
+    if (!hasLoadedPersistedState) {
+      return;
+    }
+
+    void loadSoftwareCopilots();
   }, [hasLoadedPersistedState, runtimeState.localRuntime.workspaceId]);
 
   useEffect(() => {
@@ -3797,6 +3821,25 @@ export default function App() {
       );
     } finally {
       setIsLoadingRoleTemplates(false);
+    }
+  }
+
+  async function loadSoftwareCopilots() {
+    if (!window.qiuDesktop) {
+      return;
+    }
+
+    setIsLoadingSoftwareCopilots(true);
+    setSoftwareCopilotNotice('');
+    try {
+      const catalog = await window.qiuDesktop.listSoftwareCopilots();
+      setSoftwareCopilotCatalog(catalog);
+      setSoftwareCopilotNotice('');
+    } catch (error) {
+      setSoftwareCopilotCatalog(initialSoftwareCopilotCatalog);
+      setSoftwareCopilotNotice(`软件副驾同步失败：${error instanceof Error ? error.message : 'unknown error'}`);
+    } finally {
+      setIsLoadingSoftwareCopilots(false);
     }
   }
 
@@ -5310,6 +5353,7 @@ export default function App() {
                   {selectedSection === 'workbench' ? renderWorkbench() : null}
                   {selectedSection === 'factories' ? renderFactories() : null}
                   {selectedSection === 'studio' ? renderStudio() : null}
+                  {selectedSection === 'copilots' ? renderSoftwareCopilots() : null}
                   {selectedSection === 'roles' ? renderRoles() : null}
                   {selectedSection === 'logs' ? renderLogs() : null}
                   {selectedSection === 'snippets' ? <PromptSnippetBoard /> : null}
@@ -12129,6 +12173,142 @@ export default function App() {
     );
   }
 
+  function renderSoftwareCopilots() {
+    const items = [...softwareCopilotCatalog.data].sort(
+      (left, right) => left.product.sortOrder - right.product.sortOrder
+    );
+    const enabledCount = items.filter((item) => item.entitlement.canUse || item.deviceBinding).length;
+    const activeBindingCount = items.filter((item) => item.deviceBinding).length;
+
+    return (
+      <div className="software-copilot-page">
+        <Flex align="flex-start" justify="space-between" gap={16} wrap="wrap" className="catalog-page-header">
+          <div>
+            <Typography.Title level={2} className="page-title">
+              软件副驾
+            </Typography.Title>
+            <Typography.Text type="secondary">
+              给常用软件接入 AI 编辑能力。购买后按设备授权，连接器会逐步开放。
+            </Typography.Text>
+          </div>
+
+          <Space wrap>
+            <Tag color="blue">已授权 {enabledCount}</Tag>
+            <Tag color={activeBindingCount > 0 ? 'green' : 'default'}>本机可用 {activeBindingCount}</Tag>
+            <Button icon={<ReloadOutlined />} loading={isLoadingSoftwareCopilots} onClick={() => loadSoftwareCopilots()}>
+              刷新
+            </Button>
+            <Button type="primary" icon={<CreditCardOutlined />} onClick={() => openAccountModal('purchase')}>
+              购买中心
+            </Button>
+          </Space>
+        </Flex>
+
+        {softwareCopilotNotice ? (
+          <Card size="small" bordered className="software-copilot-notice">
+            <Typography.Text type="secondary">{softwareCopilotNotice}</Typography.Text>
+          </Card>
+        ) : null}
+
+        <div className="software-copilot-grid">
+          {items.map((item) => renderSoftwareCopilotCard(item))}
+        </div>
+
+        {items.length === 0 ? (
+          <div className="provider-empty">
+            <Empty description="暂时没有可用的软件副驾" />
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderSoftwareCopilotCard(item: SoftwareCopilotCatalogItem) {
+    const status = resolveSoftwareCopilotCardStatus(item);
+    const product = item.product;
+    const monthlyPrice = formatCents(product.personalMonthlyPriceCents);
+    const annualPrice = formatCents(product.personalAnnualPriceCents);
+
+    return (
+      <Card key={product.code} bordered={false} className="catalog-card software-copilot-card">
+        <Space direction="vertical" size={12} className="catalog-card-content software-copilot-card-content">
+          <Flex align="flex-start" justify="space-between" gap={12}>
+            <span className={`software-copilot-icon software-copilot-${softwareCopilotTone(product.code)}`}>
+              {softwareCopilotIcon(product.code)}
+            </span>
+            <Space size={4} wrap className="software-copilot-status-row">
+              <Tag color={status.color}>{status.label}</Tag>
+              <Tag>Windows</Tag>
+            </Space>
+          </Flex>
+
+          <Space direction="vertical" size={6} style={{ width: '100%' }}>
+            <Typography.Title level={5}>{product.name}</Typography.Title>
+            <Typography.Text type="secondary" className="software-copilot-description">
+              {product.description}
+            </Typography.Text>
+          </Space>
+
+          <Space size={6} wrap>
+            <Tag color="blue">{product.category}</Tag>
+            {product.capabilities.slice(0, 3).map((capability) => (
+              <Tag key={capability}>{capability}</Tag>
+            ))}
+          </Space>
+
+          <div className="software-copilot-license-panel">
+            <span>
+              <Typography.Text type="secondary">个人会员</Typography.Text>
+              <Typography.Text strong>{monthlyPrice}/月</Typography.Text>
+            </span>
+            <span>
+              <Typography.Text type="secondary">年付</Typography.Text>
+              <Typography.Text strong>{annualPrice}/年</Typography.Text>
+            </span>
+            <span>
+              <Typography.Text type="secondary">席位</Typography.Text>
+              <Typography.Text strong>
+                {item.entitlement.assignedSeatCount}/{item.entitlement.seatLimit || 0}
+              </Typography.Text>
+            </span>
+          </div>
+
+          {item.deviceBinding ? (
+            <Typography.Text type="secondary" className="software-copilot-device-line">
+              已绑定本机：{item.deviceBinding.deviceName}
+            </Typography.Text>
+          ) : item.entitlement.reason ? (
+            <Typography.Text type="secondary" className="software-copilot-device-line">
+              {item.entitlement.reason}
+            </Typography.Text>
+          ) : (
+            <Typography.Text type="secondary" className="software-copilot-device-line">
+              企业席位需要管理员在企业端分配到设备。
+            </Typography.Text>
+          )}
+
+          <div className="catalog-card-action-row">
+            <Space wrap>
+              <Button
+                type={item.deviceBinding ? 'primary' : 'default'}
+                disabled={!item.deviceBinding}
+                icon={<ControlOutlined />}
+                onClick={() => message.info('软件副驾连接器正在接入中，当前版本先开放购买和授权管理。')}
+              >
+                打开副驾
+              </Button>
+              {!item.deviceBinding ? (
+                <Button icon={<CreditCardOutlined />} onClick={() => openAccountModal('purchase')}>
+                  去购买
+                </Button>
+              ) : null}
+            </Space>
+          </div>
+        </Space>
+      </Card>
+    );
+  }
+
   function renderKnowledge() {
     const knowledgeSources =
       runtimeState.knowledgeSources.length > 0
@@ -15602,6 +15782,46 @@ function renderToolRuntimeTags(tool: ToolManifest, webSearchUsesCustomEndpoint: 
   return null;
 }
 
+function resolveSoftwareCopilotCardStatus(item: SoftwareCopilotCatalogItem): { label: string; color: string } {
+  if (item.deviceBinding) {
+    return { label: '本机已授权', color: 'green' };
+  }
+
+  if (item.entitlement.canUse && item.entitlement.availableSeatCount > 0) {
+    return { label: '有可用席位', color: 'blue' };
+  }
+
+  if (item.licenses.length > 0) {
+    return { label: '待分配设备', color: 'gold' };
+  }
+
+  if (item.entitlement.canPurchase) {
+    return { label: '可购买', color: 'default' };
+  }
+
+  return { label: '需会员/企业', color: 'default' };
+}
+
+function softwareCopilotTone(productCode: string): string {
+  if (productCode.includes('photoshop')) return 'image';
+  if (productCode.includes('coreldraw')) return 'vector';
+  if (productCode.includes('excel')) return 'excel';
+  if (productCode.includes('ppt')) return 'ppt';
+  if (productCode.includes('cad')) return 'cad';
+  if (productCode.includes('jianying')) return 'video';
+  return 'default';
+}
+
+function softwareCopilotIcon(productCode: string): ReactNode {
+  const tone = softwareCopilotTone(productCode);
+  if (tone === 'image') return <FileImageOutlined />;
+  if (tone === 'excel') return <FileExcelOutlined />;
+  if (tone === 'video') return <VideoCameraOutlined />;
+  if (tone === 'cad') return <BorderOutlined />;
+  if (tone === 'ppt') return <PlayCircleOutlined />;
+  return <ControlOutlined />;
+}
+
 function modelProviderLogoText(providerName: string): string {
   const normalizedName = providerName.trim();
   if (!normalizedName) return 'AI';
@@ -15667,6 +15887,10 @@ function sectionMeta(section: SectionKey) {
     studio: {
       title: '工作室',
       description: '用可视化方式查看数字员工、数字工厂和任务状态。'
+    },
+    copilots: {
+      title: '软件副驾',
+      description: '为 Photoshop、CorelDRAW、Excel、PPT、CAD、剪映等软件购买和管理 AI 副驾授权。'
     },
     roles: {
       title: '数字市场',

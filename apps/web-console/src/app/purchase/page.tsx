@@ -7,7 +7,7 @@ export default async function PurchasePage({
   searchParams?: Promise<{ workspaceId?: string }>;
 }) {
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const { currentAccount, plans, billing, isApiFallback } = await loadPurchasePageData(
+  const { currentAccount, plans, billing, softwareCopilots, isApiFallback } = await loadPurchasePageData(
     resolvedSearchParams?.workspaceId
   );
 
@@ -16,6 +16,7 @@ export default async function PurchasePage({
       currentAccount={currentAccount}
       plans={plans.data}
       billing={billing.data}
+      softwareCopilots={softwareCopilots}
       isApiFallback={isApiFallback}
     />
   );

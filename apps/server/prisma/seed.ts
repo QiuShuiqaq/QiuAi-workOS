@@ -7,6 +7,7 @@ import {
   retiredServerRoleTemplateIds,
   serverRoleTemplateCatalog
 } from '../src/shared/role-template-catalog';
+import { softwareCopilotProductSeeds } from '../src/shared/software-copilot-catalog';
 import { officialModelRouteSeeds } from '../src/modules/ai-points/official-model-routes';
 
 const prisma = new PrismaClient();
@@ -860,6 +861,47 @@ async function seedOfficialModelRoutes() {
   }
 }
 
+async function seedSoftwareCopilotProducts() {
+  for (const product of softwareCopilotProductSeeds) {
+    await prisma.softwareCopilotProduct.upsert({
+      where: {
+        code: product.code
+      },
+      update: {
+        name: product.name,
+        softwareName: product.softwareName,
+        category: product.category,
+        description: product.description,
+        status: 'ACTIVE',
+        platforms: product.platforms,
+        capabilities: product.capabilities,
+        personalMonthlyPriceCents: product.personalMonthlyPriceCents,
+        personalAnnualPriceCents: product.personalAnnualPriceCents,
+        enterpriseMonthlyUnitPriceCents: product.enterpriseMonthlyUnitPriceCents,
+        enterpriseAnnualUnitPriceCents: product.enterpriseAnnualUnitPriceCents,
+        currency: product.currency,
+        sortOrder: product.sortOrder
+      },
+      create: {
+        code: product.code,
+        name: product.name,
+        softwareName: product.softwareName,
+        category: product.category,
+        description: product.description,
+        status: 'ACTIVE',
+        platforms: product.platforms,
+        capabilities: product.capabilities,
+        personalMonthlyPriceCents: product.personalMonthlyPriceCents,
+        personalAnnualPriceCents: product.personalAnnualPriceCents,
+        enterpriseMonthlyUnitPriceCents: product.enterpriseMonthlyUnitPriceCents,
+        enterpriseAnnualUnitPriceCents: product.enterpriseAnnualUnitPriceCents,
+        currency: product.currency,
+        sortOrder: product.sortOrder
+      }
+    });
+  }
+}
+
 async function seedOfficialModelApiKeys() {
   for (const route of officialModelRouteSeeds) {
     const apiKey = process.env[route.apiKeyEnvName]?.trim();
@@ -944,6 +986,7 @@ async function main() {
     }
     await seedAssetDefinitions();
     await seedRoleTemplates();
+    await seedSoftwareCopilotProducts();
     await seedOfficialModelRoutes();
     await seedOfficialModelApiKeys();
     return;
@@ -957,6 +1000,7 @@ async function main() {
   await seedBilling();
   await seedAssetDefinitions();
   await seedRoleTemplates();
+  await seedSoftwareCopilotProducts();
   await seedOfficialModelRoutes();
   await seedOfficialModelApiKeys();
 }

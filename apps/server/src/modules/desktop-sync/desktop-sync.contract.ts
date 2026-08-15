@@ -154,6 +154,10 @@ export interface CancelDesktopBindingCodeResponse {
   data: ListDesktopBindingCodesResponse['data'][number];
 }
 
+export interface RevokeDesktopDeviceResponse {
+  data: DesktopDeviceSummary;
+}
+
 export interface ListDesktopDevicesResponse {
   data: DesktopDeviceSummary[];
 }

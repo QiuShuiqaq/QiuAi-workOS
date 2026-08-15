@@ -17,6 +17,7 @@ import { OrganizationModule } from './organization/organization.module';
 import { ReferralsModule } from './referrals/referrals.module';
 import { RoleModule } from './role/role.module';
 import { RoleTemplateFactoryModule } from './role-template-factory/role-template-factory.module';
+import { SoftwareCopilotModule } from './software-copilot/software-copilot.module';
 import { TaskModule } from './task/task.module';
 import { WorkspaceModule } from './workspace/workspace.module';
 import { MockPlatformStoreModule } from '../shared/mock/mock-platform-store.module';
@@ -43,6 +44,7 @@ import { MockPlatformStoreModule } from '../shared/mock/mock-platform-store.modu
     ReferralsModule,
     RoleModule,
     RoleTemplateFactoryModule,
+    SoftwareCopilotModule,
     TaskModule,
     WorkspaceModule
   ]

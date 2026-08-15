@@ -105,6 +105,15 @@ export class WorkspaceDesktopController {
     return this.desktopSyncService.listDevices(workspaceId, request.headers.cookie);
   }
 
+  @Post('devices/:deviceId/revoke')
+  revokeDevice(
+    @Param('workspaceId') workspaceId: string,
+    @Param('deviceId') deviceId: string,
+    @Req() request: FastifyRequest
+  ) {
+    return this.desktopSyncService.revokeDevice(workspaceId, deviceId, request.headers.cookie);
+  }
+
   @Get('binding-codes')
   listBindingCodes(@Param('workspaceId') workspaceId: string, @Req() request: FastifyRequest) {
     return this.desktopSyncService.listBindingCodes(workspaceId, request.headers.cookie);
