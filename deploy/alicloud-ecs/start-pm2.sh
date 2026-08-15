@@ -5,12 +5,6 @@ APP_DIR="${APP_DIR:-/opt/qiuai-workos}"
 
 cd "${APP_DIR}"
 
-echo "==> Cleaning stale Next.js build outputs"
-rm -rf \
-  apps/admin-console/.next \
-  apps/web-console/.next \
-  apps/public-site/.next
-
 if [[ -f ".env" ]]; then
   echo "==> Loading .env"
   set -a
@@ -21,6 +15,20 @@ else
   echo "Missing .env in ${APP_DIR}" >&2
   exit 1
 fi
+
+echo "==> Stopping existing PM2 processes"
+if command -v pm2 >/dev/null 2>&1; then
+  pm2 stop qiuai-workos-server qiuai-workos-web qiuai-workos-admin qiuai-workos-public 2>/dev/null || true
+  pm2 delete qiuai-workos-server qiuai-workos-web qiuai-workos-admin qiuai-workos-public 2>/dev/null || true
+else
+  echo "PM2 is not available yet; continuing with a fresh build"
+fi
+
+echo "==> Cleaning stale Next.js build outputs"
+rm -rf \
+  apps/admin-console/.next \
+  apps/web-console/.next \
+  apps/public-site/.next
 
 echo "==> Installing dependencies"
 npm ci
