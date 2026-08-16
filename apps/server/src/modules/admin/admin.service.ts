@@ -28,6 +28,7 @@ import { buildInvitationUrl, createInvitationToken, hashInvitationToken } from '
 import type { CurrentAccountResponseDto } from '../workspace/dto/current-account-response.dto';
 import {
   AdminPlanDetailDto,
+  AdminWorkspaceAiPointUsageSummaryDto,
   AdminOfficialModelApiKeySummaryDto,
   AdminOfficialModelRouteSummaryDto,
   AdminWorkspaceDetailDto,
@@ -110,6 +111,12 @@ type WorkspaceSummaryRecord = {
   ownerAccount: {
     primaryEmail: string;
   };
+  aiPointWallet: {
+    workspaceId: string;
+    balancePoints: number;
+    reservedPoints: number;
+    updatedAt: Date;
+  } | null;
   subscriptions: Array<{
     status: string;
     currentPeriodEnd: Date | null;
@@ -1104,7 +1111,7 @@ export class AdminService {
 
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
-    const where = this.buildWorkspaceWhere(query.query);
+    const where = this.buildWorkspaceWhere(query.query, query.workspaceType);
 
     const [totalItems, workspaces] = await this.prismaService.$transaction([
       this.prismaService.workspace.count({ where }),
@@ -1119,8 +1126,14 @@ export class AdminService {
       })
     ]);
 
+    const usageByWorkspaceId = await this.getWorkspaceAiPointUsageByWorkspaceIds(
+      workspaces.map((workspace) => workspace.id)
+    );
+
     return {
-      data: workspaces.map((workspace) => this.toAdminWorkspaceSummary(workspace)),
+      data: workspaces.map((workspace) =>
+        this.toAdminWorkspaceSummary(workspace, usageByWorkspaceId.get(workspace.id))
+      ),
       pagination: {
         page,
         pageSize,
@@ -2578,10 +2591,20 @@ export class AdminService {
     );
   }
 
-  private buildWorkspaceWhere(query?: string): Prisma.WorkspaceWhereInput {
+  private buildWorkspaceWhere(
+    query?: string,
+    workspaceType?: 'personal' | 'enterprise'
+  ): Prisma.WorkspaceWhereInput {
+    const filters: Prisma.WorkspaceWhereInput[] = [];
+    if (workspaceType) {
+      filters.push({
+        type: workspaceType === 'enterprise' ? 'ENTERPRISE' : 'PERSONAL'
+      });
+    }
+
     const value = query?.trim();
     if (!value) {
-      return {};
+      return filters.length ? { AND: filters } : {};
     }
 
     const search: Prisma.WorkspaceWhereInput[] = [
@@ -2617,8 +2640,12 @@ export class AdminService {
       );
     }
 
-    return {
+    filters.push({
       OR: search
+    });
+
+    return {
+      AND: filters
     };
   }
 
@@ -2706,6 +2733,7 @@ export class AdminService {
     return {
       tenant: true,
       ownerAccount: true,
+      aiPointWallet: true,
       subscriptions: {
         include: {
           plan: true
@@ -2786,7 +2814,8 @@ export class AdminService {
       throw this.workspaceNotFound(workspaceId);
     }
 
-    const summary = this.toAdminWorkspaceSummary(workspace);
+    const aiPointUsage = await this.getWorkspaceAiPointUsageSummary(workspaceId);
+    const summary = this.toAdminWorkspaceSummary(workspace, aiPointUsage);
     const subscription = workspace.subscriptions[0];
 
     return {
@@ -2820,6 +2849,7 @@ export class AdminService {
       aiPointWallet: workspace.aiPointWallet
         ? this.toAdminAiPointWalletSummary(workspace.aiPointWallet)
         : null,
+      aiPointUsage,
       members: workspace.memberships.map((member) => ({
         id: member.id,
         workspaceId: member.workspaceId,
@@ -3024,7 +3054,10 @@ export class AdminService {
     };
   }
 
-  private toAdminWorkspaceSummary(workspace: WorkspaceSummaryRecord): AdminWorkspaceSummaryDto {
+  private toAdminWorkspaceSummary(
+    workspace: WorkspaceSummaryRecord,
+    aiPointUsage?: AdminWorkspaceAiPointUsageSummaryDto
+  ): AdminWorkspaceSummaryDto {
     const subscription = workspace.subscriptions[0];
 
     return {
@@ -3045,7 +3078,77 @@ export class AdminService {
       taskCount: workspace._count.tasks,
       desktopDeviceCount: workspace._count.desktopDevices,
       billingOrderCount: workspace._count.billingOrders,
+      aiPointWallet: workspace.aiPointWallet
+        ? this.toAdminAiPointWalletSummary(workspace.aiPointWallet)
+        : null,
+      aiPointUsage: aiPointUsage ?? this.emptyAdminAiPointUsageSummary(),
       updatedAt: workspace.updatedAt.toISOString()
+    };
+  }
+
+  private async getWorkspaceAiPointUsageSummary(
+    workspaceId: string
+  ): Promise<AdminWorkspaceAiPointUsageSummaryDto> {
+    const usageByWorkspaceId = await this.getWorkspaceAiPointUsageByWorkspaceIds([workspaceId]);
+    return usageByWorkspaceId.get(workspaceId) ?? this.emptyAdminAiPointUsageSummary();
+  }
+
+  private async getWorkspaceAiPointUsageByWorkspaceIds(
+    workspaceIds: string[]
+  ): Promise<Map<string, AdminWorkspaceAiPointUsageSummaryDto>> {
+    if (!workspaceIds.length) {
+      return new Map();
+    }
+
+    const now = new Date();
+    const last24hStart = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const last7dStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const usageByWorkspaceId = new Map<string, AdminWorkspaceAiPointUsageSummaryDto>(
+      workspaceIds.map((workspaceId) => [workspaceId, this.emptyAdminAiPointUsageSummary()])
+    );
+
+    const entries = await this.prismaService.aiPointLedgerEntry.findMany({
+      where: {
+        workspaceId: {
+          in: workspaceIds
+        },
+        type: 'SETTLE',
+        status: 'COMPLETED',
+        createdAt: {
+          gte: last7dStart
+        }
+      },
+      select: {
+        workspaceId: true,
+        points: true,
+        createdAt: true
+      }
+    });
+
+    for (const entry of entries) {
+      const usage = usageByWorkspaceId.get(entry.workspaceId) ?? this.emptyAdminAiPointUsageSummary();
+      const spentPoints = Math.abs(entry.points);
+      usage.spentLast7dPoints += spentPoints;
+      usage.settledLast7dCount += 1;
+      if (entry.createdAt >= last24hStart) {
+        usage.spentLast24hPoints += spentPoints;
+        usage.settledLast24hCount += 1;
+      }
+      if (!usage.lastSettledAt || entry.createdAt > new Date(usage.lastSettledAt)) {
+        usage.lastSettledAt = entry.createdAt.toISOString();
+      }
+      usageByWorkspaceId.set(entry.workspaceId, usage);
+    }
+
+    return usageByWorkspaceId;
+  }
+
+  private emptyAdminAiPointUsageSummary(): AdminWorkspaceAiPointUsageSummaryDto {
+    return {
+      spentLast24hPoints: 0,
+      spentLast7dPoints: 0,
+      settledLast24hCount: 0,
+      settledLast7dCount: 0
     };
   }
 

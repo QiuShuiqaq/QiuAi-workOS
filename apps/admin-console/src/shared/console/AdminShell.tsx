@@ -115,7 +115,7 @@ export function AdminShell({ currentAccount, children }: AdminShellProps) {
             {
               key: 'workspaces',
               icon: <ApartmentOutlined />,
-              label: <Link href="/workspaces">企业管理</Link>
+              label: <Link href="/workspaces">用户管理</Link>
             },
             {
               key: 'official-routes',

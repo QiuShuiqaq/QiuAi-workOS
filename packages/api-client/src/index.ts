@@ -450,6 +450,7 @@ export class QiuApiClient {
     page?: number;
     pageSize?: number;
     query?: string;
+    workspaceType?: 'personal' | 'enterprise';
   }): Promise<ListAdminWorkspacesResponse> {
     const searchParams = new URLSearchParams();
     if (params?.page !== undefined) {
@@ -460,6 +461,9 @@ export class QiuApiClient {
     }
     if (params?.query) {
       searchParams.set('query', params.query);
+    }
+    if (params?.workspaceType) {
+      searchParams.set('workspaceType', params.workspaceType);
     }
 
     const queryString = searchParams.toString();

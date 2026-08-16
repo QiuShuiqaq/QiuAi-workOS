@@ -101,6 +101,14 @@ export interface ListAdminOfficialModelRoutesResponse {
   data: AdminOfficialModelRouteSummary[];
 }
 
+export interface AdminWorkspaceAiPointUsageSummary {
+  spentLast24hPoints: number;
+  spentLast7dPoints: number;
+  settledLast24hCount: number;
+  settledLast7dCount: number;
+  lastSettledAt?: string;
+}
+
 export interface CreateAdminOfficialModelApiKeyRequest {
   label?: string;
   apiKey: string;
@@ -145,6 +153,8 @@ export interface AdminWorkspaceSummary {
   taskCount: number;
   desktopDeviceCount: number;
   billingOrderCount: number;
+  aiPointWallet?: AiPointWalletSummary | null;
+  aiPointUsage?: AdminWorkspaceAiPointUsageSummary;
   updatedAt: string;
 }
 
@@ -197,6 +207,7 @@ export interface AdminWorkspaceDetail {
   subscription: BillingSubscriptionSummary | null;
   billingAccount: BillingAccountSummary | null;
   aiPointWallet: AiPointWalletSummary | null;
+  aiPointUsage: AdminWorkspaceAiPointUsageSummary;
   members: AdminWorkspaceMemberSummary[];
   invitations: WorkspaceInvitationSummary[];
   recentOrders: BillingOrderSummary[];

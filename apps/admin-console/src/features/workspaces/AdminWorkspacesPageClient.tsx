@@ -2,6 +2,7 @@
 
 import type {
   AdminPlanDetail,
+  AdminWorkspaceAiPointUsageSummary,
   AdminWorkspaceDetail,
   AdminWorkspaceStatus,
   AdjustAdminWorkspaceAiPointsRequest,
@@ -87,6 +88,8 @@ type AiPointsModalState = {
   workspace: AdminWorkspaceSummary;
 };
 
+type WorkspaceTypeFilter = 'all' | 'personal' | 'enterprise';
+
 function formatDate(value?: string) {
   if (!value) {
     return '-';
@@ -126,6 +129,23 @@ function formatCurrency(amountCents?: number, currency = 'CNY') {
 
 function formatAiPoints(points?: number) {
   return `${new Intl.NumberFormat('zh-CN').format(points ?? 0)} 点`;
+}
+
+function workspaceTypeLabel(type: AdminWorkspaceSummary['workspaceType']) {
+  return type === 'enterprise' ? '企业用户' : '个人用户';
+}
+
+function workspaceTypeColor(type: AdminWorkspaceSummary['workspaceType']) {
+  return type === 'enterprise' ? 'blue' : 'green';
+}
+
+function aiPointUsageColor(usage?: AdminWorkspaceAiPointUsageSummary) {
+  const spentLast24h = usage?.spentLast24hPoints ?? 0;
+  const spentLast7d = usage?.spentLast7dPoints ?? 0;
+  if (spentLast24h >= 10000 || spentLast7d >= 50000) return 'red';
+  if (spentLast24h >= 3000 || spentLast7d >= 15000) return 'orange';
+  if (spentLast24h > 0 || spentLast7d > 0) return 'green';
+  return 'default';
 }
 
 function workspaceTone(status: string): 'default' | 'success' | 'warning' {
@@ -204,6 +224,7 @@ export function AdminWorkspacesPageClient({
   const [rows, setRows] = useState(workspaces);
   const [paginationMeta, setPaginationMeta] = useState(pagination);
   const [query, setQuery] = useState('');
+  const [workspaceTypeFilter, setWorkspaceTypeFilter] = useState<WorkspaceTypeFilter>('all');
   const [loading, setLoading] = useState(false);
   const [detail, setDetail] = useState<AdminWorkspaceDetail | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -233,28 +254,50 @@ export function AdminWorkspacesPageClient({
   const [bindingCodeForm] = Form.useForm<CreateAdminDesktopBindingCodeRequest>();
   const [aiPointsForm] = Form.useForm<AdjustAdminWorkspaceAiPointsRequest>();
 
-  const enterprisePlans = useMemo(
+  const paidPlans = useMemo(
     () => plans.filter((plan) => plan.billingCycle !== 'FREE'),
     [plans]
+  );
+  const personalPlans = useMemo(
+    () => paidPlans.filter((plan) => plan.code.startsWith('PERSONAL_')),
+    [paidPlans]
+  );
+  const enterprisePlans = useMemo(
+    () => paidPlans.filter((plan) => plan.code.startsWith('ENTERPRISE_')),
+    [paidPlans]
   );
   const activeEnterprisePlans = useMemo(
     () => enterprisePlans.filter((plan) => plan.status === 'ACTIVE'),
     [enterprisePlans]
   );
+  const authorizationPlans = useMemo(() => {
+    if (!selectedWorkspace) {
+      return paidPlans;
+    }
 
-  async function loadWorkspaces(nextPage = paginationMeta.page, nextPageSize = paginationMeta.pageSize, nextQuery = query) {
+    return selectedWorkspace.workspaceType === 'personal' ? personalPlans : enterprisePlans;
+  }, [enterprisePlans, paidPlans, personalPlans, selectedWorkspace]);
+
+  async function loadWorkspaces(
+    nextPage = paginationMeta.page,
+    nextPageSize = paginationMeta.pageSize,
+    nextQuery = query,
+    nextWorkspaceTypeFilter = workspaceTypeFilter
+  ) {
     setLoading(true);
     try {
       const response = await createBrowserApiClient().listAdminWorkspaces({
         page: nextPage,
         pageSize: nextPageSize,
-        query: nextQuery || undefined
+        query: nextQuery || undefined,
+        workspaceType: nextWorkspaceTypeFilter === 'all' ? undefined : nextWorkspaceTypeFilter
       });
       setRows(response.data);
       setPaginationMeta(response.pagination);
       setQuery(nextQuery);
+      setWorkspaceTypeFilter(nextWorkspaceTypeFilter);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '加载企业失败';
+      const errorMessage = error instanceof Error ? error.message : '加载用户失败';
       message.error(errorMessage);
     } finally {
       setLoading(false);
@@ -270,7 +313,7 @@ export function AdminWorkspacesPageClient({
       const response = await createBrowserApiClient().getAdminWorkspace(workspace.id);
       setDetail(response.data);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '加载企业详情失败';
+      const errorMessage = error instanceof Error ? error.message : '加载用户详情失败';
       message.error(errorMessage);
     } finally {
       setDetailLoading(false);
@@ -333,10 +376,12 @@ export function AdminWorkspacesPageClient({
   }
 
   function openAuthorization(workspace: AdminWorkspaceSummary) {
+    const availablePlans = workspace.workspaceType === 'personal' ? personalPlans : enterprisePlans;
     const defaultPlanCode =
-      workspace.planCode !== 'PERSONAL_FREE'
+      workspace.planCode !== 'PERSONAL_FREE' &&
+      availablePlans.some((plan) => plan.code === workspace.planCode)
         ? workspace.planCode
-        : enterprisePlans[0]?.code;
+        : availablePlans[0]?.code;
 
     setSelectedWorkspace(workspace);
     authorizeForm.setFieldsValue({
@@ -487,7 +532,7 @@ export function AdminWorkspacesPageClient({
       message.success(`企业状态已更新为${workspaceStatusLabel(response.data.workspace.status)}`);
       setStatusModal(null);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '更新企业状态失败';
+      const errorMessage = error instanceof Error ? error.message : '更新用户状态失败';
       message.error(errorMessage);
     } finally {
       setStatusChanging(false);
@@ -671,11 +716,16 @@ export function AdminWorkspacesPageClient({
 
   const columns: ColumnsType<AdminWorkspaceSummary> = [
     {
-      title: '企业',
+      title: '用户',
       dataIndex: 'name',
       render: (_value, workspace) => (
         <Space direction="vertical" size={2}>
-          <Typography.Text strong>{workspace.name}</Typography.Text>
+          <Space size={8} wrap>
+            <Typography.Text strong>{workspace.name}</Typography.Text>
+            <Tag color={workspaceTypeColor(workspace.workspaceType)}>
+              {workspaceTypeLabel(workspace.workspaceType)}
+            </Tag>
+          </Space>
           <Typography.Text type="secondary" copyable>
             {workspace.id}
           </Typography.Text>
@@ -708,6 +758,28 @@ export function AdminWorkspacesPageClient({
         <QiuStatusTag tone={workspaceTone(workspace.status)}>
           {workspaceStatusLabel(workspace.status)}
         </QiuStatusTag>
+      )
+    },
+    {
+      title: 'AI 点数监测',
+      key: 'aiPoints',
+      render: (_value, workspace) => (
+        <Space direction="vertical" size={2}>
+          <Space size={6} wrap>
+            <Tag color="blue">可用 {formatAiPoints(workspace.aiPointWallet?.availablePoints)}</Tag>
+            <Tag color={aiPointUsageColor(workspace.aiPointUsage)}>
+              24h 消耗 {formatAiPoints(workspace.aiPointUsage?.spentLast24hPoints)}
+            </Tag>
+          </Space>
+          <Typography.Text type="secondary">
+            7天消耗 {formatAiPoints(workspace.aiPointUsage?.spentLast7dPoints)} / {workspace.aiPointUsage?.settledLast7dCount ?? 0} 次
+          </Typography.Text>
+          {workspace.aiPointUsage?.lastSettledAt ? (
+            <Typography.Text type="secondary">
+              最近扣费 {formatDateTime(workspace.aiPointUsage.lastSettledAt)}
+            </Typography.Text>
+          ) : null}
+        </Space>
       )
     },
     {
@@ -775,8 +847,8 @@ export function AdminWorkspacesPageClient({
   return (
     <AdminShell currentAccount={currentAccount}>
       <QiuPage
-        title="企业管理"
-        description="查看企业工作空间、桌面设备、订单摘要，并在试点阶段做人工授权兜底。"
+        title="用户管理"
+        description="统一查看个人用户和企业用户，监测 AI 点数余额、近期消耗、桌面设备和订单摘要。"
         actions={
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreateWorkspace}>
             创建企业
@@ -809,18 +881,30 @@ export function AdminWorkspacesPageClient({
           <Alert
             showIcon
             type="warning"
-            message="手动授权不是手动改支付成功"
-            description="手动授权只更新企业订阅，不伪造支付宝支付结果；后台会记录管理员操作日志。"
+            message="重点关注 AI 点数异常消耗"
+            description="列表会显示近 24 小时和近 7 天的真实扣费点数；如果发现异常高消耗，先停用用户或减少点数，再排查调用日志。"
           />
 
           <Card bordered={false}>
-            <Input.Search
-              allowClear
-              placeholder="搜索企业名称、租户、所有者邮箱或 UUID"
-              enterButton="搜索"
-              onSearch={(value) => void loadWorkspaces(1, paginationMeta.pageSize, value)}
-              style={{ maxWidth: 520 }}
-            />
+            <Space wrap>
+              <Select<WorkspaceTypeFilter>
+                value={workspaceTypeFilter}
+                style={{ width: 160 }}
+                options={[
+                  { value: 'all', label: '全部用户' },
+                  { value: 'personal', label: '个人用户' },
+                  { value: 'enterprise', label: '企业用户' }
+                ]}
+                onChange={(value) => void loadWorkspaces(1, paginationMeta.pageSize, query, value)}
+              />
+              <Input.Search
+                allowClear
+                placeholder="搜索用户名称、租户、所有者邮箱或 UUID"
+                enterButton="搜索"
+                onSearch={(value) => void loadWorkspaces(1, paginationMeta.pageSize, value)}
+                style={{ width: 520, maxWidth: '100%' }}
+              />
+            </Space>
           </Card>
 
           <Card bordered={false}>
@@ -838,7 +922,9 @@ export function AdminWorkspacesPageClient({
               onChange={(nextPagination) => {
                 void loadWorkspaces(
                   nextPagination.current ?? paginationMeta.page,
-                  nextPagination.pageSize ?? paginationMeta.pageSize
+                  nextPagination.pageSize ?? paginationMeta.pageSize,
+                  query,
+                  workspaceTypeFilter
                 );
               }}
             />
@@ -847,7 +933,7 @@ export function AdminWorkspacesPageClient({
       </QiuPage>
 
       <Drawer
-        title={detail ? detail.workspace.name : '企业详情'}
+        title={detail ? detail.workspace.name : '用户详情'}
         open={detailOpen}
         onClose={() => setDetailOpen(false)}
         width={900}
@@ -865,12 +951,16 @@ export function AdminWorkspacesPageClient({
               >
                 代客进入
               </Button>
-              <Button icon={<TeamOutlined />} onClick={openInvitationCreator}>
-                邀请成员
-              </Button>
-              <Button icon={<DesktopOutlined />} onClick={openBindingCodeCreator}>
-                生成绑定码
-              </Button>
+              {detail.workspace.workspaceType === 'enterprise' ? (
+                <>
+                  <Button icon={<TeamOutlined />} onClick={openInvitationCreator}>
+                    邀请成员
+                  </Button>
+                  <Button icon={<DesktopOutlined />} onClick={openBindingCodeCreator}>
+                    生成绑定码
+                  </Button>
+                </>
+              ) : null}
               <Button type="primary" onClick={() => openAuthorization(detail.workspace)}>
                 手动授权
               </Button>
@@ -897,6 +987,11 @@ export function AdminWorkspacesPageClient({
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <Descriptions bordered column={1} size="small">
               <Descriptions.Item label="工作空间 ID">{detail.workspace.id}</Descriptions.Item>
+              <Descriptions.Item label="用户类型">
+                <Tag color={workspaceTypeColor(detail.workspace.workspaceType)}>
+                  {workspaceTypeLabel(detail.workspace.workspaceType)}
+                </Tag>
+              </Descriptions.Item>
               <Descriptions.Item label="所有者">{detail.workspace.ownerEmail}</Descriptions.Item>
               <Descriptions.Item label="当前状态">
                 <QiuStatusTag tone={workspaceTone(detail.workspace.status)}>
@@ -927,7 +1022,7 @@ export function AdminWorkspacesPageClient({
 
             <Card
               size="small"
-              title="AI 点数"
+              title="AI 点数监测"
               extra={
                 <Button size="small" icon={<ThunderboltOutlined />} onClick={() => openAiPointsAdjustment(detail.workspace)}>
                   调整点数
@@ -938,6 +1033,15 @@ export function AdminWorkspacesPageClient({
                 <Tag color="blue">可用 {formatAiPoints(detail.aiPointWallet?.availablePoints)}</Tag>
                 <Tag>余额 {formatAiPoints(detail.aiPointWallet?.balancePoints)}</Tag>
                 <Tag>冻结 {formatAiPoints(detail.aiPointWallet?.reservedPoints)}</Tag>
+                <Tag color={aiPointUsageColor(detail.aiPointUsage)}>
+                  24h 消耗 {formatAiPoints(detail.aiPointUsage.spentLast24hPoints)}
+                </Tag>
+                <Tag>24h 扣费 {detail.aiPointUsage.settledLast24hCount} 次</Tag>
+                <Tag>7天消耗 {formatAiPoints(detail.aiPointUsage.spentLast7dPoints)}</Tag>
+                <Tag>7天扣费 {detail.aiPointUsage.settledLast7dCount} 次</Tag>
+                {detail.aiPointUsage.lastSettledAt ? (
+                  <Tag>最近扣费 {formatDateTime(detail.aiPointUsage.lastSettledAt)}</Tag>
+                ) : null}
                 <Typography.Text type="secondary">100 AI点 = 1 RMB</Typography.Text>
               </Space>
             </Card>
@@ -1364,7 +1468,7 @@ export function AdminWorkspacesPageClient({
         <Form layout="vertical" form={authorizeForm} onFinish={handleAuthorization}>
           <Form.Item name="planCode" label="授权套餐" rules={[{ required: true, message: '请选择套餐' }]}>
             <Select
-              options={enterprisePlans.map((plan) => ({
+              options={authorizationPlans.map((plan) => ({
                 value: plan.code,
                 label: `${plan.name} / ${plan.code}`
               }))}
@@ -1390,7 +1494,7 @@ export function AdminWorkspacesPageClient({
       </Modal>
 
       <Modal
-        title={`更新企业状态：${statusModal?.workspace.name ?? ''}`}
+        title={`更新用户状态：${statusModal?.workspace.name ?? ''}`}
         open={Boolean(statusModal)}
         onCancel={() => setStatusModal(null)}
         onOk={() => statusForm.submit()}

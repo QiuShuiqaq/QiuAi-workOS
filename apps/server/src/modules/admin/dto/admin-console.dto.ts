@@ -786,6 +786,28 @@ export class ListAdminWorkspacesQueryDto {
   @IsOptional()
   @IsString()
   query?: string;
+
+  @ApiPropertyOptional({ enum: ['personal', 'enterprise'] })
+  @IsOptional()
+  @IsIn(['personal', 'enterprise'])
+  workspaceType?: 'personal' | 'enterprise';
+}
+
+export class AdminWorkspaceAiPointUsageSummaryDto {
+  @ApiProperty({ example: 1200 })
+  spentLast24hPoints!: number;
+
+  @ApiProperty({ example: 8500 })
+  spentLast7dPoints!: number;
+
+  @ApiProperty({ example: 3 })
+  settledLast24hCount!: number;
+
+  @ApiProperty({ example: 18 })
+  settledLast7dCount!: number;
+
+  @ApiPropertyOptional({ example: '2026-08-16T08:00:00.000Z' })
+  lastSettledAt?: string;
 }
 
 export class AdminWorkspaceSummaryDto {
@@ -839,6 +861,12 @@ export class AdminWorkspaceSummaryDto {
 
   @ApiProperty({ example: 4 })
   billingOrderCount!: number;
+
+  @ApiProperty({ type: () => AdminAiPointWalletSummaryDto, nullable: true, required: false })
+  aiPointWallet?: AdminAiPointWalletSummaryDto | null;
+
+  @ApiProperty({ type: AdminWorkspaceAiPointUsageSummaryDto, required: false })
+  aiPointUsage?: AdminWorkspaceAiPointUsageSummaryDto;
 
   @ApiProperty({ example: '2026-07-22T00:00:00.000Z' })
   updatedAt!: string;
@@ -1129,6 +1157,9 @@ export class AdminWorkspaceDetailDto {
 
   @ApiProperty({ type: AdminAiPointWalletSummaryDto, nullable: true })
   aiPointWallet!: AdminAiPointWalletSummaryDto | null;
+
+  @ApiProperty({ type: AdminWorkspaceAiPointUsageSummaryDto })
+  aiPointUsage!: AdminWorkspaceAiPointUsageSummaryDto;
 
   @ApiProperty({ type: [AdminWorkspaceMemberSummaryDto] })
   members!: AdminWorkspaceMemberSummaryDto[];
