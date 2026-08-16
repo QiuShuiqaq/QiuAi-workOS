@@ -14,6 +14,10 @@
       "types": "./dist/ai-points.d.ts",
       "default": "./dist/ai-points.js"
     },
+    "./billing": {
+      "types": "./dist/billing.d.ts",
+      "default": "./dist/billing.js"
+    },
     "./referral": {
       "types": "./dist/referral.d.ts",
       "default": "./dist/referral.js"

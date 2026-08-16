@@ -215,6 +215,101 @@ test('desktop account register issues a desktop device token for a personal free
   }
 });
 
+test('desktop device token can create billing orders', async () => {
+  const app = await createApplication();
+  app.useLogger(false);
+
+  await app.init();
+  try {
+    const loginResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: {
+        'content-type': 'application/json'
+      },
+      payload: {
+        email: 'admin@qiuai.local',
+        password: process.env.WORKOS_MOCK_ADMIN_PASSWORD ?? 'qiuai-demo'
+      }
+    });
+
+    assert.equal(loginResponse.statusCode, 201);
+    const setCookie = loginResponse.headers['set-cookie'];
+    const sessionCookie: string | undefined = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+    assert.ok(sessionCookie);
+    const cookie = sessionCookie.split(';')[0];
+
+    const bindingCodeResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/workspaces/enterprise/desktop/binding-codes',
+      headers: {
+        cookie,
+        'content-type': 'application/json'
+      },
+      payload: {
+        label: 'Billing test binding'
+      }
+    });
+
+    assert.equal(bindingCodeResponse.statusCode, 201);
+    const bindingCode = JSON.parse(bindingCodeResponse.body).data.bindingCode as string;
+
+    const redeemResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/desktop/bindings/redeem',
+      headers: {
+        'content-type': 'application/json'
+      },
+      payload: {
+        bindingCode,
+        runtimeId: `runtime-billing-${Date.now()}`,
+        deviceId: `device-billing-${Date.now()}`,
+        deviceName: 'Desktop Billing Device',
+        platform: 'windows',
+        appVersion: '1.1.5'
+      }
+    });
+
+    assert.equal(redeemResponse.statusCode, 201);
+    const binding = JSON.parse(redeemResponse.body).data;
+
+    const unauthenticatedOrderResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/workspaces/enterprise/billing/orders',
+      headers: {
+        'content-type': 'application/json'
+      },
+      payload: {
+        planCode: 'ENTERPRISE_BASIC_MONTHLY',
+        provider: 'ALIPAY'
+      }
+    });
+    assert.equal(unauthenticatedOrderResponse.statusCode, 401);
+
+    const orderResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/workspaces/enterprise/billing/orders',
+      headers: {
+        'content-type': 'application/json',
+        'x-qiuai-device-token': binding.deviceToken
+      },
+      payload: {
+        planCode: 'ENTERPRISE_BASIC_MONTHLY',
+        provider: 'ALIPAY'
+      }
+    });
+
+    assert.equal(orderResponse.statusCode, 201);
+    const order = JSON.parse(orderResponse.body).data;
+    assert.equal(order.workspaceId, 'enterprise');
+    assert.equal(order.orderKind, 'PLAN');
+    assert.equal(order.planCode, 'ENTERPRISE_BASIC_MONTHLY');
+    assert.equal(order.status, 'PENDING');
+  } finally {
+    await app.close();
+  }
+});
+
 test('auth login applies rate limiting to repeated attempts', async () => {
   const previousLimit = process.env.WORKOS_AUTH_LOGIN_IP_LIMIT;
   const previousEmailLimit = process.env.WORKOS_AUTH_LOGIN_EMAIL_LIMIT;

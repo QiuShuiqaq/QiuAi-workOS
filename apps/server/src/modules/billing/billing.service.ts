@@ -2,10 +2,12 @@ import { randomUUID } from 'node:crypto';
 
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
-  ServiceUnavailableException
+  ServiceUnavailableException,
+  UnauthorizedException
 } from '@nestjs/common';
 import type { BillingCycle, PaymentProvider, PlanCode, Prisma } from '@prisma/client';
 
@@ -14,6 +16,7 @@ import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
+import { hashDesktopToken } from '../desktop-sync/desktop-auth-token';
 import { ReferralsService } from '../referrals/referrals.service';
 import { SoftwareCopilotService } from '../software-copilot/software-copilot.service';
 import {
@@ -99,8 +102,12 @@ export class BillingService {
     private readonly softwareCopilotService: SoftwareCopilotService
   ) {}
 
-  async getOverview(workspaceId: string, cookieHeader?: string): Promise<GetBillingOverviewResponseDto> {
-    await this.requireWorkspaceAccess(workspaceId, cookieHeader);
+  async getOverview(
+    workspaceId: string,
+    deviceToken?: string,
+    cookieHeader?: string
+  ): Promise<GetBillingOverviewResponseDto> {
+    await this.requireWorkspaceAccess(workspaceId, deviceToken, cookieHeader);
 
     const data = isDatabasePersistenceEnabled()
       ? await this.buildDatabaseOverview(workspaceId)
@@ -112,9 +119,10 @@ export class BillingService {
   async createOrder(
     workspaceId: string,
     input: CreateBillingOrderRequestDto,
+    deviceToken?: string,
     cookieHeader?: string
   ): Promise<CreateBillingOrderResponseDto> {
-    await this.requireWorkspaceAccess(workspaceId, cookieHeader);
+    await this.requireWorkspaceAccess(workspaceId, deviceToken, cookieHeader);
 
     const data = isDatabasePersistenceEnabled()
       ? await this.createDatabaseOrder(workspaceId, input)
@@ -238,7 +246,7 @@ export class BillingService {
     }
 
     const workspaceId = localOrder?.workspaceId ?? softwareCopilotWorkspaceId!;
-    await this.requireWorkspaceAccess(workspaceId, cookieHeader);
+    await this.requireWorkspaceAccess(workspaceId, undefined, cookieHeader);
 
     const trade = await queryAlipayTradeByOrderNo(orderNo);
     if (!trade) {
@@ -317,8 +325,62 @@ export class BillingService {
     };
   }
 
-  private async requireWorkspaceAccess(workspaceId: string, cookieHeader?: string) {
+  private async requireWorkspaceAccess(workspaceId: string, deviceToken?: string, cookieHeader?: string) {
+    if (deviceToken) {
+      await this.requireDesktopDeviceWorkspaceAccess(workspaceId, deviceToken);
+      return;
+    }
+
     await this.authService.requireWorkspaceAccess(workspaceId, cookieHeader);
+  }
+
+  private async requireDesktopDeviceWorkspaceAccess(workspaceId: string, deviceToken: string) {
+    if (!isDatabasePersistenceEnabled()) {
+      if (!this.store.workspaceExists(workspaceId)) {
+        throw new NotFoundException({
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Workspace was not found.',
+            details: { workspaceId }
+          }
+        });
+      }
+      return;
+    }
+
+    const device = await this.prismaService.desktopDevice.findUnique({
+      where: {
+        tokenHash: hashDesktopToken(deviceToken)
+      },
+      select: {
+        id: true,
+        workspaceId: true,
+        status: true
+      }
+    });
+
+    if (!device || device.status !== 'ACTIVE') {
+      throw new UnauthorizedException({
+        error: {
+          code: 'AUTHENTICATION_REQUIRED',
+          message: 'Desktop device token is invalid.'
+        }
+      });
+    }
+
+    if (device.workspaceId !== workspaceId) {
+      throw new ForbiddenException({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Desktop device is not bound to this workspace.'
+        }
+      });
+    }
+
+    await this.prismaService.desktopDevice.update({
+      where: { id: device.id },
+      data: { lastSeenAt: new Date() }
+    });
   }
 
   private buildMockOverview(workspaceId: string): BillingOverviewDto {

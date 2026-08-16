@@ -9,6 +9,16 @@ import {
   GetBillingOverviewResponseDto
 } from './dto/billing-overview-response.dto';
 
+function readDesktopDeviceToken(request: FastifyRequest): string | undefined {
+  const authorization = request.headers.authorization;
+  if (authorization?.toLowerCase().startsWith('bearer ')) {
+    return authorization.slice('bearer '.length).trim();
+  }
+
+  const header = request.headers['x-qiuai-device-token'];
+  return Array.isArray(header) ? header[0] : header;
+}
+
 @ApiTags('billing')
 @Controller({
   path: 'workspaces/:workspaceId/billing',
@@ -23,7 +33,7 @@ export class WorkspaceBillingController {
     @Param('workspaceId') workspaceId: string,
     @Req() request: FastifyRequest
   ): Promise<GetBillingOverviewResponseDto> {
-    return this.billingService.getOverview(workspaceId, request.headers.cookie);
+    return this.billingService.getOverview(workspaceId, readDesktopDeviceToken(request), request.headers.cookie);
   }
 
   @Post('orders')
@@ -33,7 +43,7 @@ export class WorkspaceBillingController {
     @Body() body: CreateBillingOrderRequestDto,
     @Req() request: FastifyRequest
   ): Promise<CreateBillingOrderResponseDto> {
-    return this.billingService.createOrder(workspaceId, body, request.headers.cookie);
+    return this.billingService.createOrder(workspaceId, body, readDesktopDeviceToken(request), request.headers.cookie);
   }
 }
 

@@ -1,6 +1,10 @@
 import type { ListSoftwareCopilotsResponse } from '@qiuai/api-contract/software-copilot';
+import type {
+  BillingOrderSummary,
+  CreateBillingOrderRequest
+} from '@qiuai/api-contract/billing';
 
-export type { ListSoftwareCopilotsResponse };
+export type { BillingOrderSummary, CreateBillingOrderRequest, ListSoftwareCopilotsResponse };
 import type {
   DesktopRuntimeSnapshot,
   DesktopArtifactSummary,
@@ -613,6 +617,7 @@ export interface QiuDesktopBridge {
   getAiPointOverview(): Promise<DesktopAiPointOverview>;
   getReferralOverview(): Promise<DesktopReferralOverview>;
   listSoftwareCopilots(): Promise<ListSoftwareCopilotsResponse>;
+  createBillingOrder(request: CreateBillingOrderRequest): Promise<BillingOrderSummary>;
   saveRuntimeState(state: DesktopRuntimeState): Promise<void>;
   listWorkspaceBackups(): Promise<DesktopBackupSummary[]>;
   createWorkspaceBackup(state: DesktopRuntimeState): Promise<DesktopBackupSummary>;

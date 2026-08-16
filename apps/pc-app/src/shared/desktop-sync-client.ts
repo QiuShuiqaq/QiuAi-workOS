@@ -18,6 +18,10 @@ import type {
   GetAiPointOverviewResponse,
   ListOfficialModelRoutesResponse
 } from '@qiuai/api-contract/ai-points';
+import type {
+  CreateBillingOrderRequest,
+  CreateBillingOrderResponse
+} from '@qiuai/api-contract/billing';
 import type { ListSoftwareCopilotsResponse } from '@qiuai/api-contract/software-copilot';
 import type { GetReferralOverviewResponse } from '@qiuai/api-contract/referral';
 
@@ -355,6 +359,35 @@ export async function fetchAiPointOverview(
   }
 
   return body as GetAiPointOverviewResponse;
+}
+
+export async function createBillingOrder(
+  baseUrl: string,
+  workspaceId: string,
+  deviceToken: string,
+  input: CreateBillingOrderRequest
+): Promise<CreateBillingOrderResponse> {
+  const response = await fetch(
+    `${normalizeBaseUrl(baseUrl)}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/billing/orders`,
+    {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        'x-qiuai-device-token': deviceToken
+      },
+      body: JSON.stringify(input)
+    }
+  );
+
+  const body = (await response.json()) as CreateBillingOrderResponse | { error?: { message?: string } };
+  if (!response.ok) {
+    const errorBody = body as { error?: { message?: string } };
+    const message = errorBody.error?.message ?? `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return body as CreateBillingOrderResponse;
 }
 
 export async function fetchReferralOverview(

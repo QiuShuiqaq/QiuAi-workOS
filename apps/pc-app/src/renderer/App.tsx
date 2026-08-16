@@ -990,6 +990,11 @@ const providerModelCapabilityFilters: Array<{
 ];
 
 const memberMonthlyIncludedAiPoints = 1500;
+const personalMemberMonthlyPlanCode = 'PERSONAL_MEMBER_MONTHLY';
+const personalMemberAnnualPlanCode = 'PERSONAL_MEMBER_ANNUAL';
+const aiPointPurchaseMin = 100;
+const aiPointPurchaseMax = 1_000_000;
+const aiPointPurchaseStep = 100;
 
 const aiPointRechargeOptions: AiPointRechargeOption[] = [
   { points: 1000, label: '体验补充', hint: '适合文本对话和轻量图片任务' },
@@ -3257,6 +3262,8 @@ export default function App() {
   const [isDesktopAccountSubmitting, setIsDesktopAccountSubmitting] = useState(false);
   const [desktopAccountNotice, setDesktopAccountNotice] = useState('');
   const [customAiPointAmount, setCustomAiPointAmount] = useState(10000);
+  const [payingPlanCode, setPayingPlanCode] = useState<string | null>(null);
+  const [payingAiPointAmount, setPayingAiPointAmount] = useState<number | null>(null);
   const [roleConfigModalOpen, setRoleConfigModalOpen] = useState(false);
   const [roleConfigMode, setRoleConfigMode] = useState<'install' | 'configure'>('install');
   const [roleConfigRoleCode, setRoleConfigRoleCode] = useState('');
@@ -4633,6 +4640,109 @@ export default function App() {
 
   function openPurchaseCenterPage() {
     void openLocalPath(buildWebConsolePurchaseUrl(runtimeState.app.serverBaseUrl));
+  }
+
+  function getPersonalDesktopPurchaseDisabledReason() {
+    if (isEnterpriseUnbound) {
+      return '请先登录或注册账号后再购买。';
+    }
+    if (isEnterpriseWorkspace) {
+      return '企业版套餐和企业 AI 点数由管理员在企业端统一处理。';
+    }
+    if (!window.qiuDesktop) {
+      return '桌面端购买通道不可用。';
+    }
+    return undefined;
+  }
+
+  async function openBillingPaymentUrl(paymentUrl?: string) {
+    if (!paymentUrl) {
+      message.warning('订单已创建，但支付链接未返回。');
+      return;
+    }
+
+    if (!window.qiuDesktop) {
+      message.warning('桌面端购买通道不可用。');
+      return;
+    }
+
+    await window.qiuDesktop.openExternalUrl(paymentUrl);
+    message.success('订单已创建，已打开支付页面。');
+  }
+
+  async function createDesktopMemberOrder(planCode: string) {
+    const disabledReason = getPersonalDesktopPurchaseDisabledReason();
+    if (disabledReason) {
+      message.warning(disabledReason);
+      if (isEnterpriseUnbound) {
+        openDesktopAccessModal('account');
+      }
+      return;
+    }
+
+    const bridge = window.qiuDesktop;
+    if (!bridge) {
+      message.warning('桌面端购买通道不可用。');
+      return;
+    }
+
+    setPayingPlanCode(planCode);
+    try {
+      const order = await bridge.createBillingOrder({
+        planCode,
+        provider: 'ALIPAY'
+      });
+      await openBillingPaymentUrl(order.paymentUrl);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '创建会员订单失败');
+    } finally {
+      setPayingPlanCode(null);
+    }
+  }
+
+  async function createDesktopAiPointOrder(points: number) {
+    const disabledReason = getPersonalDesktopPurchaseDisabledReason();
+    if (disabledReason) {
+      message.warning(disabledReason);
+      if (isEnterpriseUnbound) {
+        openDesktopAccessModal('account');
+      }
+      return;
+    }
+
+    if (
+      !Number.isInteger(points) ||
+      points < aiPointPurchaseMin ||
+      points > aiPointPurchaseMax ||
+      points % aiPointPurchaseStep !== 0
+    ) {
+      message.warning(
+        `AI 点数需为 ${aiPointPurchaseMin.toLocaleString()}-${aiPointPurchaseMax.toLocaleString()} 的整数，并按 ${aiPointPurchaseStep} 点递增。`
+      );
+      return;
+    }
+
+    const bridge = window.qiuDesktop;
+    if (!bridge) {
+      message.warning('桌面端购买通道不可用。');
+      return;
+    }
+
+    setPayingAiPointAmount(points);
+    try {
+      const order = await bridge.createBillingOrder({
+        orderKind: 'AI_POINTS',
+        aiPointAmount: points,
+        amountCents: points,
+        provider: 'ALIPAY',
+        subject: `QiuAI WorkOS AI 点数充值（${points.toLocaleString('zh-CN')} 点）`
+      });
+      await openBillingPaymentUrl(order.paymentUrl);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '创建 AI 点数订单失败');
+    } finally {
+      setPayingAiPointAmount(null);
+    }
   }
 
   async function copyDeviceDiagnostics() {
@@ -6704,6 +6814,7 @@ export default function App() {
         : isLoadingAiPointOverview
           ? '读取中'
           : '未读取';
+    const personalPurchaseDisabledReason = getPersonalDesktopPurchaseDisabledReason();
 
     return (
       <Modal
@@ -6847,112 +6958,164 @@ export default function App() {
                   ? '请先登录或注册账号，再完成会员和 AI 点数购买。'
                   : purchaseStatus.isEnterprise
                     ? '企业套餐和企业 AI 点数由管理员在企业端统一处理。'
-                    : '个人会员和 AI 点数可在购买中心完成。'}
+                    : '个人会员和 AI 点数可在当前购买中心直接下单。'}
               </Descriptions.Item>
             </Descriptions>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-              <Card size="small" title="免费版">
-                <Space direction="vertical" size={8}>
-                  <Typography.Title level={4} style={{ margin: 0 }}>
-                    ¥0
-                  </Typography.Title>
-                  <Typography.Text type="secondary">适合体验基础数字员工。</Typography.Text>
-                  <Tag>当前基础权益</Tag>
-                </Space>
-              </Card>
-              <Card size="small" title="会员版（月付）">
-                <Space direction="vertical" size={8}>
-                  <Typography.Title level={4} style={{ margin: 0 }}>
-                    ¥30 / 月
-                  </Typography.Title>
-                  <Typography.Text type="secondary">适合个人用户使用数字工厂。</Typography.Text>
-                  <Tag color="blue">每月含 {formatAiPoints(memberMonthlyIncludedAiPoints)}</Tag>
-                </Space>
-              </Card>
-              <Card size="small" title="会员版（年付）">
-                <Space direction="vertical" size={8}>
-                  <Typography.Title level={4} style={{ margin: 0 }}>
-                    ¥300 / 年
-                  </Typography.Title>
-                  <Typography.Text type="secondary">适合长期稳定使用。</Typography.Text>
-                  <Tag color="green">年付更省，按月发放 AI 点数</Tag>
-                </Space>
-              </Card>
-            </div>
-
-            <Card size="small" title="AI 点数">
-              <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                <Typography.Text>
-                  会员月度点数：个人会员每月赠送 {formatAiPoints(memberMonthlyIncludedAiPoints)}，当月有效，到期未用完自动清零。
-                </Typography.Text>
-                <Typography.Text>永久充值：适合按需补充，长期有效，100 点 = 1 元。</Typography.Text>
-                <Card size="small" type="inner" title="点数大约可以做什么">
-                  <Space direction="vertical" size={6} style={{ width: '100%' }}>
+            {purchaseStatus.isEnterprise ? (
+              <Card size="small" bordered className="purchase-enterprise-card">
+                <Flex align="center" justify="space-between" gap={12} wrap="wrap">
+                  <Space direction="vertical" size={4}>
+                    <Typography.Text strong>企业购买与点数管理</Typography.Text>
                     <Typography.Text type="secondary">
-                      以 1000 点为例，以下为理论最多数量，实际会受失败重试、任务配置和产物数量影响。
+                      企业套餐、企业 AI 点数和设备授权由管理员在企业端统一处理。
                     </Typography.Text>
-                    <Space wrap size={[6, 6]}>
-                      {aiPointProductExamples.map((item) => (
-                        <Tag key={`${item.label}-${item.points}`}>
-                          {item.label}：约 {Math.floor(1000 / item.points)}
-                          {item.unit}
-                        </Tag>
-                      ))}
-                    </Space>
                   </Space>
-                </Card>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
-                  {aiPointRechargeOptions.map((option) => (
-                    <Card key={option.points} size="small" bordered>
+                  <Button type="primary" icon={<GlobalOutlined />} onClick={openPurchaseCenterPage}>
+                    进入企业端购买
+                  </Button>
+                </Flex>
+              </Card>
+            ) : null}
+
+            {!purchaseStatus.isEnterprise ? (
+              <>
+                <div className="purchase-plan-grid">
+                  <Card size="small" title="免费版" className="purchase-plan-card">
+                    <Space direction="vertical" size={8}>
+                      <Typography.Title level={4} style={{ margin: 0 }}>
+                        ¥0
+                      </Typography.Title>
+                      <Typography.Text type="secondary">适合体验基础数字员工。</Typography.Text>
+                      <Tag>当前基础权益</Tag>
+                    </Space>
+                  </Card>
+                  <Card size="small" title="会员版（月付）" className="purchase-plan-card">
+                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                      <Typography.Title level={4} style={{ margin: 0 }}>
+                        ¥30 / 月
+                      </Typography.Title>
+                      <Typography.Text type="secondary">适合个人用户使用数字工厂。</Typography.Text>
+                      <Tag color="blue">每月含 {formatAiPoints(memberMonthlyIncludedAiPoints)}</Tag>
+                      <Button
+                        block
+                        type={currentPlanCode === personalMemberMonthlyPlanCode ? 'default' : 'primary'}
+                        icon={<CreditCardOutlined />}
+                        disabled={Boolean(personalPurchaseDisabledReason)}
+                        title={personalPurchaseDisabledReason}
+                        loading={payingPlanCode === personalMemberMonthlyPlanCode}
+                        onClick={() => void createDesktopMemberOrder(personalMemberMonthlyPlanCode)}
+                      >
+                        {currentPlanCode === personalMemberMonthlyPlanCode ? '续费月付' : '开通月付'}
+                      </Button>
+                    </Space>
+                  </Card>
+                  <Card size="small" title="会员版（年付）" className="purchase-plan-card">
+                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                      <Typography.Title level={4} style={{ margin: 0 }}>
+                        ¥300 / 年
+                      </Typography.Title>
+                      <Typography.Text type="secondary">适合长期稳定使用。</Typography.Text>
+                      <Tag color="green">年付更省，按月发放 AI 点数</Tag>
+                      <Button
+                        block
+                        type={currentPlanCode === personalMemberAnnualPlanCode ? 'default' : 'primary'}
+                        icon={<CreditCardOutlined />}
+                        disabled={Boolean(personalPurchaseDisabledReason)}
+                        title={personalPurchaseDisabledReason}
+                        loading={payingPlanCode === personalMemberAnnualPlanCode}
+                        onClick={() => void createDesktopMemberOrder(personalMemberAnnualPlanCode)}
+                      >
+                        {currentPlanCode === personalMemberAnnualPlanCode ? '续费年付' : '开通年付'}
+                      </Button>
+                    </Space>
+                  </Card>
+                </div>
+
+                <Card size="small" title="AI 点数">
+                  <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                    <Typography.Text>
+                      会员月度点数：个人会员每月赠送 {formatAiPoints(memberMonthlyIncludedAiPoints)}，当月有效，到期未用完自动清零。
+                    </Typography.Text>
+                    <Typography.Text>永久充值：适合按需补充，长期有效，100 点 = 1 元。</Typography.Text>
+                    <Card size="small" type="inner" title="点数大约可以做什么">
                       <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                        <Space size={6} wrap>
-                          <Typography.Text strong>{formatAiPoints(option.points)}</Typography.Text>
-                          <Tag color={option.label === '推荐' ? 'blue' : 'default'}>{option.label}</Tag>
+                        <Typography.Text type="secondary">
+                          以 1000 点为例，以下为理论最多数量，实际会受失败重试、任务配置和产物数量影响。
+                        </Typography.Text>
+                        <Space wrap size={[6, 6]}>
+                          {aiPointProductExamples.map((item) => (
+                            <Tag key={`${item.label}-${item.points}`}>
+                              {item.label}：约 {Math.floor(1000 / item.points)}
+                              {item.unit}
+                            </Tag>
+                          ))}
                         </Space>
-                        <Typography.Title level={5} style={{ margin: 0 }}>
-                          {formatAiPointRechargePrice(option.points)}
-                        </Typography.Title>
-                        <Typography.Text type="secondary">{option.hint}</Typography.Text>
-                        <Button size="small" block onClick={openPurchaseCenterPage}>
-                          购买
+                      </Space>
+                    </Card>
+                    <div className="purchase-ai-point-grid">
+                      {aiPointRechargeOptions.map((option) => (
+                        <Card key={option.points} size="small" bordered className="purchase-ai-point-card">
+                          <Space direction="vertical" size={6} className="purchase-ai-point-card-content">
+                            <Space size={6} wrap>
+                              <Typography.Text strong>{formatAiPoints(option.points)}</Typography.Text>
+                              <Tag color={option.label === '推荐' ? 'blue' : 'default'}>{option.label}</Tag>
+                            </Space>
+                            <Typography.Title level={5} style={{ margin: 0 }}>
+                              {formatAiPointRechargePrice(option.points)}
+                            </Typography.Title>
+                            <Typography.Text type="secondary">{option.hint}</Typography.Text>
+                            <Button
+                              size="small"
+                              block
+                              disabled={Boolean(personalPurchaseDisabledReason)}
+                              title={personalPurchaseDisabledReason}
+                              loading={payingAiPointAmount === option.points}
+                              onClick={() => void createDesktopAiPointOrder(option.points)}
+                            >
+                              购买
+                            </Button>
+                          </Space>
+                        </Card>
+                      ))}
+                    </div>
+                    <Card size="small" bordered>
+                      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                        <Typography.Text strong>自定义购买</Typography.Text>
+                        <InputNumber
+                          min={aiPointPurchaseMin}
+                          max={aiPointPurchaseMax}
+                          step={aiPointPurchaseStep}
+                          precision={0}
+                          value={customAiPointAmount}
+                          addonAfter="点"
+                          style={{ width: '100%' }}
+                          onChange={(value) =>
+                            setCustomAiPointAmount(
+                              typeof value === 'number' ? Math.max(aiPointPurchaseMin, Math.floor(value)) : aiPointPurchaseMin
+                            )
+                          }
+                        />
+                        <Typography.Text type="secondary">
+                          预计支付 {formatAiPointRechargePrice(customAiPointAmount)}，按 100 点 = 1 元计算。
+                        </Typography.Text>
+                        <Button
+                          type="primary"
+                          icon={<CreditCardOutlined />}
+                          disabled={Boolean(personalPurchaseDisabledReason)}
+                          title={personalPurchaseDisabledReason}
+                          loading={payingAiPointAmount === customAiPointAmount}
+                          onClick={() => void createDesktopAiPointOrder(customAiPointAmount)}
+                        >
+                          自定义购买
                         </Button>
                       </Space>
                     </Card>
-                  ))}
-                </div>
-                <Card size="small" bordered>
-                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                    <Typography.Text strong>自定义购买</Typography.Text>
-                    <InputNumber
-                      min={100}
-                      max={1000000}
-                      step={100}
-                      precision={0}
-                      value={customAiPointAmount}
-                      addonAfter="点"
-                      style={{ width: '100%' }}
-                      onChange={(value) =>
-                        setCustomAiPointAmount(typeof value === 'number' ? Math.max(100, Math.floor(value)) : 100)
-                      }
-                    />
-                    <Typography.Text type="secondary">
-                      预计支付 {formatAiPointRechargePrice(customAiPointAmount)}，按 100 点 = 1 元计算。
-                    </Typography.Text>
-                    <Button type="primary" icon={<CreditCardOutlined />} onClick={openPurchaseCenterPage}>
-                      自定义购买
-                    </Button>
                   </Space>
                 </Card>
-              </Space>
-            </Card>
-
-            <Space wrap>
-              <Button type="primary" icon={<GlobalOutlined />} onClick={openPurchaseCenterPage}>
-                {purchaseStatus.isEnterprise ? '进入企业端' : '前往购买'}
-              </Button>
-              {aiPointNotice ? <Typography.Text type="secondary">{aiPointNotice}</Typography.Text> : null}
-            </Space>
+              </>
+            ) : null}
+            {aiPointNotice ? <Typography.Text type="secondary">{aiPointNotice}</Typography.Text> : null}
           </Space>
         ) : null}
 

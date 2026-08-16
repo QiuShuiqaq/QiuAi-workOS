@@ -337,6 +337,52 @@ body,
   padding-right: 4px;
 }
 
+.purchase-plan-grid,
+.purchase-ai-point-grid {
+  display: grid;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.purchase-plan-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.purchase-ai-point-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.purchase-plan-card,
+.purchase-ai-point-card {
+  height: 100%;
+}
+
+.purchase-plan-card .ant-card-body,
+.purchase-ai-point-card .ant-card-body {
+  height: 100%;
+}
+
+.purchase-ai-point-card-content {
+  width: 100%;
+  height: 100%;
+}
+
+.purchase-ai-point-card-content > .ant-space-item:last-child {
+  margin-top: auto;
+}
+
+.purchase-enterprise-card {
+  background: #f8fbff;
+  border-color: #d6e4ff;
+}
+
+@media (max-width: 760px) {
+  .purchase-plan-grid,
+  .purchase-ai-point-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .account-stat-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

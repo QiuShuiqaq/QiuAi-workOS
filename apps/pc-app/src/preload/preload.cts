@@ -21,6 +21,8 @@ import type {
   DesktopArtifactSaveAsRequest,
   DesktopArtifactSaveAsResult,
   DesktopAiPointOverview,
+  BillingOrderSummary,
+  CreateBillingOrderRequest,
   DesktopReferralOverview,
   ListSoftwareCopilotsResponse,
   DesktopLocalFileExportRequest,
@@ -63,6 +65,7 @@ const channels = {
   getAiPointOverview: 'qiuai:desktop:get-ai-point-overview',
   getReferralOverview: 'qiuai:desktop:get-referral-overview',
   listSoftwareCopilots: 'qiuai:desktop:list-software-copilots',
+  createBillingOrder: 'qiuai:desktop:create-billing-order',
   saveRuntimeState: 'qiuai:desktop:save-runtime-state',
   listWorkspaceBackups: 'qiuai:desktop:list-workspace-backups',
   createWorkspaceBackup: 'qiuai:desktop:create-workspace-backup',
@@ -126,6 +129,8 @@ const bridge: QiuDesktopBridge = {
     ipcRenderer.invoke(channels.getReferralOverview) as Promise<DesktopReferralOverview>,
   listSoftwareCopilots: () =>
     ipcRenderer.invoke(channels.listSoftwareCopilots) as Promise<ListSoftwareCopilotsResponse>,
+  createBillingOrder: (request: CreateBillingOrderRequest) =>
+    ipcRenderer.invoke(channels.createBillingOrder, request) as Promise<BillingOrderSummary>,
   saveRuntimeState: (state: DesktopRuntimeState) =>
     ipcRenderer.invoke(channels.saveRuntimeState, state) as Promise<void>,
   listWorkspaceBackups: () =>
