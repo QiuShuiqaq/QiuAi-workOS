@@ -5095,4 +5095,270 @@ assert.equal(failed.task.artifacts.length, 0);
 assert.equal(failed.task.currentRun?.status, 'failed');
 assert.ok(failed.task.executionLogs.some((log) => log.eventType === 'LOCAL_RUN_FAILED'));
 
+let singleImageModelCalled = false;
+let singleImageDownloadCalled = false;
+const singleImageResult = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-single-image-001',
+    roleCode: 'ai-image-generation-assistant',
+    roleName: 'AI 生图助手',
+    title: '生成单张图片',
+    input: '参考图片生成一张 16:9 的科技产品宣传封面，不要文字。',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0,
+    executionContext: {
+      attachmentPaths: ['C:\\QiuAI\\input\\reference.png'],
+      modelProfileIds: ['qiu-image-generation-default'],
+      toolIds: ['local-filesystem'],
+      knowledgeBindingIds: []
+    }
+  }),
+  rolePackage: createSingleMediaRolePackage({
+    roleCode: 'ai-image-generation-assistant',
+    name: 'AI 生图助手',
+    modelProfileId: 'qiu-image-generation-default',
+    llmTaskType: 'image_generation',
+    artifactType: 'png',
+    mediaKind: 'image',
+    folder: 'generated-images',
+    aspectRatio: '1:1'
+  }),
+  modelProfiles: modelProfiles.concat([
+    {
+      id: 'qiu-image-generation-default',
+      providerId: 'official',
+      providerName: 'QiuAI Official',
+      modelName: 'image-line-1',
+      purpose: 'vision',
+      capabilities: ['image_generation', 'image_to_image'],
+      apiBaseUrl: 'https://model.example/v1',
+      apiKey: 'image-key'
+    }
+  ]),
+  tools,
+  workspaceId: 'workspace-single-image',
+  enabledModelProfileIds: ['qiu-image-generation-default'],
+  enabledToolIds: ['local-filesystem'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    singleImageModelCalled = true;
+    assert.equal(request.profile.id, 'qiu-image-generation-default');
+    assert.equal(request.taskKind, 'image_generation');
+    assert.equal(request.imageGeneration?.aspectRatio, '16:9');
+    assert.equal(request.imageGeneration?.sourceImagePath, 'C:\\QiuAI\\input\\reference.png');
+    assert.match(request.imageGeneration?.prompt ?? '', /单张图片/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: JSON.stringify({ remoteUrl: 'https://cdn.example.test/single/image.png' }),
+      artifacts: [
+        {
+          type: 'image',
+          remoteUrl: 'https://cdn.example.test/single/image.png',
+          thumbnailPath: 'https://cdn.example.test/single/image.png'
+        }
+      ]
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    singleImageDownloadCalled = true;
+    assert.equal(request.toolId, 'local-filesystem');
+    assert.equal(request.action, 'filesystem.download_remote_file');
+    assert.equal(request.input.url, 'https://cdn.example.test/single/image.png');
+    assert.equal(request.input.folder, 'generated-images');
+    assert.equal(request.input.mediaKind, 'image');
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\generated-images\\single-image.png',
+        sourceUrl: request.input.url
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:02:00.000Z'
+});
+
+assert.equal(singleImageResult.task.state, 'completed');
+assert.equal(singleImageModelCalled, true);
+assert.equal(singleImageDownloadCalled, true);
+assert.ok(
+  singleImageResult.task.artifacts.some(
+    (artifact) => artifact.type === 'image' && artifact.localPath?.endsWith('single-image.png')
+  )
+);
+
+let singleVideoModelCalled = false;
+let singleVideoDownloadCalled = false;
+const singleVideoResult = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-single-video-001',
+    roleCode: 'ai-video-generation-assistant',
+    roleName: 'AI 生视频助手',
+    title: '生成单条视频',
+    input: '生成一条 8秒 16:9 的品牌宣传短视频，镜头缓慢推进。',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0,
+    executionContext: {
+      modelProfileIds: ['qiu-video-generation-default'],
+      toolIds: ['local-filesystem'],
+      knowledgeBindingIds: []
+    }
+  }),
+  rolePackage: createSingleMediaRolePackage({
+    roleCode: 'ai-video-generation-assistant',
+    name: 'AI 生视频助手',
+    modelProfileId: 'qiu-video-generation-default',
+    llmTaskType: 'video_generation',
+    artifactType: 'mp4',
+    mediaKind: 'video',
+    folder: 'generated-videos',
+    aspectRatio: '9:16',
+    durationSeconds: 6
+  }),
+  modelProfiles: modelProfiles.concat([
+    {
+      id: 'qiu-video-generation-default',
+      providerId: 'official',
+      providerName: 'QiuAI Official',
+      modelName: 'video-line-1',
+      purpose: 'vision',
+      capabilities: ['video_generation', 'text_to_video', 'image_to_video'],
+      apiBaseUrl: 'https://model.example/v1',
+      apiKey: 'video-key'
+    }
+  ]),
+  tools,
+  workspaceId: 'workspace-single-video',
+  enabledModelProfileIds: ['qiu-video-generation-default'],
+  enabledToolIds: ['local-filesystem'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    singleVideoModelCalled = true;
+    assert.equal(request.profile.id, 'qiu-video-generation-default');
+    assert.equal(request.taskKind, 'video_generation');
+    assert.equal(request.videoGeneration?.aspectRatio, '16:9');
+    assert.equal(request.videoGeneration?.durationSeconds, 8);
+    assert.equal(request.videoGeneration?.sourceImagePath, undefined);
+    assert.match(request.videoGeneration?.prompt ?? '', /单条短视频/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: JSON.stringify({ remoteUrl: 'https://cdn.example.test/single/video.mp4' }),
+      artifacts: [
+        {
+          type: 'video',
+          remoteUrl: 'https://cdn.example.test/single/video.mp4',
+          thumbnailPath: 'https://cdn.example.test/single/video-cover.jpg'
+        }
+      ]
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    singleVideoDownloadCalled = true;
+    assert.equal(request.toolId, 'local-filesystem');
+    assert.equal(request.action, 'filesystem.download_remote_file');
+    assert.equal(request.input.url, 'https://cdn.example.test/single/video.mp4');
+    assert.equal(request.input.folder, 'generated-videos');
+    assert.equal(request.input.mediaKind, 'video');
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\generated-videos\\single-video.mp4',
+        sourceUrl: request.input.url
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:03:00.000Z'
+});
+
+assert.equal(singleVideoResult.task.state, 'completed');
+assert.equal(singleVideoModelCalled, true);
+assert.equal(singleVideoDownloadCalled, true);
+assert.ok(
+  singleVideoResult.task.artifacts.some(
+    (artifact) => artifact.type === 'video' && artifact.localPath?.endsWith('single-video.mp4')
+  )
+);
+
 console.log('Desktop local task runner passed.');
+
+function createSingleMediaRolePackage(input: {
+  roleCode: string;
+  name: string;
+  modelProfileId: string;
+  llmTaskType: 'image_generation' | 'video_generation';
+  artifactType: 'png' | 'mp4';
+  mediaKind: 'image' | 'video';
+  folder: string;
+  aspectRatio: string;
+  durationSeconds?: number;
+}): RolePackageManifest {
+  return {
+    roleCode: input.roleCode,
+    applicationType: 'digital_employee',
+    name: input.name,
+    version: '1.0.0',
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'receive_input',
+          type: 'input',
+          name: 'Receive input',
+          inputVariables: ['start.text', 'start.images'],
+          outputVariables: ['media_request']
+        },
+        {
+          id: 'generate_media',
+          type: 'llm',
+          name: 'Generate media',
+          modelProfileId: input.modelProfileId,
+          inputVariables: ['media_request', 'start.images'],
+          outputVariables: ['generated_media'],
+          config: {
+            llmTaskType: input.llmTaskType,
+            outputMode: 'json',
+            aspectRatio: input.aspectRatio,
+            ...(input.durationSeconds ? { durationSeconds: input.durationSeconds } : {})
+          }
+        },
+        {
+          id: 'save_media',
+          type: 'artifact',
+          name: 'Save media',
+          toolId: 'local-filesystem',
+          artifactType: input.artifactType,
+          inputVariables: ['generated_media'],
+          outputVariables: ['media_file'],
+          config: {
+            action: 'filesystem.download_remote_file',
+            input: {
+              url: '$generated_media.remoteUrl',
+              folder: input.folder,
+              fileName: '{{task.title}}',
+              mediaKind: input.mediaKind
+            }
+          }
+        }
+      ],
+      edges: [
+        { id: 'start-receive', sourceNodeId: 'start', targetNodeId: 'receive_input' },
+        { id: 'receive-generate', sourceNodeId: 'receive_input', targetNodeId: 'generate_media' },
+        { id: 'generate-save', sourceNodeId: 'generate_media', targetNodeId: 'save_media' }
+      ]
+    },
+    modelProfileIds: [input.modelProfileId],
+    toolIds: ['local-filesystem'],
+    requiredKnowledgeSources: [],
+    defaultTaskTypes: [input.llmTaskType],
+    syncPolicy: 'summary_only'
+  };
+}

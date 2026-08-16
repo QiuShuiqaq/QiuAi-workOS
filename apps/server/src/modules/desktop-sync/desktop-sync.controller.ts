@@ -164,6 +164,31 @@ export class DesktopBindingController {
 
 @ApiTags('desktop')
 @Controller({
+  path: 'desktop/auth',
+  version: '1'
+})
+export class DesktopAccountAuthController {
+  constructor(@Inject(DesktopSyncService) private readonly desktopSyncService: DesktopSyncService) {}
+
+  @Post('login')
+  login(@Body() body: unknown, @Req() request: FastifyRequest) {
+    return this.desktopSyncService.loginDesktopAccount(body, {
+      ipAddress: readClientIpAddress(request),
+      userAgent: readUserAgent(request)
+    });
+  }
+
+  @Post('register')
+  register(@Body() body: unknown, @Req() request: FastifyRequest) {
+    return this.desktopSyncService.registerDesktopAccount(body, {
+      ipAddress: readClientIpAddress(request),
+      userAgent: readUserAgent(request)
+    });
+  }
+}
+
+@ApiTags('desktop')
+@Controller({
   path: 'desktop/agreement-acceptances',
   version: '1'
 })

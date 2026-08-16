@@ -3268,6 +3268,15 @@ async function invokeWorkflowRuntimeModelNode(input: {
     if (ecommerceVideoFactoryResult) {
       return ecommerceVideoFactoryResult;
     }
+
+    const singleVideoResult = await invokeWorkflowRuntimeSingleMediaGenerationNode({
+      ...input,
+      profile,
+      mediaKind: 'video'
+    });
+    if (singleVideoResult) {
+      return singleVideoResult;
+    }
   }
 
   if (['image_generation', 'image_editing'].includes(readWorkflowRuntimeString(input.node.config?.llmTaskType) ?? '')) {
@@ -3277,6 +3286,15 @@ async function invokeWorkflowRuntimeModelNode(input: {
     });
     if (factoryResult) {
       return factoryResult;
+    }
+
+    const singleImageResult = await invokeWorkflowRuntimeSingleMediaGenerationNode({
+      ...input,
+      profile,
+      mediaKind: 'image'
+    });
+    if (singleImageResult) {
+      return singleImageResult;
     }
   }
 
@@ -5542,6 +5560,332 @@ function buildAcademicDemoFactoryOutputItems(input: {
   }
 
   return items;
+}
+
+async function invokeWorkflowRuntimeSingleMediaGenerationNode(input: {
+  task: DesktopTaskDetail;
+  node: WorkflowGraphNode;
+  pool: WorkflowVariablePool;
+  binding: ResolvedRuntimeBinding;
+  profiles: ModelProfile[];
+  modelInvoker: DesktopModelInvoker;
+  desktopToolInvoker?: DesktopToolInvoker;
+  workspaceId?: string;
+  createdAt: string;
+  currentResponse: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  profile: ModelProfile;
+  mediaKind: 'image' | 'video';
+}): Promise<WorkflowRuntimeNodeResult | undefined> {
+  const taskType = readWorkflowRuntimeString(input.node.config?.llmTaskType);
+  if (input.mediaKind === 'image' && !['image_generation', 'image_editing'].includes(taskType ?? '')) {
+    return undefined;
+  }
+  if (input.mediaKind === 'video' && taskType !== 'video_generation') {
+    return undefined;
+  }
+
+  const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
+  const hasFactoryContext =
+    Boolean(readWorkflowRuntimeString(factoryRequest?.factoryKind)) ||
+    readFactoryRuntimeItems(input.pool.get('factory_items')).length > 0 ||
+    readFactoryRuntimePackages(input.pool.get('selected_packages')).length > 0;
+  if (hasFactoryContext) {
+    return undefined;
+  }
+
+  const variables = resolveWorkflowVariableRefs(
+    input.pool,
+    input.node.inputVariables,
+    getWorkflowRuntimeFallbackInputRefs(input.pool)
+  );
+  const sourceImage = findFirstWorkflowRuntimeImageFile([
+    ...variables,
+    { ref: 'start.images', value: input.pool.get('start.images') ?? [] }
+  ]);
+  const configuredAspectRatio =
+    readWorkflowRuntimeString(input.node.config?.aspectRatio) ??
+    readWorkflowRuntimeString(input.node.config?.imageRatio) ??
+    readWorkflowRuntimeString(input.node.config?.videoRatio) ??
+    (input.mediaKind === 'image' ? '1:1' : '9:16');
+  const aspectRatio = inferSingleMediaAspectRatio(input.task.input, configuredAspectRatio);
+  const configuredDurationSeconds = readWorkflowRuntimeNumber(input.node.config?.durationSeconds, 6);
+  const durationSeconds = input.mediaKind === 'video'
+    ? inferSingleVideoDurationSeconds(input.task.input, configuredDurationSeconds)
+    : undefined;
+  const prompt = buildSingleMediaGenerationPrompt({
+    task: input.task,
+    node: input.node,
+    variables,
+    mediaKind: input.mediaKind,
+    aspectRatio,
+    durationSeconds,
+    sourceImage
+  });
+  const messages = buildSingleMediaGenerationMessages({
+    task: input.task,
+    node: input.node,
+    variables,
+    mediaKind: input.mediaKind,
+    prompt,
+    aspectRatio,
+    durationSeconds,
+    sourceImage
+  });
+  const timeoutMs = normalizeSingleMediaGenerationTimeoutMs(
+    input.node.config?.timeoutMs,
+    input.mediaKind === 'image' ? 180_000 : 240_000
+  );
+  const response = await input.modelInvoker(
+    input.mediaKind === 'image'
+      ? {
+          profile: input.profile,
+          taskKind: 'image_generation',
+          imageGeneration: {
+            prompt,
+            sourceImagePath: sourceImage?.localPath,
+            aspectRatio,
+            responseFormat: 'url'
+          },
+          messages,
+          timeoutMs
+        }
+      : {
+          profile: input.profile,
+          taskKind: 'video_generation',
+          videoGeneration: {
+            prompt,
+            sourceImagePath: sourceImage?.localPath,
+            durationSeconds,
+            aspectRatio,
+            responseFormat: 'url'
+          },
+          messages,
+          timeoutMs
+        }
+  );
+  const mediaResult = input.mediaKind === 'image'
+    ? readFactoryImageGenerationResponse(response)
+    : readFactoryVideoGenerationResponse(response);
+  if (!mediaResult.remoteUrl && !mediaResult.localPath) {
+    throw new Error(`Single ${input.mediaKind} generation response did not include a remoteUrl or localPath.`);
+  }
+
+  let resolvedMediaResult = mediaResult;
+  let usedDownloadTool = false;
+  if (
+    resolvedMediaResult.remoteUrl &&
+    !resolvedMediaResult.localPath &&
+    input.desktopToolInvoker &&
+    input.workspaceId &&
+    canUseFactoryRemoteAssetDownload(input.binding)
+  ) {
+    try {
+      const downloadResult = await input.desktopToolInvoker({
+        workspaceId: input.workspaceId,
+        toolId: 'local-filesystem',
+        action: 'filesystem.download_remote_file',
+        input: {
+          url: resolvedMediaResult.remoteUrl,
+          folder: input.mediaKind === 'image' ? 'generated-images' : 'generated-videos',
+          fileName: buildWorkflowArtifactFileName(input.task.title, input.node.name),
+          mediaKind: input.mediaKind
+        }
+      });
+      const localPath = readWorkflowRuntimeString(downloadResult.output?.localPath);
+      if (downloadResult.ok && localPath) {
+        usedDownloadTool = true;
+        resolvedMediaResult = {
+          ...resolvedMediaResult,
+          localPath,
+          thumbnailPath: input.mediaKind === 'image' ? localPath : resolvedMediaResult.thumbnailPath
+        };
+      }
+    } catch {
+      // Keep the remote result when the local download is unavailable.
+    }
+  }
+
+  const outputPayload = {
+    kind: input.mediaKind,
+    remoteUrl: resolvedMediaResult.remoteUrl,
+    localPath: resolvedMediaResult.localPath,
+    thumbnailPath: resolvedMediaResult.thumbnailPath,
+    providerJobId: resolvedMediaResult.providerJobId,
+    providerStatus: resolvedMediaResult.providerStatus,
+    aspectRatio,
+    durationSeconds,
+    sourceImagePath: sourceImage?.localPath,
+    prompt
+  };
+  const summaryContent = [
+    input.mediaKind === 'image' ? '图片生成完成。' : '视频生成完成。',
+    `画幅：${aspectRatio}`,
+    durationSeconds ? `时长：${durationSeconds} 秒` : undefined,
+    sourceImage?.localPath ? '已使用参考图。' : undefined,
+    resolvedMediaResult.remoteUrl
+      ? resolvedMediaResult.localPath
+        ? '远程结果已保存到本地。'
+        : '已获得远程结果，正在保存到本地。'
+      : undefined,
+    resolvedMediaResult.localPath ? `本地文件：${resolvedMediaResult.localPath}` : undefined
+  ].filter(Boolean).join('\n');
+  const generatedArtifact: DesktopArtifactSummary = {
+    id: `${input.task.taskId}-single-${input.mediaKind}-${Date.parse(input.createdAt) || Date.now()}`,
+    type: input.mediaKind,
+    title: `${input.task.title} ${input.mediaKind === 'image' ? '图片结果' : '视频结果'}`,
+    content: summaryContent,
+    createdAt: input.createdAt,
+    remoteUrl: resolvedMediaResult.remoteUrl,
+    localPath: resolvedMediaResult.localPath,
+    format: input.mediaKind === 'image' ? 'png' : 'mp4',
+    mimeType: input.mediaKind === 'image' ? 'image/png' : 'video/mp4'
+  };
+  const outputVariables = writeWorkflowNodeOutputs({
+    pool: input.pool,
+    node: input.node,
+    text: JSON.stringify(outputPayload, null, 2),
+    json: outputPayload,
+    result: outputPayload,
+    outputValue: outputPayload
+  });
+  input.pool.set('runtime.previous_text', summaryContent);
+  input.pool.set('runtime.last_model_node', input.node.id);
+
+  return {
+    response: mergeWorkflowRuntimeResponses(input.currentResponse, {
+      provider: response.provider,
+      modelName: response.modelName,
+      content: summaryContent,
+      artifacts: response.artifacts
+    }),
+    primaryProfile: input.profile,
+    logs: [
+      createLog(
+        input.task.taskId,
+        'info',
+          input.mediaKind === 'image'
+            ? 'WORKFLOW_RUNTIME_SINGLE_IMAGE_GENERATED'
+            : 'WORKFLOW_RUNTIME_SINGLE_VIDEO_GENERATED',
+          input.mediaKind === 'image'
+            ? 'Single image generation completed.'
+            : 'Single video generation completed.',
+          input.createdAt,
+          sanitizeLogSuffix(input.node.id),
+          {
+            hasRemoteUrl: Boolean(resolvedMediaResult.remoteUrl),
+            hasLocalPath: Boolean(resolvedMediaResult.localPath),
+            aspectRatio,
+            durationSeconds
+          }
+        )
+      ],
+    usedToolIds: usedDownloadTool ? ['local-filesystem'] : [],
+    generatedArtifacts: [generatedArtifact],
+    inputVariables: variables.map((variable) => variable.ref),
+    outputVariables,
+    message: input.mediaKind === 'image' ? 'Single image generated.' : 'Single video generated.'
+  };
+}
+
+function buildSingleMediaGenerationPrompt(input: {
+  task: DesktopTaskDetail;
+  node: WorkflowGraphNode;
+  variables: Array<{ ref: string; value: WorkflowRuntimeValue }>;
+  mediaKind: 'image' | 'video';
+  aspectRatio: string;
+  durationSeconds?: number;
+  sourceImage?: WorkflowFileValue;
+}): string {
+  return [
+    input.node.instruction,
+    input.mediaKind === 'image'
+      ? '生成单张图片，不做批量任务。'
+      : '生成单条短视频，不做批量任务。',
+    `画幅比例：${input.aspectRatio}`,
+    input.durationSeconds ? `视频时长：${input.durationSeconds} 秒` : undefined,
+    input.sourceImage?.localPath ? `参考图路径：${input.sourceImage.localPath}` : undefined,
+    '用户需求：',
+    input.task.input,
+    '上下文：',
+    renderWorkflowVariableRefsForPrompt(input.variables, 8_000),
+    '要求：只生成一个结果；保持用户明确要求；不要添加无依据的品牌、文字、人物身份或功能效果。'
+  ].filter(Boolean).join('\n');
+}
+
+function buildSingleMediaGenerationMessages(input: {
+  task: DesktopTaskDetail;
+  node: WorkflowGraphNode;
+  variables: Array<{ ref: string; value: WorkflowRuntimeValue }>;
+  mediaKind: 'image' | 'video';
+  prompt: string;
+  aspectRatio: string;
+  durationSeconds?: number;
+  sourceImage?: WorkflowFileValue;
+}): DesktopModelChatMessage[] {
+  return [
+    {
+      role: 'system',
+      content: [
+        input.mediaKind === 'image'
+          ? 'You are a QiuAI WorkOS single image generation executor.'
+          : 'You are a QiuAI WorkOS single video generation executor.',
+        input.mediaKind === 'image'
+          ? 'Generate exactly one image for the user request.'
+          : 'Generate exactly one short video for the user request.',
+        input.mediaKind === 'image'
+          ? 'Return JSON only: {"remoteUrl":"https://...","thumbnailPath":"https://..."} or {"localPath":"C:\\\\...\\\\image.png"}.'
+          : 'Return JSON only: {"remoteUrl":"https://...","thumbnailPath":"https://..."} or {"localPath":"C:\\\\...\\\\video.mp4"}.',
+        'Do not return binary data, base64, markdown, or multiple results.'
+      ].join('\n')
+    },
+    {
+      role: 'user',
+      content: [
+        `Task title: ${input.task.title}`,
+        `Aspect ratio: ${input.aspectRatio}`,
+        input.durationSeconds ? `Duration seconds: ${input.durationSeconds}` : undefined,
+        input.sourceImage?.localPath ? `Reference image local path: ${input.sourceImage.localPath}` : undefined,
+        'Prompt:',
+        input.prompt
+      ].filter(Boolean).join('\n')
+    }
+  ];
+}
+
+function findFirstWorkflowRuntimeImageFile(
+  variables: Array<{ ref: string; value: WorkflowRuntimeValue | undefined }>
+): WorkflowFileValue | undefined {
+  for (const variable of variables) {
+    const image = readWorkflowRuntimeFiles(variable.value)
+      .find((file) => file.kind === 'image' || Boolean(inferFactoryImageMimeType(file.name)));
+    if (image?.localPath) {
+      return image;
+    }
+  }
+
+  return undefined;
+}
+
+function inferSingleMediaAspectRatio(text: string, fallback: string): string {
+  const normalized = text.replace(/：/g, ':');
+  const match = normalized.match(/\b(?:1:1|3:4|4:3|9:16|16:9|21:9|2:3|3:2)\b/);
+  return match?.[0] ?? fallback;
+}
+
+function inferSingleVideoDurationSeconds(text: string, fallback: number): number {
+  const match = text.match(/(\d{1,2})(?:\s*)(?:秒|s|sec|seconds?)/i);
+  const duration = match ? Number(match[1]) : fallback;
+  if (!Number.isFinite(duration)) {
+    return fallback;
+  }
+
+  return Math.min(30, Math.max(1, Math.round(duration)));
+}
+
+function normalizeSingleMediaGenerationTimeoutMs(value: unknown, fallback: number): number {
+  const timeoutMs = readWorkflowRuntimeNumber(value, fallback);
+  return Math.min(300_000, Math.max(10_000, Math.round(timeoutMs)));
 }
 
 async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
@@ -11908,6 +12252,14 @@ function isWorkflowArtifactToolRequestCompatible(
     return true;
   }
 
+  if (
+    request.toolId === 'local-filesystem' &&
+    request.action === 'filesystem.download_remote_file' &&
+    ['png', 'jpg', 'mp4'].includes(artifactType)
+  ) {
+    return true;
+  }
+
   return workflowArtifactTypeForToolRequest(request) === artifactType;
 }
 
@@ -11930,6 +12282,7 @@ function workflowArtifactTypeForToolRequest(
 function defaultWorkflowArtifactFolder(
   artifactType: WorkflowExecutionNodeSummary['artifactType']
 ): string {
+  if (artifactType === 'png' || artifactType === 'jpg') return 'generated-images';
   if (artifactType === 'xlsx' || artifactType === 'csv') return 'spreadsheets';
   if (artifactType === 'pptx') return 'presentations';
   if (artifactType === 'mp4') return 'videos';
@@ -12249,8 +12602,16 @@ function buildArtifactToolActionHint(
     return 'local-filesystem/filesystem.write_text_file';
   }
 
+  if ((artifactType === 'png' || artifactType === 'jpg') && hasAction('local-filesystem', 'filesystem.download_remote_file')) {
+    return 'local-filesystem/filesystem.download_remote_file';
+  }
+
   if (artifactType === 'mp4' && hasAction('video-processing', 'video.compose_clips')) {
     return 'video-processing/video.compose_clips';
+  }
+
+  if (artifactType === 'mp4' && hasAction('local-filesystem', 'filesystem.download_remote_file')) {
+    return 'local-filesystem/filesystem.download_remote_file';
   }
 
   if (artifactType === 'zip' && hasAction('local-filesystem', 'filesystem.package_zip')) {

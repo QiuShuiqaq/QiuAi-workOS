@@ -261,7 +261,7 @@ export class AuthService {
         const tenant = await tx.tenant.create({
           data: {
             name: workspaceName,
-            type: 'ENTERPRISE',
+            type: 'PERSONAL',
             status: 'ACTIVE'
           }
         });
@@ -269,7 +269,7 @@ export class AuthService {
         const workspace = await tx.workspace.create({
           data: {
             tenantId: tenant.id,
-            type: 'ENTERPRISE',
+            type: 'PERSONAL',
             name: workspaceName,
             ownerAccountId: account.id,
             status: 'ACTIVE',
@@ -756,7 +756,7 @@ export class AuthService {
         {
           id: workspaceId,
           tenantId,
-          workspaceType: 'enterprise',
+          workspaceType: 'personal',
           name: input.workspaceName,
           ownerAccountId: accountId,
           status: 'active',

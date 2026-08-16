@@ -3,6 +3,7 @@ import {
   ApartmentOutlined,
   AppstoreOutlined,
   BankOutlined,
+  BellOutlined,
   BorderOutlined,
   CloudDownloadOutlined,
   CloudSyncOutlined,
@@ -234,6 +235,12 @@ type DesktopThemePreference = 'light' | 'system';
 type DesktopDensityPreference = 'comfortable' | 'compact';
 type ProviderModelCapabilityFilter = 'all' | ModelCapability;
 type ProviderModelCatalogEntry = ModelProviderCatalog['models'][number];
+
+interface AiPointRechargeOption {
+  points: number;
+  label: string;
+  hint: string;
+}
 
 interface DesktopClientPreferences {
   theme: DesktopThemePreference;
@@ -482,6 +489,14 @@ interface ModelFormValues {
 
 interface OnboardingFormValues {
   bindingCode: string;
+}
+
+interface DesktopAccountFormValues {
+  email: string;
+  password: string;
+  workspaceName?: string;
+  rememberMe?: boolean;
+  acceptedTerms?: boolean;
 }
 
 interface RoleConfigFormValues {
@@ -964,13 +979,30 @@ const providerModelCapabilityFilters: Array<{
   { value: 'rerank', label: 'Rerank' }
 ];
 
+const memberMonthlyIncludedAiPoints = 1500;
+
+const aiPointRechargeOptions: AiPointRechargeOption[] = [
+  { points: 1000, label: '体验补充', hint: '适合文本对话和轻量图片任务' },
+  { points: 3000, label: '常用补充', hint: '适合偶尔使用官方通道' },
+  { points: 10000, label: '推荐', hint: '适合生图、文档和短视频测试' },
+  { points: 30000, label: '高频使用', hint: '适合连续生产素材' },
+  { points: 100000, label: '团队储备', hint: '适合长期或多人协作' }
+];
+
+const productAnnouncementItems = [
+  '固定维护窗口：每周三、周日 08:00-12:00，可能进行服务器维护或版本更新。',
+  '任务运行中请保持客户端在线，重要产物建议及时保存到本地。',
+  '官方通道消耗 AI 点数；自配模型请确认 API Key、余额和网络状态。',
+  '遇到异常可先检查控制端状态，再通过“问题反馈”提交信息。'
+];
+
 const accountHelpSections: AccountHelpSection[] = [
   {
     title: '快速开始',
     items: [
       {
-        question: '首次打开为什么是免费版？',
-        answer: 'PC 客户端安装后默认进入免费版，可以安装公开免费的数字员工。输入企业绑定码后，才会接入企业授权、企业数字员工和企业知识库。'
+        question: '首次打开为什么要登录？',
+        answer: 'PC 客户端需要先登录或注册账号。注册后默认进入个人免费版，后续可在购买中心升级会员或购买 AI 点数。'
       },
       {
         question: '怎么绑定企业？',
@@ -978,7 +1010,7 @@ const accountHelpSections: AccountHelpSection[] = [
       },
       {
         question: '退出登录是什么意思？',
-        answer: '退出登录等同于解绑当前设备。解绑后保留本机历史任务、模型配置和产物文件，但不再同步企业数字员工和企业授权。'
+        answer: '退出登录等同于解绑当前设备。解绑后保留本机历史任务、模型配置和产物文件，再次使用需要重新登录或绑定企业。'
       }
     ]
   },
@@ -3181,6 +3213,7 @@ export default function App() {
   const [modelForm] = Form.useForm<ModelFormValues>();
   const [toolSettingsForm] = Form.useForm<ToolSettingsFormValues>();
   const [onboardingForm] = Form.useForm<OnboardingFormValues>();
+  const [desktopAccountForm] = Form.useForm<DesktopAccountFormValues>();
   const [roleConfigForm] = Form.useForm<RoleConfigFormValues>();
   const [runtimeModelQuickSwitchForm] = Form.useForm<RuntimeModelQuickSwitchFormValues>();
   const [watchConfigForm] = Form.useForm<WatchConfigFormValues>();
@@ -3196,6 +3229,10 @@ export default function App() {
     [documentAssistantCustomScenarioPresets]
   );
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [desktopAccountMode, setDesktopAccountMode] = useState<'login' | 'register'>('login');
+  const [isDesktopAccountSubmitting, setIsDesktopAccountSubmitting] = useState(false);
+  const [desktopAccountNotice, setDesktopAccountNotice] = useState('');
+  const [customAiPointAmount, setCustomAiPointAmount] = useState(10000);
   const [roleConfigModalOpen, setRoleConfigModalOpen] = useState(false);
   const [roleConfigMode, setRoleConfigMode] = useState<'install' | 'configure'>('install');
   const [roleConfigRoleCode, setRoleConfigRoleCode] = useState('');
@@ -3472,7 +3509,11 @@ export default function App() {
     [refreshedInstalledRolePackages]
   );
 
-  const tutorialIsEnterpriseUnbound = runtimeState.localRuntime.workspaceId === pendingWorkspaceId;
+  const isDesktopAccountUnregistered = runtimeState.localRuntime.workspaceId === pendingWorkspaceId;
+  const currentPlanCode = authorizedRoleTemplateCatalog.deviceCapacity?.planCode;
+  const isEnterpriseWorkspace = currentPlanCode?.startsWith('ENTERPRISE_') ?? false;
+  const canBindEnterprise = !isDesktopAccountUnregistered && !isEnterpriseWorkspace;
+  const tutorialIsEnterpriseUnbound = isDesktopAccountUnregistered;
 
   const digitalEmployeeTutorialSteps = [
     {
@@ -3587,7 +3628,7 @@ export default function App() {
     : -1;
 
   useEffect(() => {
-    if (!hasLoadedPersistedState || !userAgreementStatus?.accepted) {
+    if (!hasLoadedPersistedState || !userAgreementStatus?.accepted || isDesktopAccountUnregistered) {
       return;
     }
 
@@ -3607,6 +3648,7 @@ export default function App() {
     digitalEmployeeTutorialProgress.completedAt,
     digitalEmployeeTutorialProgress.dismissedAt,
     hasLoadedPersistedState,
+    isDesktopAccountUnregistered,
     userAgreementStatus?.accepted
   ]);
 
@@ -4552,6 +4594,10 @@ export default function App() {
     void openLocalPath(buildWebConsoleLoginUrl(runtimeState.app.serverBaseUrl));
   }
 
+  function openPurchaseCenterPage() {
+    void openLocalPath(buildWebConsolePurchaseUrl(runtimeState.app.serverBaseUrl));
+  }
+
   async function copyDeviceDiagnostics() {
     const diagnostics = [
       `应用：${runtimeState.app.appName}`,
@@ -4563,7 +4609,7 @@ export default function App() {
       `存储模式：${storageModeLabel(runtimeState.app.storageMode)}`,
       `设备 ID：${runtimeState.localRuntime.deviceId}`,
       `运行时 ID：${runtimeState.localRuntime.runtimeId}`,
-      `授权状态：${isEnterpriseUnbound ? '免费版（未绑定企业）' : '已绑定企业'}`,
+      `授权状态：${isDesktopAccountUnregistered ? '未注册' : isEnterpriseWorkspace ? '已绑定企业' : '个人账号（未绑定企业）'}`,
       `工作区：${runtimeState.localRuntime.workspaceId}`,
       `控制端：${runtimeState.app.serverBaseUrl}`,
       `连接状态：${connectionLabel(runtimeState.serverConnection.state)}`,
@@ -4641,6 +4687,53 @@ export default function App() {
       setOnboardingNotice(`绑定失败：${error instanceof Error ? error.message : 'unknown error'}`);
     } finally {
       setIsBindingDevice(false);
+    }
+  }
+
+  async function submitDesktopAccount(values: DesktopAccountFormValues) {
+    if (!window.qiuDesktop) {
+      setDesktopAccountNotice('当前运行环境不支持桌面端账号登录。');
+      return;
+    }
+
+    const email = values.email.trim();
+    const password = values.password;
+    const workspaceName =
+      values.workspaceName?.trim() ||
+      email.split('@')[0]?.trim() ||
+      '个人工作区';
+
+    setIsDesktopAccountSubmitting(true);
+    setDesktopAccountNotice('');
+    try {
+      const nextState =
+        desktopAccountMode === 'login'
+          ? await window.qiuDesktop.loginDesktopAccount({
+              email,
+              password,
+              rememberMe: values.rememberMe
+            })
+          : await window.qiuDesktop.registerDesktopAccount({
+              email,
+              password,
+              workspaceName,
+              acceptedTerms: true
+            });
+
+      setRuntimeState(nextState);
+      desktopAccountForm.resetFields();
+      setDesktopAccountNotice('');
+      setOnboardingOpen(false);
+      setAccountModal(null);
+      message.success(desktopAccountMode === 'login' ? '登录成功' : '注册成功，已进入免费版');
+    } catch (error) {
+      setDesktopAccountNotice(
+        `${desktopAccountMode === 'login' ? '登录失败' : '注册失败'}：${
+          error instanceof Error ? error.message : 'unknown error'
+        }`
+      );
+    } finally {
+      setIsDesktopAccountSubmitting(false);
     }
   }
 
@@ -5282,7 +5375,7 @@ export default function App() {
   const enabledModelCount = runtimeState.localRuntime.enabledModelProfileIds.length;
   const enabledToolCount = runtimeState.localRuntime.enabledToolIds.length;
   const knowledgeBindingCount = runtimeState.localRuntime.knowledgeBindingIds.length;
-  const isEnterpriseUnbound = runtimeState.localRuntime.workspaceId === pendingWorkspaceId;
+  const isEnterpriseUnbound = isDesktopAccountUnregistered;
   const currentSectionMeta = sectionMeta(selectedSection);
   const desktopShellClassName = [
     'desktop-shell',
@@ -5319,7 +5412,7 @@ export default function App() {
                 </div>
 
                 <Space wrap>
-                  {isEnterpriseUnbound ? (
+                  {canBindEnterprise ? (
                     <Button
                       type="primary"
                       onClick={() => setOnboardingOpen(true)}
@@ -5367,6 +5460,7 @@ export default function App() {
           </Layout.Content>
         </Layout>
         {renderOnboardingModal()}
+        {renderDesktopAccountModal()}
         {renderAccountModal()}
         {renderDigitalEmployeeTutorialTour()}
         {renderIssueFeedbackModal()}
@@ -5396,6 +5490,27 @@ export default function App() {
         </div>
 
         <div className="product-titlebar-actions">
+          <Popover
+            trigger="hover"
+            placement="bottomRight"
+            title="公告"
+            content={
+              <Space direction="vertical" size={6} className="product-announcement-popover">
+                {productAnnouncementItems.map((item) => (
+                  <Typography.Text key={item} type="secondary">
+                    {item}
+                  </Typography.Text>
+                ))}
+              </Space>
+            }
+          >
+            <Button
+              type="text"
+              size="small"
+              title="公告"
+              icon={<BellOutlined />}
+            />
+          </Popover>
           <Button
             size="small"
             icon={<CreditCardOutlined />}
@@ -5403,7 +5518,7 @@ export default function App() {
           >
             购买中心
           </Button>
-          {isEnterpriseUnbound ? (
+          {canBindEnterprise ? (
             <span className="tutorial-titlebar-bind-enterprise-target">
               <Button
                 size="small"
@@ -6223,13 +6338,119 @@ export default function App() {
             <Input placeholder="例如：QIU-ABCD-EFGH" />
           </Form.Item>
           <Typography.Text type="secondary">
-            未绑定时可直接使用免费版；绑定企业后，桌面端会自动接入对应企业工作区。
+            当前账号可继续使用个人权益；绑定企业后，桌面端会自动接入对应企业工作区。
           </Typography.Text>
           <Space size={8}>
             <Typography.Link onClick={openEnterpriseLoginPage}>进入企业端</Typography.Link>
             <Typography.Text type="secondary">用于获取企业绑定码</Typography.Text>
           </Space>
           {onboardingNotice ? <Typography.Text type="danger">{onboardingNotice}</Typography.Text> : null}
+        </Form>
+      </Modal>
+    );
+  }
+
+  function renderDesktopAccountModal() {
+    const open =
+      hasLoadedPersistedState &&
+      Boolean(userAgreementStatus?.accepted) &&
+      isDesktopAccountUnregistered;
+    const isRegisterMode = desktopAccountMode === 'register';
+
+    return (
+      <Modal
+        title={isRegisterMode ? '注册 QiuAI 账号' : '登录 QiuAI 账号'}
+        open={open}
+        width={520}
+        closable={false}
+        maskClosable={false}
+        destroyOnHidden={false}
+        footer={
+          <Flex align="center" justify="space-between" gap={12} wrap="wrap">
+            <Button
+              type="link"
+              onClick={() => {
+                setDesktopAccountMode(isRegisterMode ? 'login' : 'register');
+                setDesktopAccountNotice('');
+              }}
+            >
+              {isRegisterMode ? '已有账号，去登录' : '没有账号，立即注册'}
+            </Button>
+            <Button
+              type="primary"
+              loading={isDesktopAccountSubmitting}
+              onClick={() => desktopAccountForm.submit()}
+            >
+              {isRegisterMode ? '注册并进入免费版' : '登录'}
+            </Button>
+          </Flex>
+        }
+      >
+        <Form<DesktopAccountFormValues>
+          form={desktopAccountForm}
+          layout="vertical"
+          initialValues={{ rememberMe: true, acceptedTerms: false }}
+          onFinish={(values) => void submitDesktopAccount(values)}
+        >
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Typography.Text type="secondary">
+              请先登录或注册。注册后默认进入免费版，可在购买中心升级会员或购买 AI 点数。
+            </Typography.Text>
+            <Form.Item
+              name="email"
+              label="邮箱"
+              rules={[
+                { required: true, message: '请输入邮箱' },
+                { type: 'email', message: '请输入有效邮箱' }
+              ]}
+            >
+              <Input autoComplete="email" placeholder="name@example.com" />
+            </Form.Item>
+            <Form.Item
+              name="password"
+              label="密码"
+              rules={[
+                { required: true, message: '请输入密码' },
+                { min: 8, message: '密码至少 8 位' }
+              ]}
+            >
+              <Input.Password autoComplete={isRegisterMode ? 'new-password' : 'current-password'} />
+            </Form.Item>
+            {isRegisterMode ? (
+              <Form.Item
+                name="workspaceName"
+                label="名称"
+                rules={[
+                  { required: true, message: '请填写名称' },
+                  { min: 2, message: '名称至少 2 个字符' }
+                ]}
+              >
+                <Input placeholder="有企业填企业名称，无企业填工作室名称" />
+              </Form.Item>
+            ) : (
+              <Form.Item name="rememberMe" valuePropName="checked" style={{ marginBottom: 0 }}>
+                <Checkbox>保持登录</Checkbox>
+              </Form.Item>
+            )}
+            {isRegisterMode ? (
+              <Form.Item
+                name="acceptedTerms"
+                valuePropName="checked"
+                rules={[
+                  {
+                    validator: (_, checked) =>
+                      checked ? Promise.resolve() : Promise.reject(new Error('请确认已阅读并同意账号服务条款'))
+                  }
+                ]}
+                style={{ marginBottom: 0 }}
+              >
+                <Checkbox>我已阅读并同意账号服务条款</Checkbox>
+              </Form.Item>
+            ) : null}
+            {desktopAccountNotice ? (
+              <Typography.Text type="danger">{desktopAccountNotice}</Typography.Text>
+            ) : null}
+          </Space>
         </Form>
       </Modal>
     );
@@ -6341,7 +6562,6 @@ export default function App() {
     );
     const accountModalWidth =
       accountModal === 'release' || accountModal === 'purchase' ? 860 : accountModal === 'help' ? 760 : 680;
-    const currentPlanCode = authorizedRoleTemplateCatalog.deviceCapacity?.planCode;
     const purchaseStatus = resolvePurchaseStatus(currentPlanCode, isEnterpriseUnbound);
     const aiPointBalanceText = isEnterpriseUnbound
       ? '绑定账号后可查看'
@@ -6367,10 +6587,16 @@ export default function App() {
           <Space direction="vertical" size={16} className="account-modal-body">
             <Descriptions column={1} size="small" bordered>
               <Descriptions.Item label="授权状态">
-                {isEnterpriseUnbound ? <Tag>免费版（未绑定企业）</Tag> : <Tag color="green">已绑定企业</Tag>}
+                {isDesktopAccountUnregistered ? (
+                  <Tag>未注册</Tag>
+                ) : isEnterpriseWorkspace ? (
+                  <Tag color="green">已绑定企业</Tag>
+                ) : (
+                  <Tag color="blue">个人账号（未绑定企业）</Tag>
+                )}
               </Descriptions.Item>
               <Descriptions.Item label="工作区 ID">
-                {isEnterpriseUnbound ? '未绑定企业工作区' : runtimeState.localRuntime.workspaceId}
+                {isDesktopAccountUnregistered ? '未注册' : runtimeState.localRuntime.workspaceId}
               </Descriptions.Item>
               <Descriptions.Item label="设备名称">{runtimeState.app.deviceName}</Descriptions.Item>
               <Descriptions.Item label="设备 ID">{runtimeState.localRuntime.deviceId}</Descriptions.Item>
@@ -6493,7 +6719,7 @@ export default function App() {
                     ¥30 / 月
                   </Typography.Title>
                   <Typography.Text type="secondary">适合个人用户使用数字工厂。</Typography.Text>
-                  <Tag color="blue">可搭配月度 AI 点数包</Tag>
+                  <Tag color="blue">每月含 {formatAiPoints(memberMonthlyIncludedAiPoints)}</Tag>
                 </Space>
               </Card>
               <Card size="small" title="会员版（年付）">
@@ -6502,24 +6728,65 @@ export default function App() {
                     ¥300 / 年
                   </Typography.Title>
                   <Typography.Text type="secondary">适合长期稳定使用。</Typography.Text>
-                  <Tag color="green">年付更省</Tag>
+                  <Tag color="green">年付更省，按月发放 AI 点数</Tag>
                 </Space>
               </Card>
             </div>
 
             <Card size="small" title="AI 点数">
-              <Space direction="vertical" size={8}>
-                <Typography.Text>月度 AI 点数包：适合每月固定使用，价格更低，到期未用完会过期。</Typography.Text>
-                <Typography.Text>AI 点数充值：适合按需补充，长期有效，100 点 = 1 元。</Typography.Text>
-                <Typography.Text type="secondary">
-                  会员不自动赠送 AI 点数，用户可以在开通会员时一起选择月度 AI 点数包。
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                <Typography.Text>
+                  会员月度点数：个人会员每月赠送 {formatAiPoints(memberMonthlyIncludedAiPoints)}，当月有效，到期未用完自动清零。
                 </Typography.Text>
+                <Typography.Text>永久充值：适合按需补充，长期有效，100 点 = 1 元。</Typography.Text>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+                  {aiPointRechargeOptions.map((option) => (
+                    <Card key={option.points} size="small" bordered>
+                      <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                        <Space size={6} wrap>
+                          <Typography.Text strong>{formatAiPoints(option.points)}</Typography.Text>
+                          <Tag color={option.label === '推荐' ? 'blue' : 'default'}>{option.label}</Tag>
+                        </Space>
+                        <Typography.Title level={5} style={{ margin: 0 }}>
+                          {formatAiPointRechargePrice(option.points)}
+                        </Typography.Title>
+                        <Typography.Text type="secondary">{option.hint}</Typography.Text>
+                        <Button size="small" block onClick={openPurchaseCenterPage}>
+                          购买
+                        </Button>
+                      </Space>
+                    </Card>
+                  ))}
+                </div>
+                <Card size="small" bordered>
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    <Typography.Text strong>自定义购买</Typography.Text>
+                    <InputNumber
+                      min={100}
+                      max={1000000}
+                      step={100}
+                      precision={0}
+                      value={customAiPointAmount}
+                      addonAfter="点"
+                      style={{ width: '100%' }}
+                      onChange={(value) =>
+                        setCustomAiPointAmount(typeof value === 'number' ? Math.max(100, Math.floor(value)) : 100)
+                      }
+                    />
+                    <Typography.Text type="secondary">
+                      预计支付 {formatAiPointRechargePrice(customAiPointAmount)}，按 100 点 = 1 元计算。
+                    </Typography.Text>
+                    <Button type="primary" icon={<CreditCardOutlined />} onClick={openPurchaseCenterPage}>
+                      自定义购买
+                    </Button>
+                  </Space>
+                </Card>
               </Space>
             </Card>
 
             <Space wrap>
-              <Button type="primary" icon={<GlobalOutlined />} onClick={openEnterpriseLoginPage}>
-                {purchaseStatus.isEnterprise ? '进入企业端' : '登录后购买'}
+              <Button type="primary" icon={<GlobalOutlined />} onClick={openPurchaseCenterPage}>
+                {purchaseStatus.isEnterprise ? '进入企业端' : '前往购买'}
               </Button>
               {aiPointNotice ? <Typography.Text type="secondary">{aiPointNotice}</Typography.Text> : null}
             </Space>
@@ -6727,7 +6994,7 @@ export default function App() {
         {accountModal === 'logout' ? (
           <Space direction="vertical" size={16} className="account-modal-body">
             <Typography.Paragraph>
-              退出登录会解绑当前设备。解绑后，本机需要重新输入企业绑定码才能同步企业数字员工和授权。
+              退出登录会解绑当前设备。解绑后，再次使用需要重新登录个人账号或重新绑定企业。
             </Typography.Paragraph>
             <Typography.Text type="secondary">
               本地任务记录、模型配置和产物文件不会在此操作中主动删除。
@@ -16010,6 +16277,21 @@ function buildWebConsoleLoginUrl(serverBaseUrl: string) {
   }
 }
 
+function buildWebConsolePurchaseUrl(serverBaseUrl: string) {
+  try {
+    const url = new URL(serverBaseUrl);
+    if ((url.hostname === '127.0.0.1' || url.hostname === 'localhost') && url.port === '4000') {
+      url.port = '3001';
+    }
+    url.pathname = '/purchase';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return 'https://workos.qiuaihub.com/purchase';
+  }
+}
+
 function connectionLabel(state: DesktopRuntimeState['serverConnection']['state']) {
   if (state === 'online') return '控制端在线';
   if (state === 'offline') return '控制端离线';
@@ -16297,6 +16579,10 @@ function formatAiPoints(value?: number) {
   }
 
   return `${Math.max(0, Math.floor(value)).toLocaleString('zh-CN')} 点`;
+}
+
+function formatAiPointRechargePrice(points: number) {
+  return `¥${Math.max(0, Math.floor(points / 100)).toLocaleString('zh-CN')}`;
 }
 
 function isUserDeliverableArtifact(artifact: DesktopTaskDetail['artifacts'][number]) {

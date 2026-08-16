@@ -56,6 +56,11 @@ const ONLINE_BILLING_PLAN_CODES = [
   'ENTERPRISE_PRO_ANNUAL'
 ] as const;
 
+const PERSONAL_FREE_PLAN_CODE = 'PERSONAL_FREE' as const;
+const AI_POINT_PURCHASE_MIN = 100;
+const AI_POINT_PURCHASE_MAX = 1_000_000;
+const AI_POINT_PURCHASE_STEP = 100;
+
 export interface AlipayNotifyProcessingResult {
   success: boolean;
   message: string;
@@ -417,6 +422,70 @@ export class BillingService {
     workspaceId: string,
     input: CreateBillingOrderRequestDto
   ): BillingOrderSummaryDto {
+    const orderKind = this.resolveOrderKind(input.orderKind);
+    if (orderKind === 'AI_POINTS') {
+      const workspace = this.store.getWorkspace(workspaceId);
+      if (!workspace) {
+        throw new NotFoundException({
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Workspace was not found.',
+            details: { workspaceId }
+          }
+        });
+      }
+
+      const plan = demoPlans.find((item) => item.code === PERSONAL_FREE_PLAN_CODE) ?? demoPlans[0];
+      if (!plan) {
+        throw new ServiceUnavailableException({
+          error: {
+            code: 'PERSONAL_FREE_PLAN_NOT_FOUND',
+            message: 'The default personal plan is not configured.'
+          }
+        });
+      }
+
+      const aiPointAmount = this.resolveAiPointAmount(input.aiPointAmount);
+      const currency = this.resolveAiPointCurrency(input.currency);
+      if (input.amountCents !== undefined && input.amountCents !== aiPointAmount) {
+        throw new BadRequestException({
+          error: {
+            code: 'PAYMENT_AMOUNT_MISMATCH',
+            message: 'The submitted amount does not match the AI point package.'
+          }
+        });
+      }
+      const now = new Date();
+      return {
+        id: `order_${Date.now()}`,
+        workspaceId,
+        orderNo: this.generateOrderNo(now),
+        provider: input.provider ?? 'ALIPAY',
+        status: 'PENDING',
+        subject: this.resolveSubject(input.subject, `AI 点数充值（${aiPointAmount} 点）`),
+        amountCents: aiPointAmount,
+        currency,
+        billingCycle: 'CUSTOM',
+        orderKind: 'AI_POINTS',
+        aiPointAmount,
+        planCode: plan.code,
+        planName: plan.name,
+        paymentUrl: undefined,
+        expiresAt: this.addMinutes(now, 30).toISOString(),
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString()
+      };
+    }
+
+    if (!input.planCode) {
+      throw new BadRequestException({
+        error: {
+          code: 'PLAN_CODE_REQUIRED',
+          message: 'planCode is required for plan orders.'
+        }
+      });
+    }
+
     if (!this.isSupportedPlanCode(input.planCode)) {
       throw new BadRequestException({
         error: {
@@ -463,6 +532,7 @@ export class BillingService {
       amountCents,
       currency: input.currency ?? plan.currency ?? 'CNY',
       billingCycle: plan.billingCycle,
+      orderKind: 'PLAN',
       planCode: plan.code,
       planName: plan.name,
       paymentUrl: undefined,
@@ -476,6 +546,20 @@ export class BillingService {
     workspaceId: string,
     input: CreateBillingOrderRequestDto
   ): Promise<BillingOrderSummaryDto> {
+    const orderKind = this.resolveOrderKind(input.orderKind);
+    if (orderKind === 'AI_POINTS') {
+      return this.createDatabaseAiPointOrder(workspaceId, input);
+    }
+
+    if (!input.planCode) {
+      throw new BadRequestException({
+        error: {
+          code: 'PLAN_CODE_REQUIRED',
+          message: 'planCode is required for plan orders.'
+        }
+      });
+    }
+
     if (!this.isSupportedPlanCode(input.planCode)) {
       throw new BadRequestException({
         error: {
@@ -583,6 +667,7 @@ export class BillingService {
           paymentUrl,
           expiresAt: this.addMinutes(now, 30),
           metadata: {
+            orderKind: 'PLAN',
             paymentProviderReady: true,
             paymentIntegrationStage: 'ALIPAY_PAGE_PAY_READY',
             alipayNotifyPath: getAlipayNotifyPath(),
@@ -608,6 +693,132 @@ export class BillingService {
         billingOrderId: createdOrder.id,
         planCode: plan.code,
         referralCode: input.referralCode
+      });
+
+      return createdOrder;
+    });
+
+    return this.toBillingOrderSummary(order);
+  }
+
+  private async createDatabaseAiPointOrder(
+    workspaceId: string,
+    input: CreateBillingOrderRequestDto
+  ): Promise<BillingOrderSummaryDto> {
+    const aiPointAmount = this.resolveAiPointAmount(input.aiPointAmount);
+    if (input.amountCents !== undefined && input.amountCents !== aiPointAmount) {
+      throw new BadRequestException({
+        error: {
+          code: 'PAYMENT_AMOUNT_MISMATCH',
+          message: 'The submitted amount does not match the AI point package.'
+        }
+      });
+    }
+
+    const workspace = await this.prismaService.workspace.findUnique({
+      where: { id: workspaceId },
+      include: {
+        billingAccount: true,
+        subscriptions: {
+          include: {
+            plan: true
+          },
+          orderBy: {
+            updatedAt: 'desc'
+          },
+          take: 1
+        }
+      }
+    });
+
+    if (!workspace) {
+      throw new NotFoundException({
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Workspace was not found.',
+          details: { workspaceId }
+        }
+      });
+    }
+
+    const plan =
+      workspace.subscriptions[0]?.plan ??
+      (await this.prismaService.plan.findUnique({
+        where: { code: PERSONAL_FREE_PLAN_CODE }
+      }));
+    if (!plan) {
+      throw new ServiceUnavailableException({
+        error: {
+          code: 'PERSONAL_FREE_PLAN_NOT_FOUND',
+          message: 'The default personal plan is not configured.'
+        }
+      });
+    }
+
+    const billingAccount =
+      workspace.billingAccount ??
+      (await this.prismaService.billingAccount.create({
+        data: {
+          workspaceId,
+          status: 'ACTIVE',
+          billingName: workspace.name,
+          defaultProvider: 'ALIPAY'
+        }
+      }));
+    const provider = (input.provider ?? billingAccount.defaultProvider ?? 'ALIPAY') as PaymentProvider;
+    this.requirePaymentProviderConfigured(provider);
+
+    const now = new Date();
+    const orderNo = this.generateOrderNo(now);
+    const subject = this.resolveSubject(input.subject, `AI 点数充值（${aiPointAmount} 点）`);
+    const currency = this.resolveAiPointCurrency(input.currency);
+    const paymentUrl =
+      provider === 'ALIPAY'
+        ? buildAlipayCheckoutUrl({
+            orderNo,
+            amountCents: aiPointAmount,
+            subject,
+            body: `${workspace.name} AI 点数充值`
+          })
+        : undefined;
+
+    const order = await this.prismaService.$transaction(async (tx) => {
+      const createdOrder = await tx.billingOrder.create({
+        data: {
+          workspaceId,
+          billingAccountId: billingAccount.id,
+          planId: plan.id,
+          orderNo,
+          provider,
+          status: 'PENDING',
+          subject,
+          amountCents: aiPointAmount,
+          currency,
+          billingCycle: 'CUSTOM',
+          paymentUrl,
+          expiresAt: this.addMinutes(now, 30),
+          metadata: {
+            orderKind: 'AI_POINTS',
+            aiPointAmount,
+            aiPointUnitPriceCents: 1,
+            aiPointCreditSourceType: 'PURCHASE_PERMANENT',
+            paymentProviderReady: true,
+            paymentIntegrationStage: 'ALIPAY_PAGE_PAY_READY',
+            alipayNotifyPath: getAlipayNotifyPath(),
+            alipayReturnPath: getAlipayReturnPath()
+          },
+          transactions: {
+            create: {
+              provider,
+              status: 'INITIATED',
+              amountCents: aiPointAmount,
+              currency
+            }
+          }
+        },
+        include: {
+          plan: true
+        }
       });
 
       return createdOrder;
@@ -745,11 +956,17 @@ export class BillingService {
         tx
       );
 
-      const subscriptionId = await this.activateSubscriptionForPaidOrder(order, tx);
-      await this.referralsService.grantRewardsForPaidOrder(tx, {
-        billingOrderId: order.id,
-        paidAt: now
-      });
+      const orderKind = this.readOrderKind(order.metadata);
+      let subscriptionId = order.subscriptionId;
+      if (orderKind === 'AI_POINTS') {
+        await this.grantPurchasedAiPointsForPaidOrder(tx, order, now);
+      } else {
+        subscriptionId = await this.activateSubscriptionForPaidOrder(order, tx);
+        await this.referralsService.grantRewardsForPaidOrder(tx, {
+          billingOrderId: order.id,
+          paidAt: now
+        });
+      }
 
       return tx.billingOrder.update({
         where: {
@@ -840,6 +1057,76 @@ export class BillingService {
     });
 
     return subscription.id;
+  }
+
+  private async grantPurchasedAiPointsForPaidOrder(
+    tx: Prisma.TransactionClient,
+    order: BillingOrderWithPlan,
+    now: Date
+  ): Promise<void> {
+    const aiPointAmount = this.resolveAiPointAmount(
+      Number(this.toJsonObject(order.metadata).aiPointAmount) || order.amountCents
+    );
+    const existingBucket = await tx.aiPointCreditBucket.findFirst({
+      where: {
+        billingOrderId: order.id,
+        sourceType: 'PURCHASE_PERMANENT'
+      },
+      select: {
+        id: true
+      }
+    });
+    if (existingBucket) {
+      return;
+    }
+
+    await tx.aiPointCreditBucket.create({
+      data: {
+        workspaceId: order.workspaceId,
+        sourceType: 'PURCHASE_PERMANENT',
+        billingOrderId: order.id,
+        totalPoints: aiPointAmount,
+        availablePoints: aiPointAmount,
+        reservedPoints: 0,
+        startsAt: now,
+        status: 'ACTIVE',
+        metadata: {
+          source: 'ai-point-purchase',
+          billingOrderId: order.id,
+          orderNo: order.orderNo
+        }
+      }
+    });
+
+    const wallet = await tx.aiPointWallet.upsert({
+      where: { workspaceId: order.workspaceId },
+      update: {
+        balancePoints: {
+          increment: aiPointAmount
+        }
+      },
+      create: {
+        workspaceId: order.workspaceId,
+        balancePoints: aiPointAmount,
+        reservedPoints: 0
+      }
+    });
+
+    await tx.aiPointLedgerEntry.create({
+      data: {
+        workspaceId: order.workspaceId,
+        type: 'PURCHASE',
+        status: 'COMPLETED',
+        points: aiPointAmount,
+        balanceAfter: wallet.balancePoints - wallet.reservedPoints,
+        description: 'AI 点数充值',
+        metadata: {
+          source: 'ai-point-purchase',
+          billingOrderId: order.id,
+          orderNo: order.orderNo
+        }
+      }
+    });
   }
 
   private async recordAlipayTransaction(
@@ -950,6 +1237,61 @@ export class BillingService {
     return catalogAmountCents;
   }
 
+  private resolveOrderKind(value: string | undefined): 'PLAN' | 'AI_POINTS' {
+    if (!value || value === 'PLAN') {
+      return 'PLAN';
+    }
+    if (value === 'AI_POINTS') {
+      return 'AI_POINTS';
+    }
+
+    throw new BadRequestException({
+      error: {
+        code: 'INVALID_ORDER_KIND',
+        message: 'Unsupported billing order kind.',
+        details: { orderKind: value }
+      }
+    });
+  }
+
+  private resolveAiPointAmount(value: number | undefined): number {
+    if (
+      value === undefined ||
+      !Number.isInteger(value) ||
+      value < AI_POINT_PURCHASE_MIN ||
+      value > AI_POINT_PURCHASE_MAX ||
+      value % AI_POINT_PURCHASE_STEP !== 0
+    ) {
+      throw new BadRequestException({
+        error: {
+          code: 'INVALID_AI_POINT_AMOUNT',
+          message: `AI point amount must be an integer between ${AI_POINT_PURCHASE_MIN} and ${AI_POINT_PURCHASE_MAX}, in steps of ${AI_POINT_PURCHASE_STEP}.`,
+          details: {
+            min: AI_POINT_PURCHASE_MIN,
+            max: AI_POINT_PURCHASE_MAX,
+            step: AI_POINT_PURCHASE_STEP
+          }
+        }
+      });
+    }
+
+    return value;
+  }
+
+  private resolveAiPointCurrency(value: string | undefined): string {
+    const currency = value?.trim().toUpperCase() || 'CNY';
+    if (currency !== 'CNY') {
+      throw new BadRequestException({
+        error: {
+          code: 'UNSUPPORTED_CURRENCY',
+          message: 'AI point purchases currently support CNY only.',
+          details: { currency }
+        }
+      });
+    }
+    return currency;
+  }
+
   private requirePurchasablePlan(plan: {
     code: string;
     billingCycle: string;
@@ -1029,6 +1371,11 @@ export class BillingService {
 
   private isPersonalMemberPlanCode(planCode: string): boolean {
     return planCode === 'PERSONAL_MEMBER_MONTHLY' || planCode === 'PERSONAL_MEMBER_ANNUAL';
+  }
+
+  private readOrderKind(metadata: unknown): 'PLAN' | 'AI_POINTS' {
+    const value = this.toJsonObject(metadata).orderKind;
+    return value === 'AI_POINTS' ? 'AI_POINTS' : 'PLAN';
   }
 
   private toBillingAccountSummary(account: {
@@ -1111,6 +1458,7 @@ export class BillingService {
     billingCycle: string;
     periodStart: Date | null;
     periodEnd: Date | null;
+    metadata?: unknown;
     paymentUrl: string | null;
     providerTradeNo: string | null;
     paidAt: Date | null;
@@ -1133,6 +1481,11 @@ export class BillingService {
       amountCents: order.amountCents,
       currency: order.currency,
       billingCycle: order.billingCycle,
+      orderKind: this.readOrderKind(order.metadata),
+      aiPointAmount:
+        this.readOrderKind(order.metadata) === 'AI_POINTS'
+          ? Number(this.toJsonObject(order.metadata).aiPointAmount) || order.amountCents
+          : undefined,
       planCode: order.plan.code,
       planName: order.plan.name,
       periodStart: order.periodStart?.toISOString(),

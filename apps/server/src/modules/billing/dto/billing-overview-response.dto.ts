@@ -126,6 +126,12 @@ export class BillingOrderSummaryDto {
   @ApiProperty({ example: 'MONTHLY' })
   billingCycle!: string;
 
+  @ApiProperty({ example: 'AI_POINTS', required: false, enum: ['PLAN', 'AI_POINTS'] })
+  orderKind?: 'PLAN' | 'AI_POINTS';
+
+  @ApiProperty({ example: 10000, required: false })
+  aiPointAmount?: number;
+
   @ApiProperty({ example: 'ENTERPRISE_BASIC_MONTHLY' })
   planCode!: string;
 

@@ -106,7 +106,7 @@ export const qiuaiPlanCatalog: PlanDetail[] = [
     billingCycle: 'MONTHLY',
     priceCents: 3000,
     currency: 'CNY',
-    description: '适合个人用户使用数字员工和数字工厂。会员不自动赠送 AI 点数。',
+    description: '适合个人用户使用数字员工和数字工厂。每月含 1500 点月度 AI 点数，到期未用完自动清零。',
     entitlements: personalMemberEntitlements
   },
   {
@@ -115,7 +115,7 @@ export const qiuaiPlanCatalog: PlanDetail[] = [
     billingCycle: 'ANNUAL',
     priceCents: 30000,
     currency: 'CNY',
-    description: '个人会员年付，适合长期使用数字工厂的个人用户。',
+    description: '个人会员年付，适合长期使用数字工厂的个人用户。按月发放 1500 点月度 AI 点数。',
     entitlements: personalMemberEntitlements
   },
   {

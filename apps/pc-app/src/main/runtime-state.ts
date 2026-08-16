@@ -8,8 +8,9 @@ import {
   fetchPublicDesktopToolActionCatalog,
   fetchWorkspaceDesktopToolActionCatalog,
   listAuthorizedRoleTemplates as fetchAuthorizedRoleTemplates,
-  listPublicFreeRoleTemplates as fetchPublicFreeRoleTemplates,
+  loginDesktopAccount as submitDesktopAccountLogin,
   redeemDesktopBindingCode,
+  registerDesktopAccount as submitDesktopAccountRegister,
   submitDesktopIssueReport,
   syncDesktopRuntimeSnapshot
 } from '../shared/desktop-sync-client.js';
@@ -21,6 +22,8 @@ import {
 } from '../shared/desktop-model-credentials.js';
 import type {
   DesktopAppInfo,
+  DesktopAccountLoginRequest,
+  DesktopAccountRegisterRequest,
   DesktopAuthorizedRoleTemplateCatalog,
   DesktopAuthorizedRoleTemplateSummary,
   DesktopRuntimeState,
@@ -161,6 +164,47 @@ export async function bindDesktopDevice(bindingCode: string): Promise<DesktopRun
     appVersion: appInfo.appVersion
   });
 
+  return applyDesktopDeviceBinding(response.data.workspaceId, response.data.deviceToken);
+}
+
+export async function loginDesktopAccount(request: DesktopAccountLoginRequest): Promise<DesktopRuntimeState> {
+  const appInfo = getDesktopAppInfo();
+  const identity = loadRuntimeIdentity(appInfo.userDataPath);
+  const response = await submitDesktopAccountLogin(appInfo.serverBaseUrl, {
+    email: request.email,
+    password: request.password,
+    rememberMe: request.rememberMe,
+    runtimeId: identity.runtimeId,
+    deviceId: identity.deviceId,
+    deviceName: appInfo.deviceName,
+    platform: mapPlatform(appInfo.platform),
+    appVersion: appInfo.appVersion
+  });
+
+  return applyDesktopDeviceBinding(response.data.workspaceId, response.data.deviceToken);
+}
+
+export async function registerDesktopAccount(request: DesktopAccountRegisterRequest): Promise<DesktopRuntimeState> {
+  const appInfo = getDesktopAppInfo();
+  const identity = loadRuntimeIdentity(appInfo.userDataPath);
+  const response = await submitDesktopAccountRegister(appInfo.serverBaseUrl, {
+    email: request.email,
+    password: request.password,
+    workspaceName: request.workspaceName,
+    acceptedTerms: request.acceptedTerms,
+    runtimeId: identity.runtimeId,
+    deviceId: identity.deviceId,
+    deviceName: appInfo.deviceName,
+    platform: mapPlatform(appInfo.platform),
+    appVersion: appInfo.appVersion
+  });
+
+  return applyDesktopDeviceBinding(response.data.workspaceId, response.data.deviceToken);
+}
+
+async function applyDesktopDeviceBinding(workspaceId: string, deviceToken: string): Promise<DesktopRuntimeState> {
+  const appInfo = getDesktopAppInfo();
+  const identity = loadRuntimeIdentity(appInfo.userDataPath);
   const currentState = await getDesktopRuntimeState();
   const boundState: DesktopRuntimeState = {
     ...currentState,
@@ -169,14 +213,14 @@ export async function bindDesktopDevice(bindingCode: string): Promise<DesktopRun
       ...currentState.localRuntime,
       runtimeId: identity.runtimeId,
       deviceId: identity.deviceId,
-      workspaceId: response.data.workspaceId,
+      workspaceId,
       appVersion: appInfo.appVersion
     },
     runtimeSnapshot: {
       ...currentState.runtimeSnapshot,
       runtimeId: identity.runtimeId,
       deviceId: identity.deviceId,
-      workspaceId: response.data.workspaceId,
+      workspaceId,
       deviceName: appInfo.deviceName,
       platform: mapPlatform(appInfo.platform),
       appVersion: appInfo.appVersion
@@ -184,8 +228,8 @@ export async function bindDesktopDevice(bindingCode: string): Promise<DesktopRun
   };
 
   updateRuntimeIdentity(appInfo.userDataPath, {
-    workspaceId: response.data.workspaceId,
-    deviceToken: response.data.deviceToken
+    workspaceId,
+    deviceToken
   });
 
   await saveDesktopRuntimeState(appInfo.userDataPath, boundState);
@@ -406,28 +450,13 @@ export async function listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRo
   const installedTemplateIds = readInstalledTemplateIds(persistedState);
 
   if (!identity.deviceToken) {
-    try {
-      const response = await fetchPublicFreeRoleTemplates(appInfo.serverBaseUrl, installedTemplateIds);
-      return {
-        source: 'server',
-        workspaceId,
-        loadedAt: new Date().toISOString(),
-        templates: response.data,
-        deviceCapacity: response.deviceCapacity,
-        deletedTemplateIds: response.deletedTemplateIds,
-        message: formatAuthorizedRoleTemplateSyncMessage(response.data)
-      };
-    } catch (error) {
-      return {
-        source: 'local_fallback',
-        workspaceId,
-        loadedAt: new Date().toISOString(),
-        templates: [],
-        message: error instanceof Error
-          ? `免费数字员工目录加载失败：${error.message}`
-          : '免费数字员工目录加载失败。'
-      };
-    }
+    return {
+      source: 'local_fallback',
+      workspaceId,
+      loadedAt: new Date().toISOString(),
+      templates: [],
+      message: '请先登录或注册账号，注册后默认进入免费版。'
+    };
   }
 
   try {

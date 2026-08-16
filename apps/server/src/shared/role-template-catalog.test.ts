@@ -212,6 +212,8 @@ test('server role template catalog only exposes the approved production set', ()
 
   assert.deepEqual(expectedEmployeeTemplateIds, [
     'template_document_assistant',
+    'template_image_generation_assistant_v1',
+    'template_video_generation_assistant_v1',
     'core_enterprise_researcher_v1',
     'core_customer_support_agent_v1',
     'core_after_sales_ticket_v1',
@@ -447,7 +449,7 @@ test('server role template catalog only exposes the approved production set', ()
       }
       assert.equal(
         artifactNode.toolId,
-        artifactNode.artifactType === 'mp4' ? 'video-processing' : 'office-document',
+        expectedArtifactToolId(artifactNode.artifactType, String(artifactNode.config?.action ?? '')),
         `${template.templateId} artifact node must use the matching writer tool`
       );
       assert.ok(
@@ -510,9 +512,8 @@ test('server role template catalog only exposes the approved production set', ()
       );
       const artifactAction = artifactNode?.config?.action;
       assert.equal(typeof artifactAction, 'string', `${template.templateId} artifact must define a concrete tool action`);
-      assert.equal(
-        artifactAction,
-        expectedArtifactAction(artifactNode?.artifactType),
+      assert.ok(
+        expectedArtifactActions(artifactNode?.artifactType).includes(String(artifactAction)),
         `${template.templateId} artifact action must match artifact type`
       );
       const artifactInput = readRecord(artifactNode?.config?.input);
@@ -534,22 +535,32 @@ test('server role template catalog only exposes the approved production set', ()
   }
 });
 
-function expectedArtifactAction(artifactType: string | undefined): string | undefined {
+function expectedArtifactToolId(artifactType: string | undefined, action: string): string | undefined {
+  if (action === 'filesystem.download_remote_file') {
+    return 'local-filesystem';
+  }
+  return artifactType === 'mp4' ? 'video-processing' : 'office-document';
+}
+
+function expectedArtifactActions(artifactType: string | undefined): string[] {
   switch (artifactType) {
     case 'docx':
-      return 'office.write_docx_document';
+      return ['office.write_docx_document'];
     case 'markdown':
-      return 'office.write_markdown_document';
+      return ['office.write_markdown_document'];
     case 'xlsx':
-      return 'spreadsheet.write_xlsx';
+      return ['spreadsheet.write_xlsx'];
     case 'csv':
-      return 'spreadsheet.write_csv';
+      return ['spreadsheet.write_csv'];
     case 'pptx':
-      return 'presentation.write_pptx';
+      return ['presentation.write_pptx'];
+    case 'png':
+    case 'jpg':
+      return ['filesystem.download_remote_file'];
     case 'mp4':
-      return 'video.compose_clips';
+      return ['video.compose_clips', 'filesystem.download_remote_file'];
     default:
-      return undefined;
+      return [];
   }
 }
 

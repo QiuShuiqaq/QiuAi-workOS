@@ -50,6 +50,21 @@ interface RedeemDesktopBindingCodeResponse {
   };
 }
 
+interface DesktopAccountAuthRequest {
+  email: string;
+  password: string;
+  rememberMe?: boolean;
+  workspaceName?: string;
+  acceptedTerms?: true;
+  runtimeId: string;
+  deviceId: string;
+  deviceName: string;
+  platform: DesktopRuntimeSnapshot['platform'];
+  appVersion: string;
+}
+
+type DesktopAccountAuthResponse = RedeemDesktopBindingCodeResponse;
+
 interface SyncDesktopRuntimeRequest {
   data: DesktopRuntimeSnapshot;
 }
@@ -177,6 +192,44 @@ export async function redeemDesktopBindingCode(
   }
 
   return body as RedeemDesktopBindingCodeResponse;
+}
+
+export async function loginDesktopAccount(
+  baseUrl: string,
+  input: DesktopAccountAuthRequest
+): Promise<DesktopAccountAuthResponse> {
+  return submitDesktopAccountAuth(baseUrl, 'login', input);
+}
+
+export async function registerDesktopAccount(
+  baseUrl: string,
+  input: DesktopAccountAuthRequest & { workspaceName: string; acceptedTerms: true }
+): Promise<DesktopAccountAuthResponse> {
+  return submitDesktopAccountAuth(baseUrl, 'register', input);
+}
+
+async function submitDesktopAccountAuth(
+  baseUrl: string,
+  action: 'login' | 'register',
+  input: DesktopAccountAuthRequest
+): Promise<DesktopAccountAuthResponse> {
+  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/api/v1/desktop/auth/${action}`, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify(input)
+  });
+
+  const body = (await response.json()) as DesktopAccountAuthResponse | { error?: { message?: string } };
+  if (!response.ok) {
+    const errorBody = body as { error?: { message?: string } };
+    const message = errorBody.error?.message ?? `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return body as DesktopAccountAuthResponse;
 }
 
 export async function listAuthorizedRoleTemplates(

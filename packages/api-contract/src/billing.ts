@@ -9,6 +9,8 @@ export type BillingOrderStatus = 'PENDING' | 'PAID' | 'CLOSED' | 'CANCELLED' | '
 
 export type PaymentTransactionStatus = 'INITIATED' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
 
+export type BillingOrderKind = 'PLAN' | 'AI_POINTS';
+
 export interface BillingAccountSummary {
   id: string;
   workspaceId: string;
@@ -52,6 +54,8 @@ export interface BillingOrderSummary {
   amountCents: number;
   currency: string;
   billingCycle: string;
+  orderKind?: BillingOrderKind;
+  aiPointAmount?: number;
   planCode: string;
   planName: string;
   periodStart?: string;
@@ -79,7 +83,9 @@ export interface GetBillingOverviewResponse {
 }
 
 export interface CreateBillingOrderRequest {
-  planCode: string;
+  planCode?: string;
+  orderKind?: BillingOrderKind;
+  aiPointAmount?: number;
   provider?: PaymentProvider;
   amountCents?: number;
   currency?: string;

@@ -1,10 +1,23 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsIn, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class CreateBillingOrderRequestDto {
-  @ApiProperty({ example: 'ENTERPRISE_BASIC_MONTHLY' })
+  @ApiProperty({ example: 'ENTERPRISE_BASIC_MONTHLY', required: false })
+  @IsOptional()
   @IsString()
-  planCode!: string;
+  planCode?: string;
+
+  @ApiProperty({ example: 'AI_POINTS', required: false, enum: ['PLAN', 'AI_POINTS'] })
+  @IsOptional()
+  @IsIn(['PLAN', 'AI_POINTS'])
+  orderKind?: 'PLAN' | 'AI_POINTS';
+
+  @ApiProperty({ example: 10000, required: false, description: 'AI points to purchase.' })
+  @IsOptional()
+  @IsInt()
+  @Min(100)
+  @Max(1_000_000)
+  aiPointAmount?: number;
 
   @ApiProperty({ example: 'ALIPAY', required: false })
   @IsOptional()

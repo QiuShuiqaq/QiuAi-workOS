@@ -5,6 +5,7 @@ import { EntitlementModule } from '../entitlement/entitlement.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { RoleModule } from '../role/role.module';
 import {
+  DesktopAccountAuthController,
   DesktopAgreementAcceptanceController,
   DesktopBindingController,
   DesktopIssueReportController,
@@ -19,6 +20,7 @@ import { DesktopSyncService } from './desktop-sync.service';
 @Module({
   imports: [AuthModule, EntitlementModule, KnowledgeModule, RoleModule],
   controllers: [
+    DesktopAccountAuthController,
     DesktopAgreementAcceptanceController,
     DesktopBindingController,
     DesktopIssueReportController,

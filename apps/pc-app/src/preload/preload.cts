@@ -48,6 +48,8 @@ const channels = {
   getUserAgreementStatus: 'qiuai:desktop:get-user-agreement-status',
   acceptUserAgreement: 'qiuai:desktop:accept-user-agreement',
   submitIssueReport: 'qiuai:desktop:submit-issue-report',
+  loginDesktopAccount: 'qiuai:desktop:login-desktop-account',
+  registerDesktopAccount: 'qiuai:desktop:register-desktop-account',
   bindDesktopDevice: 'qiuai:desktop:bind-desktop-device',
   unbindDesktopDevice: 'qiuai:desktop:unbind-desktop-device',
   checkServerConnection: 'qiuai:desktop:check-server-connection',
@@ -89,6 +91,10 @@ const bridge: QiuDesktopBridge = {
     ipcRenderer.invoke(channels.acceptUserAgreement, request) as Promise<DesktopAgreementStatus>,
   submitIssueReport: (request: DesktopIssueReportSubmitRequest) =>
     ipcRenderer.invoke(channels.submitIssueReport, request) as Promise<DesktopIssueReportSubmitResult>,
+  loginDesktopAccount: (request) =>
+    ipcRenderer.invoke(channels.loginDesktopAccount, request) as Promise<DesktopRuntimeState>,
+  registerDesktopAccount: (request) =>
+    ipcRenderer.invoke(channels.registerDesktopAccount, request) as Promise<DesktopRuntimeState>,
   bindDesktopDevice: (bindingCode: string) =>
     ipcRenderer.invoke(channels.bindDesktopDevice, bindingCode) as Promise<DesktopRuntimeState>,
   unbindDesktopDevice: () =>

@@ -4,6 +4,8 @@ import { describe, test } from 'node:test';
 import {
   parseCreateDesktopBindingCodeRequest,
   parseCreateDesktopIssueReportRequest,
+  parseDesktopAccountLoginRequest,
+  parseDesktopAccountRegisterRequest,
   parseDesktopRuntimeSyncRequest,
   parseRedeemDesktopBindingCodeRequest
 } from './desktop-sync.contract';
@@ -106,6 +108,51 @@ describe('desktop runtime sync contract', () => {
 
     assert.equal(request.bindingCode, 'QIU-ABCD-EFGH');
     assert.equal(request.platform, 'windows');
+  });
+
+  test('parses desktop account auth requests', () => {
+    const loginRequest = parseDesktopAccountLoginRequest({
+      email: 'user@example.com',
+      password: 'password-123',
+      rememberMe: true,
+      runtimeId: 'runtime-001',
+      deviceId: 'device-001',
+      deviceName: 'desktop-001',
+      platform: 'windows',
+      appVersion: '1.1.2'
+    });
+    assert.equal(loginRequest.email, 'user@example.com');
+    assert.equal(loginRequest.rememberMe, true);
+
+    const registerRequest = parseDesktopAccountRegisterRequest({
+      email: 'new@example.com',
+      password: 'password-123',
+      workspaceName: '个人工作室',
+      acceptedTerms: true,
+      runtimeId: 'runtime-002',
+      deviceId: 'device-002',
+      deviceName: 'desktop-002',
+      platform: 'windows',
+      appVersion: '1.1.2'
+    });
+    assert.equal(registerRequest.workspaceName, '个人工作室');
+    assert.equal(registerRequest.acceptedTerms, true);
+
+    assert.throws(
+      () =>
+        parseDesktopAccountRegisterRequest({
+          email: 'new@example.com',
+          password: 'password-123',
+          workspaceName: '个人工作室',
+          acceptedTerms: false,
+          runtimeId: 'runtime-002',
+          deviceId: 'device-002',
+          deviceName: 'desktop-002',
+          platform: 'windows',
+          appVersion: '1.1.2'
+        }),
+      /acceptedTerms/
+    );
   });
 
   test('parses desktop issue reports and enforces field limits', () => {

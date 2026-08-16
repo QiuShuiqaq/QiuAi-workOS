@@ -20,6 +20,34 @@ export interface RedeemDesktopBindingCodeRequest {
   appVersion: string;
 }
 
+export interface DesktopAccountLoginRequest {
+  email: string;
+  password: string;
+  rememberMe?: boolean;
+  runtimeId: string;
+  deviceId: string;
+  deviceName: string;
+  platform: DesktopRuntimeSnapshot['platform'];
+  appVersion: string;
+}
+
+export type DesktopAccountDeviceRequest = Pick<
+  DesktopAccountLoginRequest,
+  'runtimeId' | 'deviceId' | 'deviceName' | 'platform' | 'appVersion'
+>;
+
+export interface DesktopAccountRegisterRequest {
+  email: string;
+  password: string;
+  workspaceName: string;
+  acceptedTerms: true;
+  runtimeId: string;
+  deviceId: string;
+  deviceName: string;
+  platform: DesktopRuntimeSnapshot['platform'];
+  appVersion: string;
+}
+
 export interface DesktopAgreementAcceptanceStatusQuery {
   agreementKey: string;
   agreementVersion: string;
@@ -170,6 +198,8 @@ export interface RedeemDesktopBindingCodeResponse {
   };
 }
 
+export type DesktopAccountAuthResponse = RedeemDesktopBindingCodeResponse;
+
 export interface DesktopRuntimeSyncResponse {
   data: {
     accepted: true;
@@ -293,6 +323,39 @@ export function parseRedeemDesktopBindingCodeRequest(input: unknown): RedeemDesk
     deviceName: requireString(record.deviceName, 'desktopBindingRedeem.deviceName'),
     platform: requireEnum(record.platform, 'desktopBindingRedeem.platform', ['windows', 'macos', 'linux']),
     appVersion: requireString(record.appVersion, 'desktopBindingRedeem.appVersion')
+  };
+}
+
+export function parseDesktopAccountLoginRequest(input: unknown): DesktopAccountLoginRequest {
+  const record = requireRecord(input, 'desktop account login request');
+  return {
+    email: requireString(record.email, 'desktopAccountLogin.email'),
+    password: requireString(record.password, 'desktopAccountLogin.password'),
+    rememberMe: record.rememberMe === undefined ? undefined : Boolean(record.rememberMe),
+    runtimeId: requireString(record.runtimeId, 'desktopAccountLogin.runtimeId'),
+    deviceId: requireString(record.deviceId, 'desktopAccountLogin.deviceId'),
+    deviceName: requireString(record.deviceName, 'desktopAccountLogin.deviceName'),
+    platform: requireEnum(record.platform, 'desktopAccountLogin.platform', ['windows', 'macos', 'linux']),
+    appVersion: requireString(record.appVersion, 'desktopAccountLogin.appVersion')
+  };
+}
+
+export function parseDesktopAccountRegisterRequest(input: unknown): DesktopAccountRegisterRequest {
+  const record = requireRecord(input, 'desktop account register request');
+  if (record.acceptedTerms !== true) {
+    throw new Error('desktopAccountRegister.acceptedTerms must be true.');
+  }
+
+  return {
+    email: requireString(record.email, 'desktopAccountRegister.email'),
+    password: requireString(record.password, 'desktopAccountRegister.password'),
+    workspaceName: requireString(record.workspaceName, 'desktopAccountRegister.workspaceName'),
+    acceptedTerms: true,
+    runtimeId: requireString(record.runtimeId, 'desktopAccountRegister.runtimeId'),
+    deviceId: requireString(record.deviceId, 'desktopAccountRegister.deviceId'),
+    deviceName: requireString(record.deviceName, 'desktopAccountRegister.deviceName'),
+    platform: requireEnum(record.platform, 'desktopAccountRegister.platform', ['windows', 'macos', 'linux']),
+    appVersion: requireString(record.appVersion, 'desktopAccountRegister.appVersion')
   };
 }
 

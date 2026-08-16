@@ -188,6 +188,19 @@ export interface DesktopRuntimeSyncResponse {
   };
 }
 
+export interface DesktopAccountLoginRequest {
+  email: string;
+  password: string;
+  rememberMe?: boolean;
+}
+
+export interface DesktopAccountRegisterRequest {
+  email: string;
+  password: string;
+  workspaceName: string;
+  acceptedTerms: true;
+}
+
 export interface DesktopAiPointOverview {
   wallet: {
     workspaceId: string;
@@ -572,6 +585,8 @@ export interface QiuDesktopBridge {
   getUserAgreementStatus(): Promise<DesktopAgreementStatus>;
   acceptUserAgreement(request: DesktopAgreementAcceptRequest): Promise<DesktopAgreementStatus>;
   submitIssueReport(request: DesktopIssueReportSubmitRequest): Promise<DesktopIssueReportSubmitResult>;
+  loginDesktopAccount(request: DesktopAccountLoginRequest): Promise<DesktopRuntimeState>;
+  registerDesktopAccount(request: DesktopAccountRegisterRequest): Promise<DesktopRuntimeState>;
   bindDesktopDevice(bindingCode: string): Promise<DesktopRuntimeState>;
   unbindDesktopDevice(): Promise<DesktopRuntimeState>;
   checkServerConnection(): Promise<DesktopServerConnectionStatus>;

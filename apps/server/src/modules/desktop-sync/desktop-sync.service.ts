@@ -35,6 +35,8 @@ import {
   CancelDesktopBindingCodeResponse,
   CreateDesktopIssueReportResponse,
   CreateDesktopBindingCodeResponse,
+  DesktopAccountAuthResponse,
+  DesktopAccountDeviceRequest,
   DesktopAgreementAcceptanceStatusResponse,
   DesktopAgreementAcceptanceSummary,
   DesktopDeviceSummary,
@@ -51,6 +53,8 @@ import {
   parseCreateDesktopIssueReportRequest,
   parseCreateDesktopBindingCodeRequest,
   parseDesktopRuntimeSyncRequest,
+  parseDesktopAccountLoginRequest,
+  parseDesktopAccountRegisterRequest,
   parseRedeemDesktopBindingCodeRequest,
   parseUpdateDesktopBindingCodeRequest
 } from './desktop-sync.contract';
@@ -1011,6 +1015,196 @@ export class DesktopSyncService {
     return {
       data: {
         workspaceId: bindingCode.workspaceId,
+        deviceToken,
+        device: this.toDeviceSummary(device)
+      }
+    };
+  }
+
+  async loginDesktopAccount(
+    body: unknown,
+    requestMeta?: { userAgent?: string; ipAddress?: string }
+  ): Promise<DesktopAccountAuthResponse> {
+    const request = parseDesktopAccountLoginRequest(body);
+    const session = await this.authService.login(
+      {
+        email: request.email,
+        password: request.password,
+        rememberMe: request.rememberMe
+      },
+      requestMeta
+    );
+    const workspaceId = this.selectDesktopAccountWorkspaceId(session.response);
+    return this.issueDesktopDeviceForWorkspace(workspaceId, request);
+  }
+
+  async registerDesktopAccount(
+    body: unknown,
+    requestMeta?: { userAgent?: string; ipAddress?: string }
+  ): Promise<DesktopAccountAuthResponse> {
+    const request = parseDesktopAccountRegisterRequest(body);
+    const session = await this.authService.register(
+      {
+        email: request.email,
+        password: request.password,
+        workspaceName: request.workspaceName,
+        acceptedTerms: request.acceptedTerms
+      },
+      requestMeta
+    );
+    const workspaceId = this.selectDesktopAccountWorkspaceId(session.response);
+    return this.issueDesktopDeviceForWorkspace(workspaceId, request);
+  }
+
+  private selectDesktopAccountWorkspaceId(session: {
+    workspaces?: Array<{ id: string; workspaceType: 'personal' | 'enterprise'; planCode?: string; status?: string }>;
+    activeWorkspaceId?: string;
+  }): string {
+    const activeWorkspaces = (session.workspaces ?? []).filter((workspace) => workspace.status !== 'archived');
+    const personalWorkspace =
+      activeWorkspaces.find((workspace) => workspace.workspaceType === 'personal') ??
+      activeWorkspaces.find((workspace) => workspace.planCode?.startsWith('PERSONAL_'));
+    const activeWorkspace = activeWorkspaces.find((workspace) => workspace.id === session.activeWorkspaceId);
+    const workspaceId = personalWorkspace?.id ?? activeWorkspace?.id ?? activeWorkspaces[0]?.id;
+
+    if (!workspaceId) {
+      throw new ForbiddenException({
+        error: {
+          code: 'WORKSPACE_ACCESS_DENIED',
+          message: 'No available workspace was found for this account.'
+        }
+      });
+    }
+
+    return workspaceId;
+  }
+
+  private async issueDesktopDeviceForWorkspace(
+    workspaceId: string,
+    request: DesktopAccountDeviceRequest
+  ): Promise<DesktopAccountAuthResponse> {
+    const now = new Date();
+
+    if (!isDatabasePersistenceEnabled()) {
+      const deviceToken = createDesktopDeviceToken();
+      const device: MockDesktopDeviceRecord = {
+        id: `desktop_device_${Date.now()}`,
+        workspaceId,
+        runtimeId: request.runtimeId,
+        deviceId: request.deviceId,
+        deviceName: request.deviceName,
+        platform: request.platform,
+        appVersion: request.appVersion,
+        status: 'ACTIVE',
+        boundAt: now.toISOString(),
+        lastSeenAt: now.toISOString(),
+        tokenHash: hashDesktopToken(deviceToken)
+      };
+
+      const existingIndex = this.mockDevices.findIndex(
+        (item) => item.workspaceId === workspaceId && item.runtimeId === request.runtimeId
+      );
+      let storedDevice = device;
+      if (existingIndex >= 0) {
+        storedDevice = {
+          ...this.mockDevices[existingIndex],
+          ...device,
+          id: this.mockDevices[existingIndex].id,
+          boundAt: this.mockDevices[existingIndex].boundAt
+        };
+        this.mockDevices[existingIndex] = storedDevice;
+      } else {
+        this.mockDevices.unshift(device);
+      }
+
+      const { tokenHash: _tokenHash, ...deviceSummary } = storedDevice;
+      return {
+        data: {
+          workspaceId,
+          deviceToken,
+          device: deviceSummary
+        }
+      };
+    }
+
+    const workspace = await this.prismaService.workspace.findUnique({
+      where: {
+        id: workspaceId
+      },
+      select: {
+        id: true,
+        status: true
+      }
+    });
+
+    if (!workspace || workspace.status !== 'ACTIVE') {
+      throw new ForbiddenException({
+        error: {
+          code: 'WORKSPACE_NOT_ACTIVE',
+          message: 'Workspace is not active.',
+          details: { workspaceId }
+        }
+      });
+    }
+
+    const existingDevice = await this.prismaService.desktopDevice.findUnique({
+      where: {
+        workspaceId_runtimeId: {
+          workspaceId,
+          runtimeId: request.runtimeId
+        }
+      }
+    });
+    const activeDeviceCount = await this.prismaService.desktopDevice.count({
+      where: {
+        workspaceId,
+        status: 'ACTIVE'
+      }
+    });
+    const requestedDeviceCount = existingDevice?.status === 'ACTIVE' ? activeDeviceCount : activeDeviceCount + 1;
+    await this.entitlementService.requireAllowed(
+      {
+        workspaceId,
+        featureKey: 'maxDesktopDevices',
+        requestedAmount: requestedDeviceCount
+      },
+      'Desktop device quota has been reached.'
+    );
+
+    const deviceToken = createDesktopDeviceToken();
+    const deviceTokenHash = hashDesktopToken(deviceToken);
+    const device = await this.prismaService.desktopDevice.upsert({
+      where: {
+        workspaceId_runtimeId: {
+          workspaceId,
+          runtimeId: request.runtimeId
+        }
+      },
+      update: {
+        deviceId: request.deviceId,
+        deviceName: request.deviceName,
+        platform: request.platform,
+        appVersion: request.appVersion,
+        tokenHash: deviceTokenHash,
+        status: 'ACTIVE',
+        lastSeenAt: now
+      },
+      create: {
+        workspaceId,
+        runtimeId: request.runtimeId,
+        deviceId: request.deviceId,
+        deviceName: request.deviceName,
+        platform: request.platform,
+        appVersion: request.appVersion,
+        tokenHash: deviceTokenHash,
+        status: 'ACTIVE',
+        lastSeenAt: now
+      }
+    });
+
+    return {
+      data: {
+        workspaceId,
         deviceToken,
         device: this.toDeviceSummary(device)
       }

@@ -176,6 +176,10 @@ body,
   margin-inline-end: 0;
 }
 
+.product-announcement-popover {
+  max-width: 360px;
+}
+
 .tutorial-titlebar-bind-enterprise-target {
   display: inline-flex;
 }

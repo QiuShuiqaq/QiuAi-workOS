@@ -125,6 +125,7 @@ const pollMaxIntervalMs = 20_000;
 const minimaxSubmitTimeoutMs = 30_000;
 const minimaxPollInitialIntervalMs = 8_000;
 const officialRouteBusyRetryMs = 750;
+const personalMemberMonthlyAiPoints = 1500;
 const officialRouteQueueWaitMsByCapability: Record<OfficialCapability, number> = {
   TEXT: 10_000,
   REASONING: 10_000,
@@ -159,6 +160,7 @@ export class AiPointsService {
       };
     }
 
+    await this.ensureActivePersonalMemberMonthlyCredits(workspaceId);
     await this.ensureWallet(workspaceId);
     await this.expireWorkspaceCreditBuckets(workspaceId);
     const [ledgerEntries, quota, creditBuckets] = await Promise.all([
@@ -854,6 +856,139 @@ export class AiPointsService {
     });
   }
 
+  private async ensureActivePersonalMemberMonthlyCredits(
+    workspaceId: string,
+    now = new Date()
+  ): Promise<void> {
+    if (!isDatabasePersistenceEnabled() || isLocalDevelopmentUnlimitedEnabled()) {
+      return;
+    }
+
+    await this.prismaService.$transaction(async (tx) => {
+      await this.ensureActivePersonalMemberMonthlyCreditsInTransaction(tx, workspaceId, now);
+    });
+  }
+
+  private async ensureActivePersonalMemberMonthlyCreditsInTransaction(
+    tx: Prisma.TransactionClient,
+    workspaceId: string,
+    now: Date
+  ): Promise<void> {
+    const subscription = await tx.subscription.findFirst({
+      where: {
+        workspaceId,
+        status: 'ACTIVE'
+      },
+      include: {
+        plan: true
+      },
+      orderBy: {
+        updatedAt: 'desc'
+      }
+    });
+    if (!subscription) {
+      return;
+    }
+
+    if (
+      subscription.plan.code !== 'PERSONAL_MEMBER_MONTHLY' &&
+      subscription.plan.code !== 'PERSONAL_MEMBER_ANNUAL'
+    ) {
+      return;
+    }
+    if (subscription.currentPeriodStart && subscription.currentPeriodStart > now) {
+      return;
+    }
+    if (subscription.currentPeriodEnd && subscription.currentPeriodEnd <= now) {
+      return;
+    }
+
+    const { start: monthStart, end: monthEnd, period } = getCurrentMonthRange(now);
+    const existingBucket = await tx.aiPointCreditBucket.findFirst({
+      where: {
+        workspaceId,
+        subscriptionId: subscription.id,
+        sourceType: 'SUBSCRIPTION_MONTHLY',
+        startsAt: {
+          gte: monthStart,
+          lt: monthEnd
+        },
+        status: {
+          not: 'CANCELLED'
+        }
+      },
+      select: {
+        id: true
+      }
+    });
+    if (existingBucket) {
+      return;
+    }
+
+    const startsAt =
+      subscription.currentPeriodStart && subscription.currentPeriodStart > monthStart
+        ? subscription.currentPeriodStart
+        : monthStart;
+    const expiresAt =
+      subscription.currentPeriodEnd && subscription.currentPeriodEnd < monthEnd
+        ? subscription.currentPeriodEnd
+        : monthEnd;
+    if (expiresAt <= startsAt) {
+      return;
+    }
+
+    const points = personalMemberMonthlyAiPoints;
+    await tx.aiPointCreditBucket.create({
+      data: {
+        workspaceId,
+        sourceType: 'SUBSCRIPTION_MONTHLY',
+        subscriptionId: subscription.id,
+        totalPoints: points,
+        availablePoints: points,
+        reservedPoints: 0,
+        startsAt,
+        expiresAt,
+        status: 'ACTIVE',
+        metadata: {
+          source: 'personal-member-monthly',
+          period,
+          planCode: subscription.plan.code
+        }
+      }
+    });
+
+    const wallet = await tx.aiPointWallet.upsert({
+      where: { workspaceId },
+      update: {
+        balancePoints: {
+          increment: points
+        }
+      },
+      create: {
+        workspaceId,
+        balancePoints: points,
+        reservedPoints: 0
+      }
+    });
+
+    await tx.aiPointLedgerEntry.create({
+      data: {
+        workspaceId,
+        type: 'GRANT',
+        status: 'COMPLETED',
+        points,
+        balanceAfter: wallet.balancePoints - wallet.reservedPoints,
+        description: '会员月度 AI 点数发放',
+        metadata: {
+          source: 'personal-member-monthly',
+          subscriptionId: subscription.id,
+          period,
+          expiresAt: expiresAt.toISOString()
+        }
+      }
+    });
+  }
+
   private async expireWorkspaceCreditBuckets(workspaceId: string, now = new Date()): Promise<void> {
     if (!isDatabasePersistenceEnabled() || isLocalDevelopmentUnlimitedEnabled()) {
       return;
@@ -1070,6 +1205,7 @@ export class AiPointsService {
 
     return this.prismaService.$transaction(async (tx) => {
       const now = new Date();
+      await this.ensureActivePersonalMemberMonthlyCreditsInTransaction(tx, input.workspaceId, now);
       await this.expireWorkspaceCreditBucketsInTransaction(tx, input.workspaceId, now);
       const wallet = await tx.aiPointWallet.upsert({
         where: { workspaceId: input.workspaceId },
@@ -1940,6 +2076,20 @@ function toDeviceQuotaSummary(quota: {
 
 function currentMonthPeriod(): string {
   return new Date().toISOString().slice(0, 7);
+}
+
+function getCurrentMonthRange(now: Date): {
+  start: Date;
+  end: Date;
+  period: string;
+} {
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  return {
+    start,
+    end,
+    period: start.toISOString().slice(0, 7)
+  };
 }
 
 function isOfficialResultPollRequest(request: OfficialInvokeRequest): boolean {

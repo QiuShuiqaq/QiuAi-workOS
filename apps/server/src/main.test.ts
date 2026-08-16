@@ -125,7 +125,7 @@ test('workspace APIs require an authenticated workspace session', async () => {
   }
 });
 
-test('auth register creates an authenticated free enterprise workspace session', async () => {
+test('auth register creates an authenticated personal free workspace session', async () => {
   const app = await createApplication();
   app.useLogger(false);
 
@@ -150,7 +150,7 @@ test('auth register creates an authenticated free enterprise workspace session',
     assert.equal(body.authenticated, true);
     assert.equal(body.account.status, 'active');
     assert.equal(body.workspaces.length, 1);
-    assert.equal(body.workspaces[0].workspaceType, 'enterprise');
+    assert.equal(body.workspaces[0].workspaceType, 'personal');
     assert.equal(body.workspaces[0].planCode, 'PERSONAL_FREE');
 
     const setCookie = registerResponse.headers['set-cookie'];
@@ -169,6 +169,44 @@ test('auth register creates an authenticated free enterprise workspace session',
     const sessionBody = JSON.parse(sessionResponse.body);
     assert.equal(sessionBody.authenticated, true);
     assert.equal(sessionBody.activeWorkspaceId, body.activeWorkspaceId);
+  } finally {
+    await app.close();
+  }
+});
+
+test('desktop account register issues a desktop device token for a personal free workspace', async () => {
+  const app = await createApplication();
+  app.useLogger(false);
+
+  await app.init();
+  try {
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/desktop/auth/register',
+      headers: {
+        'content-type': 'application/json',
+        'user-agent': 'QiuAI WorkOS Test'
+      },
+      payload: {
+        email: `desktop-${Date.now()}@example.com`,
+        password: 'password-123',
+        workspaceName: '个人工作室',
+        acceptedTerms: true,
+        runtimeId: `runtime-${Date.now()}`,
+        deviceId: `device-${Date.now()}`,
+        deviceName: 'Desktop Device',
+        platform: 'windows',
+        appVersion: '1.1.2'
+      }
+    });
+
+    assert.equal(registerResponse.statusCode, 201);
+    const body = JSON.parse(registerResponse.body).data;
+    assert.match(body.workspaceId, /^(mock_)?workspace_/);
+    assert.equal(typeof body.deviceToken, 'string');
+    assert.equal(body.device.deviceName, 'Desktop Device');
+    assert.equal(body.device.platform, 'windows');
+    assert.equal(body.device.status, 'ACTIVE');
   } finally {
     await app.close();
   }

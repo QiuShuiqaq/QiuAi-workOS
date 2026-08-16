@@ -7,6 +7,8 @@ import {
   getDesktopAppInfo,
   getDesktopRuntimeState,
   listAuthorizedRoleTemplates,
+  loginDesktopAccount,
+  registerDesktopAccount,
   submitDesktopIssueReportFromRenderer,
   syncDesktopRuntimeState,
   unbindDesktopDevice
@@ -55,6 +57,8 @@ const channels = {
   getUserAgreementStatus: 'qiuai:desktop:get-user-agreement-status',
   acceptUserAgreement: 'qiuai:desktop:accept-user-agreement',
   submitIssueReport: 'qiuai:desktop:submit-issue-report',
+  loginDesktopAccount: 'qiuai:desktop:login-desktop-account',
+  registerDesktopAccount: 'qiuai:desktop:register-desktop-account',
   bindDesktopDevice: 'qiuai:desktop:bind-desktop-device',
   unbindDesktopDevice: 'qiuai:desktop:unbind-desktop-device',
   checkServerConnection: 'qiuai:desktop:check-server-connection',
@@ -96,6 +100,12 @@ export function registerDesktopIpc() {
   });
   ipcMain.handle(channels.submitIssueReport, async (_, request) => {
     return submitDesktopIssueReportFromRenderer(request);
+  });
+  ipcMain.handle(channels.loginDesktopAccount, async (_, request) => {
+    return loginDesktopAccount(request);
+  });
+  ipcMain.handle(channels.registerDesktopAccount, async (_, request) => {
+    return registerDesktopAccount(request);
   });
   ipcMain.handle(channels.bindDesktopDevice, async (_, bindingCode: string) => {
     return bindDesktopDevice(bindingCode);

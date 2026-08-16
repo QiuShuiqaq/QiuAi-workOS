@@ -118,6 +118,15 @@ function isEnterprisePlanCode(planCode: string | undefined) {
   return Boolean(planCode?.startsWith('ENTERPRISE_'));
 }
 
+const aiPointPurchaseOptions = [1000, 3000, 10000, 30000, 100000];
+const aiPointPurchaseMin = 100;
+const aiPointPurchaseMax = 1_000_000;
+const aiPointPurchaseStep = 100;
+
+function aiPointPriceText(points: number) {
+  return formatCurrency(points, 'CNY');
+}
+
 function getPlanPaymentDisabledReason(
   plan: PlanDetail,
   options: {
@@ -146,6 +155,8 @@ export function PurchaseCenterPageClient({
 }: PurchaseCenterPageClientProps) {
   const router = useRouter();
   const [payingPlanCode, setPayingPlanCode] = useState<string | null>(null);
+  const [payingAiPointAmount, setPayingAiPointAmount] = useState<number | null>(null);
+  const [customAiPointAmount, setCustomAiPointAmount] = useState<number>(10000);
   const [payingSoftwareCopilotKey, setPayingSoftwareCopilotKey] = useState<string | null>(null);
   const [softwareCopilotSeatCounts, setSoftwareCopilotSeatCounts] = useState<Record<string, number>>({});
   const [memberReferralCode, setMemberReferralCode] = useState('');
@@ -242,6 +253,56 @@ export function PurchaseCenterPageClient({
       message.error(error instanceof Error ? error.message : '创建支付订单失败');
     } finally {
       setPayingPlanCode(null);
+    }
+  }
+
+  function getAiPointPaymentDisabledReason() {
+    if (isApiFallback) return '后端 API 未连接';
+    if (!alipayStatus?.isConfigured) return '在线支付暂不可用，请联系服务商开通或线下处理';
+    return undefined;
+  }
+
+  async function createAiPointOrder(points: number) {
+    const disabledReason = getAiPointPaymentDisabledReason();
+    if (disabledReason) {
+      message.warning(disabledReason);
+      return;
+    }
+
+    if (
+      !Number.isInteger(points) ||
+      points < aiPointPurchaseMin ||
+      points > aiPointPurchaseMax ||
+      points % aiPointPurchaseStep !== 0
+    ) {
+      message.warning(
+        `AI 点数需为 ${aiPointPurchaseMin.toLocaleString()}-${aiPointPurchaseMax.toLocaleString()} 的整数，且按 ${aiPointPurchaseStep} 点递增`
+      );
+      return;
+    }
+
+    setPayingAiPointAmount(points);
+    try {
+      const response = await createBrowserApiClient().createBillingOrder(activeWorkspace.id, {
+        orderKind: 'AI_POINTS',
+        aiPointAmount: points,
+        amountCents: points,
+        provider: 'ALIPAY',
+        subject: `QiuAI WorkOS AI 点数充值（${points} 点）`
+      });
+
+      if (response.data.paymentUrl) {
+        message.success('支付订单已创建');
+        window.location.assign(response.data.paymentUrl);
+        return;
+      }
+
+      message.warning('订单已创建，但支付链接未返回');
+      router.refresh();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '创建 AI 点数订单失败');
+    } finally {
+      setPayingAiPointAmount(null);
     }
   }
 
@@ -380,11 +441,62 @@ export function PurchaseCenterPageClient({
                 <Descriptions column={1} title="套餐容量说明">
                   <Descriptions.Item label="授权范围">按企业空间购买</Descriptions.Item>
                   <Descriptions.Item label="设备规则">企业绑定的每台 PC 设备单独遵守套餐容量</Descriptions.Item>
-                  <Descriptions.Item label="模型费用">模型 API 由 PC 端自行配置，实际费用以模型供应商账单为准</Descriptions.Item>
+                  <Descriptions.Item label="模型费用">官方通道消耗 AI 点数，自配模型以供应商账单为准</Descriptions.Item>
                   <Descriptions.Item label="在线支付">{paymentProviderLabel(alipayStatus?.provider ?? 'ALIPAY')}</Descriptions.Item>
                 </Descriptions>
               </Col>
             </Row>
+          </Card>
+
+          <Card title="AI 点数" bordered={false}>
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Alert
+                showIcon
+                type="info"
+                message="官方通道按 AI 点数使用，充值点数长期有效"
+                description="100 点 = 1 元。会员每月赠送的 1500 点按月发放，月底未使用会自动失效；充值点数不会过期。"
+              />
+              <Space wrap>
+                {aiPointPurchaseOptions.map((points) => (
+                  <Button
+                    key={points}
+                    icon={<CreditCardOutlined />}
+                    type="primary"
+                    disabled={Boolean(getAiPointPaymentDisabledReason())}
+                    title={getAiPointPaymentDisabledReason()}
+                    loading={payingAiPointAmount === points}
+                    onClick={() => void createAiPointOrder(points)}
+                  >
+                    {points.toLocaleString()} 点 · {aiPointPriceText(points)}
+                  </Button>
+                ))}
+              </Space>
+              <Space.Compact style={{ maxWidth: 520, width: '100%' }}>
+                <InputNumber
+                  min={aiPointPurchaseMin}
+                  max={aiPointPurchaseMax}
+                  step={aiPointPurchaseStep}
+                  value={customAiPointAmount}
+                  addonAfter="点"
+                  style={{ flex: 1 }}
+                  onChange={(value) => {
+                    if (typeof value === 'number') {
+                      setCustomAiPointAmount(value);
+                    }
+                  }}
+                />
+                <Button
+                  type="primary"
+                  icon={<CreditCardOutlined />}
+                  disabled={Boolean(getAiPointPaymentDisabledReason())}
+                  title={getAiPointPaymentDisabledReason()}
+                  loading={payingAiPointAmount === customAiPointAmount}
+                  onClick={() => void createAiPointOrder(customAiPointAmount)}
+                >
+                  自定义充值
+                </Button>
+              </Space.Compact>
+            </Space>
           </Card>
 
           {!isEnterprisePlanCode(currentPlan.code) && personalMemberPlans.length > 0 ? (
@@ -393,7 +505,7 @@ export function PurchaseCenterPageClient({
                 <Alert
                   showIcon
                   type="info"
-                  message="开通会员后可使用数字工厂，AI 点数可按需购买。"
+                  message="开通会员后可使用数字工厂，每月含 1500 点月度 AI 点数。"
                   description="邀请码为选填项。使用有效会员邀请码开通会员，双方可获得 AI 点数奖励。"
                 />
                 <Input.Search
