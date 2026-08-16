@@ -86,6 +86,39 @@ function isEnterpriseGroup(groupKey: string) {
   return groupKey === "BASIC" || groupKey === "STANDARD" || groupKey === "PRO";
 }
 
+function usageScopeText(groupKey: string, lang: SiteLanguage) {
+  const zhText =
+    {
+      FREE: "基础体验",
+      MEMBER: "个人使用",
+      BASIC: "企业多设备",
+      STANDARD: "企业多设备",
+      PRO: "企业多设备",
+    }[groupKey] ?? "按套餐开放";
+  const enText =
+    {
+      FREE: "Basic trial",
+      MEMBER: "Personal use",
+      BASIC: "Enterprise devices",
+      STANDARD: "Enterprise devices",
+      PRO: "Enterprise devices",
+    }[groupKey] ?? "Plan-based access";
+  return lang === "zh" ? zhText : enText;
+}
+
+function aiPointAccessText(groupKey: string, lang: SiteLanguage) {
+  const isZh = lang === "zh";
+  if (groupKey === "MEMBER") {
+    return isZh ? "含 1500 点/月" : "1,500 points/month";
+  }
+
+  if (isEnterpriseGroup(groupKey)) {
+    return isZh ? "企业统一管理" : "Managed by company";
+  }
+
+  return isZh ? "支持单独购买" : "Top-up available";
+}
+
 function priceDetails(plan: PublicPlan | undefined, period: BillingPeriod, lang: SiteLanguage) {
   if (plan?.billingCycle === "FREE") {
     return {
@@ -110,20 +143,19 @@ function priceDetails(plan: PublicPlan | undefined, period: BillingPeriod, lang:
       : lang === "zh"
         ? "按月支付"
         : "Billed monthly";
-  const description = lang === "zh" && plan.code !== "PERSONAL_FREE" && plan.description ? ` · ${plan.description}` : "";
 
   if (period === "ANNUAL") {
     return {
       price: formatCurrency(plan.priceCents, currency, lang),
       suffix: lang === "zh" ? "/年" : "/year",
-      note: `${baseNote}${description}`,
+      note: baseNote,
     };
   }
 
   return {
     price: formatCurrency(plan.priceCents, currency, lang),
     suffix: lang === "zh" ? "/月" : "/month",
-    note: `${baseNote}${description}`,
+    note: baseNote,
   };
 }
 
@@ -213,12 +245,12 @@ export function ProductPricing({
                   <dd>{entitlementValue(plan, "maxDesktopDevices", lang)}</dd>
                 </div>
                 <div>
-                  <dt>{isZh ? "数字员工" : "Digital workers"}</dt>
-                  <dd>{entitlementValue(plan, "maxRoleInstances", lang)}</dd>
+                  <dt>{isZh ? "使用范围" : "Scope"}</dt>
+                  <dd>{usageScopeText(group.key, lang)}</dd>
                 </div>
                 <div>
-                  <dt>{isZh ? "数字工厂" : "Digital factories"}</dt>
-                  <dd>{entitlementValue(plan, "maxDigitalFactories", lang)}</dd>
+                  <dt>{isZh ? "AI 点数" : "AI points"}</dt>
+                  <dd>{aiPointAccessText(group.key, lang)}</dd>
                 </div>
                 {isEnterprise && period === "ANNUAL" ? (
                   <div>

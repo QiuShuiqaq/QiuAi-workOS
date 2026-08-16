@@ -4,13 +4,20 @@ import { createServerApiClient } from '../../../../shared/api/server-api';
 
 export const dynamic = 'force-dynamic';
 
+type AlipayReturnSearchParams = Record<string, string | string[] | undefined>;
+
+function firstSearchParam(value: string | string[] | undefined) {
+  const firstValue = Array.isArray(value) ? value[0] : value;
+  return typeof firstValue === 'string' ? firstValue.trim() : '';
+}
+
 export default async function AlipayReturnPage({
   searchParams
 }: {
-  searchParams: Promise<{ out_trade_no?: string }>;
+  searchParams: Promise<AlipayReturnSearchParams>;
 }) {
   const params = await searchParams;
-  const orderNo = params.out_trade_no?.trim();
+  const orderNo = firstSearchParam(params.out_trade_no);
   let redirectHref = '/purchase?payment=alipay_return';
 
   if (orderNo) {
