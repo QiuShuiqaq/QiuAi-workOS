@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 
 import type { ModelProfile, RoleModelCredentialBinding, RolePackageManifest, ToolManifest } from './desktop-contract.js';
+import { officialModelProfiles } from './desktop-state.js';
 import { runDesktopTask } from './desktop-task-runner.js';
 import { createMockTaskDetail } from './workbench-data.js';
 
@@ -5190,6 +5191,312 @@ assert.ok(
   )
 );
 
+let officialImageModelCalled = false;
+const officialImageResult = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-official-image-001',
+    roleCode: 'ai-image-generation-assistant',
+    roleName: 'AI Image Assistant',
+    title: 'Generate product image',
+    input: 'Generate a 1:1 product hero image from the uploaded reference.',
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0,
+    executionContext: {
+      attachmentPaths: ['C:\\QiuAI\\input\\product.png'],
+      modelProfileIds: ['qiu-image-generation-default'],
+      toolIds: ['local-filesystem'],
+      knowledgeBindingIds: []
+    }
+  }),
+  rolePackage: createSingleMediaRolePackage({
+    roleCode: 'ai-image-generation-assistant',
+    name: 'AI Image Assistant',
+    modelProfileId: 'qiu-image-generation-default',
+    llmTaskType: 'image_generation',
+    artifactType: 'png',
+    mediaKind: 'image',
+    folder: 'generated-images',
+    aspectRatio: '1:1'
+  }),
+  modelProfiles: modelProfiles.concat([
+    {
+      id: 'qiu-official-image-1',
+      providerId: 'qiuai-official',
+      providerName: 'QiuAI官方通道',
+      modelName: '图片线路一',
+      purpose: 'vision',
+      billingMode: 'official_points',
+      officialRouteKey: 'official-image-1',
+      capabilities: ['image_generation', 'image_to_image']
+    }
+  ]),
+  roleModelCredentialBindings: [
+    {
+      roleCode: 'ai-image-generation-assistant',
+      modelProfileId: 'qiu-image-generation-default',
+      runtimeModelProfileId: 'qiu-official-image-1',
+      mode: 'credential_ref'
+    }
+  ],
+  tools,
+  workspaceId: 'workspace-official-image',
+  enabledModelProfileIds: ['qiu-official-image-1'],
+  enabledToolIds: ['local-filesystem'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    officialImageModelCalled = true;
+    assert.equal(request.profile.id, 'qiu-official-image-1');
+    assert.equal(request.profile.billingMode, 'official_points');
+    assert.equal(request.profile.apiBaseUrl, undefined);
+    assert.equal(request.profile.apiKey, undefined);
+    assert.equal(request.taskKind, 'image_generation');
+    assert.equal(request.imageGeneration?.aspectRatio, '1:1');
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: JSON.stringify({ remoteUrl: 'https://cdn.example.test/single/official-image.png' }),
+      artifacts: [
+        {
+          type: 'image',
+          remoteUrl: 'https://cdn.example.test/single/official-image.png',
+          thumbnailPath: 'https://cdn.example.test/single/official-image.png'
+        }
+      ]
+    };
+  },
+  desktopToolInvoker: async (request) => ({
+    toolId: request.toolId,
+    action: request.action,
+    ok: true,
+    output: {
+      localPath: 'C:\\QiuAI\\workspace\\generated-images\\official-image.png',
+      sourceUrl: request.input.url
+    }
+  }),
+  completedAt: '2026-07-20T10:02:30.000Z'
+});
+
+assert.equal(officialImageResult.task.state, 'completed');
+assert.equal(officialImageModelCalled, true);
+assert.equal(
+  officialImageResult.task.executionLogs.some((log) => log.eventType === 'MODEL_API_CONFIG_MISSING'),
+  false
+);
+assert.ok(
+  officialImageResult.task.artifacts.some(
+    (artifact) => artifact.type === 'image' && artifact.localPath?.endsWith('official-image.png')
+  )
+);
+
+const officialModelPreflightCases = [
+  {
+    caseId: 'official-text-employee',
+    roleCode: 'official-text-employee',
+    roleName: 'Official Text Employee',
+    applicationType: 'digital_employee',
+    semanticModelProfileId: 'qiu-general-default',
+    officialModelProfileId: 'qiu-official-text-1',
+    llmTaskType: 'text'
+  },
+  {
+    caseId: 'official-reasoning-factory',
+    roleCode: 'official-reasoning-factory',
+    roleName: 'Official Reasoning Factory',
+    applicationType: 'digital_factory',
+    semanticModelProfileId: 'qiu-reasoning-default',
+    officialModelProfileId: 'qiu-official-reasoning-1',
+    llmTaskType: 'reasoning'
+  },
+  {
+    caseId: 'official-image-1-employee',
+    roleCode: 'official-image-1-employee',
+    roleName: 'Official Image Employee',
+    applicationType: 'digital_employee',
+    semanticModelProfileId: 'qiu-image-generation-default',
+    officialModelProfileId: 'qiu-official-image-1',
+    llmTaskType: 'image_generation'
+  },
+  {
+    caseId: 'official-image-2-factory',
+    roleCode: 'official-image-2-factory',
+    roleName: 'Official Image Factory',
+    applicationType: 'digital_factory',
+    semanticModelProfileId: 'qiu-image-generation-default',
+    officialModelProfileId: 'qiu-official-image-2',
+    llmTaskType: 'image_generation'
+  },
+  {
+    caseId: 'official-video-1-employee',
+    roleCode: 'official-video-1-employee',
+    roleName: 'Official Video Employee',
+    applicationType: 'digital_employee',
+    semanticModelProfileId: 'qiu-video-generation-default',
+    officialModelProfileId: 'qiu-official-video-1',
+    llmTaskType: 'video_generation'
+  },
+  {
+    caseId: 'official-video-2-factory',
+    roleCode: 'official-video-2-factory',
+    roleName: 'Official Video Factory',
+    applicationType: 'digital_factory',
+    semanticModelProfileId: 'qiu-video-generation-default',
+    officialModelProfileId: 'qiu-official-video-2',
+    llmTaskType: 'video_generation'
+  },
+  {
+    caseId: 'official-video-3-employee',
+    roleCode: 'official-video-3-employee',
+    roleName: 'Official Video Employee H3',
+    applicationType: 'digital_employee',
+    semanticModelProfileId: 'qiu-video-generation-default',
+    officialModelProfileId: 'qiu-official-video-3',
+    llmTaskType: 'video_generation'
+  }
+] as const;
+
+for (const officialCase of officialModelPreflightCases) {
+  const officialProfile = getOfficialPreflightModelProfile(officialCase.officialModelProfileId);
+  const isImageCase = officialCase.llmTaskType === 'image_generation';
+  const isVideoCase = officialCase.llmTaskType === 'video_generation';
+  const rolePackage = isImageCase
+    ? createSingleMediaRolePackage({
+        roleCode: officialCase.roleCode,
+        applicationType: officialCase.applicationType,
+        name: officialCase.roleName,
+        modelProfileId: officialCase.semanticModelProfileId,
+        llmTaskType: 'image_generation',
+        artifactType: 'png',
+        mediaKind: 'image',
+        folder: 'generated-images',
+        aspectRatio: '1:1'
+      })
+    : isVideoCase
+      ? createSingleMediaRolePackage({
+          roleCode: officialCase.roleCode,
+          applicationType: officialCase.applicationType,
+          name: officialCase.roleName,
+          modelProfileId: officialCase.semanticModelProfileId,
+          llmTaskType: 'video_generation',
+          artifactType: 'mp4',
+          mediaKind: 'video',
+          folder: 'generated-videos',
+          aspectRatio: '9:16',
+          durationSeconds: 6
+        })
+      : createSingleTextRolePackage({
+          roleCode: officialCase.roleCode,
+          applicationType: officialCase.applicationType,
+          name: officialCase.roleName,
+          modelProfileId: officialCase.semanticModelProfileId,
+          llmTaskType: officialCase.llmTaskType
+        });
+  let officialModelCalled = false;
+  const officialPreflightResult = await runDesktopTask({
+    task: createMockTaskDetail({
+      taskId: `task-runner-${officialCase.caseId}`,
+      roleCode: officialCase.roleCode,
+      roleName: officialCase.roleName,
+      title: `Run ${officialCase.caseId}`,
+      input: `Verify ${officialCase.officialModelProfileId} can run without local API credentials.`,
+      state: 'queued',
+      artifactCount: 0,
+      costCents: 0
+    }),
+    rolePackage,
+    modelProfiles: modelProfiles.concat([officialProfile]),
+    roleModelCredentialBindings: [
+      {
+        roleCode: officialCase.roleCode,
+        modelProfileId: officialCase.semanticModelProfileId,
+        runtimeModelProfileId: officialCase.officialModelProfileId,
+        mode: 'credential_ref'
+      }
+    ],
+    tools,
+    workspaceId: `workspace-${officialCase.caseId}`,
+    enabledModelProfileIds: [officialCase.officialModelProfileId],
+    enabledToolIds: isImageCase || isVideoCase ? ['local-filesystem'] : [],
+    enabledKnowledgeBindingIds: [],
+    modelInvoker: async (request) => {
+      officialModelCalled = true;
+      assert.equal(request.profile.id, officialCase.officialModelProfileId);
+      assert.equal(request.profile.billingMode, 'official_points');
+      assert.equal(request.profile.officialRouteKey, officialProfile.officialRouteKey);
+      assert.equal(request.profile.apiBaseUrl, undefined);
+      assert.equal(request.profile.apiKey, undefined);
+
+      if (isImageCase) {
+        assert.equal(request.taskKind, 'image_generation');
+        return {
+          provider: request.profile.providerName,
+          modelName: request.profile.modelName,
+          content: JSON.stringify({
+            remoteUrl: `https://cdn.example.test/official/${officialCase.caseId}.png`
+          }),
+          artifacts: [
+            {
+              type: 'image',
+              remoteUrl: `https://cdn.example.test/official/${officialCase.caseId}.png`,
+              thumbnailPath: `https://cdn.example.test/official/${officialCase.caseId}.png`
+            }
+          ]
+        };
+      }
+
+      if (isVideoCase) {
+        assert.equal(request.taskKind, 'video_generation');
+        return {
+          provider: request.profile.providerName,
+          modelName: request.profile.modelName,
+          content: JSON.stringify({
+            remoteUrl: `https://cdn.example.test/official/${officialCase.caseId}.mp4`
+          }),
+          artifacts: [
+            {
+              type: 'video',
+              remoteUrl: `https://cdn.example.test/official/${officialCase.caseId}.mp4`,
+              thumbnailPath: `https://cdn.example.test/official/${officialCase.caseId}.jpg`
+            }
+          ]
+        };
+      }
+
+      assert.equal(request.taskKind, undefined);
+      return {
+        provider: request.profile.providerName,
+        modelName: request.profile.modelName,
+        content: `${officialCase.officialModelProfileId} completed with official points.`,
+        inputTokens: 20,
+        outputTokens: 12
+      };
+    },
+    desktopToolInvoker: isImageCase || isVideoCase
+      ? async (request) => ({
+          toolId: request.toolId,
+          action: request.action,
+          ok: true,
+          output: {
+            localPath: `C:\\QiuAI\\workspace\\${isImageCase ? 'generated-images' : 'generated-videos'}\\${officialCase.caseId}.${isImageCase ? 'png' : 'mp4'}`,
+            sourceUrl: request.input.url
+          }
+        })
+      : undefined,
+    completedAt: '2026-07-20T10:02:45.000Z'
+  });
+
+  assert.equal(officialPreflightResult.task.state, 'completed');
+  assert.equal(officialModelCalled, true);
+  assert.equal(
+    officialPreflightResult.task.executionLogs.some((log) => log.eventType === 'MODEL_API_CONFIG_MISSING'),
+    false
+  );
+  assert.equal(
+    officialPreflightResult.task.executionLogs.some((log) => log.eventType === 'LOCAL_RUN_FAILED'),
+    false
+  );
+}
+
 let singleVideoModelCalled = false;
 let singleVideoDownloadCalled = false;
 const singleVideoResult = await runDesktopTask({
@@ -5290,6 +5597,7 @@ console.log('Desktop local task runner passed.');
 
 function createSingleMediaRolePackage(input: {
   roleCode: string;
+  applicationType?: NonNullable<RolePackageManifest['applicationType']>;
   name: string;
   modelProfileId: string;
   llmTaskType: 'image_generation' | 'video_generation';
@@ -5301,7 +5609,7 @@ function createSingleMediaRolePackage(input: {
 }): RolePackageManifest {
   return {
     roleCode: input.roleCode,
-    applicationType: 'digital_employee',
+    applicationType: input.applicationType ?? 'digital_employee',
     name: input.name,
     version: '1.0.0',
     workflowGraph: {
@@ -5360,5 +5668,60 @@ function createSingleMediaRolePackage(input: {
     requiredKnowledgeSources: [],
     defaultTaskTypes: [input.llmTaskType],
     syncPolicy: 'summary_only'
+  };
+}
+
+function createSingleTextRolePackage(input: {
+  roleCode: string;
+  applicationType: NonNullable<RolePackageManifest['applicationType']>;
+  name: string;
+  modelProfileId: string;
+  llmTaskType: 'text' | 'reasoning';
+}): RolePackageManifest {
+  return {
+    roleCode: input.roleCode,
+    applicationType: input.applicationType,
+    name: input.name,
+    version: '1.0.0',
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'write',
+          type: 'llm',
+          name: 'Write response',
+          modelProfileId: input.modelProfileId,
+          inputVariables: ['start.text'],
+          outputVariables: ['answer'],
+          config: {
+            llmTaskType: input.llmTaskType,
+            outputMode: 'text'
+          }
+        }
+      ],
+      edges: [
+        { id: 'start-write', sourceNodeId: 'start', targetNodeId: 'write' }
+      ]
+    },
+    modelProfileIds: [input.modelProfileId],
+    toolIds: [],
+    requiredKnowledgeSources: [],
+    defaultTaskTypes: [input.llmTaskType],
+    syncPolicy: 'summary_only'
+  };
+}
+
+function getOfficialPreflightModelProfile(profileId: string): ModelProfile {
+  const profile = officialModelProfiles.find((item) => item.id === profileId);
+  if (!profile) {
+    throw new Error(`Missing official model profile fixture: ${profileId}`);
+  }
+
+  return {
+    ...profile,
+    apiBaseUrl: undefined,
+    apiKey: undefined
   };
 }

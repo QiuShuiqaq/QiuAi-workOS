@@ -14,7 +14,10 @@
   ToolManifest
 } from './desktop-contract.js';
 import { normalizeKnowledgeBindingId } from './knowledge-bindings.js';
-import { resolveModelProfileCredential } from './desktop-model-credentials.js';
+import {
+  isOfficialPointsModelProfile,
+  resolveModelProfileCredential
+} from './desktop-model-credentials.js';
 import {
   modelProfileSupportsRequiredCapabilities,
   readModelProfileCapabilities
@@ -12360,9 +12363,7 @@ function buildModelConfigWarningLogs(
   modelProfiles: ModelProfile[],
   createdAt: string
 ): DesktopExecutionLogEntry[] {
-  const unconfiguredProfiles = modelProfiles.filter(
-    (profile) => !profile.apiBaseUrl || !profile.apiKey
-  );
+  const unconfiguredProfiles = modelProfiles.filter((profile) => !isModelApiConfigured(profile));
   if (unconfiguredProfiles.length === 0) {
     return [];
   }
@@ -13004,6 +13005,10 @@ function sanitizeLogSuffix(value: string): string {
 }
 
 function isModelApiConfigured(profile: ModelProfile): boolean {
+  if (isOfficialPointsModelProfile(profile)) {
+    return true;
+  }
+
   return Boolean(profile.apiBaseUrl?.trim() && profile.apiKey?.trim());
 }
 
