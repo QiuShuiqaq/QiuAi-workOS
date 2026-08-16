@@ -115,6 +115,13 @@ interface OfficialApiCredential {
   leaseId?: string;
 }
 
+interface PendingPointsReservation {
+  id: string;
+  desktopDeviceId: string;
+  points: number;
+  metadata: Prisma.JsonValue | null;
+}
+
 const defaultTextTimeoutMs = 45_000;
 const defaultImageTimeoutMs = 1_800_000;
 const defaultVideoTimeoutMs = 1_800_000;
@@ -242,15 +249,92 @@ export class AiPointsService {
 
     const device = await this.requireDesktopDevice(workspaceId, deviceToken);
     if (isOfficialResultPollRequest(request)) {
+      const providerJobId = request.imageGeneration?.providerJobId?.trim();
+      const pendingReservation = providerJobId
+        ? await this.findPendingPointsReservation(workspaceId, route.routeKey, providerJobId)
+        : undefined;
       let credential: OfficialApiCredential | undefined;
       try {
         credential = await this.acquireOfficialApiCredential(route, request);
         const providerResponse = await this.invokeProvider(route, request, credential.apiKey);
-        if (!isPendingGenerationProviderResponse(providerResponse)) {
+        const isPending = isPendingGenerationProviderResponse(providerResponse);
+        if (!isPending) {
           await this.releaseOfficialApiCredential(credential, {
             status: 'RELEASED'
           });
         }
+        const wallet = pendingReservation && !isPending
+          ? await this.settlePoints({
+              workspaceId,
+              desktopDeviceId: pendingReservation.desktopDeviceId,
+              routeKey: route.routeKey,
+              reservationId: pendingReservation.id,
+              points: pendingReservation.points
+            })
+          : isDatabasePersistenceEnabled()
+            ? await this.ensureWallet(workspaceId)
+            : undefined;
+
+        return {
+          data: {
+            provider: qiuaiOfficialProviderName,
+            modelName: userFacingRouteModelName(route),
+            content: providerResponse.content,
+            inputTokens: providerResponse.inputTokens,
+            outputTokens: providerResponse.outputTokens,
+            pointsCharged: pendingReservation && !isPending ? pendingReservation.points : 0,
+            wallet: this.toResponseWallet(workspaceId, wallet),
+            artifacts: providerResponse.artifacts
+          }
+        };
+      } catch (error) {
+        if (credential) {
+          await this.releaseOfficialApiCredential(credential, {
+            status: 'FAILED',
+            error
+          });
+        }
+        if (pendingReservation) {
+          await this.releasePoints({
+            workspaceId,
+            desktopDeviceId: pendingReservation.desktopDeviceId,
+            routeKey: route.routeKey,
+            reservationId: pendingReservation.id,
+            points: pendingReservation.points
+          });
+        }
+        this.logger.error(
+          `Official model route poll failed: route=${route.routeKey}, provider=${route.providerId}, model=${route.modelName}`,
+          error instanceof Error ? error.stack : String(error)
+        );
+        throw sanitizeOfficialProviderError(error);
+      }
+    }
+
+    const reservedPoints = resolveOfficialRoutePointPrice(route, request);
+    const reservation = await this.reservePoints({
+      workspaceId,
+      desktopDeviceId: device.id,
+      routeKey: route.routeKey,
+      points: reservedPoints
+    });
+
+    let credential: OfficialApiCredential | undefined;
+    try {
+      credential = await this.acquireOfficialApiCredential(route, request);
+      const providerResponse = await this.invokeProvider(route, request, credential.apiKey);
+      if (isPendingGenerationProviderResponse(providerResponse)) {
+        await this.attachProviderJobIdToOfficialApiCredential(credential, providerResponse);
+        const providerJobId = readProviderJobIdFromResponse(providerResponse);
+        if (!providerJobId) {
+          throw new ServiceUnavailableException({
+            error: {
+              code: 'OFFICIAL_ROUTE_TASK_ID_MISSING',
+              message: 'Official route did not return a task id.'
+            }
+          });
+        }
+        await this.attachProviderJobIdToPointsReservation(reservation.id, providerJobId);
         const wallet = isDatabasePersistenceEnabled()
           ? await this.ensureWallet(workspaceId)
           : undefined;
@@ -267,35 +351,6 @@ export class AiPointsService {
             artifacts: providerResponse.artifacts
           }
         };
-      } catch (error) {
-        if (credential) {
-          await this.releaseOfficialApiCredential(credential, {
-            status: 'FAILED',
-            error
-          });
-        }
-        this.logger.error(
-          `Official model route poll failed: route=${route.routeKey}, provider=${route.providerId}, model=${route.modelName}`,
-          error instanceof Error ? error.stack : String(error)
-        );
-        throw sanitizeOfficialProviderError(error);
-      }
-    }
-
-    const reservedPoints = Math.max(1, route.pointPrice);
-    const reservation = await this.reservePoints({
-      workspaceId,
-      desktopDeviceId: device.id,
-      routeKey: route.routeKey,
-      points: reservedPoints
-    });
-
-    let credential: OfficialApiCredential | undefined;
-    try {
-      credential = await this.acquireOfficialApiCredential(route, request);
-      const providerResponse = await this.invokeProvider(route, request, credential.apiKey);
-      if (isPendingGenerationProviderResponse(providerResponse)) {
-        await this.attachProviderJobIdToOfficialApiCredential(credential, providerResponse);
       } else {
         await this.releaseOfficialApiCredential(credential, {
           status: 'RELEASED'
@@ -731,6 +786,81 @@ export class AiPointsService {
     });
   }
 
+  private async attachProviderJobIdToPointsReservation(
+    reservationId: string,
+    providerJobId: string
+  ): Promise<void> {
+    if (!isDatabasePersistenceEnabled()) {
+      return;
+    }
+
+    const reservation = await this.prismaService.aiPointLedgerEntry.findUnique({
+      where: { id: reservationId },
+      select: {
+        metadata: true
+      }
+    });
+    if (!reservation) {
+      return;
+    }
+
+    const metadata = readRecord(reservation.metadata) ?? {};
+    await this.prismaService.aiPointLedgerEntry.update({
+      where: {
+        id: reservationId
+      },
+      data: {
+        metadata: JSON.parse(JSON.stringify({
+          ...metadata,
+          providerJobId
+        })) as Prisma.InputJsonValue
+      }
+    });
+  }
+
+  private async findPendingPointsReservation(
+    workspaceId: string,
+    routeKey: string,
+    providerJobId: string
+  ): Promise<PendingPointsReservation | undefined> {
+    if (!isDatabasePersistenceEnabled()) {
+      return undefined;
+    }
+
+    const reservations = await this.prismaService.aiPointLedgerEntry.findMany({
+      where: {
+        workspaceId,
+        routeKey,
+        type: 'RESERVE',
+        status: 'PENDING'
+      },
+      orderBy: {
+        createdAt: 'desc'
+      },
+      take: 100,
+      select: {
+        id: true,
+        desktopDeviceId: true,
+        points: true,
+        metadata: true
+      }
+    });
+
+    const reservation = reservations.find(
+      (item) =>
+        Boolean(item.desktopDeviceId) &&
+        readReservationProviderJobId(item.metadata) === providerJobId
+    );
+    return reservation?.desktopDeviceId
+      ? {
+          id: reservation.id,
+          desktopDeviceId: reservation.desktopDeviceId,
+          points: reservation.points,
+          metadata: reservation.metadata
+        }
+      : undefined;
+  }
+
   private async releaseOfficialApiCredential(
     credential: OfficialApiCredential,
     input: {
@@ -938,11 +1068,12 @@ export class AiPointsService {
     }
 
     const points = personalMemberMonthlyAiPoints;
-    await tx.aiPointCreditBucket.create({
+    const creditBucket = await tx.aiPointCreditBucket.createMany({
       data: {
         workspaceId,
         sourceType: 'SUBSCRIPTION_MONTHLY',
         subscriptionId: subscription.id,
+        idempotencyKey: `subscription-monthly:${subscription.id}:${period}`,
         totalPoints: points,
         availablePoints: points,
         reservedPoints: 0,
@@ -954,8 +1085,12 @@ export class AiPointsService {
           period,
           planCode: subscription.plan.code
         }
-      }
+      },
+      skipDuplicates: true
     });
+    if (creditBucket.count === 0) {
+      return;
+    }
 
     const wallet = await tx.aiPointWallet.upsert({
       where: { workspaceId },
@@ -1399,19 +1534,29 @@ export class AiPointsService {
     return this.prismaService.$transaction(async (tx) => {
       const reservation = await tx.aiPointLedgerEntry.findUnique({
         where: { id: input.reservationId },
-        select: { metadata: true }
+        select: {
+          metadata: true,
+          status: true,
+          points: true
+        }
       });
+      if (!reservation || reservation.status !== 'PENDING') {
+        return tx.aiPointWallet.findUniqueOrThrow({
+          where: { workspaceId: input.workspaceId }
+        });
+      }
       const bucketAllocations = readReservationBucketAllocations(reservation?.metadata);
+      const points = reservation.points;
       await this.settleReservedCreditBucketsInTransaction(tx, bucketAllocations);
 
       const wallet = await tx.aiPointWallet.update({
         where: { workspaceId: input.workspaceId },
         data: {
           balancePoints: {
-            decrement: input.points
+            decrement: points
           },
           reservedPoints: {
-            decrement: input.points
+            decrement: points
           }
         }
       });
@@ -1419,10 +1564,10 @@ export class AiPointsService {
         where: { desktopDeviceId: input.desktopDeviceId },
         data: {
           usedPointsThisMonth: {
-            increment: input.points
+            increment: points
           },
           reservedPoints: {
-            decrement: input.points
+            decrement: points
           }
         }
       });
@@ -1440,7 +1585,7 @@ export class AiPointsService {
           routeKey: input.routeKey,
           type: 'SETTLE',
           status: 'COMPLETED',
-          points: -input.points,
+          points: -points,
           balanceAfter: wallet.balancePoints - wallet.reservedPoints,
           description: 'Official model route point settlement.',
           metadata: toReservationMetadata(bucketAllocations)
@@ -1498,9 +1643,17 @@ export class AiPointsService {
       const now = new Date();
       const reservation = await tx.aiPointLedgerEntry.findUnique({
         where: { id: input.reservationId },
-        select: { metadata: true }
+        select: {
+          metadata: true,
+          status: true,
+          points: true
+        }
       });
+      if (!reservation || reservation.status !== 'PENDING') {
+        return;
+      }
       const bucketAllocations = readReservationBucketAllocations(reservation?.metadata);
+      const points = reservation.points;
       const expiredReleasedPoints = await this.releaseReservedCreditBucketsInTransaction(tx, bucketAllocations, now);
       const wallet = await tx.aiPointWallet.update({
         where: { workspaceId: input.workspaceId },
@@ -1513,7 +1666,7 @@ export class AiPointsService {
               }
             : {}),
           reservedPoints: {
-            decrement: input.points
+            decrement: points
           }
         }
       });
@@ -1521,7 +1674,7 @@ export class AiPointsService {
         where: { desktopDeviceId: input.desktopDeviceId },
         data: {
           reservedPoints: {
-            decrement: input.points
+            decrement: points
           }
         }
       }).catch(() => undefined);
@@ -1539,7 +1692,7 @@ export class AiPointsService {
           routeKey: input.routeKey,
           type: 'RELEASE',
           status: 'COMPLETED',
-          points: input.points,
+          points,
           balanceAfter: wallet.balancePoints - wallet.reservedPoints,
           description: 'Official model route reservation released.',
           metadata: toReservationMetadata(bucketAllocations)
@@ -1997,13 +2150,109 @@ function readOptionalPositiveInteger(value: unknown): number | undefined {
   return Number.isFinite(numberValue) && numberValue > 0 ? Math.round(numberValue) : undefined;
 }
 
+const legacyOfficialRoutePricing: Record<
+  string,
+  {
+    basePointPrice: number;
+    durationPoints?: Record<string, number>;
+  }
+> = {
+  'official-text-1': {
+    basePointPrice: 1
+  },
+  'official-reasoning-1': {
+    basePointPrice: 3
+  },
+  'official-image-1': {
+    basePointPrice: 15
+  },
+  'official-image-2': {
+    basePointPrice: 25
+  },
+  'official-video-1': {
+    basePointPrice: 200,
+    durationPoints: {
+      '6': 200,
+      '10': 280
+    }
+  },
+  'official-video-2': {
+    basePointPrice: 300,
+    durationPoints: {
+      '6': 300,
+      '10': 500
+    }
+  },
+  'official-video-3': {
+    basePointPrice: 0
+  }
+};
+
+function resolveOfficialRoutePricing(route: OfficialRouteRecord): {
+  basePointPrice: number;
+  durationPoints?: Record<string, number>;
+} {
+  const fallback = legacyOfficialRoutePricing[route.routeKey];
+  const providerConfig = readRecord(route.providerConfig);
+  const pricing = readRecord(providerConfig?.pricing);
+  const rawDurationPoints = readRecord(pricing?.durationPoints);
+  const durationPoints = rawDurationPoints
+    ? Object.fromEntries(
+        Object.entries(rawDurationPoints).flatMap(([key, value]) => {
+          const points = Number(value);
+          return Number.isFinite(points) && points >= 0 ? [[key, Math.trunc(points)]] : [];
+        })
+      )
+    : undefined;
+
+  if (durationPoints && Object.keys(durationPoints).length > 0) {
+    const configuredBase = Number(route.pointPrice);
+    return {
+      basePointPrice:
+        Number.isFinite(configuredBase) && configuredBase >= 0
+          ? Math.trunc(configuredBase)
+          : Math.min(...Object.values(durationPoints)),
+      durationPoints
+    };
+  }
+
+  if (fallback) {
+    return fallback;
+  }
+
+  return {
+    basePointPrice: Math.max(0, Math.trunc(route.pointPrice))
+  };
+}
+
+function resolveOfficialRoutePointPrice(route: OfficialRouteRecord, request: OfficialInvokeRequest): number {
+  const pricing = resolveOfficialRoutePricing(route);
+  if (route.capability !== 'VIDEO' || !pricing.durationPoints) {
+    return Math.max(0, pricing.basePointPrice);
+  }
+
+  const durationSeconds = normalizeMiniMaxVideoDurationSeconds(request.videoGeneration?.durationSeconds) ?? 6;
+  return Math.max(
+    0,
+    pricing.durationPoints[String(durationSeconds)] ??
+      pricing.durationPoints['6'] ??
+      pricing.basePointPrice
+  );
+}
+
 function toRouteSummary(route: OfficialRouteRecord) {
+  const pricing = resolveOfficialRoutePricing(route);
   return {
     routeKey: route.routeKey,
     displayName: route.displayName,
     capability: route.capability.toLowerCase(),
     status: route.status.toLowerCase(),
-    pointPrice: route.pointPrice,
+    pointPrice: pricing.basePointPrice,
+    ...(pricing.durationPoints
+      ? {
+          pointPricesByDurationSeconds: pricing.durationPoints
+        }
+      : {}),
     sortOrder: route.sortOrder
   };
 }
@@ -2134,10 +2383,20 @@ function userFacingRouteModelName(route: OfficialRouteRecord): string {
   return route.displayName.replace(/^官方通道\s*[·路]\s*/, '').trim() || route.displayName;
 }
 
-function toReservationMetadata(allocations: AiPointBucketAllocation[]): Prisma.InputJsonValue {
+function toReservationMetadata(
+  allocations: AiPointBucketAllocation[],
+  providerJobId?: string
+): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify({
-    bucketAllocations: allocations
+    bucketAllocations: allocations,
+    ...(providerJobId ? { providerJobId } : {})
   })) as Prisma.InputJsonValue;
+}
+
+function readReservationProviderJobId(metadata: Prisma.JsonValue | null | undefined): string | undefined {
+  const record = readRecord(metadata);
+  const providerJobId = typeof record?.providerJobId === 'string' ? record.providerJobId.trim() : '';
+  return providerJobId || undefined;
 }
 
 function readReservationBucketAllocations(metadata: Prisma.JsonValue | null | undefined): AiPointBucketAllocation[] {

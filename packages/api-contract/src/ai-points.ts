@@ -8,6 +8,7 @@ export interface OfficialModelRouteSummary {
   capability: OfficialModelRouteCapability;
   status: OfficialModelRouteStatus;
   pointPrice: number;
+  pointPricesByDurationSeconds?: Record<string, number>;
   sortOrder: number;
 }
 

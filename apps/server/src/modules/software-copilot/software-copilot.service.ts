@@ -96,15 +96,20 @@ export class SoftwareCopilotService {
           return {
             product: {
               ...product,
-              status: 'ACTIVE',
+              status: product.status,
               currency: product.currency
             },
             licenses: [],
             activeBindings: [],
             entitlement: {
-              canPurchase,
+              canPurchase: product.status === 'ACTIVE' && canPurchase,
               canUse: false,
-              reason: canPurchase ? undefined : this.purchaseBlockedReason(access.workspaceType),
+              reason:
+                product.status !== 'ACTIVE'
+                  ? '该软件副驾暂未开放购买。'
+                  : canPurchase
+                    ? undefined
+                    : this.purchaseBlockedReason(access.workspaceType),
               seatLimit: 0,
               assignedSeatCount: 0,
               availableSeatCount: 0
@@ -187,7 +192,7 @@ export class SoftwareCopilotService {
           activeBindings: activeBindings.map((binding) => this.toDeviceBindingSummary(binding)),
           entitlement: {
             canPurchase: product.status === 'ACTIVE' && canPurchase,
-            canUse: access.desktopDeviceId ? Boolean(deviceBinding) : seatLimit > 0,
+            canUse: product.status === 'ACTIVE' && (access.desktopDeviceId ? Boolean(deviceBinding) : seatLimit > 0),
             reason:
               product.status !== 'ACTIVE'
                 ? '该软件副驾暂未开放购买。'

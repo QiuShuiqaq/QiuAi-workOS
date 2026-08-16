@@ -122,6 +122,16 @@ const aiPointPurchaseOptions = [1000, 3000, 10000, 30000, 100000];
 const aiPointPurchaseMin = 100;
 const aiPointPurchaseMax = 1_000_000;
 const aiPointPurchaseStep = 100;
+const aiPointProductExamples = [
+  { label: '图片线路一', points: 15, unit: '张' },
+  { label: '图片线路二', points: 25, unit: '张' },
+  { label: '视频线路一（6 秒）', points: 200, unit: '个' },
+  { label: '视频线路一（10 秒）', points: 280, unit: '个' },
+  { label: '视频线路二（6 秒）', points: 300, unit: '个' },
+  { label: '视频线路二（10 秒）', points: 500, unit: '个' },
+  { label: '文本线路一', points: 1, unit: '次' },
+  { label: '推理线路一', points: 3, unit: '次' }
+] as const;
 
 function aiPointPriceText(points: number) {
   return formatCurrency(points, 'CNY');
@@ -307,6 +317,7 @@ export function PurchaseCenterPageClient({
   }
 
   function getSoftwareCopilotPaymentDisabledReason(item: SoftwareCopilotCatalogItem) {
+    if (item.product.status !== 'ACTIVE') return '该软件副驾暂未开放购买。';
     if (isApiFallback) return '后端 API 未连接';
     if (!alipayStatus?.isConfigured) return '在线支付暂不可用，请联系服务商开通或线下处理';
     if (!item.entitlement.canPurchase) return item.entitlement.reason ?? '当前账号不能购买该软件副驾';
@@ -456,6 +467,21 @@ export function PurchaseCenterPageClient({
                 message="官方通道按 AI 点数使用，充值点数长期有效"
                 description="100 点 = 1 元。会员每月赠送的 1500 点按月发放，月底未使用会自动失效；充值点数不会过期。"
               />
+              <Card size="small" type="inner" title="点数大约可以做什么">
+                <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                  <Typography.Text type="secondary">
+                    以 1000 点为例，以下为理论最多数量，实际会受失败重试、任务配置和产物数量影响。
+                  </Typography.Text>
+                  <Space wrap size={[6, 6]}>
+                    {aiPointProductExamples.map((item) => (
+                      <Tag key={`${item.label}-${item.points}`}>
+                        {item.label}：约 {Math.floor(1000 / item.points)}
+                        {item.unit}
+                      </Tag>
+                    ))}
+                  </Space>
+                </Space>
+              </Card>
               <Space wrap>
                 {aiPointPurchaseOptions.map((points) => (
                   <Button
@@ -665,12 +691,15 @@ export function PurchaseCenterPageClient({
               <Alert
                 showIcon
                 type="info"
-                message="软件副驾按软件单独购买"
-                description="个人会员可按月或按年购买。企业购买时填写设备数量，管理员再到“设备与授权”里分配给具体 PC。"
+                message="软件副驾正在接入中"
+                description="当前仅展示产品目录，待真实软件连接器完成验证后再开放购买和设备授权。"
               />
               <Row gutter={[16, 16]}>
                 {softwareCopilots.data.map((item) => {
-                  const disabledReason = getSoftwareCopilotPaymentDisabledReason(item);
+                  const isPurchasable = item.product.status === 'ACTIVE';
+                  const disabledReason = isPurchasable
+                    ? getSoftwareCopilotPaymentDisabledReason(item)
+                    : undefined;
                   const seatCount = softwareCopilotSeatCounts[item.product.code] ?? 1;
                   const monthlyPrice =
                     activeWorkspace.workspaceType === 'enterprise'
@@ -688,6 +717,7 @@ export function PurchaseCenterPageClient({
                           <Space size={8} wrap>
                             <Typography.Text strong>{item.product.name}</Typography.Text>
                             <Tag>{item.product.category}</Tag>
+                            {!isPurchasable ? <Tag color="gold">即将开放</Tag> : null}
                             {item.entitlement.seatLimit > 0 ? <Tag color="green">已购</Tag> : null}
                           </Space>
                           <Typography.Text type="secondary">{item.product.description}</Typography.Text>
@@ -696,59 +726,63 @@ export function PurchaseCenterPageClient({
                               <Tag key={capability}>{capability}</Tag>
                             ))}
                           </Space>
-                          <Descriptions size="small" column={1}>
-                            <Descriptions.Item label="月付">
-                              {softwareCopilotPriceText(monthlyPrice, item.product.currency)}
-                              {activeWorkspace.workspaceType === 'enterprise' ? ' / 设备' : ''}
-                            </Descriptions.Item>
-                            <Descriptions.Item label="年付">
-                              {softwareCopilotPriceText(annualPrice, item.product.currency)}
-                              {activeWorkspace.workspaceType === 'enterprise' ? ' / 设备' : ''}
-                            </Descriptions.Item>
-                            <Descriptions.Item label="席位">
-                              {item.entitlement.seatLimit > 0
-                                ? `${item.entitlement.assignedSeatCount}/${item.entitlement.seatLimit} 已分配`
-                                : '未购买'}
-                            </Descriptions.Item>
-                          </Descriptions>
-                          {activeWorkspace.workspaceType === 'enterprise' ? (
-                            <InputNumber
-                              min={1}
-                              max={500}
-                              value={seatCount}
-                              addonBefore="设备数量"
-                              style={{ width: '100%' }}
-                              onChange={(value) =>
-                                setSoftwareCopilotSeatCounts((current) => ({
-                                  ...current,
-                                  [item.product.code]: typeof value === 'number' ? value : 1
-                                }))
-                              }
-                            />
-                          ) : null}
-                          <Space wrap>
-                            <Button
-                              type="primary"
-                              icon={<CreditCardOutlined />}
-                              disabled={Boolean(disabledReason)}
-                              title={disabledReason}
-                              loading={payingSoftwareCopilotKey === `${item.product.code}:MONTHLY`}
-                              onClick={() => void createSoftwareCopilotAlipayOrder(item, 'MONTHLY')}
-                            >
-                              月付购买
-                            </Button>
-                            <Button
-                              icon={<CreditCardOutlined />}
-                              disabled={Boolean(disabledReason)}
-                              title={disabledReason}
-                              loading={payingSoftwareCopilotKey === `${item.product.code}:ANNUAL`}
-                              onClick={() => void createSoftwareCopilotAlipayOrder(item, 'ANNUAL')}
-                            >
-                              年付购买
-                            </Button>
-                          </Space>
-                          {disabledReason ? (
-                            <Typography.Text type="secondary">{disabledReason}</Typography.Text>
+                          {isPurchasable ? (
+                            <>
+                              <Descriptions size="small" column={1}>
+                                <Descriptions.Item label="月付">
+                                  {softwareCopilotPriceText(monthlyPrice, item.product.currency)}
+                                  {activeWorkspace.workspaceType === 'enterprise' ? ' / 设备' : ''}
+                                </Descriptions.Item>
+                                <Descriptions.Item label="年付">
+                                  {softwareCopilotPriceText(annualPrice, item.product.currency)}
+                                  {activeWorkspace.workspaceType === 'enterprise' ? ' / 设备' : ''}
+                                </Descriptions.Item>
+                                <Descriptions.Item label="席位">
+                                  {item.entitlement.seatLimit > 0
+                                    ? `${item.entitlement.assignedSeatCount}/${item.entitlement.seatLimit} 已分配`
+                                    : '未购买'}
+                                </Descriptions.Item>
+                              </Descriptions>
+                              {activeWorkspace.workspaceType === 'enterprise' ? (
+                                <InputNumber
+                                  min={1}
+                                  max={500}
+                                  value={seatCount}
+                                  addonBefore="设备数量"
+                                  style={{ width: '100%' }}
+                                  onChange={(value) =>
+                                    setSoftwareCopilotSeatCounts((current) => ({
+                                      ...current,
+                                      [item.product.code]: typeof value === 'number' ? value : 1
+                                    }))
+                                  }
+                                />
+                              ) : null}
+                              <Space wrap>
+                                <Button
+                                  type="primary"
+                                  icon={<CreditCardOutlined />}
+                                  disabled={Boolean(disabledReason)}
+                                  title={disabledReason}
+                                  loading={payingSoftwareCopilotKey === `${item.product.code}:MONTHLY`}
+                                  onClick={() => void createSoftwareCopilotAlipayOrder(item, 'MONTHLY')}
+                                >
+                                  月付购买
+                                </Button>
+                                <Button
+                                  icon={<CreditCardOutlined />}
+                                  disabled={Boolean(disabledReason)}
+                                  title={disabledReason}
+                                  loading={payingSoftwareCopilotKey === `${item.product.code}:ANNUAL`}
+                                  onClick={() => void createSoftwareCopilotAlipayOrder(item, 'ANNUAL')}
+                                >
+                                  年付购买
+                                </Button>
+                              </Space>
+                              {disabledReason ? (
+                                <Typography.Text type="secondary">{disabledReason}</Typography.Text>
+                              ) : null}
+                            </>
                           ) : null}
                         </Space>
                       </Card>

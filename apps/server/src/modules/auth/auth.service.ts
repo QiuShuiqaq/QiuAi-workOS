@@ -12,6 +12,7 @@ import {
 import { Prisma, type AccountStatus, type WorkspaceStatus, type WorkspaceType } from '@prisma/client';
 
 import { demoCurrentAccount } from '../../shared/mock/platform-seed';
+import { isLocalDevelopmentUnlimitedEnabled } from '../../shared/local-development-mode';
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import type { PlanCode } from '../../shared/types/plan-code';
@@ -473,6 +474,11 @@ export class AuthService {
 
     const sessionToken = this.readSessionToken(cookieHeader);
     if (!sessionToken) {
+      const localDevelopmentSession = await this.getLocalDevelopmentDefaultSession();
+      if (localDevelopmentSession) {
+        return localDevelopmentSession;
+      }
+
       return {
         authenticated: false,
         persistenceMode: 'database'
@@ -512,6 +518,11 @@ export class AuthService {
     });
 
     if (!session || session.revokedAt || session.expiresAt.getTime() <= Date.now() || session.account.status !== 'ACTIVE') {
+      const localDevelopmentSession = await this.getLocalDevelopmentDefaultSession();
+      if (localDevelopmentSession) {
+        return localDevelopmentSession;
+      }
+
       return {
         authenticated: false,
         persistenceMode: 'database'
@@ -524,6 +535,46 @@ export class AuthService {
     });
 
     return this.buildDatabaseSessionResponse(session.account, session.expiresAt);
+  }
+
+  private async getLocalDevelopmentDefaultSession(): Promise<AuthSessionResponseDto | undefined> {
+    if (!isLocalDevelopmentUnlimitedEnabled()) {
+      return undefined;
+    }
+
+    const account = await this.prismaService.account.findUnique({
+      where: {
+        primaryEmail: this.normalizeEmail(process.env.WORKOS_BOOTSTRAP_ADMIN_EMAIL ?? 'admin@qiuai.local')
+      },
+      include: {
+        memberships: {
+          include: {
+            workspace: {
+              include: {
+                subscriptions: {
+                  include: {
+                    plan: true
+                  },
+                  orderBy: {
+                    createdAt: 'desc'
+                  },
+                  take: 1
+                }
+              }
+            }
+          },
+          orderBy: {
+            createdAt: 'asc'
+          }
+        }
+      }
+    });
+
+    if (!account || account.status !== 'ACTIVE') {
+      return undefined;
+    }
+
+    return this.buildDatabaseSessionResponse(account, new Date(Date.now() + 1000 * 60 * 60 * 24 * 30));
   }
 
   private async loadDatabaseAccount(accountId: string): Promise<DatabaseAccount> {

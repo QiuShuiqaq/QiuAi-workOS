@@ -209,6 +209,18 @@ export interface DesktopAiPointOverview {
     availablePoints: number;
     updatedAt: string;
   };
+  creditBuckets?: Array<{
+    id: string;
+    sourceType: 'subscription_monthly' | 'purchase_permanent' | 'admin_grant' | 'referral_reward' | 'migrated_balance';
+    totalPoints: number;
+    availablePoints: number;
+    reservedPoints: number;
+    startsAt: string;
+    expiresAt?: string;
+    status: 'active' | 'expired' | 'cancelled';
+    createdAt: string;
+    updatedAt: string;
+  }>;
   deviceQuota?: {
     desktopDeviceId: string;
     period: string;
@@ -224,6 +236,7 @@ export interface DesktopAiPointOverview {
     capability: 'text' | 'reasoning' | 'image' | 'video';
     status: 'active' | 'disabled';
     pointPrice: number;
+    pointPricesByDurationSeconds?: Record<string, number>;
     sortOrder: number;
   }>;
 }

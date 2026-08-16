@@ -557,11 +557,12 @@ export class ReferralsService {
 
     const now = new Date();
     const expiresAt = new Date(now.getTime() + referralRewardPolicy.rewardExpiresInDays * 24 * 60 * 60 * 1000);
-    await tx.aiPointCreditBucket.create({
+    const creditBucket = await tx.aiPointCreditBucket.createMany({
       data: {
         workspaceId: input.workspaceId,
         sourceType: 'REFERRAL_REWARD',
         billingOrderId: input.billingOrderId,
+        idempotencyKey: `referral:${input.referralInviteId}:${input.rewardRole}`,
         totalPoints: input.points,
         availablePoints: input.points,
         reservedPoints: 0,
@@ -573,8 +574,12 @@ export class ReferralsService {
           referralInviteId: input.referralInviteId,
           rewardRole: input.rewardRole
         }
-      }
+      },
+      skipDuplicates: true
     });
+    if (creditBucket.count === 0) {
+      return;
+    }
 
     const wallet = await tx.aiPointWallet.upsert({
       where: { workspaceId: input.workspaceId },

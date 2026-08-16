@@ -61,7 +61,7 @@ function product(
     softwareName,
     category,
     description,
-    status: 'ACTIVE',
+    status: 'COMING_SOON',
     platforms: ['windows'],
     capabilities,
     personalMonthlyPriceCents: 990,

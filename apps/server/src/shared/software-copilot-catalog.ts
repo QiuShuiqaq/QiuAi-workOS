@@ -4,6 +4,7 @@ export interface SoftwareCopilotProductSeed {
   softwareName: string;
   category: string;
   description: string;
+  status: 'ACTIVE' | 'COMING_SOON' | 'ARCHIVED';
   platforms: string[];
   capabilities: string[];
   personalMonthlyPriceCents: number;
@@ -20,6 +21,7 @@ const annualPriceCents = 9900;
 export const softwareCopilotProductSeeds: SoftwareCopilotProductSeed[] = [
   {
     code: 'photoshop-copilot',
+    status: 'COMING_SOON',
     name: 'Photoshop 副驾',
     softwareName: 'Photoshop',
     category: '设计修图',
@@ -35,6 +37,7 @@ export const softwareCopilotProductSeeds: SoftwareCopilotProductSeed[] = [
   },
   {
     code: 'coreldraw-copilot',
+    status: 'COMING_SOON',
     name: 'CorelDRAW 副驾',
     softwareName: 'CorelDRAW',
     category: '矢量排版',
@@ -50,6 +53,7 @@ export const softwareCopilotProductSeeds: SoftwareCopilotProductSeed[] = [
   },
   {
     code: 'excel-copilot',
+    status: 'COMING_SOON',
     name: 'Excel 副驾',
     softwareName: 'Excel',
     category: '办公数据',
@@ -65,6 +69,7 @@ export const softwareCopilotProductSeeds: SoftwareCopilotProductSeed[] = [
   },
   {
     code: 'ppt-copilot',
+    status: 'COMING_SOON',
     name: 'PPT 副驾',
     softwareName: 'PowerPoint',
     category: '演示汇报',
@@ -80,6 +85,7 @@ export const softwareCopilotProductSeeds: SoftwareCopilotProductSeed[] = [
   },
   {
     code: 'cad-copilot',
+    status: 'COMING_SOON',
     name: 'CAD 副驾',
     softwareName: 'CAD',
     category: '工程绘图',
@@ -95,6 +101,7 @@ export const softwareCopilotProductSeeds: SoftwareCopilotProductSeed[] = [
   },
   {
     code: 'jianying-copilot',
+    status: 'COMING_SOON',
     name: '剪映副驾',
     softwareName: '剪映',
     category: '视频剪辑',

@@ -605,6 +605,7 @@ model AiPointCreditBucket {
   startsAt        DateTime                      @default(now()) @map("starts_at")
   expiresAt       DateTime?                     @map("expires_at")
   status          AiPointCreditBucketStatus     @default(ACTIVE)
+  idempotencyKey  String?                       @unique @map("idempotency_key")
   metadata        Json?
   createdAt       DateTime                      @default(now()) @map("created_at")
   updatedAt       DateTime                      @updatedAt @map("updated_at")

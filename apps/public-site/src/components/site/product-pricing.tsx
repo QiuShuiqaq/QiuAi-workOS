@@ -12,9 +12,20 @@ const PLAN_GROUPS = [
     key: "FREE",
     monthlyCode: "PERSONAL_FREE",
     annualCode: "PERSONAL_FREE",
-    name: { zh: "Personal Free", en: "Personal Free" },
+    name: { zh: "个人免费版", en: "Personal Free" },
     fitFor: { zh: "适合个人、工作室或企业初次体验。", en: "For individuals, studios, and first-time enterprise trials." },
     highlight: false,
+  },
+  {
+    key: "MEMBER",
+    monthlyCode: "PERSONAL_MEMBER_MONTHLY",
+    annualCode: "PERSONAL_MEMBER_ANNUAL",
+    name: { zh: "个人会员版", en: "Personal Member" },
+    fitFor: {
+      zh: "适合个人长期使用数字员工和数字工厂，支持购买 AI 点数。",
+      en: "For individuals who want daily use of digital workers and factories, with AI points available.",
+    },
+    highlight: true,
   },
   {
     key: "BASIC",
@@ -64,25 +75,15 @@ function entitlementValue(plan: PublicPlan | undefined, featureKey: string, lang
     return lang === "zh" ? "按需配置" : "Custom";
   }
 
+  if (entitlement.limitValue >= 999999) {
+    return lang === "zh" ? "不限" : "Unlimited";
+  }
+
   return entitlement.limitValue.toLocaleString(lang === "zh" ? "zh-CN" : "en-US");
 }
 
-function factoryAccessText(groupKey: string, lang: SiteLanguage) {
-  const zhText =
-    {
-      FREE: "数字工厂：暂不开放",
-      BASIC: "数字工厂：全部开放",
-      STANDARD: "数字工厂：全部开放",
-      PRO: "数字工厂：全部开放",
-    }[groupKey] ?? "数字工厂：按套餐开放";
-  const enText =
-    {
-      FREE: "Digital factories: not included",
-      BASIC: "Digital factories: included",
-      STANDARD: "Digital factories: included",
-      PRO: "Digital factories: included",
-    }[groupKey] ?? "Digital factories: plan-based access";
-  return lang === "zh" ? zhText : enText;
+function isEnterpriseGroup(groupKey: string) {
+  return groupKey === "BASIC" || groupKey === "STANDARD" || groupKey === "PRO";
 }
 
 function priceDetails(plan: PublicPlan | undefined, period: BillingPeriod, lang: SiteLanguage) {
@@ -103,18 +104,26 @@ function priceDetails(plan: PublicPlan | undefined, period: BillingPeriod, lang:
   }
 
   const currency = plan.currency ?? "CNY";
+  const baseNote =
+    period === "ANNUAL"
+      ? `${lang === "zh" ? "折合" : "Equivalent to"} ${formatCurrency(Math.round(plan.priceCents / 12), currency, lang)}${lang === "zh" ? "/月" : "/month"}`
+      : lang === "zh"
+        ? "按月支付"
+        : "Billed monthly";
+  const description = lang === "zh" && plan.code !== "PERSONAL_FREE" && plan.description ? ` · ${plan.description}` : "";
+
   if (period === "ANNUAL") {
     return {
       price: formatCurrency(plan.priceCents, currency, lang),
       suffix: lang === "zh" ? "/年" : "/year",
-      note: `${lang === "zh" ? "折合" : "Equivalent to"} ${formatCurrency(Math.round(plan.priceCents / 12), currency, lang)}${lang === "zh" ? "/月" : "/month"}`,
+      note: `${baseNote}${description}`,
     };
   }
 
   return {
     price: formatCurrency(plan.priceCents, currency, lang),
     suffix: lang === "zh" ? "/月" : "/month",
-    note: lang === "zh" ? "按月支付" : "Billed monthly",
+    note: `${baseNote}${description}`,
   };
 }
 
@@ -158,7 +167,11 @@ export function ProductPricing({
         <div className="product-section-heading product-section-heading--left">
           <span>{isZh ? "套餐价格" : "Pricing"}</span>
           <h2>{isZh ? "选择适合你的使用方式" : "Choose the right way to use QiuAI WorkOS"}</h2>
-          <p>{isZh ? "企业套餐容量会同步到企业绑定的每台 PC 设备。" : "Enterprise plan capacity applies to every bound PC device."}</p>
+          <p>
+            {isZh
+              ? "个人免费、个人会员和企业套餐都支持购买 AI 点数；企业套餐容量会同步到企业绑定的每台 PC 设备。"
+              : "Personal free, personal member, and enterprise plans can all buy AI points. Enterprise plan capacity applies to every bound PC device."}
+          </p>
         </div>
         <div className="product-pricing__period" aria-label={isZh ? "选择付费周期" : "Select billing period"}>
           <button type="button" className={period === "MONTHLY" ? "is-active" : undefined} onClick={() => setPeriod("MONTHLY")} aria-pressed={period === "MONTHLY"}>
@@ -176,12 +189,15 @@ export function ProductPricing({
           const plan = planMap.get(planCode);
           const price = priceDetails(plan, period, lang);
           const isFree = group.key === "FREE";
+          const isEnterprise = isEnterpriseGroup(group.key);
           const targetUrl = isFree ? registerUrl : purchaseUrl;
 
           return (
             <article key={group.key} className={`product-pricing-card${group.highlight ? " is-highlighted" : ""}`}>
               <div className="product-pricing-card__topline">
-                <span>{isFree ? (isZh ? "免费使用" : "Free") : isZh ? "企业套餐" : "Enterprise"}</span>
+                <span>
+                  {isFree ? (isZh ? "免费使用" : "Free") : group.key === "MEMBER" ? (isZh ? "个人会员" : "Member") : isZh ? "企业套餐" : "Enterprise"}
+                </span>
                 {group.highlight ? <strong>{isZh ? "推荐" : "Recommended"}</strong> : null}
               </div>
               <h3>{readText(group.name, lang)}</h3>
@@ -198,13 +214,13 @@ export function ProductPricing({
                 </div>
                 <div>
                   <dt>{isZh ? "数字员工" : "Digital workers"}</dt>
-                  <dd>{isZh ? "全部开放" : "Included"}</dd>
+                  <dd>{entitlementValue(plan, "maxRoleInstances", lang)}</dd>
                 </div>
                 <div>
                   <dt>{isZh ? "数字工厂" : "Digital factories"}</dt>
-                  <dd>{factoryAccessText(group.key, lang)}</dd>
+                  <dd>{entitlementValue(plan, "maxDigitalFactories", lang)}</dd>
                 </div>
-                {!isFree && period === "ANNUAL" ? (
+                {isEnterprise && period === "ANNUAL" ? (
                   <div>
                     <dt>{isZh ? "年付权益" : "Annual benefit"}</dt>
                     <dd>{isZh ? "可定制 1 个数字工厂" : "1 custom digital factory"}</dd>
@@ -222,6 +238,18 @@ export function ProductPricing({
 
       <div className="product-pricing__custom">
         <div>
+          <strong>{isZh ? "AI 点数说明" : "AI points"}</strong>
+          <p>
+            {isZh
+              ? "文本 1 点，推理 3 点，图片 15 点起，视频 200 点起；100 点 = 1 元。个人会员月付包含 1500 点月度 AI 点数，当月未用完自动清零。"
+              : "Text uses 1 point, reasoning uses 3 points, images start at 15 points, and video starts at 200 points; 100 points = 1 CNY. Monthly member plans include 1,500 monthly AI points that expire at the end of the month."}
+          </p>
+        </div>
+        <a href={purchaseUrl}>{isZh ? "查看购买中心" : "Open purchase center"} →</a>
+      </div>
+
+      <div className="product-pricing__custom">
+        <div>
           <strong>{isZh ? "企业定制与私有化部署" : "Enterprise customization and private deployment"}</strong>
           <p>{isZh ? "适合需要行业数字员工、专属数字工厂、系统集成或独立部署的企业。" : "For industry-specific workers, dedicated factories, integrations, or private deployment."}</p>
         </div>
@@ -230,8 +258,8 @@ export function ProductPricing({
 
       <p className="product-pricing__footnote">
         {isZh
-          ? "软件套餐费用不包含模型供应商收取的 API 调用费用。年付定制权益解释权以运营方为准。"
-          : "Software plans do not include API usage fees charged by model providers. Annual customization benefits are subject to operator interpretation."}
+          ? "软件套餐与 AI 点数分开计费；月度点数到期清零，永久点数按 100 点 = 1 元长期有效。年付定制权益以运营方说明为准。"
+          : "Software plans are billed separately from AI points; monthly points expire, while permanent points stay valid at 100 points = 1 CNY. Annual customization benefits follow operator policy."}
       </p>
     </div>
   );

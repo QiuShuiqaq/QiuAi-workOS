@@ -18,6 +18,7 @@ export async function getDesktopAiPointOverview(): Promise<DesktopAiPointOvervie
 
   return {
     wallet: response.data.wallet,
+    creditBuckets: response.data.creditBuckets,
     deviceQuota: response.data.deviceQuota,
     routes: response.data.routes
   };

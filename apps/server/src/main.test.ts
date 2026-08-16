@@ -7,8 +7,11 @@ import { test } from 'node:test';
 import type { Response as InjectResponse } from 'light-my-request';
 
 import { createApplication } from './main';
+import { AuthService } from './modules/auth/auth.service';
+import { WORKOS_SESSION_COOKIE_NAME } from './shared/auth/session-cookie';
 import { MockPlatformStore } from './shared/mock/mock-platform-store.service';
 import { retiredServerRoleTemplateIds } from './shared/role-template-catalog';
+import type { PrismaService } from './shared/prisma/prisma.service';
 
 type ProtectedRequest = {
   method: 'GET' | 'POST';
@@ -2017,6 +2020,117 @@ test('official model routes expose only QiuAI line labels to desktop clients', a
       delete process.env.QIUAI_OFFICIAL_DEEPSEEK_API_KEY;
     } else {
       process.env.QIUAI_OFFICIAL_DEEPSEEK_API_KEY = previousEnvironment.deepseekKey;
+    }
+  }
+});
+
+test('local development database sessions can use the seeded default account without login', async () => {
+  const previousEnvironment = {
+    persistenceMode: process.env.WORKOS_PERSISTENCE_MODE,
+    deployTarget: process.env.WORKOS_DEPLOY_TARGET,
+    appEnvironment: process.env.APP_ENV,
+    nodeEnvironment: process.env.NODE_ENV,
+    serverHost: process.env.SERVER_HOST,
+    localUnlimited: process.env.WORKOS_LOCAL_DEV_UNLIMITED,
+    bootstrapAdminEmail: process.env.WORKOS_BOOTSTRAP_ADMIN_EMAIL
+  };
+  let accountLookupCount = 0;
+  let sessionLookupCount = 0;
+  const seededAccount = {
+    id: '00000000-0000-4000-8000-000000000001',
+    primaryEmail: 'admin@qiuai.local',
+    status: 'ACTIVE',
+    memberships: [
+      {
+        workspace: {
+          id: 'personal',
+          tenantId: 'tenant_personal',
+          type: 'PERSONAL',
+          name: 'Personal Workspace',
+          ownerAccountId: '00000000-0000-4000-8000-000000000001',
+          status: 'ACTIVE',
+          subscriptions: [
+            {
+              plan: {
+                code: 'PERSONAL_FREE'
+              }
+            }
+          ]
+        }
+      },
+      {
+        workspace: {
+          id: 'enterprise',
+          tenantId: 'tenant_enterprise',
+          type: 'ENTERPRISE',
+          name: 'QiuAI Demo Enterprise',
+          ownerAccountId: '00000000-0000-4000-8000-000000000001',
+          status: 'ACTIVE',
+          subscriptions: [
+            {
+              plan: {
+                code: 'ENTERPRISE_BASIC_MONTHLY'
+              }
+            }
+          ]
+        }
+      }
+    ]
+  };
+  const fakePrisma = {
+    account: {
+      findUnique: async (args: { where: { primaryEmail: string } }) => {
+        accountLookupCount += 1;
+        assert.equal(args.where.primaryEmail, 'admin@qiuai.local');
+        return seededAccount;
+      }
+    },
+    authSession: {
+      findUnique: async () => {
+        sessionLookupCount += 1;
+        return null;
+      },
+      update: async () => {
+        throw new Error('Local development fallback must not update a missing session.');
+      }
+    }
+  };
+  const authService = new AuthService(fakePrisma as unknown as PrismaService);
+
+  try {
+    process.env.WORKOS_PERSISTENCE_MODE = 'database';
+    process.env.WORKOS_DEPLOY_TARGET = 'local';
+    process.env.APP_ENV = 'local';
+    process.env.NODE_ENV = 'development';
+    process.env.SERVER_HOST = '127.0.0.1';
+    process.env.WORKOS_LOCAL_DEV_UNLIMITED = 'true';
+    process.env.WORKOS_BOOTSTRAP_ADMIN_EMAIL = 'admin@qiuai.local';
+
+    const noCookieSession = await authService.getSession();
+    assert.equal(noCookieSession.authenticated, true);
+    assert.equal(noCookieSession.persistenceMode, 'database');
+    assert.equal(noCookieSession.account?.primaryEmail, 'admin@qiuai.local');
+    assert.equal(noCookieSession.activeWorkspaceId, 'enterprise');
+    assert.equal(noCookieSession.workspaces?.[0]?.workspaceType, 'enterprise');
+
+    const invalidCookieSession = await authService.getSession(`${WORKOS_SESSION_COOKIE_NAME}=missing`);
+    assert.equal(invalidCookieSession.authenticated, true);
+    assert.equal(invalidCookieSession.account?.primaryEmail, 'admin@qiuai.local');
+    assert.equal(sessionLookupCount, 1);
+
+    process.env.NODE_ENV = 'production';
+    accountLookupCount = 0;
+    const productionSession = await authService.getSession();
+    assert.equal(productionSession.authenticated, false);
+    assert.equal(productionSession.persistenceMode, 'database');
+    assert.equal(accountLookupCount, 0);
+  } finally {
+    for (const [key, value] of Object.entries(previousEnvironment)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
     }
   }
 });

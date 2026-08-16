@@ -1080,11 +1080,12 @@ export class BillingService {
       return;
     }
 
-    await tx.aiPointCreditBucket.create({
+    const creditBucket = await tx.aiPointCreditBucket.createMany({
       data: {
         workspaceId: order.workspaceId,
         sourceType: 'PURCHASE_PERMANENT',
         billingOrderId: order.id,
+        idempotencyKey: `purchase:${order.id}`,
         totalPoints: aiPointAmount,
         availablePoints: aiPointAmount,
         reservedPoints: 0,
@@ -1095,8 +1096,12 @@ export class BillingService {
           billingOrderId: order.id,
           orderNo: order.orderNo
         }
-      }
+      },
+      skipDuplicates: true
     });
+    if (creditBucket.count === 0) {
+      return;
+    }
 
     const wallet = await tx.aiPointWallet.upsert({
       where: { workspaceId: order.workspaceId },

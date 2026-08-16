@@ -408,6 +408,16 @@ interface FactoryRunFormValues {
   instruction?: string;
 }
 
+interface AiPointFactoryConsumptionEstimate {
+  visible: boolean;
+  label: string;
+  itemCount: number;
+  unitPointPrice: number;
+  totalPoints: number;
+  availablePoints?: number;
+  routeKey?: string;
+}
+
 interface FactoryRunPackageDefinition {
   key: string;
   label: string;
@@ -988,6 +998,17 @@ const aiPointRechargeOptions: AiPointRechargeOption[] = [
   { points: 30000, label: '高频使用', hint: '适合连续生产素材' },
   { points: 100000, label: '团队储备', hint: '适合长期或多人协作' }
 ];
+
+const aiPointProductExamples = [
+  { label: '图片线路一', points: 15, unit: '张' },
+  { label: '图片线路二', points: 25, unit: '张' },
+  { label: '视频线路一（6 秒）', points: 200, unit: '个' },
+  { label: '视频线路一（10 秒）', points: 280, unit: '个' },
+  { label: '视频线路二（6 秒）', points: 300, unit: '个' },
+  { label: '视频线路二（10 秒）', points: 500, unit: '个' },
+  { label: '文本线路一', points: 1, unit: '次' },
+  { label: '推理线路一', points: 3, unit: '次' }
+] as const;
 
 const productAnnouncementItems = [
   '固定维护窗口：每周三、周日 08:00-12:00，可能进行服务器维护或版本更新。',
@@ -6694,6 +6715,20 @@ export default function App() {
                   ) : null}
                 </Space>
               </Descriptions.Item>
+              {!isEnterpriseUnbound && aiPointOverview?.creditBuckets?.length ? (
+                <Descriptions.Item label="点数构成">
+                  <Space size={6} wrap>
+                    <Tag color="blue">
+                      本月赠送{' '}
+                      {formatAiPoints(getAiPointBucketAvailablePoints(aiPointOverview, ['subscription_monthly']))}
+                    </Tag>
+                    <Tag color="green">
+                      永久充值{' '}
+                      {formatAiPoints(getAiPointBucketAvailablePoints(aiPointOverview, ['purchase_permanent']))}
+                    </Tag>
+                  </Space>
+                </Descriptions.Item>
+              ) : null}
               <Descriptions.Item label="购买入口">
                 {isEnterpriseUnbound
                   ? '请先登录或注册账号，再完成会员和 AI 点数购买。'
@@ -6739,6 +6774,21 @@ export default function App() {
                   会员月度点数：个人会员每月赠送 {formatAiPoints(memberMonthlyIncludedAiPoints)}，当月有效，到期未用完自动清零。
                 </Typography.Text>
                 <Typography.Text>永久充值：适合按需补充，长期有效，100 点 = 1 元。</Typography.Text>
+                <Card size="small" type="inner" title="点数大约可以做什么">
+                  <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                    <Typography.Text type="secondary">
+                      以 1000 点为例，以下为理论最多数量，实际会受失败重试、任务配置和产物数量影响。
+                    </Typography.Text>
+                    <Space wrap size={[6, 6]}>
+                      {aiPointProductExamples.map((item) => (
+                        <Tag key={`${item.label}-${item.points}`}>
+                          {item.label}：约 {Math.floor(1000 / item.points)}
+                          {item.unit}
+                        </Tag>
+                      ))}
+                    </Space>
+                  </Space>
+                </Card>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
                   {aiPointRechargeOptions.map((option) => (
                     <Card key={option.points} size="small" bordered>
@@ -9891,6 +9941,53 @@ export default function App() {
                             ) : null}
                           </>
                         )}
+                        <Form.Item shouldUpdate noStyle>
+                          {({ getFieldsValue }) => {
+                            const estimate = buildAiPointFactoryConsumptionEstimate({
+                              state: runtimeState,
+                              roleCode: selectedFactoryCode,
+                              factory: selectedFactoryManifest,
+                              values: getFieldsValue(true) as FactoryRunFormValues,
+                              attachments: factoryAttachments,
+                              overview: aiPointOverview
+                            });
+
+                            if (!estimate.visible) {
+                              return null;
+                            }
+
+                            const insufficient = hasInsufficientAiPoints(estimate);
+                            return (
+                              <Card
+                                size="small"
+                                type="inner"
+                                title="AI 点数预估"
+                                style={{ borderColor: insufficient ? '#ffccc7' : undefined }}
+                              >
+                                <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                                  <Space size={8} wrap>
+                                    <Tag color="blue">预计生成 {estimate.itemCount} 个产物</Tag>
+                                    <Tag>{estimate.label}</Tag>
+                                    <Tag>{formatAiPoints(estimate.unitPointPrice)} / 个</Tag>
+                                  </Space>
+                                  <Typography.Text strong>
+                                    预计消耗 {formatAiPoints(estimate.totalPoints)}
+                                  </Typography.Text>
+                                  {estimate.availablePoints !== undefined ? (
+                                    <Typography.Text type={insufficient ? 'danger' : 'secondary'}>
+                                      当前可用 {formatAiPoints(estimate.availablePoints)}
+                                      {insufficient ? '，点数不足。' : '。'}
+                                    </Typography.Text>
+                                  ) : (
+                                    <Typography.Text type="secondary">
+                                      余额尚未读取，可在 Q 面板或购买中心刷新 AI 点数。
+                                    </Typography.Text>
+                                  )}
+                                </Space>
+                              </Card>
+                            );
+                          }}
+                        </Form.Item>
                         <div className="factory-parameter-action-row">
                           <Button
                             block
@@ -12523,22 +12620,24 @@ export default function App() {
             ))}
           </Space>
 
-          <div className="software-copilot-license-panel">
-            <span>
-              <Typography.Text type="secondary">个人会员</Typography.Text>
-              <Typography.Text strong>{monthlyPrice}/月</Typography.Text>
-            </span>
-            <span>
-              <Typography.Text type="secondary">年付</Typography.Text>
-              <Typography.Text strong>{annualPrice}/年</Typography.Text>
-            </span>
-            <span>
-              <Typography.Text type="secondary">席位</Typography.Text>
-              <Typography.Text strong>
-                {item.entitlement.assignedSeatCount}/{item.entitlement.seatLimit || 0}
-              </Typography.Text>
-            </span>
-          </div>
+          {product.status === 'ACTIVE' ? (
+            <div className="software-copilot-license-panel">
+              <span>
+                <Typography.Text type="secondary">个人会员</Typography.Text>
+                <Typography.Text strong>{monthlyPrice}/月</Typography.Text>
+              </span>
+              <span>
+                <Typography.Text type="secondary">年付</Typography.Text>
+                <Typography.Text strong>{annualPrice}/年</Typography.Text>
+              </span>
+              <span>
+                <Typography.Text type="secondary">席位</Typography.Text>
+                <Typography.Text strong>
+                  {item.entitlement.assignedSeatCount}/{item.entitlement.seatLimit || 0}
+                </Typography.Text>
+              </span>
+            </div>
+          ) : null}
 
           {item.deviceBinding ? (
             <Typography.Text type="secondary" className="software-copilot-device-line">
@@ -12557,14 +12656,14 @@ export default function App() {
           <div className="catalog-card-action-row">
             <Space wrap>
               <Button
-                type={item.deviceBinding ? 'primary' : 'default'}
-                disabled={!item.deviceBinding}
+                type={item.deviceBinding && item.product.status === 'ACTIVE' ? 'primary' : 'default'}
+                disabled={!item.deviceBinding || item.product.status !== 'ACTIVE'}
                 icon={<ControlOutlined />}
-                onClick={() => message.info('软件副驾连接器正在接入中，当前版本先开放购买和授权管理。')}
+                onClick={() => message.info('软件副驾连接器正在接入中，当前版本暂未开放使用。')}
               >
                 打开副驾
               </Button>
-              {!item.deviceBinding ? (
+              {!item.deviceBinding && item.product.status === 'ACTIVE' ? (
                 <Button icon={<CreditCardOutlined />} onClick={() => openAccountModal('purchase')}>
                   去购买
                 </Button>
@@ -13650,6 +13749,28 @@ export default function App() {
 
     const factory = readFactoryManifest(template.dependencyManifest);
     const maxItems = readFactoryMaxItems(factory);
+    const aiPointEstimate = buildAiPointFactoryConsumptionEstimate({
+      state: runtimeState,
+      roleCode: values.roleCode,
+      factory,
+      values: {
+        ...values,
+        packageDefinitions: normalizeFactoryPackageDefinitions(
+          factoryRunForm.getFieldValue('packageDefinitions'),
+          readFactoryPackageOptions(factory)
+        )
+      },
+      attachments: factoryAttachments,
+      overview: aiPointOverview
+    });
+    if (hasInsufficientAiPoints(aiPointEstimate)) {
+      message.warning(
+        `本次预计消耗 ${formatAiPoints(aiPointEstimate.totalPoints)}，当前可用 ${formatAiPoints(aiPointEstimate.availablePoints)}，请先补充 AI 点数。`
+      );
+      openAccountModal('purchase');
+      return;
+    }
+
     if (isMedicalCaseVideoFactory(factory)) {
       const videoAttachments = factoryAttachments.filter((attachment) => isFactoryVideoAttachment(attachment));
       if (videoAttachments.length === 0) {
@@ -16050,6 +16171,14 @@ function renderToolRuntimeTags(tool: ToolManifest, webSearchUsesCustomEndpoint: 
 }
 
 function resolveSoftwareCopilotCardStatus(item: SoftwareCopilotCatalogItem): { label: string; color: string } {
+  if (item.product.status === 'COMING_SOON') {
+    return { label: '即将开放', color: 'gold' };
+  }
+
+  if (item.product.status === 'ARCHIVED') {
+    return { label: '已下架', color: 'default' };
+  }
+
   if (item.deviceBinding) {
     return { label: '本机已授权', color: 'green' };
   }
@@ -16583,6 +16712,199 @@ function formatAiPoints(value?: number) {
 
 function formatAiPointRechargePrice(points: number) {
   return `¥${Math.max(0, Math.floor(points / 100)).toLocaleString('zh-CN')}`;
+}
+
+function getAiPointBucketAvailablePoints(
+  overview: DesktopAiPointOverview | null,
+  sourceTypes: Array<NonNullable<DesktopAiPointOverview['creditBuckets']>[number]['sourceType']>
+): number {
+  const sourceTypeSet = new Set(sourceTypes);
+  return overview?.creditBuckets
+    ?.filter((bucket) => bucket.status === 'active' && sourceTypeSet.has(bucket.sourceType))
+    .reduce((total, bucket) => total + bucket.availablePoints, 0) ?? 0;
+}
+
+function resolveAiPointRoutePrice(
+  overview: DesktopAiPointOverview | null,
+  routeKey: string | undefined,
+  durationSeconds?: number
+): number | undefined {
+  if (!routeKey) {
+    return undefined;
+  }
+
+  const route = overview?.routes.find((item) => item.routeKey === routeKey);
+  const durationPrice = durationSeconds
+    ? route?.pointPricesByDurationSeconds?.[String(durationSeconds)] ?? fallbackRouteDurationPrice(routeKey, durationSeconds)
+    : undefined;
+  const routePrice = route?.pointPrice ?? fallbackRoutePointPrice(routeKey);
+  const price = durationPrice ?? routePrice;
+  return Number.isFinite(price) && price !== undefined ? Math.max(0, Math.floor(price)) : undefined;
+}
+
+function fallbackRoutePointPrice(routeKey: string): number | undefined {
+  return {
+    'official-text-1': 1,
+    'official-reasoning-1': 3,
+    'official-image-1': 15,
+    'official-image-2': 25,
+    'official-video-1': 200,
+    'official-video-2': 300
+  }[routeKey];
+}
+
+function fallbackRouteDurationPrice(routeKey: string, durationSeconds: number): number | undefined {
+  const durationKey = String(durationSeconds);
+  const durationPrices: Record<string, Record<string, number>> = {
+    'official-video-1': {
+      '6': 200,
+      '10': 280
+    },
+    'official-video-2': {
+      '6': 300,
+      '10': 500
+    }
+  };
+  return durationPrices[routeKey]?.[durationKey];
+}
+
+function routeLineLabel(overview: DesktopAiPointOverview | null, routeKey: string | undefined, fallback: string) {
+  const displayName = routeKey
+    ? overview?.routes.find((item) => item.routeKey === routeKey)?.displayName
+    : undefined;
+  return displayName?.replace(/^QiuAI\s*/i, '').replace(/^官方通道\s*[·・]\s*/, '').trim() || fallback;
+}
+
+function resolveOfficialRouteKeyForSemanticModel(
+  state: DesktopRuntimeState,
+  roleCode: string,
+  semanticModelProfileId: string
+): string | undefined {
+  const binding = state.roleModelCredentialBindings.find(
+    (item) => item.roleCode === roleCode && item.modelProfileId === semanticModelProfileId
+  );
+  const runtimeProfileId = binding?.runtimeModelProfileId?.trim() || semanticModelProfileId;
+  const profile =
+    state.modelProfiles.find((item) => item.id === runtimeProfileId) ??
+    state.modelProfiles.find((item) => item.id === semanticModelProfileId);
+  return profile && isOfficialPointsModelProfile(profile) ? profile.officialRouteKey : undefined;
+}
+
+function buildAiPointFactoryConsumptionEstimate(input: {
+  state: DesktopRuntimeState;
+  roleCode: string;
+  factory: DigitalFactoryManifest;
+  values: Partial<FactoryRunFormValues>;
+  attachments: ComposerAttachment[];
+  overview: DesktopAiPointOverview | null;
+}): AiPointFactoryConsumptionEstimate {
+  const hiddenEstimate: AiPointFactoryConsumptionEstimate = {
+    visible: false,
+    label: '',
+    itemCount: 0,
+    unitPointPrice: 0,
+    totalPoints: 0,
+    availablePoints: input.overview?.wallet.availablePoints
+  };
+  if (!input.roleCode) {
+    return hiddenEstimate;
+  }
+
+  const packageDefinitions = normalizeFactoryPackageDefinitions(
+    input.values.packageDefinitions,
+    readFactoryPackageOptions(input.factory)
+  );
+  const selectedKeys = new Set(input.values.packageKeys ?? []);
+  const selectedPackageCount = packageDefinitions.filter((item) => selectedKeys.has(item.key)).length;
+  const imageCount = input.attachments.filter((attachment) => isFactoryImageAttachment(attachment)).length;
+  const availablePoints = input.overview?.wallet.availablePoints;
+
+  if (isImageGenerationFactory(input.factory)) {
+    const routeKey = resolveOfficialRouteKeyForSemanticModel(
+      input.state,
+      input.roleCode,
+      'qiu-image-generation-default'
+    );
+    const unitPointPrice = resolveAiPointRoutePrice(input.overview, routeKey);
+    const itemCount = imageCount * selectedPackageCount;
+    return unitPointPrice && itemCount > 0
+      ? {
+          visible: true,
+          label: routeLineLabel(input.overview, routeKey, '图片线路'),
+          itemCount,
+          unitPointPrice,
+          totalPoints: itemCount * unitPointPrice,
+          availablePoints,
+          routeKey
+        }
+      : hiddenEstimate;
+  }
+
+  if (isReferenceImageVideoFactory(input.factory)) {
+    const durationOptions = readFactoryVideoDurationOptions(input.factory);
+    const requestedDuration = Number(input.values.videoDurationSeconds);
+    const durationSeconds = durationOptions.includes(requestedDuration)
+      ? requestedDuration
+      : durationOptions[1] ?? durationOptions[0] ?? 6;
+    const routeKey = resolveOfficialRouteKeyForSemanticModel(
+      input.state,
+      input.roleCode,
+      'qiu-video-generation-default'
+    );
+    const unitPointPrice = resolveAiPointRoutePrice(input.overview, routeKey, durationSeconds);
+    const itemCount = imageCount * selectedPackageCount;
+    return unitPointPrice && itemCount > 0
+      ? {
+          visible: true,
+          label: `${routeLineLabel(input.overview, routeKey, '视频线路')}（${durationSeconds} 秒）`,
+          itemCount,
+          unitPointPrice,
+          totalPoints: itemCount * unitPointPrice,
+          availablePoints,
+          routeKey
+        }
+      : hiddenEstimate;
+  }
+
+  if (isOperationVideoFactory(input.factory) && selectedKeys.has('generated_video')) {
+    const durationOptions = readFactoryVideoDurationOptions(input.factory);
+    const requestedDuration = Number(input.values.videoDurationSeconds);
+    const durationSeconds = durationOptions.includes(requestedDuration)
+      ? requestedDuration
+      : durationOptions[1] ?? durationOptions[0] ?? 6;
+    const videoCount = Math.max(
+      1,
+      Math.min(
+        Number(input.values.videoCount) || input.factory.contentControls?.defaultVideoCount || 3,
+        Math.min(input.factory.contentControls?.maxVideoCount ?? 20, 20)
+      )
+    );
+    const routeKey = resolveOfficialRouteKeyForSemanticModel(
+      input.state,
+      input.roleCode,
+      'qiu-video-generation-default'
+    );
+    const unitPointPrice = resolveAiPointRoutePrice(input.overview, routeKey, durationSeconds);
+    return unitPointPrice
+      ? {
+          visible: true,
+          label: `${routeLineLabel(input.overview, routeKey, '视频线路')}（${durationSeconds} 秒）`,
+          itemCount: videoCount,
+          unitPointPrice,
+          totalPoints: videoCount * unitPointPrice,
+          availablePoints,
+          routeKey
+        }
+      : hiddenEstimate;
+  }
+
+  return hiddenEstimate;
+}
+
+function hasInsufficientAiPoints(estimate: AiPointFactoryConsumptionEstimate) {
+  return estimate.visible &&
+    estimate.availablePoints !== undefined &&
+    estimate.availablePoints < estimate.totalPoints;
 }
 
 function isUserDeliverableArtifact(artifact: DesktopTaskDetail['artifacts'][number]) {

@@ -60,7 +60,7 @@ export const officialModelRouteSeeds: OfficialModelRouteSeed[] = [
     displayName: '官方通道 · 图片线路一',
     capability: 'IMAGE',
     status: 'ACTIVE',
-    pointPrice: 30,
+    pointPrice: 15,
     providerId: 'grsai',
     providerName: 'GRSAI',
     modelName: 'gpt-image-2',
@@ -76,7 +76,7 @@ export const officialModelRouteSeeds: OfficialModelRouteSeed[] = [
     displayName: '官方通道 · 图片线路二',
     capability: 'IMAGE',
     status: 'ACTIVE',
-    pointPrice: 40,
+    pointPrice: 25,
     providerId: 'grsai',
     providerName: 'GRSAI',
     modelName: 'nano-banana-2',
@@ -92,14 +92,20 @@ export const officialModelRouteSeeds: OfficialModelRouteSeed[] = [
     displayName: '官方通道 · 视频线路一',
     capability: 'VIDEO',
     status: 'ACTIVE',
-    pointPrice: 280,
+    pointPrice: 200,
     providerId: 'minimax',
     providerName: 'MiniMax',
     modelName: 'MiniMax-Hailuo-2.3-Fast',
     apiBaseUrl: 'https://api.minimaxi.com/v1',
     apiKeyEnvName: 'QIUAI_OFFICIAL_MINIMAX_API_KEY',
     providerConfig: {
-      mode: 'minimax_video'
+      mode: 'minimax_video',
+      pricing: {
+        durationPoints: {
+          '6': 200,
+          '10': 280
+        }
+      }
     },
     sortOrder: 50
   },
@@ -108,14 +114,20 @@ export const officialModelRouteSeeds: OfficialModelRouteSeed[] = [
     displayName: '官方通道 · 视频线路二',
     capability: 'VIDEO',
     status: 'ACTIVE',
-    pointPrice: 500,
+    pointPrice: 300,
     providerId: 'minimax',
     providerName: 'MiniMax',
     modelName: 'MiniMax-Hailuo-2.3',
     apiBaseUrl: 'https://api.minimaxi.com/v1',
     apiKeyEnvName: 'QIUAI_OFFICIAL_MINIMAX_API_KEY',
     providerConfig: {
-      mode: 'minimax_video'
+      mode: 'minimax_video',
+      pricing: {
+        durationPoints: {
+          '6': 300,
+          '10': 500
+        }
+      }
     },
     sortOrder: 60
   },
@@ -124,7 +136,7 @@ export const officialModelRouteSeeds: OfficialModelRouteSeed[] = [
     displayName: '官方通道 · 视频线路三',
     capability: 'VIDEO',
     status: 'DISABLED',
-    pointPrice: 900,
+    pointPrice: 0,
     providerId: 'minimax',
     providerName: 'MiniMax',
     modelName: 'MiniMax H3',
