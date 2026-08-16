@@ -3234,6 +3234,7 @@ export default function App() {
   const [modelForm] = Form.useForm<ModelFormValues>();
   const [toolSettingsForm] = Form.useForm<ToolSettingsFormValues>();
   const [onboardingForm] = Form.useForm<OnboardingFormValues>();
+  const [desktopAccessBindingForm] = Form.useForm<OnboardingFormValues>();
   const [desktopAccountForm] = Form.useForm<DesktopAccountFormValues>();
   const [roleConfigForm] = Form.useForm<RoleConfigFormValues>();
   const [runtimeModelQuickSwitchForm] = Form.useForm<RuntimeModelQuickSwitchFormValues>();
@@ -3250,6 +3251,8 @@ export default function App() {
     [documentAssistantCustomScenarioPresets]
   );
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [desktopAccessMode, setDesktopAccessMode] = useState<'account' | 'enterprise'>('account');
+  const [desktopAccountModalDismissed, setDesktopAccountModalDismissed] = useState(false);
   const [desktopAccountMode, setDesktopAccountMode] = useState<'login' | 'register'>('login');
   const [isDesktopAccountSubmitting, setIsDesktopAccountSubmitting] = useState(false);
   const [desktopAccountNotice, setDesktopAccountNotice] = useState('');
@@ -4601,6 +4604,19 @@ export default function App() {
     void window.qiuDesktop?.controlWindow(action);
   }
 
+  function openDesktopAccessModal(mode: 'account' | 'enterprise' = 'account') {
+    setDesktopAccessMode(mode);
+    setDesktopAccountModalDismissed(false);
+    setDesktopAccountNotice('');
+    setOnboardingNotice('');
+  }
+
+  function dismissDesktopAccessModal() {
+    setDesktopAccountModalDismissed(true);
+    setDesktopAccountNotice('');
+    setOnboardingNotice('');
+  }
+
   function openAccountModal(modal: AccountModalKey) {
     setAccountModal(modal);
     setSelectedLegalDocumentId('');
@@ -4703,7 +4719,31 @@ export default function App() {
       const boundState = await window.qiuDesktop.bindDesktopDevice(bindingCode);
       setRuntimeState(boundState);
       onboardingForm.resetFields();
+      setOnboardingNotice('');
       setOnboardingOpen(false);
+      setDesktopAccountModalDismissed(false);
+      message.success('企业绑定成功');
+    } catch (error) {
+      setOnboardingNotice(`绑定失败：${error instanceof Error ? error.message : 'unknown error'}`);
+    } finally {
+      setIsBindingDevice(false);
+    }
+  }
+
+  async function submitDesktopAccessBinding(values: OnboardingFormValues) {
+    const bindingCode = values.bindingCode.trim();
+    if (!bindingCode || !window.qiuDesktop) {
+      return;
+    }
+
+    setIsBindingDevice(true);
+    setOnboardingNotice('');
+    try {
+      const boundState = await window.qiuDesktop.bindDesktopDevice(bindingCode);
+      setRuntimeState(boundState);
+      desktopAccessBindingForm.resetFields();
+      setDesktopAccountModalDismissed(false);
+      message.success('企业绑定成功');
     } catch (error) {
       setOnboardingNotice(`绑定失败：${error instanceof Error ? error.message : 'unknown error'}`);
     } finally {
@@ -4745,6 +4785,7 @@ export default function App() {
       desktopAccountForm.resetFields();
       setDesktopAccountNotice('');
       setOnboardingOpen(false);
+      setDesktopAccountModalDismissed(false);
       setAccountModal(null);
       message.success(desktopAccountMode === 'login' ? '登录成功' : '注册成功，已进入免费版');
     } catch (error) {
@@ -5433,7 +5474,14 @@ export default function App() {
                 </div>
 
                 <Space wrap>
-                  {canBindEnterprise ? (
+                  {isDesktopAccountUnregistered ? (
+                    <Button
+                      type="primary"
+                      onClick={() => openDesktopAccessModal('account')}
+                    >
+                      登录/绑定
+                    </Button>
+                  ) : canBindEnterprise ? (
                     <Button
                       type="primary"
                       onClick={() => setOnboardingOpen(true)}
@@ -5539,7 +5587,17 @@ export default function App() {
           >
             购买中心
           </Button>
-          {canBindEnterprise ? (
+          {isDesktopAccountUnregistered ? (
+            <span className="tutorial-titlebar-bind-enterprise-target">
+              <Button
+                size="small"
+                type="primary"
+                onClick={() => openDesktopAccessModal('account')}
+              >
+                登录/绑定
+              </Button>
+            </span>
+          ) : canBindEnterprise ? (
             <span className="tutorial-titlebar-bind-enterprise-target">
               <Button
                 size="small"
@@ -6375,48 +6433,102 @@ export default function App() {
     const open =
       hasLoadedPersistedState &&
       Boolean(userAgreementStatus?.accepted) &&
-      isDesktopAccountUnregistered;
+      isDesktopAccountUnregistered &&
+      !desktopAccountModalDismissed;
     const isRegisterMode = desktopAccountMode === 'register';
+    const isEnterpriseAccessMode = desktopAccessMode === 'enterprise';
 
     return (
       <Modal
-        title={isRegisterMode ? '注册 QiuAI 账号' : '登录 QiuAI 账号'}
+        title={isEnterpriseAccessMode ? '绑定企业设备' : isRegisterMode ? '注册 QiuAI 账号' : '登录 QiuAI 账号'}
         open={open}
         width={520}
-        closable={false}
-        maskClosable={false}
+        closable
+        maskClosable
         destroyOnHidden={false}
+        onCancel={dismissDesktopAccessModal}
         footer={
           <Flex align="center" justify="space-between" gap={12} wrap="wrap">
-            <Button
-              type="link"
-              onClick={() => {
-                setDesktopAccountMode(isRegisterMode ? 'login' : 'register');
-                setDesktopAccountNotice('');
-              }}
-            >
-              {isRegisterMode ? '已有账号，去登录' : '没有账号，立即注册'}
-            </Button>
-            <Button
-              type="primary"
-              loading={isDesktopAccountSubmitting}
-              onClick={() => desktopAccountForm.submit()}
-            >
-              {isRegisterMode ? '注册并进入免费版' : '登录'}
-            </Button>
+            {isEnterpriseAccessMode ? (
+              <Button type="link" onClick={openEnterpriseLoginPage}>
+                进入企业端获取绑定码
+              </Button>
+            ) : (
+              <Button
+                type="link"
+                onClick={() => {
+                  setDesktopAccountMode(isRegisterMode ? 'login' : 'register');
+                  setDesktopAccountNotice('');
+                }}
+              >
+                {isRegisterMode ? '已有账号，去登录' : '没有账号，立即注册'}
+              </Button>
+            )}
+            <Space wrap>
+              <Button onClick={dismissDesktopAccessModal}>稍后</Button>
+              <Button danger onClick={() => handleWindowControl('close')}>
+                退出软件
+              </Button>
+              <Button
+                type="primary"
+                loading={isEnterpriseAccessMode ? isBindingDevice : isDesktopAccountSubmitting}
+                onClick={() => {
+                  if (isEnterpriseAccessMode) {
+                    desktopAccessBindingForm.submit();
+                    return;
+                  }
+                  desktopAccountForm.submit();
+                }}
+              >
+                {isEnterpriseAccessMode ? '绑定企业' : isRegisterMode ? '注册并进入免费版' : '登录'}
+              </Button>
+            </Space>
           </Flex>
         }
       >
-        <Form<DesktopAccountFormValues>
-          form={desktopAccountForm}
-          layout="vertical"
-          initialValues={{ rememberMe: true, acceptedTerms: false }}
-          onFinish={(values) => void submitDesktopAccount(values)}
-        >
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Typography.Text type="secondary">
-              请先登录或注册。注册后默认进入免费版，可在购买中心升级会员或购买 AI 点数。
-            </Typography.Text>
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Typography.Text type="secondary">
+            请先登录或注册。注册后默认进入免费版，可在购买中心升级会员或购买 AI 点数。
+          </Typography.Text>
+          <Radio.Group
+            value={desktopAccessMode}
+            optionType="button"
+            buttonStyle="solid"
+            onChange={(event) => {
+              setDesktopAccessMode(event.target.value as 'account' | 'enterprise');
+              setDesktopAccountNotice('');
+              setOnboardingNotice('');
+            }}
+          >
+            <Radio.Button value="account">账号登录</Radio.Button>
+            <Radio.Button value="enterprise">企业绑定</Radio.Button>
+          </Radio.Group>
+
+          {isEnterpriseAccessMode ? (
+            <Form<OnboardingFormValues>
+              form={desktopAccessBindingForm}
+              layout="vertical"
+              onFinish={(values) => void submitDesktopAccessBinding(values)}
+            >
+              <Form.Item
+                name="bindingCode"
+                label="企业绑定码"
+                rules={[{ required: true, message: '请输入桌面端绑定码' }]}
+              >
+                <Input placeholder="例如：QIU-ABCD-EFGH" />
+              </Form.Item>
+              <Typography.Text type="secondary">
+                输入企业管理员生成的绑定码后，这台电脑会同步企业套餐、AI 点数和可用模板。
+              </Typography.Text>
+              {onboardingNotice ? <Typography.Text type="danger">{onboardingNotice}</Typography.Text> : null}
+            </Form>
+          ) : (
+            <Form<DesktopAccountFormValues>
+              form={desktopAccountForm}
+              layout="vertical"
+              initialValues={{ rememberMe: true, acceptedTerms: false }}
+              onFinish={(values) => void submitDesktopAccount(values)}
+            >
             <Form.Item
               name="email"
               label="邮箱"
@@ -6471,8 +6583,9 @@ export default function App() {
             {desktopAccountNotice ? (
               <Typography.Text type="danger">{desktopAccountNotice}</Typography.Text>
             ) : null}
-          </Space>
-        </Form>
+            </Form>
+          )}
+        </Space>
       </Modal>
     );
   }
