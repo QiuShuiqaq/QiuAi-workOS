@@ -225,11 +225,11 @@ export function modelProfileSupportsRequiredCapabilities(
     return true;
   }
 
-  const isAudioTranscriptionProfile =
-    profile.purpose === 'audio' ||
-    inferredCapabilities.includes('audio_to_text') ||
-    capabilities.has('audio_to_text');
-  if (isAudioTranscriptionProfile && !required.includes('audio_to_text')) {
+  const isAudioTranscriptionOnlyProfile =
+    (inferredCapabilities.includes('audio_to_text') || capabilities.has('audio_to_text')) &&
+    !inferredCapabilities.includes('text_to_audio') &&
+    !capabilities.has('text_to_audio');
+  if (isAudioTranscriptionOnlyProfile && !required.includes('audio_to_text')) {
     return false;
   }
 
@@ -240,6 +240,7 @@ export function modelProfileSupportsRequiredCapabilities(
     ['video_generation', 'text_to_video', 'image_to_video'],
     ['video_understanding', 'video_text'],
     ['audio_to_text'],
+    ['text_to_audio'],
     ['embedding'],
     ['rerank']
   ];

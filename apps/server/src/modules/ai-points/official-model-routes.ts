@@ -3,6 +3,7 @@ export type OfficialRouteKey =
   | 'official-reasoning-1'
   | 'official-image-1'
   | 'official-image-2'
+  | 'official-audio-1'
   | 'official-video-1'
   | 'official-video-2'
   | 'official-video-3';
@@ -10,7 +11,7 @@ export type OfficialRouteKey =
 export interface OfficialModelRouteSeed {
   routeKey: OfficialRouteKey;
   displayName: string;
-  capability: 'TEXT' | 'REASONING' | 'IMAGE' | 'VIDEO';
+  capability: 'TEXT' | 'REASONING' | 'IMAGE' | 'VIDEO' | 'AUDIO';
   status: 'ACTIVE' | 'DISABLED';
   pointPrice: number;
   providerId: string;
@@ -86,6 +87,32 @@ export const officialModelRouteSeeds: OfficialModelRouteSeed[] = [
       mode: 'grsai_image'
     },
     sortOrder: 40
+  },
+  {
+    routeKey: 'official-audio-1',
+    displayName: '官方通道 · 口播线路一',
+    capability: 'AUDIO',
+    status: 'ACTIVE',
+    pointPrice: 10,
+    providerId: 'minimax',
+    providerName: 'MiniMax',
+    modelName: 'speech-02-turbo',
+    apiBaseUrl: 'https://api.minimaxi.com/v1',
+    apiKeyEnvName: 'QIUAI_OFFICIAL_MINIMAX_API_KEY',
+    providerConfig: {
+      mode: 'minimax_tts',
+      voicePresets: {
+        male_pro_1: 'Chinese (Mandarin)_Reliable_Executive',
+        male_pro_2: 'Chinese (Mandarin)_News_Anchor',
+        male_pro_3: 'Chinese (Mandarin)_Male_Announcer',
+        male_pro_4: 'Chinese (Mandarin)_Sincere_Adult',
+        female_pro_1: 'Chinese (Mandarin)_Sweet_Lady',
+        female_pro_2: 'Chinese (Mandarin)_Mature_Woman',
+        funny_1: 'Chinese (Mandarin)_Humorous_Elder',
+        funny_2: 'Chinese (Mandarin)_Cute_Spirit'
+      }
+    },
+    sortOrder: 45
   },
   {
     routeKey: 'official-video-1',

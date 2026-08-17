@@ -13,10 +13,16 @@ const sourceFilePath = path.join(tempDir, 'source.txt');
 const allowedRootPath = path.join(tempDir, 'allowed-root');
 const allowedFilePath = path.join(allowedRootPath, 'allowed.txt');
 const allowedVideoPath = path.join(allowedRootPath, 'demo.mp4');
+const allowedCoverPath = path.join(allowedRootPath, 'cover.png');
+const allowedVoiceoverPath = path.join(allowedRootPath, 'voiceover.mp3');
+const allowedWatermarkPath = path.join(allowedRootPath, 'watermark.png');
 mkdirSync(allowedRootPath, { recursive: true });
 writeFileSync(sourceFilePath, 'local source text', { encoding: 'utf8' });
 writeFileSync(allowedFilePath, 'allowed local source text', { encoding: 'utf8' });
 writeFileSync(allowedVideoPath, Buffer.from('fake-mp4'));
+writeFileSync(allowedCoverPath, Buffer.from('fake-png-cover'));
+writeFileSync(allowedVoiceoverPath, Buffer.from('fake-mp3-voiceover'));
+writeFileSync(allowedWatermarkPath, Buffer.from('fake-png-watermark'));
 
 const server = createServer((request, response) => {
   const chunks: Buffer[] = [];
@@ -625,6 +631,11 @@ const videoComposeWithoutFfmpegResult = await invokeDesktopTool(tempDir, {
   input: {
     videoPath: allowedVideoPath,
     cutPlan: [{ start: 0, end: 15 }],
+    coverPath: allowedCoverPath,
+    voiceoverPath: allowedVoiceoverPath,
+    watermarkPath: allowedWatermarkPath,
+    outputRatio: '9:16',
+    outputResolution: '720p',
     ffmpegPath: '__qiuai_missing_ffmpeg__'
   },
   allowedRootPaths: [allowedRootPath]

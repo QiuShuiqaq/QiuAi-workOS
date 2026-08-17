@@ -58,6 +58,14 @@ export async function invokeOfficialModelChat(
             responseFormat: request.videoGeneration.responseFormat
           }
         : undefined,
+      audioGeneration: request.audioGeneration
+        ? {
+            text: request.audioGeneration.text,
+            voicePresetId: request.audioGeneration.voicePresetId,
+            language: request.audioGeneration.language,
+            format: request.audioGeneration.format
+          }
+        : undefined,
       visionInputs: request.visionInputs?.map((input) => ({
         imageDataUrl: buildLocalImageDataUrl(input.imagePath),
         mimeType: input.mimeType

@@ -224,7 +224,7 @@ test('server role template catalog only exposes the approved production set', ()
     'core_ecommerce_copywriter_v1',
     'core_requirement_analyst_v1'
   ]);
-  assert.equal(expectedFactoryTemplateIds.length, 15);
+  assert.equal(expectedFactoryTemplateIds.length, 16);
   assert.equal(serverRoleTemplateCatalog.length, expectedTemplateIds.length);
   assert.deepEqual(serverRoleTemplateCatalog.map((template) => template.templateId), expectedTemplateIds);
 
@@ -266,6 +266,26 @@ test('server role template catalog only exposes the approved production set', ()
       .map((node) => node.config?.llmTaskType),
     ['structured_extraction', 'reasoning', 'text', 'text']
   );
+  const aiVideoProductionTemplate = templateById.get('factory_ai_video_production_v1');
+  assert.ok(aiVideoProductionTemplate, 'factory_ai_video_production_v1 must exist');
+  assert.equal(
+    readRecord(aiVideoProductionTemplate.dependencyManifestFactory)?.kind,
+    'ai_video_production_factory'
+  );
+  assert.equal(aiVideoProductionTemplate.applicationType, 'DIGITAL_FACTORY');
+  assert.equal(
+    aiVideoProductionTemplate.workflowGraph.nodes.some(
+      (node) => node.type === 'llm' && node.config?.llmTaskType === 'ai_video_production'
+    ),
+    true
+  );
+  assert.deepEqual(
+    buildRoleTemplateDependencyManifest({
+      workflowGraph: aiVideoProductionTemplate.workflowGraph,
+      generatedAt: '2026-08-17T00:00:00.000Z'
+    }).modelAssets.map((asset) => asset.modelProfileId),
+    ['qiu-asr-default', 'qiu-audio-generation-default', 'qiu-general-default']
+  );
 
   const factoryManifestKinds = new Set([
     'cross_border_product_image_factory',
@@ -280,6 +300,7 @@ test('server role template catalog only exposes the approved production set', ()
     'ecommerce_product_video_factory',
     'digital_spokesperson_video_factory',
     'ad_social_media_video_factory',
+    'ai_video_production_factory',
     'medical_case_video_screening_factory',
     'operation_video_factory',
     'academic_project_demo_factory'
@@ -358,7 +379,11 @@ test('server role template catalog only exposes the approved production set', ()
         `${template.templateId} must define a known factory manifest kind`
       );
       const batch = readRecord(factoryManifest.batch);
-      const expectedMaxItems = template.templateId === 'factory_academic_project_demo_v1' ? 5 : 50;
+      const expectedMaxItems = template.templateId === 'factory_academic_project_demo_v1'
+        ? 5
+        : template.templateId === 'factory_ai_video_production_v1'
+          ? 1
+          : 50;
       assert.equal(
         batch?.maxItems,
         expectedMaxItems,

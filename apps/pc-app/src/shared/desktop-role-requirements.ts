@@ -192,6 +192,7 @@ function isSemanticModelProfileId(profileId: string): boolean {
     'qiu-image-editing-default',
     'qiu-video-generation-default',
     'qiu-asr-default',
+    'qiu-audio-generation-default',
     'qiu-embedding-default',
     'qiu-rerank-default'
   ].includes(profileId.trim());
@@ -260,6 +261,7 @@ export function getRequiredCapabilitiesForSemanticProfileId(profileId: string): 
   if (profileId === 'qiu-image-editing-default') return ['image_editing', 'image_to_image'];
   if (profileId === 'qiu-video-generation-default') return ['video_generation', 'text_to_video', 'image_to_video'];
   if (profileId === 'qiu-asr-default') return ['audio_to_text'];
+  if (profileId === 'qiu-audio-generation-default') return ['text_to_audio'];
   if (profileId === 'qiu-embedding-default') return ['embedding'];
   if (profileId === 'qiu-rerank-default') return ['rerank'];
   if (profileId === 'qiu-reasoning-default') return ['reasoning_text', 'text'];
@@ -342,6 +344,7 @@ function getSemanticModelProfileIdForTaskType(taskType: string | undefined): str
   if (taskType === 'vision') return 'qiu-vision-default';
   if (taskType === 'reasoning') return 'qiu-reasoning-default';
   if (taskType === 'audio_transcription') return 'qiu-asr-default';
+  if (taskType === 'audio_generation') return 'qiu-audio-generation-default';
   if (taskType === 'image_generation') return 'qiu-image-generation-default';
   if (taskType === 'image_editing') return 'qiu-image-editing-default';
   if (taskType === 'video_generation') return 'qiu-video-generation-default';
@@ -380,7 +383,8 @@ function mapModelProfileIdToSemanticDefault(profileId: string): string {
   const normalized = profileId.trim().toLowerCase();
   if (!normalized) return '';
   if (normalized.startsWith('qiu-')) return profileId.trim();
-  if (normalized.includes('asr') || normalized.includes('speech') || normalized.includes('audio')) return 'qiu-asr-default';
+  if (normalized.includes('text_to_audio') || normalized.includes('tts') || normalized.includes('text-to-speech') || normalized.includes('speech_generation')) return 'qiu-audio-generation-default';
+  if (normalized.includes('asr') || normalized.includes('speech_to_text') || normalized.includes('speech-to-text') || normalized.includes('audio_to_text') || normalized.includes('transcription')) return 'qiu-asr-default';
   if (
     normalized.includes('reason') ||
     normalized.includes('reasoner') ||
@@ -436,6 +440,26 @@ function inferModelProviderFromProfileId(profileId: string): {
       apiBaseUrl: 'https://api.deepseek.com',
       temperature: normalized.includes('reason') || normalized.includes('pro') ? 0.2 : 0.4,
       maxTokens: normalized.includes('reason') || normalized.includes('pro') ? 8192 : 4096
+    };
+  }
+
+  if (
+    normalized.includes('audio-generation') ||
+    normalized.includes('audio_generation') ||
+    normalized.includes('text-to-audio') ||
+    normalized.includes('text_to_audio') ||
+    normalized.includes('text-to-speech') ||
+    normalized.includes('text_to_speech') ||
+    normalized.includes('speech-generation') ||
+    normalized.includes('speech_generation') ||
+    normalized.includes('tts')
+  ) {
+    return {
+      providerId: 'provider-pending',
+      providerName: 'Pending Audio Provider',
+      modelName: 'text-to-speech',
+      temperature: 0.2,
+      maxTokens: 4096
     };
   }
 

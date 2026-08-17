@@ -5289,6 +5289,305 @@ assert.ok(
   )
 );
 
+const aiVideoProductionRolePackage: RolePackageManifest = {
+  roleCode: 'ai-video-production-factory',
+  applicationType: 'digital_factory',
+  name: 'AI Video Production Factory',
+  version: '1.0.0',
+  workflowGraph: {
+    version: '1.0.0',
+    entryNodeId: 'start',
+    runtimePolicy: {
+      maxNodeExecutions: 6,
+      maxLoopIterations: 2,
+      requireApprovalBeforeTools: false
+    },
+    nodes: [
+      { id: 'start', type: 'start', name: 'Start' },
+      {
+        id: 'factory_input',
+        type: 'input',
+        name: 'Receive source video',
+        inputVariables: ['start.text', 'start.files'],
+        outputVariables: ['task_brief']
+      },
+      {
+        id: 'produce_video',
+        type: 'llm',
+        name: 'Produce MP4',
+        modelProfileId: 'qiu-general-default',
+        inputVariables: ['factory_request', 'start.files', 'task_brief'],
+        outputVariables: ['ai_video_production_result', 'generated_video_path', 'video_production_summary'],
+        config: {
+          llmTaskType: 'ai_video_production',
+          outputMode: 'json',
+          requiredModelProfileIds: ['qiu-asr-default', 'qiu-audio-generation-default']
+        }
+      },
+      {
+        id: 'factory_output',
+        type: 'output',
+        name: 'Return MP4',
+        inputVariables: ['ai_video_production_result', 'generated_video_path', 'video_production_summary'],
+        outputVariables: ['final_answer']
+      }
+    ],
+    edges: [
+      { id: 'start-input', sourceNodeId: 'start', targetNodeId: 'factory_input' },
+      { id: 'input-produce', sourceNodeId: 'factory_input', targetNodeId: 'produce_video' },
+      { id: 'produce-output', sourceNodeId: 'produce_video', targetNodeId: 'factory_output' }
+    ]
+  },
+  modelProfileIds: ['qiu-general-default', 'qiu-asr-default', 'qiu-audio-generation-default'],
+  toolIds: ['video-processing', 'local-filesystem'],
+  requiredKnowledgeSources: [],
+  defaultTaskTypes: ['ai_video_production'],
+  syncPolicy: 'summary_only'
+};
+const aiVideoProductionAsrProfile: ModelProfile = {
+  id: 'qiu-asr-default',
+  providerId: 'asr-provider',
+  providerName: 'ASR Provider',
+  modelName: 'asr-line-1',
+  purpose: 'audio',
+  capabilities: ['audio_to_text'],
+  apiBaseUrl: 'https://asr.example/v1',
+  apiKey: 'asr-key'
+};
+let aiVideoProductionAsrCalls = 0;
+let aiVideoProductionAnalysisCalls = 0;
+let aiVideoProductionVoiceCalls = 0;
+let aiVideoProductionDownloadCalls = 0;
+let aiVideoProductionComposeCalls = 0;
+const aiVideoProductionTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-ai-video-production-001',
+    roleCode: aiVideoProductionRolePackage.roleCode,
+    roleName: aiVideoProductionRolePackage.name,
+    title: 'Make a Douyin product demo clip',
+    input: JSON.stringify({
+      factory_request: {
+        factoryKind: 'ai_video_production_factory',
+        platform: 'douyin',
+        outputRatio: '9:16',
+        outputResolution: '720p',
+        targetDurationSeconds: 60,
+        voicePresetId: 'male_pro_1',
+        asr: {
+          modelProfileId: 'qiu-asr-default',
+          language: 'zh',
+          dialect: 'auto',
+          retryDelaysMs: [0]
+        },
+        voice: {
+          modelProfileId: 'qiu-audio-generation-default'
+        },
+        materials: {
+          introPath: 'C:\\QiuAI\\assets\\intro.mp4',
+          coverPath: 'C:\\QiuAI\\assets\\cover.png',
+          watermarkPath: 'C:\\QiuAI\\assets\\watermark.png'
+        },
+        instruction: 'Keep the strongest AI result segment.'
+      }
+    }),
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0,
+    executionContext: {
+      modelProfileIds: ['qiu-general-default', 'qiu-asr-default', 'qiu-audio-generation-default'],
+      toolIds: ['video-processing', 'local-filesystem'],
+      knowledgeBindingIds: [],
+      attachmentPaths: ['C:\\QiuAI\\factory\\source-recording.mp4']
+    }
+  }),
+  rolePackage: aiVideoProductionRolePackage,
+  modelProfiles: modelProfiles.concat([
+    aiVideoProductionAsrProfile,
+    getOfficialPreflightModelProfile('qiu-official-audio-1')
+  ]),
+  roleModelCredentialBindings: [
+    {
+      roleCode: aiVideoProductionRolePackage.roleCode,
+      modelProfileId: 'qiu-audio-generation-default',
+      runtimeModelProfileId: 'qiu-official-audio-1',
+      mode: 'provider_default',
+      updatedAt: '2026-08-17T00:00:00.000Z'
+    }
+  ],
+  tools,
+  workspaceId: 'workspace-ai-video-production',
+  enabledModelProfileIds: ['qiu-general-default', 'qiu-asr-default', 'qiu-official-audio-1'],
+  enabledToolIds: ['video-processing', 'local-filesystem'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    if (request.taskKind === 'audio_transcription') {
+      aiVideoProductionAsrCalls += 1;
+      assert.equal(request.profile.id, 'qiu-asr-default');
+      assert.equal(request.audioTranscription?.audioPath, 'C:\\QiuAI\\workspace\\audio\\source-recording.mp3');
+      assert.match(request.audioTranscription?.prompt ?? '', /软件录屏/);
+      return {
+        provider: request.profile.providerName,
+        modelName: request.profile.modelName,
+        content: [
+          '00:00-00:12 Introduce QiuAI WorkOS.',
+          '00:13-00:38 Show the AI worker setup.',
+          '00:39-01:10 Show the generated product image result.'
+        ].join('\n')
+      };
+    }
+
+    if (request.taskKind === 'audio_generation') {
+      aiVideoProductionVoiceCalls += 1;
+      assert.equal(request.profile.id, 'qiu-official-audio-1');
+      assert.equal(request.profile.billingMode, 'official_points');
+      assert.equal(request.audioGeneration?.voicePresetId, 'male_pro_1');
+      assert.match(request.audioGeneration?.text ?? '', /AI worker result/);
+      return {
+        provider: request.profile.providerName,
+        modelName: request.profile.modelName,
+        content: JSON.stringify({ remoteUrl: 'https://cdn.example.test/voice/ai-video-production.mp3' }),
+        artifacts: [
+          {
+            type: 'file',
+            remoteUrl: 'https://cdn.example.test/voice/ai-video-production.mp3',
+            mimeType: 'audio/mpeg'
+          }
+        ]
+      };
+    }
+
+    aiVideoProductionAnalysisCalls += 1;
+    assert.equal(request.profile.id, 'qiu-general-default');
+    const prompt = request.messages.map((message) => message.content).join('\n');
+    assert.match(prompt, /目标平台：抖音宣传/);
+    assert.match(prompt, /目标画幅：9:16/);
+    assert.match(prompt, /Keep the strongest AI result segment/);
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: JSON.stringify({
+        chapters: [
+          { title: 'Setup', start: 13, end: 38 },
+          { title: 'Result', start: 39, end: 70 }
+        ],
+        highlightSegments: [
+          { start: 39, end: 58, reason: 'Shows the AI worker result.' }
+        ],
+        cutPlan: [
+          { start: 13, end: 38, label: 'Setup', reason: 'Context for the workflow.' },
+          { start: 39, end: 58, label: 'Result', reason: 'Shows the strongest result.' }
+        ],
+        narrationScript: 'This clip shows the AI worker result and why it saves time.'
+      }),
+      inputTokens: 320,
+      outputTokens: 180
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    if (request.action === 'video.probe') {
+      assert.equal(request.toolId, 'video-processing');
+      assert.equal(request.input.videoPath, 'C:\\QiuAI\\factory\\source-recording.mp4');
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          width: 1920,
+          height: 1080,
+          durationSeconds: 90,
+          hasVideo: true,
+          hasAudio: true,
+          audioStreamCount: 1
+        }
+      };
+    }
+
+    if (request.action === 'video.extract_audio') {
+      assert.equal(request.toolId, 'video-processing');
+      assert.equal(request.input.videoPath, 'C:\\QiuAI\\factory\\source-recording.mp4');
+      assert.equal(request.input.audioFormat, 'mp3');
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          localPath: 'C:\\QiuAI\\workspace\\audio\\source-recording.mp3'
+        }
+      };
+    }
+
+    if (request.action === 'filesystem.download_remote_file') {
+      aiVideoProductionDownloadCalls += 1;
+      assert.equal(request.toolId, 'local-filesystem');
+      assert.equal(request.input.url, 'https://cdn.example.test/voice/ai-video-production.mp3');
+      assert.equal(request.input.folder, 'ai-video-production-audio');
+      assert.equal(request.input.mediaKind, 'file');
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          localPath: 'C:\\QiuAI\\workspace\\audio\\voiceover.mp3'
+        }
+      };
+    }
+
+    aiVideoProductionComposeCalls += 1;
+    assert.equal(request.action, 'video.compose_clips');
+    assert.equal(request.toolId, 'video-processing');
+    assert.equal(request.input.videoPath, 'C:\\QiuAI\\factory\\source-recording.mp4');
+    assert.equal(request.input.voiceoverPath, 'C:\\QiuAI\\workspace\\audio\\voiceover.mp3');
+    assert.equal(request.input.introPath, 'C:\\QiuAI\\assets\\intro.mp4');
+    assert.equal(request.input.coverPath, 'C:\\QiuAI\\assets\\cover.png');
+    assert.equal(request.input.watermarkPath, 'C:\\QiuAI\\assets\\watermark.png');
+    assert.equal(request.input.outputRatio, '9:16');
+    assert.equal(request.input.outputResolution, '720p');
+    assert.deepEqual(request.input.cutPlan, [
+      { start: 13, end: 38, label: 'Setup', reason: 'Context for the workflow.' },
+      { start: 39, end: 58, label: 'Result', reason: 'Shows the strongest result.' }
+    ]);
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\ai-video-production\\douyin-final.mp4'
+      }
+    };
+  },
+  completedAt: '2026-08-17T10:00:00.000Z'
+});
+
+assert.equal(
+  aiVideoProductionTask.task.state,
+  'completed',
+  JSON.stringify(aiVideoProductionTask.task.executionLogs.slice(-8), null, 2)
+);
+assert.equal(aiVideoProductionAsrCalls, 1);
+assert.equal(aiVideoProductionAnalysisCalls, 1);
+assert.equal(aiVideoProductionVoiceCalls, 1);
+assert.equal(aiVideoProductionDownloadCalls, 1);
+assert.equal(aiVideoProductionComposeCalls, 1);
+assert.equal(aiVideoProductionTask.task.artifactCount, 1);
+assert.equal(aiVideoProductionTask.task.factoryOutputs?.length, 1);
+assert.equal(aiVideoProductionTask.task.factoryOutputs?.[0]?.factoryKind, 'ai_video_production_factory');
+assert.equal(aiVideoProductionTask.task.factoryOutputs?.[0]?.kind, 'video');
+assert.equal(aiVideoProductionTask.task.factoryOutputs?.[0]?.outputPath, 'C:\\QiuAI\\workspace\\ai-video-production\\douyin-final.mp4');
+assert.ok(
+  aiVideoProductionTask.task.artifacts.some(
+    (artifact) => artifact.type === 'video' && artifact.localPath?.endsWith('douyin-final.mp4')
+  )
+);
+assert.equal(
+  aiVideoProductionTask.task.executionLogs.some((log) => log.eventType === 'MODEL_API_CONFIG_MISSING'),
+  false
+);
+assert.ok(
+  aiVideoProductionTask.task.executionLogs.some(
+    (log) => log.eventType === 'WORKFLOW_RUNTIME_AI_VIDEO_PRODUCTION_COMPLETED'
+  )
+);
+
 const officialModelPreflightCases = [
   {
     caseId: 'official-text-employee',

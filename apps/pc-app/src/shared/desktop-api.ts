@@ -237,7 +237,7 @@ export interface DesktopAiPointOverview {
   routes: Array<{
     routeKey: string;
     displayName: string;
-    capability: 'text' | 'reasoning' | 'image' | 'video';
+    capability: 'text' | 'reasoning' | 'image' | 'video' | 'audio';
     status: 'active' | 'disabled';
     pointPrice: number;
     pointPricesByDurationSeconds?: Record<string, number>;
@@ -398,7 +398,7 @@ export interface DesktopModelChatRequest {
   profile: ModelProfile;
   messages: DesktopModelChatMessage[];
   timeoutMs?: number;
-  taskKind?: 'chat' | 'image_generation' | 'video_generation' | 'audio_transcription';
+  taskKind?: 'chat' | 'image_generation' | 'video_generation' | 'audio_transcription' | 'audio_generation';
   visionInputs?: Array<{
     imagePath: string;
     mimeType?: string;
@@ -428,6 +428,12 @@ export interface DesktopModelChatRequest {
     dialect?: string;
     prompt?: string;
     responseFormat?: 'json' | 'text';
+  };
+  audioGeneration?: {
+    text: string;
+    voicePresetId: string;
+    language?: string;
+    format?: 'mp3';
   };
 }
 

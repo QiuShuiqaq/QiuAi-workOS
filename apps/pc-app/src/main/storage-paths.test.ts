@@ -11,17 +11,16 @@ import {
 const installRoot = mkdtempSync(path.join(os.tmpdir(), 'qiuai-workos-install-'));
 const roamingRoot = mkdtempSync(path.join(os.tmpdir(), 'qiuai-workos-roaming-'));
 
-const followInstall = resolveDesktopStoragePathInfo({
+const packagedStorage = resolveDesktopStoragePathInfo({
   isPackaged: true,
   processExecPath: path.join(installRoot, 'QiuAI WorkOS.exe'),
   homeDir: os.homedir(),
   appDataPath: roamingRoot
 });
 
-assert.equal(followInstall.installPath, installRoot);
-assert.equal(followInstall.storageMode, 'follow_install_dir');
-assert.equal(followInstall.dataPath, path.join(installRoot, 'data'));
-assert.ok(existsSync(followInstall.dataPath));
+assert.equal(packagedStorage.installPath, installRoot);
+assert.equal(packagedStorage.storageMode, 'fallback_user_dir');
+assert.equal(packagedStorage.dataPath, path.join(roamingRoot, 'QiuAI WorkOS'));
 
 const blockedInstallRoot = mkdtempSync(path.join(os.tmpdir(), 'qiuai-workos-blocked-'));
 writeFileSync(path.join(blockedInstallRoot, 'data'), 'blocked', { encoding: 'utf8' });
@@ -79,7 +78,7 @@ const preparedStorage = prepareDesktopStoragePathInfo({
 const preparedPointerPath = path.join(preparedRoamingRoot, 'QiuAI WorkOS', 'storage-location.json');
 const preparedPointer = JSON.parse(readFileSync(preparedPointerPath, 'utf8')) as { dataPath?: string };
 
-assert.equal(preparedStorage.storageMode, 'follow_install_dir');
+assert.equal(preparedStorage.storageMode, 'fallback_user_dir');
 assert.equal(preparedPointer.dataPath, preparedStorage.dataPath);
 
 const previousDataRoot = mkdtempSync(path.join(os.tmpdir(), 'qiuai-workos-previous-data-'));
@@ -148,7 +147,7 @@ writeFileSync(
 );
 
 const existingTargetInstallRoot = mkdtempSync(path.join(os.tmpdir(), 'qiuai-workos-existing-install-'));
-const existingTargetDataPath = path.join(existingTargetInstallRoot, 'data');
+const existingTargetDataPath = path.join(existingTargetRoamingRoot, 'QiuAI WorkOS');
 mkdirSync(existingTargetDataPath, { recursive: true });
 writeFileSync(path.join(existingTargetDataPath, 'runtime-identity.json'), 'target-identity', { encoding: 'utf8' });
 
@@ -160,5 +159,65 @@ const existingTargetStorage = prepareDesktopStoragePathInfo({
 });
 
 assert.equal(readFileSync(path.join(existingTargetStorage.dataPath, 'runtime-identity.json'), 'utf8'), 'target-identity');
+
+const backupMigrationRoamingRoot = mkdtempSync(path.join(os.tmpdir(), 'qiuai-workos-backup-migration-roaming-'));
+const backupMigrationInstallRoot = mkdtempSync(path.join(os.tmpdir(), 'qiuai-workos-backup-migration-install-'));
+const backupMigrationTargetRoot = path.join(backupMigrationRoamingRoot, 'QiuAI WorkOS');
+const installerBackupRoot = path.join(backupMigrationTargetRoot, 'install-data-backup');
+mkdirSync(backupMigrationTargetRoot, { recursive: true });
+mkdirSync(installerBackupRoot, { recursive: true });
+writeFileSync(
+  path.join(backupMigrationTargetRoot, 'runtime-identity.json'),
+  `${JSON.stringify(
+    {
+      runtimeId: 'runtime-target',
+      deviceId: 'device-target',
+      workspaceId: 'workspace_pending_login',
+      createdAt: '2026-08-16T00:00:00.000Z'
+    },
+    null,
+    2
+  )}\n`,
+  { encoding: 'utf8' }
+);
+writeFileSync(
+  path.join(installerBackupRoot, 'runtime-identity.json'),
+  `${JSON.stringify(
+    {
+      runtimeId: 'runtime-source',
+      deviceId: 'device-source',
+      workspaceId: 'workspace-account',
+      deviceToken: 'source-device-token',
+      createdAt: '2026-08-15T00:00:00.000Z'
+    },
+    null,
+    2
+  )}\n`,
+  { encoding: 'utf8' }
+);
+mkdirSync(path.join(installerBackupRoot, 'workspaces', 'workspace-account', 'state'), { recursive: true });
+writeFileSync(
+  path.join(installerBackupRoot, 'workspaces', 'workspace-account', 'state', 'workspace-profile.json'),
+  '{}\n',
+  { encoding: 'utf8' }
+);
+
+const backupMigratedStorage = prepareDesktopStoragePathInfo({
+  isPackaged: true,
+  processExecPath: path.join(backupMigrationInstallRoot, 'QiuAI WorkOS.exe'),
+  homeDir: os.homedir(),
+  appDataPath: backupMigrationRoamingRoot
+});
+const backupMigratedIdentity = JSON.parse(
+  readFileSync(path.join(backupMigratedStorage.dataPath, 'runtime-identity.json'), 'utf8')
+) as { workspaceId?: string; deviceToken?: string };
+
+assert.equal(backupMigratedIdentity.workspaceId, 'workspace-account');
+assert.equal(backupMigratedIdentity.deviceToken, 'source-device-token');
+assert.ok(
+  existsSync(
+    path.join(backupMigratedStorage.dataPath, 'workspaces', 'workspace-account', 'state', 'workspace-profile.json')
+  )
+);
 
 console.log('Desktop storage path resolution passed.');

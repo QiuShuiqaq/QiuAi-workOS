@@ -10,6 +10,7 @@ export const defaultOfficialRuntimeModelBindings = [
   ['qiu-reasoning-default', 'qiu-official-reasoning-1'],
   ['qiu-image-generation-default', 'qiu-official-image-1'],
   ['qiu-image-editing-default', 'qiu-official-image-1'],
+  ['qiu-audio-generation-default', 'qiu-official-audio-1'],
   ['qiu-video-generation-default', 'qiu-official-video-2']
 ] as const;
 

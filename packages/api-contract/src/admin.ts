@@ -56,7 +56,7 @@ export interface UpdateAdminPlanResponse {
   data: AdminPlanDetail;
 }
 
-export type AdminOfficialModelRouteCapability = 'text' | 'reasoning' | 'image' | 'video';
+export type AdminOfficialModelRouteCapability = 'text' | 'reasoning' | 'image' | 'video' | 'audio';
 export type AdminOfficialModelRouteStatus = 'active' | 'disabled';
 export type AdminOfficialModelApiKeyStatus = 'active' | 'disabled' | 'cooldown';
 

@@ -77,6 +77,19 @@ export const officialModelProfiles: ModelProfile[] = [
     monthlyBudgetCents: 0
   },
   {
+    id: 'qiu-official-audio-1',
+    providerId: 'qiuai-official',
+    providerName: 'QiuAI官方通道',
+    modelName: '口播线路一',
+    purpose: 'audio',
+    billingMode: 'official_points',
+    officialRouteKey: 'official-audio-1',
+    capabilities: ['text_to_audio'],
+    temperature: 0.2,
+    maxTokens: 4096,
+    monthlyBudgetCents: 0
+  },
+  {
     id: 'qiu-official-video-1',
     providerId: 'qiuai-official',
     providerName: 'QiuAI官方通道',
@@ -199,6 +212,17 @@ const semanticModelProfiles: ModelProfile[] = [
     modelName: 'speech-to-text',
     purpose: 'audio',
     capabilities: ['audio_to_text'],
+    temperature: 0.2,
+    maxTokens: 4096,
+    monthlyBudgetCents: 0
+  },
+  {
+    id: 'qiu-audio-generation-default',
+    providerId: 'provider-pending',
+    providerName: '待配置口播模型供应商',
+    modelName: 'text-to-speech',
+    purpose: 'audio',
+    capabilities: ['text_to_audio'],
     temperature: 0.2,
     maxTokens: 4096,
     monthlyBudgetCents: 0

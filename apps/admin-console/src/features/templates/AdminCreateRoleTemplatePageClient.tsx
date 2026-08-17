@@ -113,7 +113,9 @@ type WorkflowLlmTaskType =
   | 'embedding'
   | 'rerank'
   | 'audio_transcription'
+  | 'audio_generation'
   | 'video_screening_batch'
+  | 'ai_video_production'
   | 'operation_video_batch';
 type WorkflowDataMode = 'assign' | 'template' | 'code';
 type WorkflowCanvasPosition = { x: number; y: number };
@@ -580,10 +582,24 @@ const llmTaskTypeOptions: Array<{
     defaultOutputMode: 'text'
   },
   {
+    value: 'audio_generation',
+    label: '生成口播',
+    description: '把文本脚本转换成口播音频。',
+    requiredCapabilities: ['text_to_audio'],
+    defaultOutputMode: 'json'
+  },
+  {
     value: 'video_screening_batch',
     label: '视频筛选批处理',
     description: '按筛选规则批量处理视频，输出筛选、评分、转写、风险和可选剪辑结果。',
     requiredCapabilities: ['audio_to_text', 'text', 'video_processing', 'spreadsheet_edit'],
+    defaultOutputMode: 'json'
+  },
+  {
+    value: 'ai_video_production',
+    label: 'AI制作视频',
+    description: '按 ASR、内容分析、口播和本地视频处理生成一个 MP4 成品。',
+    requiredCapabilities: ['text'],
     defaultOutputMode: 'json'
   },
   {
@@ -1226,6 +1242,7 @@ function readWorkflowLlmTaskOption(taskType: WorkflowLlmTaskType) {
 function getDefaultModelProfileIdForLlmTask(taskType: WorkflowLlmTaskType): string {
   if (taskType === 'vision') return 'qiu-vision-default';
   if (taskType === 'audio_transcription') return 'qiu-asr-default';
+  if (taskType === 'audio_generation') return 'qiu-audio-generation-default';
   if (taskType === 'image_generation') return 'qiu-image-generation-default';
   if (taskType === 'image_editing') return 'qiu-image-editing-default';
   if (taskType === 'video_generation') return 'qiu-video-generation-default';
@@ -1257,7 +1274,7 @@ function modelAssetSupportsLlmTask(asset: AssetDefinitionDetail, taskType: Workf
 }
 
 function fallbackModelOptionSupportsLlmTask(option: { value: string }, taskType: WorkflowLlmTaskType) {
-  if (taskType === 'text' || taskType === 'long_document') {
+  if (taskType === 'text' || taskType === 'long_document' || taskType === 'ai_video_production') {
     return !option.value.includes('vision') && !option.value.includes('reasoning');
   }
   if (taskType === 'operation_video_batch') {
@@ -1534,7 +1551,8 @@ function mapModelProfileIdToSemanticDefault(profileId: string): string {
   const normalized = profileId.trim().toLowerCase();
   if (!normalized) return '';
   if (normalized.startsWith('qiu-')) return profileId.trim();
-  if (normalized.includes('asr') || normalized.includes('speech') || normalized.includes('audio')) return 'qiu-asr-default';
+  if (normalized.includes('text_to_audio') || normalized.includes('tts') || normalized.includes('text-to-speech') || normalized.includes('speech_generation')) return 'qiu-audio-generation-default';
+  if (normalized.includes('asr') || normalized.includes('speech_to_text') || normalized.includes('speech-to-text') || normalized.includes('audio_to_text') || normalized.includes('transcription')) return 'qiu-asr-default';
   if (
     normalized.includes('reason') ||
     normalized.includes('reasoner') ||

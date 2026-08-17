@@ -153,6 +153,10 @@ const asrProfile = createPlaceholderModelProfile('qiu-asr-default');
 assert.equal(asrProfile.purpose, 'audio');
 assert.ok(asrProfile.capabilities?.includes('audio_to_text'));
 
+const audioGenerationProfile = createPlaceholderModelProfile('qiu-audio-generation-default');
+assert.equal(audioGenerationProfile.purpose, 'audio');
+assert.ok(audioGenerationProfile.capabilities?.includes('text_to_audio'));
+
 assert.deepEqual(readRequiredModelProfileIdsForRolePackage(rolePackage), [
   'qiu-general-default'
 ]);
@@ -753,6 +757,59 @@ assert.equal(officialImageEditingStatus?.runtimeProfile?.id, 'qiu-official-image
 assert.equal(officialImageEditingStatus?.configured, true);
 assert.equal(officialImageEditingStatus?.enabled, true);
 assert.equal(officialImageEditingStatus?.ready, true);
+
+const officialAudioRolePackage: RolePackageManifest = {
+  ...imageFactoryRolePackage,
+  roleCode: 'official-audio-factory',
+  workflowGraph: {
+    version: '1.0.0',
+    entryNodeId: 'start',
+    nodes: [
+      { id: 'start', type: 'start', name: 'Start' },
+      {
+        id: 'generate_audio',
+        type: 'llm',
+        name: 'Generate audio',
+        config: {
+          llmTaskType: 'audio_generation'
+        }
+      }
+    ],
+    edges: [
+      {
+        id: 'start-generate',
+        sourceNodeId: 'start',
+        targetNodeId: 'generate_audio',
+        condition: { type: 'always' }
+      }
+    ]
+  },
+  modelProfileIds: ['qiu-audio-generation-default']
+};
+const officialAudioStatuses = getRoleModelRuntimeRequirementStatuses(
+  [audioGenerationProfile, ...officialModelProfiles],
+  ['qiu-audio-generation-default', 'qiu-official-audio-1'],
+  officialAudioRolePackage,
+  {
+    roleCode: officialAudioRolePackage.roleCode,
+    roleBindings: [
+      {
+        roleCode: officialAudioRolePackage.roleCode,
+        modelProfileId: 'qiu-audio-generation-default',
+        runtimeModelProfileId: 'qiu-official-audio-1',
+        mode: 'provider_default',
+        updatedAt: '2026-08-17T00:00:00.000Z'
+      }
+    ]
+  }
+);
+const officialAudioStatus = officialAudioStatuses.find(
+  (status) => status.profile.id === 'qiu-audio-generation-default'
+);
+assert.equal(officialAudioStatus?.runtimeProfile?.id, 'qiu-official-audio-1');
+assert.equal(officialAudioStatus?.configured, true);
+assert.equal(officialAudioStatus?.enabled, true);
+assert.equal(officialAudioStatus?.ready, true);
 
 const officialVideoFactoryPackage: RolePackageManifest = {
   ...imageFactoryRolePackage,

@@ -517,7 +517,14 @@ export const qiuaiToolActions: ToolActionDefinition[] = [
     description: '根据 cutPlan 把原视频剪辑成新的 MP4 文件。',
     input: [
       { key: 'videoPath', label: '视频路径', type: 'video', required: true },
-      { key: 'cutPlan', label: '剪辑方案', type: 'json', required: true }
+      { key: 'cutPlan', label: '剪辑方案', type: 'json', required: true },
+      { key: 'voiceoverPath', label: 'Voiceover audio path', type: 'file' },
+      { key: 'coverPath', label: 'Cover PNG path', type: 'image' },
+      { key: 'introPath', label: 'Intro MP4 path', type: 'video' },
+      { key: 'outroPath', label: 'Outro MP4 path', type: 'video' },
+      { key: 'watermarkPath', label: 'Watermark PNG path', type: 'image' },
+      { key: 'outputRatio', label: 'Output ratio', type: 'text' },
+      { key: 'outputResolution', label: 'Output resolution', type: 'text' }
     ],
     output: [
       { key: 'artifact', label: 'MP4 文件', type: 'artifact' }
@@ -531,6 +538,14 @@ export const qiuaiToolActions: ToolActionDefinition[] = [
     uiFields: [
       { key: 'videoPath', label: '视频路径', placeholder: '$runtime.current_item.localPath' },
       { key: 'cutPlan', label: '剪辑方案 JSON', type: 'textarea', format: 'json', placeholder: '[{"start":0,"end":15}]' },
+
+      { key: 'voiceoverPath', label: 'Voiceover audio path' },
+      { key: 'coverPath', label: 'Cover PNG path' },
+      { key: 'introPath', label: 'Intro MP4 path' },
+      { key: 'outroPath', label: 'Outro MP4 path' },
+      { key: 'watermarkPath', label: 'Watermark PNG path' },
+      { key: 'outputRatio', label: 'Output ratio' },
+      { key: 'outputResolution', label: 'Output resolution' },
       { key: 'folder', label: '保存目录' },
       { key: 'fileName', label: '文件名' }
     ],

@@ -18,7 +18,7 @@ import { isDatabasePersistenceEnabled } from '../../shared/persistence/persisten
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { officialModelRouteSeeds } from './official-model-routes';
 
-type OfficialCapability = 'TEXT' | 'REASONING' | 'IMAGE' | 'VIDEO';
+type OfficialCapability = 'TEXT' | 'REASONING' | 'IMAGE' | 'VIDEO' | 'AUDIO';
 type OfficialRouteStatus = 'ACTIVE' | 'DISABLED';
 type AiPointCreditBucketSourceType =
   | 'SUBSCRIPTION_MONTHLY'
@@ -65,7 +65,7 @@ interface OfficialInvokeRequest {
   officialRouteKey: string;
   messages: OfficialMessage[];
   timeoutMs?: number;
-  taskKind?: 'chat' | 'image_generation' | 'video_generation' | 'audio_transcription';
+  taskKind?: 'chat' | 'image_generation' | 'video_generation' | 'audio_transcription' | 'audio_generation';
   visionInputs?: Array<{
     imageDataUrl?: string;
     mimeType?: string;
@@ -87,6 +87,12 @@ interface OfficialInvokeRequest {
     durationSeconds?: number;
     aspectRatio?: string;
     responseFormat?: 'url';
+  };
+  audioGeneration?: {
+    text: string;
+    voicePresetId: string;
+    language?: string;
+    format?: 'mp3';
   };
 }
 
@@ -136,6 +142,7 @@ const personalMemberMonthlyAiPoints = 1500;
 const officialRouteQueueWaitMsByCapability: Record<OfficialCapability, number> = {
   TEXT: 10_000,
   REASONING: 10_000,
+  AUDIO: 30_000,
   IMAGE: 60_000,
   VIDEO: 60_000
 };
@@ -1805,6 +1812,9 @@ export class AiPointsService {
     if (mode === 'minimax_video') {
       return this.invokeMiniMaxVideo(route, request, apiKey);
     }
+    if (mode === 'minimax_tts') {
+      return this.invokeMiniMaxTts(route, request, apiKey);
+    }
 
     throw new OfficialProviderUnavailableError('Official route adapter is not available.');
   }
@@ -2011,6 +2021,53 @@ export class AiPointsService {
     });
   }
 
+  private async invokeMiniMaxTts(
+    route: OfficialRouteRecord,
+    request: OfficialInvokeRequest,
+    apiKey: string
+  ): Promise<OfficialInvokeProviderResponse> {
+    const audioRequest = request.audioGeneration;
+    const text = audioRequest?.text?.trim() || lastUserMessageContent(request.messages);
+    if (!text) {
+      throw new BadRequestException({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: '口播生成需要提供文本内容。'
+        }
+      });
+    }
+
+    const endpoint = `${normalizeMiniMaxApiBaseUrl(route.apiBaseUrl)}/t2a_v2`;
+    const response = await fetchJson(endpoint, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(buildMiniMaxTtsPayload(route, request, text)),
+      signal: AbortSignal.timeout(request.timeoutMs ?? 180_000)
+    }, 'Official audio route submit');
+
+    const providerError = readMiniMaxProviderError(response.body);
+    if (providerError) {
+      throw new OfficialProviderUnavailableError('Official audio route task failed.');
+    }
+
+    const remoteUrl = readMediaUrlFromUnknown(response.body, 'audio');
+    if (!remoteUrl) {
+      throw new OfficialProviderUnavailableError('Official audio route did not return an audio URL.');
+    }
+
+    return generationResponse({
+      route,
+      remoteUrl,
+      providerStatus: readProviderStatus(response.body),
+      type: 'file',
+      mimeType: 'audio/mpeg',
+      title: '口播音频.mp3'
+    });
+  }
+
   private buildMockWallet(workspaceId: string) {
     return {
       workspaceId,
@@ -2097,7 +2154,8 @@ function parseOfficialInvokeRequest(body: unknown): OfficialInvokeRequest {
     timeoutMs: readOptionalPositiveInteger(body.timeoutMs),
     taskKind: readTaskKind(body.taskKind),
     imageGeneration: readImageGenerationRequest(body.imageGeneration),
-    videoGeneration: readVideoGenerationRequest(body.videoGeneration)
+    videoGeneration: readVideoGenerationRequest(body.videoGeneration),
+    audioGeneration: readAudioGenerationRequest(body.audioGeneration)
   };
 }
 
@@ -2105,7 +2163,8 @@ function readTaskKind(value: unknown): OfficialInvokeRequest['taskKind'] {
   return value === 'chat' ||
     value === 'image_generation' ||
     value === 'video_generation' ||
-    value === 'audio_transcription'
+    value === 'audio_transcription' ||
+    value === 'audio_generation'
     ? value
     : undefined;
 }
@@ -2145,6 +2204,19 @@ function readVideoGenerationRequest(value: unknown): OfficialInvokeRequest['vide
   };
 }
 
+function readAudioGenerationRequest(value: unknown): OfficialInvokeRequest['audioGeneration'] {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  return {
+    text: typeof value.text === 'string' ? value.text : '',
+    voicePresetId: typeof value.voicePresetId === 'string' ? value.voicePresetId : '',
+    language: typeof value.language === 'string' ? value.language : undefined,
+    format: value.format === 'mp3' ? 'mp3' : undefined
+  };
+}
+
 function readOptionalPositiveInteger(value: unknown): number | undefined {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) && numberValue > 0 ? Math.round(numberValue) : undefined;
@@ -2168,6 +2240,9 @@ const legacyOfficialRoutePricing: Record<
   },
   'official-image-2': {
     basePointPrice: 25
+  },
+  'official-audio-1': {
+    basePointPrice: 10
   },
   'official-video-1': {
     basePointPrice: 200,
@@ -2604,6 +2679,34 @@ function buildMiniMaxVideoPayload(
   return payload;
 }
 
+function buildMiniMaxTtsPayload(
+  route: OfficialRouteRecord,
+  request: OfficialInvokeRequest,
+  text: string
+): Record<string, unknown> {
+  const voicePresetId = request.audioGeneration?.voicePresetId?.trim() || 'male_pro_1';
+  const voiceId = resolveOfficialVoiceId(route.providerConfig, voicePresetId);
+  return {
+    model: route.modelName,
+    text,
+    stream: false,
+    output_format: 'url',
+    language_boost: resolveMiniMaxTtsLanguageBoost(request.audioGeneration?.language),
+    voice_setting: {
+      voice_id: voiceId,
+      speed: 1,
+      vol: 1,
+      pitch: 0
+    },
+    audio_setting: {
+      sample_rate: 32000,
+      bitrate: 128000,
+      format: request.audioGeneration?.format ?? 'mp3',
+      channel: 1
+    }
+  };
+}
+
 async function queryGrsaiResult(input: {
   apiBaseUrl: string;
   apiKey: string;
@@ -2737,7 +2840,9 @@ async function retrieveMiniMaxVideoUrl(input: {
 function generationResponse(input: {
   route: OfficialRouteRecord;
   remoteUrl: string;
-  type: 'image' | 'video';
+  type: 'image' | 'video' | 'file';
+  title?: string;
+  mimeType?: string;
   providerJobId?: string;
   providerStatus?: string;
 }): OfficialInvokeProviderResponse {
@@ -2746,8 +2851,10 @@ function generationResponse(input: {
     artifacts: [
       {
         type: input.type,
+        title: input.title,
         remoteUrl: input.remoteUrl,
         thumbnailPath: input.type === 'image' ? input.remoteUrl : undefined,
+        mimeType: input.mimeType,
         providerJobId: input.providerJobId,
         providerStatus: input.providerStatus
       }
@@ -2891,6 +2998,23 @@ function readProviderMode(value: unknown): string {
   return isRecord(value) && typeof value.mode === 'string' ? value.mode : '';
 }
 
+function resolveOfficialVoiceId(providerConfig: unknown, voicePresetId: string): string {
+  const voicePresets = readRecord(readRecord(providerConfig)?.voicePresets);
+  const configuredVoiceId = typeof voicePresets?.[voicePresetId] === 'string'
+    ? voicePresets[voicePresetId].trim()
+    : '';
+  return configuredVoiceId || 'Chinese (Mandarin)_Reliable_Executive';
+}
+
+function resolveMiniMaxTtsLanguageBoost(value: string | undefined): string {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === 'en' || normalized === 'english') return 'English';
+  if (normalized === 'ja' || normalized === 'japanese') return 'Japanese';
+  if (normalized === 'ko' || normalized === 'korean') return 'Korean';
+  if (normalized === 'yue' || normalized === 'cantonese') return 'Cantonese';
+  return 'Chinese';
+}
+
 function lastUserMessageContent(messages: OfficialMessage[]): string {
   return [...messages].reverse().find((message) => message.role === 'user')?.content.trim() ?? '';
 }
@@ -2981,7 +3105,7 @@ function readMiniMaxProviderError(value: unknown): string | undefined {
   return undefined;
 }
 
-function readMediaUrlFromUnknown(value: unknown, type: 'image' | 'video', depth = 0): string | undefined {
+function readMediaUrlFromUnknown(value: unknown, type: 'image' | 'video' | 'audio', depth = 0): string | undefined {
   if (depth > 6 || value === undefined || value === null) {
     return undefined;
   }
@@ -3006,7 +3130,9 @@ function readMediaUrlFromUnknown(value: unknown, type: 'image' | 'video', depth 
   }
   const preferredKeys = type === 'image'
     ? ['url', 'image_url', 'imageUrl', 'output_url', 'outputUrl']
-    : ['url', 'video_url', 'videoUrl', 'download_url', 'downloadUrl', 'file_url', 'fileUrl'];
+    : type === 'video'
+      ? ['url', 'video_url', 'videoUrl', 'download_url', 'downloadUrl', 'file_url', 'fileUrl']
+      : ['url', 'audio', 'audio_url', 'audioUrl', 'download_url', 'downloadUrl', 'file_url', 'fileUrl'];
   for (const key of preferredKeys) {
     const url = readMediaUrlFromUnknown(value[key], type, depth + 1);
     if (url) {
@@ -3022,9 +3148,12 @@ function readMediaUrlFromUnknown(value: unknown, type: 'image' | 'video', depth 
   return undefined;
 }
 
-function looksLikeMediaUrl(value: string, type: 'image' | 'video'): boolean {
+function looksLikeMediaUrl(value: string, type: 'image' | 'video' | 'audio'): boolean {
   if (type === 'image') {
     return /\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(value) || /image|img|file|aitohumanize/i.test(value);
+  }
+  if (type === 'audio') {
+    return /\.(mp3|wav|m4a|aac|ogg)(\?|#|$)/i.test(value) || /audio|voice|speech|tts|file|minimax/i.test(value);
   }
   return /\.(mp4|mov|webm|m4v)(\?|#|$)/i.test(value) || /video|file|minimax/i.test(value);
 }

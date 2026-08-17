@@ -66,6 +66,7 @@ const capabilityLabels: Record<AdminOfficialModelRouteSummary['capability'], str
   reasoning: '推理',
   image: '图片',
   video: '视频'
+  ,audio: '口播'
 };
 
 function statusTone(status: AdminOfficialModelApiKeyStatus): 'success' | 'warning' | 'default' {

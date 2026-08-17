@@ -1783,6 +1783,65 @@ function buildEcommerceProductVideoFactoryManifest() {
   };
 }
 
+function buildAiVideoProductionFactoryManifest() {
+  return {
+    kind: 'ai_video_production_factory',
+    version: '1.0.0',
+    title: 'AI制作视频工厂',
+    batch: {
+      maxItems: 1,
+      itemUnit: 'video',
+      inputFileKinds: ['video'],
+      videoExtensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v']
+    },
+    platforms: [
+      { key: 'bilibili', label: 'B站教程', imageRatio: '16:9', notes: '适合完整教学、教程拆章和横屏讲解。' },
+      { key: 'douyin', label: '抖音宣传', imageRatio: '9:16', notes: '适合短视频宣传、结果展示和竖屏传播。' }
+    ],
+    contentControls: {
+      ratios: [
+        { key: '16:9', label: '横屏 16:9' },
+        { key: '9:16', label: '竖屏 9:16' },
+        { key: '1:1', label: '方图 1:1' }
+      ],
+      durationSecondOptions: [30, 60, 90, 120, 180, 300],
+      resolutions: [
+        { key: '720p', label: '720P' },
+        { key: '1080p', label: '1080P' },
+        { key: '2k', label: '2K' }
+      ],
+      voicePresets: [
+        { key: 'male_pro_1', label: '专业男声 - 沉稳讲解' },
+        { key: 'male_pro_2', label: '专业男声 - 清晰播报' },
+        { key: 'male_pro_3', label: '专业男声 - 科技旁白' },
+        { key: 'male_pro_4', label: '专业男声 - 亲和口播' },
+        { key: 'female_pro_1', label: '专业女声 - 清亮讲解' },
+        { key: 'female_pro_2', label: '专业女声 - 柔和播报' },
+        { key: 'funny_1', label: '搞怪声音 - 夸张解说' },
+        { key: 'funny_2', label: '搞怪声音 - 活泼吐槽' }
+      ]
+    },
+    reusableAssets: [
+      { key: 'intro', label: '片头', mimeTypes: ['video/mp4'], extensions: ['mp4'], optional: true },
+      { key: 'outro', label: '片尾', mimeTypes: ['video/mp4'], extensions: ['mp4'], optional: true },
+      { key: 'cover', label: '封面', mimeTypes: ['image/png'], extensions: ['png'], optional: true },
+      { key: 'watermark', label: '水印', mimeTypes: ['image/png'], extensions: ['png'], optional: true }
+    ],
+    output: {
+      cacheDays: 30,
+      folder: 'ai-video-production',
+      packageFormat: 'single_mp4',
+      videoFormat: 'mp4'
+    },
+    requiredCapabilities: ['text', 'audio_to_text', 'text_to_audio'],
+    ui: {
+      primaryActionLabel: '开始制作',
+      uploadHint: '上传一段原始录屏或视频素材，一次只处理一个视频。',
+      packageSelection: 'none'
+    }
+  };
+}
+
 type ReferenceVideoFactoryDefinition = {
   templateId: string;
   kind: string;
@@ -2338,6 +2397,88 @@ function buildEcommerceProductVideoFactoryWorkflowGraph(options?: {
     runtimePolicy: {
       maxNodeExecutions: 160,
       maxLoopIterations: 50,
+      requireApprovalBeforeTools: false
+    }
+  };
+}
+
+function buildAiVideoProductionFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
+  const nodes: ServerRoleWorkflowGraphNode[] = [
+    {
+      id: 'start',
+      type: 'start',
+      name: '开始',
+      description: '工作流入口。'
+    },
+    {
+      id: 'factory_input',
+      type: 'input',
+      name: '接收原始视频',
+      instruction: '接收用户上传的一段原始录屏或视频，以及平台、画幅、时长、清晰度、口播音色和固定素材选择。',
+      inputVariables: ['start.text', 'start.files', 'start.videos'],
+      outputVariables: ['task_brief'],
+      config: {
+        acceptedFileKinds: ['video'],
+        maxItems: 1,
+        source: 'digital_factory'
+      }
+    },
+    {
+      id: 'produce_video',
+      type: 'llm',
+      name: 'AI制作视频',
+      instruction: 'PC 端按固定流程执行：视频探测、音频抽取、ASR 转写、文本结构分析、生成口播、合成片头/片尾/水印并导出单个 MP4。只依据 ASR 文本分析内容，不使用图像理解或视频理解。',
+      modelProfileId: 'qiu-general-default',
+      inputVariables: ['factory_request', 'start.files', 'task_brief'],
+      outputVariables: ['ai_video_production_result', 'generated_video_path', 'video_production_summary'],
+      config: {
+        llmTaskType: 'ai_video_production',
+        outputMode: 'json',
+        requiredModelProfileIds: ['qiu-asr-default', 'qiu-audio-generation-default'],
+        requiredToolActions: [
+          { toolId: 'video-processing', action: 'video.probe' },
+          { toolId: 'video-processing', action: 'video.extract_audio' },
+          { toolId: 'video-processing', action: 'video.compose_clips' },
+          { toolId: 'local-filesystem', action: 'filesystem.download_remote_file' }
+        ],
+        schema: {
+          platform: 'bilibili | douyin',
+          transcript: 'string',
+          cutPlan: [{ start: 0, end: 30, label: 'string', reason: 'string' }],
+          narrationScript: 'string',
+          outputVideoPath: 'string'
+        }
+      }
+    },
+    {
+      id: 'factory_output',
+      type: 'output',
+      name: '返回结果',
+      instruction: '返回单个 MP4 成品地址和必要的处理状态，不输出额外字幕文件或复杂总结。',
+      inputVariables: ['ai_video_production_result', 'generated_video_path', 'video_production_summary'],
+      outputVariables: ['final_answer']
+    }
+  ];
+
+  return {
+    version: '1.0.0',
+    entryNodeId: 'start',
+    nodes,
+    edges: [
+      { id: 'start__factory_input', sourceNodeId: 'start', targetNodeId: 'factory_input', condition: { type: 'always' } },
+      { id: 'factory_input__produce_video', sourceNodeId: 'factory_input', targetNodeId: 'produce_video', condition: { type: 'always' } },
+      { id: 'produce_video__factory_output', sourceNodeId: 'produce_video', targetNodeId: 'factory_output', condition: { type: 'always' } }
+    ],
+    variables: [
+      { name: 'factory_request', type: 'json', description: '工厂面板提交的视频制作参数。', required: true },
+      { name: 'task_brief', type: 'text', description: '用户任务摘要。', required: true },
+      { name: 'ai_video_production_result', type: 'json', description: 'ASR、结构分析、剪辑计划、口播和渲染结果。', required: true },
+      { name: 'generated_video_path', type: 'text', description: '最终 MP4 本地路径。', required: true },
+      { name: 'video_production_summary', type: 'text', description: '视频制作摘要。', required: true }
+    ],
+    runtimePolicy: {
+      maxNodeExecutions: 24,
+      maxLoopIterations: 4,
       requireApprovalBeforeTools: false
     }
   };
@@ -5038,6 +5179,56 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_BASIC_MONTHLY'),
     approvalPolicy: '生成前由用户选择产物包、时长和画幅；对外发布前需人工复核平台规则、品牌合规、素材版权和视频真实性。'
   },
+  {
+    templateId: 'factory_ai_video_production_v1',
+    applicationType: 'DIGITAL_FACTORY',
+    version: DESIGNED_ROLE_TEMPLATE_VERSION,
+    name: 'AI制作视频工厂',
+    industry: '内容生产 / 视频制作',
+    scenario: '把原始录屏或视频素材制作成 B站教程或抖音宣传 MP4',
+    description: '面向软件教程、产品演示和宣传素材，把用户上传的一段原始视频按 ASR 内容分析、口播音色和固定素材配置，制作成单个 MP4 成品。',
+    recommendedPlanCode: 'ENTERPRISE_PRO_MONTHLY',
+    businessGoal: '把一次录屏转换成可发布的视频成片，减少脚本整理、口播重录和基础剪辑成本。',
+    knowledgeSources: ['企业知识库', '产品资料', '品牌口径', '历史视频内容规范'],
+    tools: ['video-processing', 'local-filesystem'],
+    skills: [
+      skill('asr_timeline_analysis', '语音转写分析', '只依据 ASR 文本和时间信息分析原始视频结构，不做图像理解。'),
+      skill('narration_generation', '口播脚本生成', '根据平台目标生成专业口播脚本，并调用口播模型生成音频。'),
+      skill('deterministic_video_rendering', '确定式视频合成', '按用户选择的片头、片尾、水印、画幅、时长和清晰度导出单个 MP4。')
+    ],
+    workflowSteps: [
+      {
+        id: 'factory_input',
+        order: 1,
+        type: 'input',
+        name: '接收原始视频',
+        instruction: '接收一段原始录屏或视频，以及平台、画幅、时长、清晰度、口播音色和固定素材选择。'
+      },
+      {
+        id: 'produce_video',
+        order: 2,
+        type: 'llm',
+        name: 'AI制作视频',
+        instruction: 'PC 端按固定流程执行 ASR、内容结构分析、口播生成和视频合成，最终只导出一个 MP4。'
+      },
+      {
+        id: 'factory_output',
+        order: 3,
+        type: 'output',
+        name: '返回结果',
+        instruction: '返回最终 MP4 成品，不单独导出字幕或复杂内容包。'
+      }
+    ],
+    workflowGraph: buildAiVideoProductionFactoryWorkflowGraph(),
+    dependencyManifestFactory: buildAiVideoProductionFactoryManifest(),
+    sampleInputs: [
+      '请把这段 QiuAI-workOS 使用录屏制作成 B站教程视频，横屏 1080P，保留重点操作步骤。',
+      '请把这段产品演示视频制作成抖音宣传短视频，竖屏 60 秒，突出 AI 自动完成工作的结果。'
+    ],
+    outputFormat: '单个 MP4 成片，包含可选片头、片尾、水印和口播音频。',
+    allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_BASIC_MONTHLY'),
+    approvalPolicy: '本工厂只生成视频成片，不自动发布；对外发布前必须由用户人工确认事实、版权、平台规则和品牌口径。'
+  },
   ...horizontalVideoFactoryDefinitions.map(buildReferenceVideoFactoryTemplate),
   {
     templateId: 'factory_medical_case_video_screening_v1',
@@ -5293,6 +5484,7 @@ export const productionRoleTemplateIds = [
   'factory_graphic_content_images_v1',
   'factory_artistic_creation_images_v1',
   'factory_ecommerce_product_videos_v1',
+  'factory_ai_video_production_v1',
   'factory_digital_spokesperson_videos_v1',
   'factory_ad_social_media_videos_v1',
   'factory_medical_case_video_screening_v1',

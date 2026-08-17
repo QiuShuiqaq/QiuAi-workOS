@@ -49,7 +49,9 @@ export type ServerRoleWorkflowGraphLlmTaskType =
   | 'embedding'
   | 'rerank'
   | 'audio_transcription'
+  | 'audio_generation'
   | 'video_screening_batch'
+  | 'ai_video_production'
   | 'operation_video_batch';
 
 export type ServerRoleWorkflowGraphEdgeConditionType =
@@ -183,7 +185,9 @@ const llmTaskTypes = new Set<string>([
   'embedding',
   'rerank',
   'audio_transcription',
+  'audio_generation',
   'video_screening_batch',
+  'ai_video_production',
   'operation_video_batch'
 ]);
 
@@ -191,6 +195,7 @@ export function getDefaultModelProfileIdForWorkflowLlmTask(taskType: string): st
   if (taskType === 'vision') return 'qiu-vision-default';
   if (taskType === 'reasoning') return 'qiu-reasoning-default';
   if (taskType === 'audio_transcription') return 'qiu-asr-default';
+  if (taskType === 'audio_generation') return 'qiu-audio-generation-default';
   if (taskType === 'image_generation') return 'qiu-image-generation-default';
   if (taskType === 'image_editing') return 'qiu-image-editing-default';
   if (taskType === 'video_generation') return 'qiu-video-generation-default';

@@ -1,4 +1,4 @@
-export type OfficialModelRouteCapability = 'text' | 'reasoning' | 'image' | 'video';
+export type OfficialModelRouteCapability = 'text' | 'reasoning' | 'image' | 'video' | 'audio';
 
 export type OfficialModelRouteStatus = 'active' | 'disabled';
 
@@ -87,7 +87,7 @@ export interface InvokeOfficialModelRequest {
     content: string;
   }>;
   timeoutMs?: number;
-  taskKind?: 'chat' | 'image_generation' | 'video_generation' | 'audio_transcription';
+  taskKind?: 'chat' | 'image_generation' | 'video_generation' | 'audio_transcription' | 'audio_generation';
   visionInputs?: Array<{
     imageDataUrl?: string;
     mimeType?: string;
@@ -109,6 +109,12 @@ export interface InvokeOfficialModelRequest {
     durationSeconds?: number;
     aspectRatio?: string;
     responseFormat?: 'url';
+  };
+  audioGeneration?: {
+    text: string;
+    voicePresetId: string;
+    language?: string;
+    format?: 'mp3';
   };
 }
 

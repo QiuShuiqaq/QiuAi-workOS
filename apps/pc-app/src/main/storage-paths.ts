@@ -1,13 +1,10 @@
 import {
-  closeSync,
   copyFileSync,
   existsSync,
   mkdirSync,
-  openSync,
   readdirSync,
   readFileSync,
   statSync,
-  unlinkSync,
   writeFileSync
 } from 'node:fs';
 import path from 'node:path';
@@ -21,6 +18,8 @@ export interface DesktopStoragePathInfo {
 }
 
 const appDataFolderName = 'QiuAI WorkOS';
+const legacyElectronAppDataFolderNames = ['qiuai-workos-pc-installer-app'];
+const installerDataBackupFolderName = 'install-data-backup';
 const storageLocationFileName = 'storage-location.json';
 const preservedRootEntries = [
   'runtime-identity.json',
@@ -55,15 +54,6 @@ export function resolveDesktopStoragePathInfo(input: {
   }
 
   const installPath = path.dirname(path.resolve(input.processExecPath));
-  const preferredDataPath = path.join(installPath, 'data');
-  if (isDirectoryWritable(preferredDataPath)) {
-    return {
-      installPath,
-      dataPath: preferredDataPath,
-      storageMode: 'follow_install_dir'
-    };
-  }
-
   const roamingRoot = input.appDataPath?.trim() || process.env.APPDATA?.trim() || path.join(input.homeDir, 'AppData', 'Roaming');
 
   return {
@@ -100,19 +90,6 @@ export function prepareDesktopStoragePathInfo(input: {
   return storagePathInfo;
 }
 
-function isDirectoryWritable(directoryPath: string): boolean {
-  try {
-    mkdirSync(directoryPath, { recursive: true });
-    const probePath = path.join(directoryPath, `.write-test-${Date.now()}-${Math.random().toString(16).slice(2)}.tmp`);
-    const fd = openSync(probePath, 'w');
-    closeSync(fd);
-    unlinkSync(probePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function migratePreviousDesktopConfiguration(
   input: {
     homeDir: string;
@@ -120,22 +97,85 @@ function migratePreviousDesktopConfiguration(
   },
   storagePathInfo: DesktopStoragePathInfo
 ): void {
-  if (hasMeaningfulDesktopData(storagePathInfo.dataPath)) {
+  const previousDataPath = findBestPreviousDesktopDataPath(input, storagePathInfo);
+  if (!previousDataPath) {
     return;
   }
 
-  const previousLocation = readStorageLocation(input);
-  if (!previousLocation || !previousLocation.dataPath.trim()) {
-    return;
-  }
-
-  const previousDataPath = path.resolve(previousLocation.dataPath);
   const targetDataPath = path.resolve(storagePathInfo.dataPath);
-  if (isSamePath(previousDataPath, targetDataPath) || !hasMeaningfulDesktopData(previousDataPath)) {
+  if (isSamePath(previousDataPath, targetDataPath)) {
+    return;
+  }
+
+  const targetHasMeaningfulData = hasMeaningfulDesktopData(targetDataPath);
+  const sourceHasAuthenticatedIdentity = hasAuthenticatedRuntimeIdentity(previousDataPath);
+  if (
+    targetHasMeaningfulData &&
+    (hasAuthenticatedRuntimeIdentity(targetDataPath) || !sourceHasAuthenticatedIdentity)
+  ) {
     return;
   }
 
   copyDesktopConfigurationData(previousDataPath, targetDataPath);
+}
+
+function findBestPreviousDesktopDataPath(
+  input: {
+    homeDir: string;
+    appDataPath?: string;
+  },
+  storagePathInfo: DesktopStoragePathInfo
+): string | undefined {
+  const targetDataPath = path.resolve(storagePathInfo.dataPath);
+  const candidates = collectPreviousDesktopDataPathCandidates(input, storagePathInfo)
+    .map((candidatePath) => path.resolve(candidatePath))
+    .filter((candidatePath, index, values) =>
+      !isSamePath(candidatePath, targetDataPath) &&
+      values.findIndex((value) => isSamePath(value, candidatePath)) === index &&
+      hasMeaningfulDesktopData(candidatePath)
+    );
+
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  return candidates
+    .map((candidatePath) => ({
+      path: candidatePath,
+      score: scorePreviousDesktopDataPath(candidatePath)
+    }))
+    .sort((left, right) => right.score - left.score)[0]?.path;
+}
+
+function collectPreviousDesktopDataPathCandidates(
+  input: {
+    homeDir: string;
+    appDataPath?: string;
+  },
+  storagePathInfo: DesktopStoragePathInfo
+): string[] {
+  const roamingRoot = getRoamingDataRoot(input);
+  const previousLocation = readStorageLocation(input);
+  return [
+    previousLocation?.dataPath,
+    storagePathInfo.installPath ? path.join(storagePathInfo.installPath, 'data') : undefined,
+    path.join(roamingRoot, appDataFolderName, installerDataBackupFolderName),
+    ...legacyElectronAppDataFolderNames.map((folderName) => path.join(roamingRoot, folderName))
+  ].filter((candidatePath): candidatePath is string => Boolean(candidatePath?.trim()));
+}
+
+function scorePreviousDesktopDataPath(dataPath: string): number {
+  let score = 0;
+  if (hasAuthenticatedRuntimeIdentity(dataPath)) {
+    score += 1_000_000;
+  }
+
+  const latestTimestamp = readLatestDesktopDataTimestamp(dataPath);
+  if (latestTimestamp > 0) {
+    score += Math.floor(latestTimestamp / 1_000);
+  }
+
+  return score;
 }
 
 function hasMeaningfulDesktopData(dataPath: string): boolean {
@@ -176,6 +216,10 @@ function copyDesktopConfigurationData(sourceRoot: string, targetRoot: string): v
     copyPathIfMissing(path.join(sourceRoot, entryName), path.join(targetRoot, entryName));
   }
 
+  if (hasAuthenticatedRuntimeIdentity(sourceRoot) && !hasAuthenticatedRuntimeIdentity(targetRoot)) {
+    copyFileSync(path.join(sourceRoot, 'runtime-identity.json'), path.join(targetRoot, 'runtime-identity.json'));
+  }
+
   const sourceWorkspacesPath = path.join(sourceRoot, 'workspaces');
   if (!existsSync(sourceWorkspacesPath)) {
     return;
@@ -191,6 +235,41 @@ function copyDesktopConfigurationData(sourceRoot: string, targetRoot: string): v
     for (const entryName of preservedWorkspaceEntries) {
       copyPathIfMissing(path.join(sourceWorkspacePath, entryName), path.join(targetWorkspacePath, entryName));
     }
+  }
+}
+
+function hasAuthenticatedRuntimeIdentity(dataPath: string): boolean {
+  try {
+    const parsed = JSON.parse(readFileSync(path.join(dataPath, 'runtime-identity.json'), 'utf8')) as {
+      deviceToken?: unknown;
+      workspaceId?: unknown;
+    };
+    return typeof parsed.deviceToken === 'string' &&
+      parsed.deviceToken.trim().length > 0 &&
+      typeof parsed.workspaceId === 'string' &&
+      parsed.workspaceId.trim().length > 0 &&
+      parsed.workspaceId !== 'workspace_pending_login';
+  } catch {
+    return false;
+  }
+}
+
+function readLatestDesktopDataTimestamp(dataPath: string): number {
+  if (!existsSync(dataPath)) {
+    return 0;
+  }
+
+  try {
+    let latestTimestamp = statSync(dataPath).mtimeMs;
+    for (const entryName of preservedRootEntries) {
+      const entryPath = path.join(dataPath, entryName);
+      if (existsSync(entryPath)) {
+        latestTimestamp = Math.max(latestTimestamp, statSync(entryPath).mtimeMs);
+      }
+    }
+    return latestTimestamp;
+  } catch {
+    return 0;
   }
 }
 

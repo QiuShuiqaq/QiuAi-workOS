@@ -482,6 +482,15 @@ function inferModelRequirementFromSemanticProfileId(profileId: string): {
     };
   }
 
+  if (profileId === 'qiu-audio-generation-default') {
+    return {
+      name: '口播模型',
+      capabilities: ['text_to_audio'],
+      inputTypes: ['text'],
+      outputTypes: ['audio']
+    };
+  }
+
   if (profileId === 'qiu-embedding-default') {
     return {
       name: '向量模型',
@@ -526,6 +535,7 @@ function getSemanticModelProfileIdForNode(node: ServerRoleWorkflowGraphNode): st
   if (taskType === 'vision') return 'qiu-vision-default';
   if (taskType === 'reasoning') return 'qiu-reasoning-default';
   if (taskType === 'audio_transcription') return 'qiu-asr-default';
+  if (taskType === 'audio_generation') return 'qiu-audio-generation-default';
   if (taskType === 'image_generation') return 'qiu-image-generation-default';
   if (taskType === 'image_editing') return 'qiu-image-editing-default';
   if (taskType === 'video_generation') return 'qiu-video-generation-default';
@@ -564,7 +574,8 @@ function mapModelProfileIdToSemanticDefault(profileId: string): string | undefin
   const normalized = profileId.trim().toLowerCase();
   if (!normalized) return undefined;
   if (normalized.startsWith('qiu-')) return profileId.trim();
-  if (normalized.includes('asr') || normalized.includes('speech') || normalized.includes('audio')) return 'qiu-asr-default';
+  if (normalized.includes('text_to_audio') || normalized.includes('tts') || normalized.includes('text-to-speech') || normalized.includes('speech_generation')) return 'qiu-audio-generation-default';
+  if (normalized.includes('asr') || normalized.includes('speech_to_text') || normalized.includes('speech-to-text') || normalized.includes('audio_to_text') || normalized.includes('transcription')) return 'qiu-asr-default';
   if (
     normalized.includes('reason') ||
     normalized.includes('reasoner') ||

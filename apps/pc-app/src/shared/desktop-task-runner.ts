@@ -3235,6 +3235,16 @@ async function invokeWorkflowRuntimeModelNode(input: {
     return academicDemoPreparedResult;
   }
 
+  if (readWorkflowRuntimeString(input.node.config?.llmTaskType) === 'ai_video_production') {
+    const aiVideoProductionResult = await invokeWorkflowRuntimeAiVideoProductionNode({
+      ...input,
+      profile
+    });
+    if (aiVideoProductionResult) {
+      return aiVideoProductionResult;
+    }
+  }
+
   if (readWorkflowRuntimeString(input.node.config?.llmTaskType) === 'video_screening_batch') {
     const videoFactoryResult = await invokeWorkflowRuntimeFactoryVideoScreeningNode({
       ...input,
@@ -3354,6 +3364,308 @@ async function invokeWorkflowRuntimeModelNode(input: {
     inputVariables: variables.map((variable) => variable.ref),
     outputVariables,
     message: `Model response saved (${response.content.length} chars).`
+  };
+}
+
+async function invokeWorkflowRuntimeAiVideoProductionNode(input: {
+  task: DesktopTaskDetail;
+  node: WorkflowGraphNode;
+  pool: WorkflowVariablePool;
+  binding: ResolvedRuntimeBinding;
+  rolePackage?: RolePackageManifest;
+  profiles: ModelProfile[];
+  roleModelCredentialBindings?: RoleModelCredentialBinding[];
+  modelInvoker: DesktopModelInvoker;
+  desktopToolInvoker?: DesktopToolInvoker;
+  workspaceId?: string;
+  createdAt: string;
+  currentResponse: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  profile: ModelProfile;
+}): Promise<{
+  response: DesktopModelChatResponse;
+  primaryProfile: ModelProfile;
+  logs: DesktopExecutionLogEntry[];
+  usedToolIds: string[];
+  generatedArtifacts: DesktopArtifactSummary[];
+  factoryOutputs?: FactoryOutputItem[];
+  inputVariables: string[];
+  outputVariables: string[];
+  message: string;
+} | undefined> {
+  const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
+  if (readWorkflowRuntimeString(factoryRequest?.factoryKind) !== 'ai_video_production_factory') {
+    return undefined;
+  }
+
+  const videos = readFactoryVideoRuntimeItems(factoryRequest, input.pool.get('start.files'));
+  const video = videos[0];
+  if (!video) {
+    throw new Error('AI制作视频工厂需要上传一个原始视频。');
+  }
+
+  if (!input.desktopToolInvoker || !input.workspaceId) {
+    throw new Error('桌面端视频处理工具不可用，无法制作视频。');
+  }
+  if (!hasFactoryToolAction(input.binding, 'video-processing', 'video.probe')) {
+    throw new Error('缺少 video.probe 工具能力，无法读取视频信息。');
+  }
+  if (!hasFactoryToolAction(input.binding, 'video-processing', 'video.extract_audio')) {
+    throw new Error('缺少 video.extract_audio 工具能力，无法抽取音频。');
+  }
+  if (!hasFactoryToolAction(input.binding, 'video-processing', 'video.compose_clips')) {
+    throw new Error('缺少 video.compose_clips 工具能力，无法合成 MP4。');
+  }
+
+  const asrProfile = selectFactoryAsrProfile(
+    input.profiles,
+    factoryRequest,
+    input.task.roleCode,
+    input.roleModelCredentialBindings
+  );
+  if (!asrProfile) {
+    throw new Error('未配置语音转文字模型，无法分析原始视频。');
+  }
+
+  const voiceProfile = selectFactoryAudioGenerationProfile(
+    input.profiles,
+    factoryRequest,
+    input.task.roleCode,
+    input.roleModelCredentialBindings
+  );
+  if (!voiceProfile) {
+    throw new Error('未配置口播模型，无法生成专业口播声音。');
+  }
+
+  const settings = readAiVideoProductionSettings(factoryRequest);
+  const allowedRootPaths = buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext);
+  const metrics: Record<string, unknown> = {};
+  const usedToolIds = new Set<string>(['video-processing']);
+  const logs: DesktopExecutionLogEntry[] = [
+    createLog(
+      input.task.taskId,
+      'info',
+      'WORKFLOW_RUNTIME_AI_VIDEO_PRODUCTION_STARTED',
+      `AI video production started: ${video.name}.`,
+      input.createdAt,
+      sanitizeLogSuffix(input.node.id)
+    )
+  ];
+
+  const probeResult = await input.desktopToolInvoker({
+    workspaceId: input.workspaceId,
+    toolId: 'video-processing',
+    action: 'video.probe',
+    input: {
+      videoPath: video.localPath
+    },
+    allowedRootPaths
+  });
+  if (!probeResult.ok) {
+    throw new Error(probeResult.message ?? '视频基础信息读取失败。');
+  }
+  Object.assign(metrics, normalizeFactoryVideoProbeMetrics(probeResult.output));
+
+  const preparedAudio = await prepareFactoryVideoAudioPath(
+    {
+      task: input.task,
+      video,
+      desktopToolInvoker: input.desktopToolInvoker,
+      workspaceId: input.workspaceId,
+      binding: input.binding,
+      factoryRequest
+    },
+    metrics
+  );
+  if (!preparedAudio.audioPath) {
+    throw new Error(preparedAudio.error ?? '音频抽取失败，无法提交语音转文字模型。');
+  }
+
+  const asr = isWorkflowRuntimeRecord(factoryRequest?.asr) ? factoryRequest.asr : {};
+  const asrResult = await transcribeFactoryVideoWithRetry({
+    video,
+    audioPath: preparedAudio.audioPath,
+    asrProfile,
+    asr: {
+      ...asr,
+      language: readWorkflowRuntimeString(asr.language) ?? 'zh',
+      prompt: '请转写软件录屏、产品演示或课程讲解视频中的口述内容，尽量保留时间顺序和关键操作。'
+    },
+    modelInvoker: input.modelInvoker
+  });
+  if (!asrResult.transcript) {
+    throw new Error(classifyFactoryAsrFailure(asrResult.error));
+  }
+
+  const analysisResponse = await input.modelInvoker({
+    profile: input.profile,
+    messages: buildAiVideoProductionAnalysisMessages({
+      task: input.task,
+      video,
+      transcript: asrResult.transcript,
+      metrics,
+      settings,
+      factoryRequest
+    }),
+    timeoutMs: readWorkflowRuntimeModelTimeoutMs(input.node.config?.timeoutMs) ?? 120_000
+  });
+  const plan = normalizeAiVideoProductionPlan({
+    parsed: parseWorkflowRuntimeJson(analysisResponse.content),
+    rawContent: analysisResponse.content,
+    transcript: asrResult.transcript,
+    settings,
+    videoDurationSeconds: readFactoryRuntimeNumber(metrics.durationSeconds)
+  });
+
+  const voiceResponse = await input.modelInvoker({
+    profile: voiceProfile,
+    taskKind: 'audio_generation',
+    audioGeneration: {
+      text: plan.narrationScript,
+      voicePresetId: settings.voicePresetId,
+      language: 'zh',
+      format: 'mp3'
+    },
+    messages: [
+      {
+        role: 'user',
+        content: `请生成视频口播音频，音色=${settings.voicePresetId}。\n\n${plan.narrationScript}`
+      }
+    ],
+    timeoutMs: 180_000
+  });
+  const voiceResult = readFactoryVideoGenerationResponse(voiceResponse);
+  const voiceAudioPath = voiceResult.localPath
+    ? voiceResult.localPath
+    : voiceResult.remoteUrl
+      ? await downloadAiVideoProductionVoiceAudio({
+          task: input.task,
+          remoteUrl: voiceResult.remoteUrl,
+          desktopToolInvoker: input.desktopToolInvoker,
+          workspaceId: input.workspaceId,
+          binding: input.binding,
+          createdAt: input.createdAt
+        })
+      : undefined;
+  if (!voiceAudioPath) {
+    throw new Error('口播模型没有返回可下载的音频文件。');
+  }
+  usedToolIds.add('local-filesystem');
+
+  const composeResult = await input.desktopToolInvoker({
+    workspaceId: input.workspaceId,
+    toolId: 'video-processing',
+    action: 'video.compose_clips',
+    input: {
+      videoPath: video.localPath,
+      cutPlan: plan.cutPlan,
+      voiceoverPath: voiceAudioPath,
+      introPath: settings.introPath,
+      outroPath: settings.outroPath,
+      coverPath: settings.coverPath,
+      watermarkPath: settings.watermarkPath,
+      outputRatio: settings.outputRatio,
+      outputResolution: settings.outputResolution,
+      folder: 'ai-video-production',
+      fileName: buildWorkflowArtifactFileName(input.task.title, settings.platformLabel)
+    },
+    allowedRootPaths
+  });
+  if (!composeResult.ok) {
+    throw new Error(composeResult.message ?? '视频合成失败。');
+  }
+  const outputVideoPath = readWorkflowRuntimeString(composeResult.output?.localPath);
+  if (!outputVideoPath) {
+    throw new Error('视频合成完成但没有返回 MP4 本地路径。');
+  }
+
+  const productionResult = {
+    platform: settings.platform,
+    platformLabel: settings.platformLabel,
+    sourceVideo: {
+      name: video.name,
+      localPath: video.localPath,
+      durationSeconds: readFactoryRuntimeNumber(metrics.durationSeconds)
+    },
+    settings,
+    transcript: asrResult.transcript,
+    chapters: plan.chapters,
+    highlightSegments: plan.highlightSegments,
+    cutPlan: plan.cutPlan,
+    narrationScript: plan.narrationScript,
+    voiceAudioPath,
+    outputVideoPath
+  };
+  const summaryContent = `已生成 MP4：${outputVideoPath}`;
+  const generatedArtifacts: DesktopArtifactSummary[] = [
+    {
+      id: `${input.task.taskId}-ai-video-production-${Date.parse(input.createdAt) || Date.now()}`,
+      type: 'video',
+      title: getPathFileName(outputVideoPath) ?? `${input.task.title}.mp4`,
+      content: summaryContent,
+      localPath: outputVideoPath,
+      createdAt: input.createdAt
+    }
+  ];
+  const factoryOutputs: FactoryOutputItem[] = [
+    {
+      id: `${input.task.taskId}-ai-video-production-output`,
+      factoryKind: 'ai_video_production_factory',
+      kind: 'video',
+      title: getPathFileName(outputVideoPath) ?? 'AI制作视频.mp4',
+      status: 'qualified',
+      originalStatus: 'qualified',
+      sourcePath: video.localPath,
+      outputPath: outputVideoPath,
+      summary: settings.platformLabel,
+      transcript: asrResult.transcript,
+      metadata: productionResult as Record<string, unknown>,
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt
+    }
+  ];
+  const outputVariables = writeWorkflowNodeOutputs({
+    pool: input.pool,
+    node: input.node,
+    text: summaryContent,
+    json: productionResult as unknown as WorkflowRuntimeValue,
+    result: productionResult as unknown as WorkflowRuntimeValue,
+    outputValue: productionResult as unknown as WorkflowRuntimeValue
+  });
+  input.pool.set('runtime.previous_text', summaryContent);
+  input.pool.set('runtime.last_model_node', input.node.id);
+  input.pool.set('ai_video_production_result', productionResult as unknown as WorkflowRuntimeValue);
+  input.pool.set('generated_video_path', outputVideoPath);
+  input.pool.set('video_production_summary', summaryContent);
+
+  logs.push(
+    createLog(
+      input.task.taskId,
+      'info',
+      'WORKFLOW_RUNTIME_AI_VIDEO_PRODUCTION_COMPLETED',
+      `AI video production completed: ${outputVideoPath}.`,
+      input.createdAt,
+      sanitizeLogSuffix(`${input.node.id}-completed`),
+      { outputVideoPath, platform: settings.platform }
+    )
+  );
+
+  return {
+    response: mergeWorkflowRuntimeResponses(input.currentResponse, {
+      provider: input.profile.providerName,
+      modelName: input.profile.modelName,
+      content: summaryContent,
+      inputTokens: analysisResponse.inputTokens,
+      outputTokens: analysisResponse.outputTokens
+    }),
+    primaryProfile: input.profile,
+    logs,
+    usedToolIds: [...usedToolIds],
+    generatedArtifacts,
+    factoryOutputs,
+    inputVariables: ['factory_request', 'start.files'],
+    outputVariables: [...new Set([...outputVariables, 'generated_video_path', 'video_production_summary'])],
+    message: 'AI video production finished.'
   };
 }
 
@@ -4736,6 +5048,47 @@ function completeWorkflowRuntimeFactoryOutputNode(input: {
       inputVariables: input.node.inputVariables ?? ['video_generation_summary', 'factory_generated_videos'],
       outputVariables,
       message: 'Reference image video factory output returned without an extra model call.'
+    };
+  }
+
+  if (factoryKind === 'ai_video_production_factory') {
+    const summary = readWorkflowRuntimeString(input.pool.get('video_production_summary'));
+    const result = input.pool.get('ai_video_production_result');
+    if (!summary || result === undefined) {
+      return undefined;
+    }
+
+    const outputVariables = writeWorkflowNodeOutputs({
+      pool: input.pool,
+      node: input.node,
+      text: summary,
+      result,
+      outputValue: summary
+    });
+    input.pool.set('runtime.previous_text', summary);
+
+    return {
+      response: mergeWorkflowRuntimeResponses(input.currentResponse, {
+        provider: input.primaryProfile.providerName,
+        modelName: input.primaryProfile.modelName,
+        content: summary
+      }),
+      primaryProfile: input.primaryProfile,
+      logs: [
+        createLog(
+          input.task.taskId,
+          'info',
+          'WORKFLOW_RUNTIME_FACTORY_OUTPUT_COMPLETED',
+          'AI video production factory output returned without an extra model call.',
+          input.createdAt,
+          sanitizeLogSuffix(input.node.id)
+        )
+      ],
+      usedToolIds: [],
+      generatedArtifacts: [],
+      inputVariables: input.node.inputVariables ?? ['video_production_summary', 'ai_video_production_result'],
+      outputVariables,
+      message: 'AI video production factory output returned without an extra model call.'
     };
   }
 
@@ -6427,6 +6780,306 @@ function selectFactoryAsrProfile(
   return profiles.find((profile) => modelProfileSupportsAnyCapability(profile, ['audio_to_text']));
 }
 
+function selectFactoryAudioGenerationProfile(
+  profiles: ModelProfile[],
+  factoryRequest: Record<string, unknown> | undefined,
+  roleCode?: string,
+  roleModelCredentialBindings: RoleModelCredentialBinding[] = []
+): ModelProfile | undefined {
+  const voice = isWorkflowRuntimeRecord(factoryRequest?.voice) ? factoryRequest.voice : undefined;
+  const requestedProfileId =
+    readWorkflowRuntimeString(voice?.modelProfileId) ??
+    readWorkflowRuntimeString(factoryRequest?.audioGenerationModelProfileId) ??
+    'qiu-audio-generation-default';
+  const requestedProfile = profiles.find(
+    (profile) => profile.id === requestedProfileId && modelProfileSupportsAnyCapability(profile, ['text_to_audio'])
+  );
+  if (requestedProfile) {
+    return requestedProfile;
+  }
+
+  const boundRuntimeProfileId = roleCode
+    ? roleModelCredentialBindings.find(
+        (binding) =>
+          binding.roleCode === roleCode &&
+          binding.modelProfileId === requestedProfileId &&
+          binding.runtimeModelProfileId?.trim()
+      )?.runtimeModelProfileId?.trim()
+    : undefined;
+  if (boundRuntimeProfileId) {
+    const boundProfile = profiles.find(
+      (profile) => profile.id === boundRuntimeProfileId && modelProfileSupportsAnyCapability(profile, ['text_to_audio'])
+    );
+    if (boundProfile) {
+      return boundProfile;
+    }
+  }
+
+  return profiles.find((profile) => modelProfileSupportsAnyCapability(profile, ['text_to_audio']));
+}
+
+interface AiVideoProductionSettings {
+  platform: 'bilibili' | 'douyin';
+  platformLabel: string;
+  outputRatio: '16:9' | '9:16' | '1:1';
+  outputResolution: '720p' | '1080p' | '2k';
+  targetDurationSeconds: number;
+  voicePresetId: string;
+  introPath?: string;
+  outroPath?: string;
+  coverPath?: string;
+  watermarkPath?: string;
+}
+
+interface AiVideoProductionPlan {
+  chapters: Array<{ title: string; start: number; end: number }>;
+  highlightSegments: Array<{ start: number; end: number; reason: string }>;
+  cutPlan: Array<{ start: number; end: number; label?: string; reason?: string }>;
+  narrationScript: string;
+}
+
+function readAiVideoProductionSettings(factoryRequest: Record<string, unknown> | undefined): AiVideoProductionSettings {
+  const platformValue = readWorkflowRuntimeString(factoryRequest?.platform);
+  const platform = platformValue === 'douyin' ? 'douyin' : 'bilibili';
+  const ratioValue = readWorkflowRuntimeString(factoryRequest?.outputRatio ?? factoryRequest?.videoRatio);
+  const defaultRatio = platform === 'douyin' ? '9:16' : '16:9';
+  const outputRatio = ratioValue === '9:16' || ratioValue === '1:1' || ratioValue === '16:9' ? ratioValue : defaultRatio;
+  const resolutionValue = readWorkflowRuntimeString(factoryRequest?.outputResolution ?? factoryRequest?.resolution);
+  const outputResolution = resolutionValue === '720p' || resolutionValue === '2k' ? resolutionValue : '1080p';
+  const requestedDuration = readFactoryRuntimeNumber(factoryRequest?.targetDurationSeconds ?? factoryRequest?.videoDurationSeconds);
+  const targetDurationSeconds = clampWorkflowRuntimeLimit(
+    requestedDuration,
+    platform === 'douyin' ? 60 : 180,
+    15,
+    600
+  );
+  const materials = isWorkflowRuntimeRecord(factoryRequest?.materials) ? factoryRequest.materials : {};
+
+  return {
+    platform,
+    platformLabel: platform === 'douyin' ? '抖音宣传' : 'B站教程',
+    outputRatio,
+    outputResolution,
+    targetDurationSeconds,
+    voicePresetId: readWorkflowRuntimeString(factoryRequest?.voicePresetId) ?? 'male_pro_1',
+    introPath: readAiVideoMaterialPath(factoryRequest, materials, 'intro'),
+    outroPath: readAiVideoMaterialPath(factoryRequest, materials, 'outro'),
+    coverPath: readAiVideoMaterialPath(factoryRequest, materials, 'cover'),
+    watermarkPath: readAiVideoMaterialPath(factoryRequest, materials, 'watermark')
+  };
+}
+
+function readAiVideoMaterialPath(
+  factoryRequest: Record<string, unknown> | undefined,
+  materials: Record<string, unknown>,
+  key: 'intro' | 'outro' | 'cover' | 'watermark'
+): string | undefined {
+  return readWorkflowRuntimeString(materials[`${key}Path`])
+    ?? readWorkflowRuntimeString(materials[key])
+    ?? readWorkflowRuntimeString(factoryRequest?.[`${key}Path`]);
+}
+
+function buildAiVideoProductionAnalysisMessages(input: {
+  task: DesktopTaskDetail;
+  video: FactoryVideoRuntimeItem;
+  transcript: string;
+  metrics: Record<string, unknown>;
+  settings: AiVideoProductionSettings;
+  factoryRequest: Record<string, unknown> | undefined;
+}): DesktopModelChatMessage[] {
+  return [
+    {
+      role: 'system',
+      content: [
+        '你是 QiuAI WorkOS 的视频内容制作规划器。',
+        '只依据 ASR 转写文本和视频基础元数据做内容结构分析，不做图像理解或视频理解。',
+        '必须返回 JSON，不要 markdown，不要解释。',
+        '输出字段：chapters、highlightSegments、cutPlan、narrationScript。',
+        'cutPlan 每项必须包含 start、end、label、reason，单位是秒；总时长尽量接近用户目标时长。',
+        'narrationScript 是最终 TTS 口播脚本，语言为中文，适合直接口播。'
+      ].join('\n')
+    },
+    {
+      role: 'user',
+      content: [
+        `任务：${input.task.title}`,
+        `源视频：${input.video.name}`,
+        `目标平台：${input.settings.platformLabel}`,
+        `目标画幅：${input.settings.outputRatio}`,
+        `目标清晰度：${input.settings.outputResolution}`,
+        `目标时长：${input.settings.targetDurationSeconds} 秒`,
+        `视频时长：${readFactoryRuntimeNumber(input.metrics.durationSeconds) ?? '未知'} 秒`,
+        input.settings.platform === 'douyin'
+          ? '平台要求：偏宣传短视频，突出结果、效率、冲击力和产品价值，不要做完整教程口吻。'
+          : '平台要求：偏教学教程，结构完整，讲解清楚，适合用户跟着学习。',
+        readWorkflowRuntimeString(input.factoryRequest?.instruction)
+          ? `补充要求：${readWorkflowRuntimeString(input.factoryRequest?.instruction)}`
+          : undefined,
+        '',
+        'ASR 转写：',
+        input.transcript
+      ].filter(Boolean).join('\n')
+    }
+  ];
+}
+
+function normalizeAiVideoProductionPlan(input: {
+  parsed: unknown;
+  rawContent: string;
+  transcript: string;
+  settings: AiVideoProductionSettings;
+  videoDurationSeconds?: number;
+}): AiVideoProductionPlan {
+  const record = isWorkflowRuntimeRecord(input.parsed) ? input.parsed : {};
+  const fallbackEnd = Math.max(
+    1,
+    Math.min(input.videoDurationSeconds ?? input.settings.targetDurationSeconds, input.settings.targetDurationSeconds)
+  );
+  const chapters = normalizeAiVideoTimelineItems(record.chapters);
+  const highlightSegments = normalizeAiVideoHighlightSegments(record.highlightSegments ?? record.highlight_segments);
+  const cutPlan = normalizeAiVideoCutPlan(record.cutPlan ?? record.cut_plan ?? record.segments, fallbackEnd);
+  const narrationScript =
+    readWorkflowRuntimeString(record.narrationScript) ??
+    readWorkflowRuntimeString(record.narration_script) ??
+    readWorkflowRuntimeString(record.script) ??
+    buildFallbackAiVideoNarrationScript(input.transcript, input.settings);
+
+  return {
+    chapters,
+    highlightSegments,
+    cutPlan,
+    narrationScript
+  };
+}
+
+function normalizeAiVideoTimelineItems(value: unknown): Array<{ title: string; start: number; end: number }> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((item, index) => {
+    if (!isWorkflowRuntimeRecord(item)) {
+      return [];
+    }
+    const start = readAiVideoSeconds(item.start);
+    const end = readAiVideoSeconds(item.end);
+    if (start === undefined || end === undefined || end <= start) {
+      return [];
+    }
+    return [{
+      title: readWorkflowRuntimeString(item.title) ?? `片段 ${index + 1}`,
+      start,
+      end
+    }];
+  });
+}
+
+function normalizeAiVideoHighlightSegments(value: unknown): Array<{ start: number; end: number; reason: string }> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((item) => {
+    if (!isWorkflowRuntimeRecord(item)) {
+      return [];
+    }
+    const start = readAiVideoSeconds(item.start);
+    const end = readAiVideoSeconds(item.end);
+    if (start === undefined || end === undefined || end <= start) {
+      return [];
+    }
+    return [{
+      start,
+      end,
+      reason: readWorkflowRuntimeString(item.reason) ?? '适合作为重点片段'
+    }];
+  });
+}
+
+function normalizeAiVideoCutPlan(
+  value: unknown,
+  fallbackEnd: number
+): Array<{ start: number; end: number; label?: string; reason?: string }> {
+  const segments = Array.isArray(value) ? value : [];
+  const normalizedSegments = segments.flatMap((item, index) => {
+    if (!isWorkflowRuntimeRecord(item)) {
+      return [];
+    }
+    const start = readAiVideoSeconds(item.start);
+    const end = readAiVideoSeconds(item.end);
+    if (start === undefined || end === undefined || end <= start) {
+      return [];
+    }
+    return [{
+      start,
+      end,
+      label: readWorkflowRuntimeString(item.label) ?? readWorkflowRuntimeString(item.title) ?? `片段 ${index + 1}`,
+      reason: readWorkflowRuntimeString(item.reason)
+    }];
+  });
+
+  return normalizedSegments.length > 0
+    ? normalizedSegments
+    : [{ start: 0, end: fallbackEnd, label: '默认片段', reason: '模型未返回有效剪辑计划，使用视频开头片段。' }];
+}
+
+function readAiVideoSeconds(value: unknown): number | undefined {
+  const direct = readWorkflowRuntimeSeconds(value);
+  if (direct !== undefined) {
+    return direct;
+  }
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const parts = value.trim().split(':').map((item) => Number(item));
+  if (parts.some((item) => !Number.isFinite(item) || item < 0)) {
+    return undefined;
+  }
+  if (parts.length === 2) {
+    return Math.round((parts[0]! * 60 + parts[1]!) * 1000) / 1000;
+  }
+  if (parts.length === 3) {
+    return Math.round((parts[0]! * 3600 + parts[1]! * 60 + parts[2]!) * 1000) / 1000;
+  }
+  return undefined;
+}
+
+function buildFallbackAiVideoNarrationScript(transcript: string, settings: AiVideoProductionSettings): string {
+  const normalizedTranscript = transcript.replace(/\s+/g, ' ').trim();
+  const excerpt = normalizedTranscript.slice(0, 900);
+  return settings.platform === 'douyin'
+    ? `这段视频展示了一个可以直接落地的 AI 工作流程。重点不是展示概念，而是让用户看到结果：原来需要人工反复处理的内容，现在可以交给 QiuAI WorkOS 里的数字员工和数字工厂完成。${excerpt ? `原视频重点包括：${excerpt}` : ''}`
+    : `本期教程根据原始录屏整理操作步骤，重点讲清楚功能入口、配置方式和最终产物。你可以跟着视频完成一次完整流程。${excerpt ? `原视频重点包括：${excerpt}` : ''}`;
+}
+
+async function downloadAiVideoProductionVoiceAudio(input: {
+  task: DesktopTaskDetail;
+  remoteUrl: string;
+  desktopToolInvoker: DesktopToolInvoker;
+  workspaceId: string;
+  binding: ResolvedRuntimeBinding;
+  createdAt: string;
+}): Promise<string | undefined> {
+  if (!canUseFactoryRemoteAssetDownload(input.binding)) {
+    throw new Error('缺少 filesystem.download_remote_file 工具能力，无法保存口播音频。');
+  }
+  const downloadResult = await input.desktopToolInvoker({
+    workspaceId: input.workspaceId,
+    toolId: 'local-filesystem',
+    action: 'filesystem.download_remote_file',
+    input: {
+      url: input.remoteUrl,
+      folder: 'ai-video-production-audio',
+      fileName: buildWorkflowArtifactFileName(input.task.title, '口播音频'),
+      mediaKind: 'file',
+      timeoutMs: 300_000
+    },
+    allowedRootPaths: buildAllowedRootPaths(input.binding.availableKnowledgeSources, input.task.executionContext)
+  });
+  if (!downloadResult.ok) {
+    throw new Error(downloadResult.message ?? '口播音频下载失败。');
+  }
+  return readWorkflowRuntimeString(downloadResult.output?.localPath);
+}
+
 function hasFactoryToolAction(
   binding: ResolvedRuntimeBinding,
   toolId: string,
@@ -7014,6 +7667,8 @@ async function transcribeFactoryVideoWithRetry(input: {
 
   for (let attemptIndex = 0; attemptIndex <= retryDelays.length; attemptIndex += 1) {
     try {
+      const transcriptionPrompt = readWorkflowRuntimeString(input.asr.prompt)
+        ?? '请转写医疗案例视频中的人物口述内容，保留使用前、使用后、症状变化等关键信息。';
       const asrResponse = await input.modelInvoker({
         profile: input.asrProfile,
         taskKind: 'audio_transcription',
@@ -7021,7 +7676,7 @@ async function transcribeFactoryVideoWithRetry(input: {
           audioPath: input.audioPath,
           language: readWorkflowRuntimeString(input.asr.language) ?? 'zh',
           dialect: readWorkflowRuntimeString(input.asr.dialect) ?? 'auto',
-          prompt: '请转写医疗案例视频中的人物口述内容，保留使用前、使用后、症状变化等关键信息。'
+          prompt: transcriptionPrompt
         },
         messages: [{ role: 'user', content: `请转写视频音频：${input.video.name}` }],
         timeoutMs: 180_000
@@ -10869,6 +11524,10 @@ function getWorkflowModelRequiredCapabilities(node: WorkflowGraphNode): string[]
     return ['audio_to_text'];
   }
 
+  if (taskType === 'audio_generation') {
+    return ['text_to_audio'];
+  }
+
   if (taskType === 'video_screening_batch') {
     return ['text', 'reasoning_text'];
   }
@@ -10902,6 +11561,7 @@ function getWorkflowSemanticDefaultProfileId(node: WorkflowGraphNode): string | 
   if (taskType === 'vision') return 'qiu-vision-default';
   if (taskType === 'reasoning') return 'qiu-reasoning-default';
   if (taskType === 'audio_transcription') return 'qiu-asr-default';
+  if (taskType === 'audio_generation') return 'qiu-audio-generation-default';
   if (taskType === 'image_generation') return 'qiu-image-generation-default';
   if (taskType === 'image_editing') return 'qiu-image-editing-default';
   if (taskType === 'video_generation') return 'qiu-video-generation-default';
@@ -10992,6 +11652,7 @@ function getSemanticModelProfileIdForAssetCapabilities(input: {
   const outputTypes = new Set((input.outputTypes ?? []).map(normalizeWorkflowModelToken));
 
   if (capabilities.has('audio_to_text')) return 'qiu-asr-default';
+  if (capabilities.has('text_to_audio')) return 'qiu-audio-generation-default';
   if (capabilities.has('embedding') || outputTypes.has('embedding')) return 'qiu-embedding-default';
   if (capabilities.has('rerank') || outputTypes.has('scores')) return 'qiu-rerank-default';
   if (
@@ -13016,7 +13677,8 @@ function normalizeRuntimeRequirementModelProfileId(profileId: string): string {
   const normalized = profileId.trim().toLowerCase();
   if (!normalized) return '';
   if (normalized.startsWith('qiu-')) return profileId.trim();
-  if (normalized.includes('asr') || normalized.includes('speech') || normalized.includes('audio')) return 'qiu-asr-default';
+  if (normalized.includes('text_to_audio') || normalized.includes('tts') || normalized.includes('text-to-speech') || normalized.includes('speech_generation')) return 'qiu-audio-generation-default';
+  if (normalized.includes('asr') || normalized.includes('speech_to_text') || normalized.includes('speech-to-text') || normalized.includes('audio_to_text') || normalized.includes('transcription')) return 'qiu-asr-default';
   if (
     normalized.includes('reason') ||
     normalized.includes('reasoner') ||
