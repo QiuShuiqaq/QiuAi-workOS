@@ -184,6 +184,7 @@ import {
   parseWorkflowGraph,
   type WorkflowGraphArtifactType
 } from '../shared/desktop-workflow-graph';
+import { resolveDisplayedAccountStatus } from './account-status';
 import {
   academicDemoSectionTitles,
   academicDemoSectionTypes,
@@ -3234,6 +3235,7 @@ export default function App() {
   const [aiPointNotice, setAiPointNotice] = useState('');
   const [referralOverview, setReferralOverview] = useState<DesktopReferralOverview | null>(null);
   const [isLoadingReferralOverview, setIsLoadingReferralOverview] = useState(false);
+  const [isRefreshingAccountOverview, setIsRefreshingAccountOverview] = useState(false);
   const [referralNotice, setReferralNotice] = useState('');
   const [modelApiKeyClearRequested, setModelApiKeyClearRequested] = useState(false);
   const [latestPulledModelCatalog, setLatestPulledModelCatalog] = useState<{
@@ -3416,6 +3418,19 @@ export default function App() {
 
     void loadSoftwareCopilots();
   }, [hasLoadedPersistedState, runtimeState.localRuntime.workspaceId]);
+
+  useEffect(() => {
+    if (!hasLoadedPersistedState || !accountMenuOpen) {
+      return;
+    }
+
+    void refreshAccountOverview({ silent: true });
+  }, [
+    accountMenuOpen,
+    hasLoadedPersistedState,
+    runtimeState.localRuntime.workspaceId,
+    runtimeState.serverConnection.state
+  ]);
 
   useEffect(() => {
     if (!hasLoadedPersistedState) {
@@ -3887,9 +3902,9 @@ export default function App() {
     }
   }
 
-  async function loadAuthorizedRoleTemplates() {
+  async function loadAuthorizedRoleTemplates(): Promise<boolean> {
     if (!window.qiuDesktop) {
-      return;
+      return false;
     }
 
     setIsLoadingRoleTemplates(true);
@@ -3912,11 +3927,13 @@ export default function App() {
             ? formatRoleApplicationSyncNotice(countRoleApplications(authorizedTemplates))
             : '暂未同步到数字市场，请检查网络或服务端配置。')
       );
+      return catalog.source === 'server';
     } catch (error) {
       setAuthorizedRoleTemplateCatalog(initialAuthorizedRoleTemplateCatalog);
       setRoleTemplateNotice(
         `数字市场同步失败：${error instanceof Error ? error.message : 'unknown error'}`
       );
+      return false;
     } finally {
       setIsLoadingRoleTemplates(false);
     }
@@ -3954,15 +3971,15 @@ export default function App() {
     }
   }
 
-  async function loadAiPointOverview() {
+  async function loadAiPointOverview(): Promise<boolean> {
     if (!window.qiuDesktop) {
-      return;
+      return false;
     }
 
     if (runtimeState.localRuntime.workspaceId === pendingWorkspaceId) {
       setAiPointOverview(null);
       setAiPointNotice('绑定账号后可查看官方通道 AI 点数。');
-      return;
+      return false;
     }
 
     setIsLoadingAiPointOverview(true);
@@ -3970,17 +3987,19 @@ export default function App() {
     try {
       const overview = await window.qiuDesktop.getAiPointOverview();
       setAiPointOverview(overview);
+      return true;
     } catch (error) {
       setAiPointOverview(null);
       setAiPointNotice(error instanceof Error ? error.message : 'AI 点数读取失败，请稍后重试。');
+      return false;
     } finally {
       setIsLoadingAiPointOverview(false);
     }
   }
 
-  async function loadReferralOverview() {
+  async function loadReferralOverview(): Promise<boolean> {
     if (!window.qiuDesktop) {
-      return;
+      return false;
     }
 
     if (runtimeState.localRuntime.workspaceId === pendingWorkspaceId) {
@@ -3997,7 +4016,7 @@ export default function App() {
         }
       });
       setReferralNotice('');
-      return;
+      return true;
     }
 
     setIsLoadingReferralOverview(true);
@@ -4005,11 +4024,47 @@ export default function App() {
     try {
       const overview = await window.qiuDesktop.getReferralOverview();
       setReferralOverview(overview);
+      return true;
     } catch (error) {
       setReferralOverview(null);
       setReferralNotice(error instanceof Error ? error.message : '账号状态读取失败，请稍后重试。');
+      return false;
     } finally {
       setIsLoadingReferralOverview(false);
+    }
+  }
+
+  async function refreshAccountOverview(options: { silent?: boolean } = {}) {
+    if (!window.qiuDesktop || isRefreshingAccountOverview) {
+      return;
+    }
+
+    setIsRefreshingAccountOverview(true);
+    try {
+      const results = await Promise.all([
+        loadAuthorizedRoleTemplates(),
+        loadReferralOverview(),
+        loadAiPointOverview()
+      ]);
+
+      if (results.some((ok) => !ok)) {
+        if (!options.silent) {
+          message.warning('账号状态刷新未完全成功，请稍后重试。');
+        }
+        return;
+      }
+
+      if (!options.silent) {
+        message.success('账号状态已刷新');
+      }
+    } catch (error) {
+      if (!options.silent) {
+        message.warning(
+          `账号状态刷新失败：${error instanceof Error ? error.message : '请稍后重试。'}`
+        );
+      }
+    } finally {
+      setIsRefreshingAccountOverview(false);
     }
   }
 
@@ -5785,7 +5840,12 @@ export default function App() {
 
   function renderProductRail() {
     const planCode = authorizedRoleTemplateCatalog.deviceCapacity?.planCode;
-    const accountStatus = referralOverview?.accountStatus ?? resolveAccountPlanStatus(planCode, isEnterpriseUnbound);
+    const accountStatus = resolveDisplayedAccountStatus(
+      planCode,
+      isEnterpriseUnbound,
+      referralOverview?.accountStatus,
+      authorizedRoleTemplateCatalog.source
+    );
     const qAiPointText = isEnterpriseUnbound
       ? '登录后查看'
       : aiPointOverview
@@ -5825,7 +5885,20 @@ export default function App() {
               <div className="account-popover-status">
                 <div>
                   <span>账号状态</span>
-                  <Tag color={accountPlanStatusColor(accountStatus)}>{accountPlanStatusLabel(accountStatus)}</Tag>
+                  <Space size={4}>
+                    <Tag color={accountPlanStatusColor(accountStatus)}>{accountPlanStatusLabel(accountStatus)}</Tag>
+                    {!isEnterpriseUnbound ? (
+                      <Button
+                        type="text"
+                        size="small"
+                        className="account-popover-refresh-button"
+                        title="刷新账号状态"
+                        icon={<ReloadOutlined />}
+                        loading={isRefreshingAccountOverview}
+                        onClick={() => void refreshAccountOverview()}
+                      />
+                    ) : null}
+                  </Space>
                 </div>
                 <div>
                   <span>AI 点数</span>
@@ -16803,13 +16876,6 @@ function resolvePurchaseStatus(planCode: string | undefined, isUnbound: boolean)
     color: 'default',
     isEnterprise: false
   };
-}
-
-function resolveAccountPlanStatus(planCode: string | undefined, isUnbound: boolean): DesktopReferralOverview['accountStatus'] {
-  if (isUnbound) return 'unregistered';
-  if (planCode?.startsWith('ENTERPRISE_')) return 'enterprise';
-  if (planCode?.startsWith('PERSONAL_MEMBER_')) return 'member';
-  return 'free';
 }
 
 function accountPlanStatusLabel(status: DesktopReferralOverview['accountStatus']) {

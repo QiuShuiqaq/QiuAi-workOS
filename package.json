@@ -71,7 +71,7 @@
     "db:generate": "npm run prisma:generate -w @qiuai/server",
     "db:migrate:deploy": "npm run prisma:migrate:deploy -w @qiuai/server",
     "db:seed": "npm run prisma:seed -w @qiuai/server",
-    "db:sync:catalogs": "npm run prisma:sync:catalogs -w @qiuai/server",
+    "db:sync:catalogs": "npm run db:generate && npm run prisma:sync:catalogs -w @qiuai/server",
     "db:sync:managed-production": "npm run prisma:sync:managed-production -w @qiuai/server"
   },
   "devDependencies": {

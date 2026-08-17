@@ -295,6 +295,13 @@ body,
   font-size: 12px;
 }
 
+.account-popover-refresh-button {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  padding: 0;
+}
+
 .account-avatar {
   display: inline-flex;
   align-items: center;
