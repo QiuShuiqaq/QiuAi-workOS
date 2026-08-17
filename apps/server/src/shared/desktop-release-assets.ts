@@ -25,6 +25,12 @@ export interface DesktopReleaseAssetDownload {
   stream: Readable;
 }
 
+export interface DesktopReleaseAssetMetadata {
+  fileName: string;
+  contentType: string;
+  fileSizeBytes: number;
+}
+
 export function getDesktopReleaseUploadMaxBytes(): number {
   const configured = Number(process.env.WORKOS_DESKTOP_RELEASE_UPLOAD_MAX_BYTES);
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_MAX_UPLOAD_BYTES;
@@ -76,9 +82,11 @@ export async function saveDesktopReleaseAsset(input: {
   };
 }
 
-export async function openDesktopReleaseAsset(fileName: string): Promise<DesktopReleaseAssetDownload> {
+export async function getDesktopReleaseAssetMetadata(
+  fileName: string
+): Promise<DesktopReleaseAssetMetadata> {
   const safeFileName = sanitizeStoredAssetFileName(fileName);
-  const fullPath = join(getDesktopReleaseAssetDirectory(), safeFileName);
+  const fullPath = getDesktopReleaseAssetPath(safeFileName);
   let fileStat;
 
   try {
@@ -105,13 +113,25 @@ export async function openDesktopReleaseAsset(fileName: string): Promise<Desktop
   return {
     fileName: safeFileName,
     contentType: normalizeInstallerContentType(extension),
-    fileSizeBytes: fileStat.size,
-    stream: createReadStream(fullPath)
+    fileSizeBytes: fileStat.size
+  };
+}
+
+export async function openDesktopReleaseAsset(fileName: string): Promise<DesktopReleaseAssetDownload> {
+  const metadata = await getDesktopReleaseAssetMetadata(fileName);
+
+  return {
+    ...metadata,
+    stream: createReadStream(getDesktopReleaseAssetPath(metadata.fileName))
   };
 }
 
 function getDesktopReleaseAssetDirectory(): string {
   return process.env.WORKOS_DESKTOP_RELEASE_UPLOAD_DIR?.trim() || join(process.cwd(), 'storage', 'desktop-releases');
+}
+
+function getDesktopReleaseAssetPath(fileName: string): string {
+  return join(getDesktopReleaseAssetDirectory(), fileName);
 }
 
 function buildDesktopReleaseAssetUrl(fileName: string): string {

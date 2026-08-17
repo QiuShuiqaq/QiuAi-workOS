@@ -1711,14 +1711,18 @@ test('desktop release publishing drives public update checks', async () => {
         downloadUrl: uploadedAsset.downloadUrl,
         releaseNotes: 'Desktop release smoke test.',
         checksumSha256: uploadedAsset.checksumSha256,
-        fileSizeBytes: uploadedAsset.fileSizeBytes,
         forceUpdate: true,
         minimumSupportedVersion: '1.0.0'
       }
     });
     assert.equal(createResponse.statusCode, 201);
-    const release = JSON.parse(createResponse.body).data as { id: string; status: string };
+    const release = JSON.parse(createResponse.body).data as {
+      id: string;
+      status: string;
+      fileSizeBytes: number;
+    };
     assert.equal(release.status, 'DRAFT');
+    assert.equal(release.fileSizeBytes, installerPayload.length);
 
     const unpublishedCheckResponse = await app.inject({
       method: 'GET',

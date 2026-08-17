@@ -12,7 +12,10 @@ import {
 import type { AiPointWallet, BillingCycle, PlanCode, Prisma, WorkspaceMemberRole } from '@prisma/client';
 
 import { hashPassword } from '../../shared/auth/password-hash';
-import { saveDesktopReleaseAsset } from '../../shared/desktop-release-assets';
+import {
+  getDesktopReleaseAssetMetadata,
+  saveDesktopReleaseAsset
+} from '../../shared/desktop-release-assets';
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
@@ -609,6 +612,7 @@ export class AdminService {
   ): Promise<CreateAdminDesktopReleaseResponseDto> {
     const operator = await this.requireAdminOperator(cookieHeader);
     const normalized = this.normalizeCreateDesktopReleaseInput(input);
+    await this.hydrateDesktopReleaseAssetMetadata(normalized, normalized.downloadUrl);
 
     if (!isDatabasePersistenceEnabled()) {
       const created = this.store.createDesktopRelease({
@@ -679,6 +683,7 @@ export class AdminService {
       const next = {
         ...normalized
       };
+      await this.hydrateDesktopReleaseAssetMetadata(next, normalized.downloadUrl ?? current.downloadUrl);
       if (normalized.status === 'PUBLISHED' && current.status !== 'PUBLISHED') {
         next.publishedAt = new Date().toISOString();
       }
@@ -709,6 +714,10 @@ export class AdminService {
     const nextChannel = normalized.channel ?? current.channel;
     const nextVersion = normalized.version ?? current.version;
     await this.assertDesktopReleaseUnique(nextPlatform, nextChannel, nextVersion, id);
+    await this.hydrateDesktopReleaseAssetMetadata(
+      normalized,
+      normalized.downloadUrl ?? current.downloadUrl
+    );
 
     const updateData = {
       ...normalized
@@ -2543,6 +2552,43 @@ export class AdminService {
     }
 
     return update;
+  }
+
+  private async hydrateDesktopReleaseAssetMetadata(
+    target: { fileSizeBytes?: number | null },
+    downloadUrl?: string | null
+  ) {
+    if (target.fileSizeBytes !== undefined && target.fileSizeBytes !== null) {
+      return;
+    }
+
+    const fileName = this.extractDesktopReleaseAssetFileName(downloadUrl);
+    if (!fileName) {
+      return;
+    }
+
+    try {
+      const metadata = await getDesktopReleaseAssetMetadata(fileName);
+      target.fileSizeBytes = metadata.fileSizeBytes;
+    } catch {
+      // External URLs or deleted local upload files should not block release metadata edits.
+    }
+  }
+
+  private extractDesktopReleaseAssetFileName(downloadUrl?: string | null): string | undefined {
+    if (!downloadUrl) {
+      return undefined;
+    }
+
+    let pathname: string;
+    try {
+      pathname = new URL(downloadUrl, 'http://qiuai.local').pathname;
+    } catch {
+      return undefined;
+    }
+
+    const match = pathname.match(/\/api\/v1\/desktop\/releases\/downloads\/([^/]+)$/);
+    return match ? decodeURIComponent(match[1]) : undefined;
   }
 
   private async assertDesktopReleaseUnique(
