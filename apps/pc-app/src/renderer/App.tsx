@@ -184,7 +184,11 @@ import {
   parseWorkflowGraph,
   type WorkflowGraphArtifactType
 } from '../shared/desktop-workflow-graph';
-import { resolveDisplayedAccountStatus } from './account-status';
+import {
+  canBindEnterpriseWorkspace,
+  resolveAccountPlanStatus,
+  resolveDisplayedAccountStatus
+} from './account-status';
 import {
   academicDemoSectionTitles,
   academicDemoSectionTypes,
@@ -3582,8 +3586,9 @@ export default function App() {
 
   const isDesktopAccountUnregistered = runtimeState.localRuntime.workspaceId === pendingWorkspaceId;
   const currentPlanCode = authorizedRoleTemplateCatalog.deviceCapacity?.planCode;
-  const isEnterpriseWorkspace = currentPlanCode?.startsWith('ENTERPRISE_') ?? false;
-  const canBindEnterprise = !isDesktopAccountUnregistered && !isEnterpriseWorkspace;
+  const desktopAccountStatus = resolveAccountPlanStatus(currentPlanCode, isDesktopAccountUnregistered);
+  const isEnterpriseWorkspace = desktopAccountStatus === 'enterprise';
+  const canBindEnterprise = canBindEnterpriseWorkspace(desktopAccountStatus);
   const tutorialIsEnterpriseUnbound = isDesktopAccountUnregistered;
 
   const digitalEmployeeTutorialSteps = [
@@ -4902,6 +4907,10 @@ export default function App() {
     if (!bindingCode || !window.qiuDesktop) {
       return;
     }
+    if (!canBindEnterprise) {
+      setOnboardingNotice('当前设备已经登录账号或绑定企业，请先退出登录后再绑定企业。');
+      return;
+    }
 
     setIsBindingDevice(true);
     setOnboardingNotice('');
@@ -4923,6 +4932,10 @@ export default function App() {
   async function submitDesktopAccessBinding(values: OnboardingFormValues) {
     const bindingCode = values.bindingCode.trim();
     if (!bindingCode || !window.qiuDesktop) {
+      return;
+    }
+    if (!canBindEnterprise) {
+      setOnboardingNotice('当前设备已经登录账号或绑定企业，请先退出登录后再绑定企业。');
       return;
     }
 

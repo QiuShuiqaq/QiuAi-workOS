@@ -580,6 +580,7 @@ export class BillingService {
       });
     }
     this.requirePurchasablePlan(plan);
+    this.requirePlanMatchesWorkspaceType(workspace.workspaceType, plan.code);
 
     const amountCents = this.resolveOrderAmount(input.amountCents, plan.priceCents, plan.billingCycle);
     const now = new Date();
@@ -672,6 +673,7 @@ export class BillingService {
       });
     }
     this.requirePurchasablePlan(plan);
+    this.requirePlanMatchesWorkspaceType(this.toWorkspaceType(workspace.type), plan.code);
 
     const billingAccount =
       workspace.billingAccount ??
@@ -1438,6 +1440,36 @@ export class BillingService {
 
   private isPersonalMemberPlanCode(planCode: string): boolean {
     return planCode === 'PERSONAL_MEMBER_MONTHLY' || planCode === 'PERSONAL_MEMBER_ANNUAL';
+  }
+
+  private isEnterprisePlanCode(planCode: string): boolean {
+    return planCode.startsWith('ENTERPRISE_');
+  }
+
+  private toWorkspaceType(workspaceType: string): 'personal' | 'enterprise' {
+    return workspaceType === 'ENTERPRISE' || workspaceType === 'enterprise' ? 'enterprise' : 'personal';
+  }
+
+  private requirePlanMatchesWorkspaceType(workspaceType: string, planCode: string): void {
+    const normalizedWorkspaceType = this.toWorkspaceType(workspaceType);
+    const isPersonalMemberPlan = this.isPersonalMemberPlanCode(planCode);
+    const isEnterprisePlan = this.isEnterprisePlanCode(planCode);
+
+    if (
+      (normalizedWorkspaceType === 'personal' && !isPersonalMemberPlan) ||
+      (normalizedWorkspaceType === 'enterprise' && !isEnterprisePlan)
+    ) {
+      throw new BadRequestException({
+        error: {
+          code: 'PLAN_WORKSPACE_TYPE_MISMATCH',
+          message: 'The selected plan is not available for this workspace type.',
+          details: {
+            workspaceType: normalizedWorkspaceType,
+            planCode
+          }
+        }
+      });
+    }
   }
 
   private readOrderKind(metadata: unknown): 'PLAN' | 'AI_POINTS' {

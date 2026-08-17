@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  canBindEnterpriseWorkspace,
   resolveAccountPlanStatus,
   resolveDisplayedAccountStatus
 } from './account-status';
@@ -35,4 +36,11 @@ test('referral status remains a fallback while the catalog is unavailable', () =
   assert.equal(resolveDisplayedAccountStatus('PERSONAL_FREE', false, 'member', 'local_fallback'), 'member');
   assert.equal(resolveDisplayedAccountStatus(undefined, false, 'enterprise'), 'enterprise');
   assert.equal(resolveDisplayedAccountStatus('PERSONAL_FREE', false), 'free');
+});
+
+test('enterprise binding is only available before desktop account registration', () => {
+  assert.equal(canBindEnterpriseWorkspace('unregistered'), true);
+  assert.equal(canBindEnterpriseWorkspace('free'), false);
+  assert.equal(canBindEnterpriseWorkspace('member'), false);
+  assert.equal(canBindEnterpriseWorkspace('enterprise'), false);
 });

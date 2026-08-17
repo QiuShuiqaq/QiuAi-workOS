@@ -26,3 +26,7 @@ export function resolveDisplayedAccountStatus(
 
   return referralStatus ?? catalogStatus;
 }
+
+export function canBindEnterpriseWorkspace(status: DesktopAccountStatus): boolean {
+  return status === 'unregistered';
+}

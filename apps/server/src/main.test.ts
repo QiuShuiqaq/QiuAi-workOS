@@ -305,6 +305,63 @@ test('desktop device token can create billing orders', async () => {
     assert.equal(order.orderKind, 'PLAN');
     assert.equal(order.planCode, 'ENTERPRISE_BASIC_MONTHLY');
     assert.equal(order.status, 'PENDING');
+
+    const enterprisePersonalPlanResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/workspaces/enterprise/billing/orders',
+      headers: {
+        'content-type': 'application/json',
+        'x-qiuai-device-token': binding.deviceToken
+      },
+      payload: {
+        planCode: 'PERSONAL_MEMBER_MONTHLY',
+        provider: 'ALIPAY'
+      }
+    });
+    assert.equal(enterprisePersonalPlanResponse.statusCode, 400);
+    assert.equal(
+      JSON.parse(enterprisePersonalPlanResponse.body).error.code,
+      'PLAN_WORKSPACE_TYPE_MISMATCH'
+    );
+
+    const personalLoginResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/desktop/auth/login',
+      headers: {
+        'content-type': 'application/json'
+      },
+      payload: {
+        email: 'admin@qiuai.local',
+        password: process.env.WORKOS_MOCK_ADMIN_PASSWORD ?? 'qiuai-demo',
+        rememberMe: true,
+        runtimeId: `runtime-personal-billing-${Date.now()}`,
+        deviceId: `device-personal-billing-${Date.now()}`,
+        deviceName: 'Personal Billing Device',
+        platform: 'windows',
+        appVersion: '1.1.5'
+      }
+    });
+    assert.equal(personalLoginResponse.statusCode, 201);
+    const personalBinding = JSON.parse(personalLoginResponse.body).data;
+    assert.equal(personalBinding.workspaceId, 'personal');
+
+    const personalEnterprisePlanResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/workspaces/personal/billing/orders',
+      headers: {
+        'content-type': 'application/json',
+        'x-qiuai-device-token': personalBinding.deviceToken
+      },
+      payload: {
+        planCode: 'ENTERPRISE_BASIC_MONTHLY',
+        provider: 'ALIPAY'
+      }
+    });
+    assert.equal(personalEnterprisePlanResponse.statusCode, 400);
+    assert.equal(
+      JSON.parse(personalEnterprisePlanResponse.body).error.code,
+      'PLAN_WORKSPACE_TYPE_MISMATCH'
+    );
   } finally {
     await app.close();
   }
