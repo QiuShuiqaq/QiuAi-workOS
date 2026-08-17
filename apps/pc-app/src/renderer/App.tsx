@@ -438,6 +438,8 @@ interface FactoryRunPackageDefinition {
   key: string;
   label: string;
   description?: string;
+  promptTemplate?: string;
+  negativePrompt?: string;
   outputType?: string;
   defaultSelected?: boolean;
   custom?: boolean;
@@ -2414,6 +2416,8 @@ function normalizeFactoryPackageDefinitions(
       key,
       label,
       description: readString(item.description),
+      promptTemplate: readString(item.promptTemplate) ?? readString(item.prompt) ?? readString(item.description),
+      negativePrompt: readString(item.negativePrompt),
       outputType: readString(item.outputType) ?? 'image',
       defaultSelected: typeof item.defaultSelected === 'boolean' ? item.defaultSelected : undefined,
       custom: typeof item.custom === 'boolean' ? item.custom : key.startsWith('custom_')
@@ -2609,7 +2613,7 @@ const factoryRunRememberedFieldKeys: Array<keyof FactoryRunFormValues> = [
   'useKnowledge',
   'platform',
   'packageKeys',
-  'qualityCheckMode',
+  'packageDefinitions',
   'enableImageUnderstanding',
   'dialect',
   'screeningProfileKey',
@@ -2724,6 +2728,13 @@ function normalizeFactoryRunParameterMemory(value: unknown): Partial<FactoryRunF
     if (key === 'packageKeys') {
       if (Array.isArray(item)) {
         normalized.packageKeys = item.filter((entry): entry is string => typeof entry === 'string');
+      }
+      continue;
+    }
+
+    if (key === 'packageDefinitions') {
+      if (Array.isArray(item)) {
+        normalized.packageDefinitions = normalizeFactoryPackageDefinitions(item, []);
       }
       continue;
     }
@@ -2876,7 +2887,33 @@ function applyFactoryRunParameterMemory(
   defaultValues: FactoryRunFormValues
 ): FactoryRunFormValues {
   const remembered = readFactoryRunParameterMemory(roleCode);
-  const packageDefinitions = defaultValues.packageDefinitions ?? [];
+  const defaultPackageDefinitions = defaultValues.packageDefinitions ?? [];
+  const rememberedPackageDefinitions = normalizeFactoryPackageDefinitions(
+    remembered.packageDefinitions,
+    []
+  );
+  const rememberedPackagesByKey = new Map(
+    rememberedPackageDefinitions.map((item) => [item.key, item])
+  );
+  const packageDefinitions = [
+    ...defaultPackageDefinitions.map((item) => {
+      const rememberedPackage = rememberedPackagesByKey.get(item.key);
+      if (!rememberedPackage) {
+        return item;
+      }
+
+      return {
+        ...item,
+        promptTemplate: rememberedPackage.promptTemplate ?? item.promptTemplate,
+        negativePrompt: rememberedPackage.negativePrompt ?? item.negativePrompt
+      };
+    }),
+    ...rememberedPackageDefinitions.filter(
+      (item) =>
+        item.custom &&
+        !defaultPackageDefinitions.some((defaultPackage) => defaultPackage.key === item.key)
+    )
+  ];
   const availablePackageKeys = new Set(packageDefinitions.map((item) => item.key));
   const rememberedPackageKeys = remembered.packageKeys?.filter((key) => availablePackageKeys.has(key));
 
@@ -3356,6 +3393,8 @@ export default function App() {
   const [factoryScreeningEditorSelectedKey, setFactoryScreeningEditorSelectedKey] = useState('');
   const runtimeStateRef = useRef(runtimeState);
   const runningWatchRoleCodesRef = useRef<Set<string>>(new Set());
+  const factoryRunParameterMemoryTimerRef = useRef<number | null>(null);
+  const factoryRunParameterMemoryValuesRef = useRef<FactoryRunFormValues | null>(null);
 
   useEffect(() => {
     void loadRuntimeState();
@@ -3799,17 +3838,23 @@ export default function App() {
 
   useEffect(() => {
     if (!selectedFactoryRoleCode) {
+      flushFactoryRunParameterMemory();
       factoryRunForm.resetFields();
       setFactoryAttachments([]);
       return;
     }
 
+    flushFactoryRunParameterMemory();
     const defaultValues = buildFactoryRunDefaultValues(selectedFactoryRoleCode);
     if (defaultValues) {
       factoryRunForm.setFieldsValue(applyFactoryRunParameterMemory(selectedFactoryRoleCode, defaultValues));
       setFactoryAttachments([]);
     }
   }, [factoryRunForm, selectedFactoryRoleCode]);
+
+  useEffect(() => () => {
+    flushFactoryRunParameterMemory();
+  }, []);
 
   async function loadRuntimeState() {
     if (!window.qiuDesktop) {
@@ -4200,6 +4245,54 @@ export default function App() {
       message.error(errorMessage);
     } finally {
       setSavingFactoryImageId('');
+    }
+  }
+
+  function collectFactoryPreviewImageFiles(task: DesktopTaskDetail) {
+    return task.artifacts.flatMap((artifact) => {
+      const preview = artifact.factoryPreview;
+      if (preview?.kind !== 'digital_factory_image_batch') {
+        return [];
+      }
+
+      return preview.items
+        .filter((item) => item.status === 'completed' && Boolean(item.localPath))
+        .sort((left, right) => left.order - right.order)
+        .map((item) => ({
+          sourcePath: item.localPath!,
+          suggestedFileName: getFactoryPreviewImageFileName(item)
+        }));
+    });
+  }
+
+  async function exportFactoryPreviewImages(task: DesktopTaskDetail) {
+    if (!window.qiuDesktop) {
+      return;
+    }
+
+    const exportableFiles = collectFactoryPreviewImageFiles(task);
+    if (exportableFiles.length === 0) {
+      message.warning('当前批次没有可批量下载的本地图片。');
+      return;
+    }
+
+    const batchKey = `preview-images-${task.taskId}`;
+    setLocalActionNotice('');
+    setExportingFactoryOutputBatch(batchKey);
+    try {
+      const result = await window.qiuDesktop.exportLocalFiles({
+        targetFolderName: `${task.title}-全部图片`,
+        files: exportableFiles
+      });
+      if (!result.canceled) {
+        message.success(`已下载 ${result.exportedFiles.length} 张图片。`);
+      }
+    } catch (error) {
+      const errorMessage = `下载全部图片失败：${error instanceof Error ? error.message : 'unknown error'}`;
+      setLocalActionNotice(errorMessage);
+      message.error(errorMessage);
+    } finally {
+      setExportingFactoryOutputBatch('');
     }
   }
 
@@ -7868,7 +7961,7 @@ export default function App() {
                   value={item.description}
                   rows={2}
                   maxLength={160}
-                  placeholder="说明这个产物包要生成什么，提示词模型会参考这里写生图提示词。"
+                  placeholder="说明这个产物包最终要生成什么，展示给用户看。"
                   onChange={(event) =>
                     updateFactoryPackageEditorDraft(index, { description: event.target.value })
                   }
@@ -9299,7 +9392,6 @@ export default function App() {
     const isAcademicDemoFactoryType = isAcademicDemoFactory(selectedFactoryManifest);
     const packageOptions = readFactoryPackageOptions(selectedFactoryManifest);
     const platformOptions = readFactoryPlatformOptions(selectedFactoryManifest);
-    const qualityModes = readFactoryQualityModes(selectedFactoryManifest);
     const promptControlFields = readFactoryPromptControlFields(selectedFactoryManifest);
     const screeningProfiles = readFactoryScreeningProfiles(selectedFactoryManifest, selectedFactoryCode);
     const operationGoals = readFactoryOperationGoals(selectedFactoryManifest);
@@ -9359,26 +9451,12 @@ export default function App() {
     const aiVideoSourceVideoOptions = buildFactoryAttachmentSelectOptions(aiVideoSourceVideoAttachments, '视频');
     const aiVideoPngAssetOptions = buildFactoryAttachmentSelectOptions(aiVideoPngAttachments, '图片');
     const latestFactoryLogs = focusedFactoryTask ? selectFactoryVisibleLogs(focusedFactoryTask) : [];
-    const focusedFactoryArtifacts =
-      focusedFactoryTask?.artifacts
-        .filter(isUserDeliverableArtifact)
-        .filter((artifact) =>
-          isEcommerceVideoFactory || isAiVideoProductionFactoryType
-            ? artifact.type === 'video' || getArtifactExtension(artifact) === 'mp4'
-            : true
-        ) ?? [];
     const focusedFactoryOutputs =
       focusedFactoryTask?.factoryOutputs?.filter((item) => item.status !== 'excluded') ?? [];
     const focusedFactoryCostCents =
       focusedFactoryTask?.costCents ??
       focusedFactoryTask?.costRecords.reduce((total, record) => total + record.costCents, 0);
     const focusedFactoryInputFiles = readFactoryTaskInputFiles(focusedFactoryTask);
-    const focusedFactoryStats = focusedFactoryTask
-      ? buildFactoryTaskBatchStats(
-          focusedFactoryTask,
-          isMedicalVideoFactory || isEcommerceVideoFactory || isAiVideoProductionFactoryType
-        )
-      : undefined;
     const missingFactoryModel = selectedFactoryModelReadiness.find((requirement) => !requirement.ready);
     const missingFactoryToolId = selectedFactoryPackage?.toolIds.find((toolId) => {
       const known = runtimeState.tools.some((tool) => tool.id === toolId);
@@ -9392,6 +9470,73 @@ export default function App() {
         : missingFactoryToolId
           ? `缺少工具配置：${resolveToolLabel(runtimeState.tools, missingFactoryToolId)}`
           : '请检查当前配置';
+    const factoryInputHelp = isMedicalVideoFactory
+      ? `上传待质检视频，单批最多 ${maxItems} 个。`
+      : isAiVideoProductionFactoryType
+        ? '上传原始视频和可选素材，一次处理 1 个原始视频。'
+        : isEcommerceVideoFactory
+          ? `上传参考图，单批最多 ${maxItems} 张。`
+          : isAcademicDemoFactoryType
+            ? `上传 Word、PDF、Excel 或 CSV 项目资料，每次最多 ${maxItems} 个文件。`
+            : isOperationFactory
+              ? '上传产品资料、案例素材或参考文件，也可以只填写参数。'
+              : `上传商品图或表格，单批最多 ${maxItems} 个。`;
+    const renderSelectedFactoryPackagePromptEditors = (mediaKind: 'image' | 'video') => (
+      <Form.Item shouldUpdate noStyle>
+        {({ getFieldValue }) => {
+          const currentPackages = normalizeFactoryPackageDefinitions(
+            getFieldValue('packageDefinitions'),
+            packageOptions
+          );
+          const packageKeysValue: unknown = getFieldValue('packageKeys');
+          const selectedPackageKeys = new Set<string>(
+            Array.isArray(packageKeysValue)
+              ? packageKeysValue.filter((item: unknown): item is string => typeof item === 'string')
+              : []
+          );
+          const selectedPackages = currentPackages.filter((item) => selectedPackageKeys.has(item.key));
+          if (selectedPackages.length === 0) {
+            return null;
+          }
+
+          return (
+            <div className="factory-package-editor-list factory-run-package-prompt-list">
+              <InlineHelpTitle help="每个产物包独立生成，不会与其他产物包的背景、风格或镜头要求冲突。">
+                <Typography.Text strong>已选产物包提示词</Typography.Text>
+              </InlineHelpTitle>
+              {selectedPackages.map((item) => (
+                <div key={item.key} className="factory-package-editor-item">
+                  <Typography.Text strong>{item.label}</Typography.Text>
+                  <Input.TextArea
+                    className="factory-package-prompt-input"
+                    value={item.promptTemplate ?? item.description ?? ''}
+                    rows={5}
+                    placeholder={mediaKind === 'image'
+                      ? '写清该图片产物包自己的背景、风格、光影和构图要求。'
+                      : '写清该视频产物包自己的场景、动作、镜头和节奏要求。'}
+                    onChange={(event) => {
+                      const packageDefinitions = currentPackages.map((current) =>
+                        current.key === item.key
+                          ? { ...current, promptTemplate: event.target.value }
+                          : current
+                      );
+                      factoryRunForm.setFieldValue(
+                        'packageDefinitions',
+                        packageDefinitions
+                      );
+                      scheduleFactoryRunParameterMemory({
+                        ...(factoryRunForm.getFieldsValue(true) as FactoryRunFormValues),
+                        packageDefinitions
+                      });
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+          );
+        }}
+      </Form.Item>
+    );
     const renderFactoryStatusPanel = (variant: 'default' | 'drawer' = 'default') => (
       <section className={`factory-panel factory-status-panel ${variant === 'drawer' ? 'factory-drawer-panel' : ''}`}>
         <Flex align="center" justify="space-between" gap={12}>
@@ -9659,20 +9804,9 @@ export default function App() {
                     >
                       <Flex align="flex-start" justify="space-between" gap={12}>
                         <Space direction="vertical" size={2}>
-                          <Typography.Text strong>输入</Typography.Text>
-                          <Typography.Text type="secondary">
-                            {isMedicalVideoFactory
-                              ? `上传待质检视频，单批最多 ${maxItems} 个。`
-                              : isAiVideoProductionFactoryType
-                                ? `上传原始视频和可选素材，一次处理 1 个原始视频。`
-                              : isEcommerceVideoFactory
-                                ? `上传参考图，单批最多 ${maxItems} 张。`
-                                : isAcademicDemoFactoryType
-                                  ? `上传 Word、PDF、Excel 或 CSV 项目资料，每次最多 ${maxItems} 个文件。`
-                                : isOperationFactory
-                                ? '上传产品资料、案例素材或参考文件，也可以只填写参数。'
-                                  : `上传商品图或表格，单批最多 ${maxItems} 个。`}
-                          </Typography.Text>
+                          <InlineHelpTitle help={factoryInputHelp}>
+                            <Typography.Text strong>输入</Typography.Text>
+                          </InlineHelpTitle>
                         </Space>
                         <Tag color="blue">{validFactoryAttachments.length}/{maxItems}</Tag>
                       </Flex>
@@ -9823,6 +9957,9 @@ export default function App() {
                       layout="vertical"
                       className="factory-console-form"
                       onFinish={submitFactoryRun}
+                      onValuesChange={(_, allValues) =>
+                        scheduleFactoryRunParameterMemory(allValues as FactoryRunFormValues)
+                      }
                     >
                       <Form.Item name="roleCode" hidden>
                         <Input />
@@ -9830,21 +9967,24 @@ export default function App() {
                       <section className="factory-panel factory-parameter-panel">
                         <Flex align="center" justify="space-between" gap={12}>
                           <Space direction="vertical" size={2}>
-                            <Typography.Text strong>参数设置</Typography.Text>
-                            <Typography.Text type="secondary">只保留本次运行需要调整的参数。</Typography.Text>
+                            <InlineHelpTitle help="只保留本次运行需要调整的参数。">
+                              <Typography.Text strong>参数设置</Typography.Text>
+                            </InlineHelpTitle>
                           </Space>
                           <Button size="small" onClick={() => clearFactoryRunFormForRole(selectedFactoryCode)}>
                             清空
                           </Button>
                         </Flex>
-                        <Form.Item
-                          name="useKnowledge"
-                          label="使用知识库"
-                          valuePropName="checked"
-                          extra="开启后，本次任务会结合已启用的本地知识库和企业知识库；未开启时直接跳过知识库。"
-                        >
-                          <Switch checkedChildren="开启" unCheckedChildren="关闭" />
-                        </Form.Item>
+                        {factorySupportsKnowledgeUsage(selectedFactoryManifest) ? (
+                          <Form.Item
+                            name="useKnowledge"
+                            label="使用知识库"
+                            valuePropName="checked"
+                            extra="开启后，本次任务会结合已启用的本地知识库和企业知识库；未开启时直接跳过知识库。"
+                          >
+                            <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+                          </Form.Item>
+                        ) : null}
 
                         {isMedicalVideoFactory ? (
                           <>
@@ -10000,6 +10140,23 @@ export default function App() {
                           </>
                         ) : isEcommerceVideoFactory ? (
                           <>
+                            <div className="factory-inline-form-grid compact">
+                              <Form.Item name="videoDurationSeconds" label="视频时长" rules={[{ required: true }]}>
+                                <Select
+                                  size="large"
+                                  options={ecommerceVideoDurationOptions.map((seconds) => ({
+                                    value: seconds,
+                                    label: `${seconds} 秒`
+                                  }))}
+                                />
+                              </Form.Item>
+                              <Form.Item name="videoRatio" label="画幅" rules={[{ required: true }]}>
+                                <Select
+                                  size="large"
+                                  options={operationRatios.map((item) => ({ value: item.key, label: item.label }))}
+                                />
+                              </Form.Item>
+                            </div>
                             <Form.Item shouldUpdate noStyle>
                               {({ getFieldValue }) => {
                                 const currentPackages = normalizeFactoryPackageDefinitions(
@@ -10035,23 +10192,7 @@ export default function App() {
                                 );
                               }}
                             </Form.Item>
-                            <div className="factory-inline-form-grid compact">
-                              <Form.Item name="videoDurationSeconds" label="视频时长" rules={[{ required: true }]}>
-                                <Select
-                                  size="large"
-                                  options={ecommerceVideoDurationOptions.map((seconds) => ({
-                                    value: seconds,
-                                    label: `${seconds} 秒`
-                                  }))}
-                                />
-                              </Form.Item>
-                              <Form.Item name="videoRatio" label="画幅" rules={[{ required: true }]}>
-                                <Select
-                                  size="large"
-                                  options={operationRatios.map((item) => ({ value: item.key, label: item.label }))}
-                                />
-                              </Form.Item>
-                            </div>
+                            {renderSelectedFactoryPackagePromptEditors('video')}
                           </>
                         ) : isOperationFactory ? (
                           <>
@@ -10294,26 +10435,44 @@ export default function App() {
                           </>
                         ) : (
                           <>
-                            <Form.Item
-                              name="platform"
-                              label={isImageFactory ? '图片比例' : '目标平台'}
-                              rules={[{ required: true, message: isImageFactory ? '请选择图片比例' : '请选择目标平台' }]}
-                            >
-                              <Select
-                                size="large"
-                                options={platformOptions.map((item) => ({
-                                  value: item.key,
-                                  label: isImageFactory
-                                    ? item.label
-                                    : `${item.label}${item.imageRatio ? ` / ${item.imageRatio}` : ''}`
-                                }))}
-                              />
-                            </Form.Item>
                             {isImageFactory ? (
-                              <Form.Item name="promptLanguage" label="图片文字语言" rules={[{ required: true, message: '请选择图片文字语言' }]}>
-                                <Select size="large" options={ecommerceImageTextLanguageOptions} />
+                              <div className="factory-inline-form-grid compact">
+                                <Form.Item
+                                  name="platform"
+                                  label="图片比例"
+                                  rules={[{ required: true, message: '请选择图片比例' }]}
+                                >
+                                  <Select
+                                    size="large"
+                                    options={platformOptions.map((item) => ({
+                                      value: item.key,
+                                      label: item.label
+                                    }))}
+                                  />
+                                </Form.Item>
+                                <Form.Item
+                                  name="promptLanguage"
+                                  label="图片文字语言"
+                                  rules={[{ required: true, message: '请选择图片文字语言' }]}
+                                >
+                                  <Select size="large" options={ecommerceImageTextLanguageOptions} />
+                                </Form.Item>
+                              </div>
+                            ) : (
+                              <Form.Item
+                                name="platform"
+                                label="目标平台"
+                                rules={[{ required: true, message: '请选择目标平台' }]}
+                              >
+                                <Select
+                                  size="large"
+                                  options={platformOptions.map((item) => ({
+                                    value: item.key,
+                                    label: `${item.label}${item.imageRatio ? ` / ${item.imageRatio}` : ''}`
+                                  }))}
+                                />
                               </Form.Item>
-                            ) : null}
+                            )}
                             <Form.Item shouldUpdate noStyle>
                               {({ getFieldValue }) => {
                                 const currentPackages = normalizeFactoryPackageDefinitions(
@@ -10349,15 +10508,7 @@ export default function App() {
                                 );
                               }}
                             </Form.Item>
-                            <Form.Item name="qualityCheckMode" label="质检方式" rules={[{ required: true }]}>
-                              <Select
-                                size="large"
-                                options={qualityModes.map((item) => ({
-                                  value: item.key,
-                                  label: item.label
-                                }))}
-                              />
-                            </Form.Item>
+                            {isImageFactory ? renderSelectedFactoryPackagePromptEditors('image') : null}
                             {!isImageFactory ? (
                               <>
                                 <Form.Item
@@ -10416,33 +10567,27 @@ export default function App() {
 
                             const insufficient = hasInsufficientAiPoints(estimate);
                             return (
-                              <Card
-                                size="small"
-                                type="inner"
-                                title="AI 点数预估"
-                                style={{ borderColor: insufficient ? '#ffccc7' : undefined }}
-                              >
-                                <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                                  <Space size={8} wrap>
-                                    <Tag color="blue">预计生成 {estimate.itemCount} 个产物</Tag>
-                                    <Tag>{estimate.label}</Tag>
-                                    <Tag>{formatAiPoints(estimate.unitPointPrice)} / 个</Tag>
-                                  </Space>
-                                  <Typography.Text strong>
-                                    预计消耗 {formatAiPoints(estimate.totalPoints)}
-                                  </Typography.Text>
-                                  {estimate.availablePoints !== undefined ? (
-                                    <Typography.Text type={insufficient ? 'danger' : 'secondary'}>
-                                      当前可用 {formatAiPoints(estimate.availablePoints)}
-                                      {insufficient ? '，点数不足。' : '。'}
-                                    </Typography.Text>
-                                  ) : (
-                                    <Typography.Text type="secondary">
-                                      余额尚未读取，可在 Q 面板或购买中心刷新 AI 点数。
-                                    </Typography.Text>
-                                  )}
+                              <div className={`factory-cost-summary ${insufficient ? 'insufficient' : ''}`}>
+                                <Typography.Text type="secondary">AI 点数预估</Typography.Text>
+                                <Space size={6} wrap>
+                                  <Tag color="blue">预计生成 {estimate.itemCount} 个产物</Tag>
+                                  <Tag>{estimate.label}</Tag>
+                                  <Tag>{formatAiPoints(estimate.unitPointPrice)} / 个</Tag>
                                 </Space>
-                              </Card>
+                                <Typography.Text strong>
+                                  预计消耗 {formatAiPoints(estimate.totalPoints)}
+                                </Typography.Text>
+                                {estimate.availablePoints !== undefined ? (
+                                  <Typography.Text type={insufficient ? 'danger' : 'secondary'}>
+                                    当前可用 {formatAiPoints(estimate.availablePoints)}
+                                    {insufficient ? '，点数不足。' : '。'}
+                                  </Typography.Text>
+                                ) : (
+                                  <Typography.Text type="secondary">
+                                    余额尚未读取，可在 Q 面板或购买中心刷新 AI 点数。
+                                  </Typography.Text>
+                                )}
+                              </div>
                             );
                           }}
                         </Form.Item>
@@ -10540,9 +10685,17 @@ export default function App() {
                         >
                           <Typography.Text strong>输出队列</Typography.Text>
                         </InlineHelpTitle>
-                        <Tag color={focusedFactoryArtifacts.length + focusedFactoryOutputs.length > 0 ? 'green' : 'default'}>
-                          产物 {focusedFactoryArtifacts.length} / 输出物 {focusedFactoryOutputs.length}
-                        </Tag>
+                        {focusedFactoryTask ? (
+                          <Button
+                            size="small"
+                            icon={<DownloadOutlined />}
+                            loading={exportingFactoryOutputBatch === `preview-images-${focusedFactoryTask.taskId}`}
+                            disabled={collectFactoryPreviewImageFiles(focusedFactoryTask).length === 0}
+                            onClick={() => void exportFactoryPreviewImages(focusedFactoryTask)}
+                          >
+                            下载全部图片
+                          </Button>
+                        ) : null}
                       </Flex>
 
                       {focusedFactoryTask ? (
@@ -10558,16 +10711,6 @@ export default function App() {
                               {formatDateTime(focusedFactoryTask.updatedAt)}
                             </Typography.Text>
                           </Flex>
-                          {focusedFactoryStats ? (
-                            <div className="factory-batch-summary-grid">
-                              {buildFactoryBatchStatItems(focusedFactoryStats, isMedicalVideoFactory, isEcommerceVideoFactory).map((item) => (
-                                <div key={item.key} className={`factory-batch-summary-card ${item.tone ?? ''}`}>
-                                  <span>{item.label}</span>
-                                  <strong>{item.value}</strong>
-                                </div>
-                              ))}
-                            </div>
-                          ) : null}
                           {renderFactoryOutputItems(focusedFactoryTask, {
                             mode: isEcommerceVideoFactory || isAiVideoProductionFactoryType ? 'generated_video' : 'review'
                           })}
@@ -13646,17 +13789,15 @@ export default function App() {
       const packageOptions = readFactoryPackageOptions(factory);
       const packageDefinitions = readFactoryPackagePreset(roleCode, packageOptions);
       const platformOptions = readFactoryPlatformOptions(factory);
-      const qualityModes = readFactoryQualityModes(factory);
       const ratios = readFactoryOperationRatios(factory);
       const durationOptions = readFactoryVideoDurationOptions(factory);
 
       return {
         roleCode,
-        useKnowledge: true,
+        useKnowledge: false,
         platform: platformOptions[0]?.key ?? 'tiktok_shop',
         packageDefinitions,
         packageKeys: resolveFactoryPackageSelection(roleCode, packageDefinitions),
-        qualityCheckMode: qualityModes[0]?.key ?? 'basic',
         videoDurationSeconds: durationOptions[1] ?? durationOptions[0] ?? 8,
         videoRatio: platformOptions[0]?.imageRatio ?? ratios[0]?.key ?? '9:16'
       };
@@ -13697,7 +13838,7 @@ export default function App() {
 
       return {
         roleCode,
-        useKnowledge: true,
+        useKnowledge: false,
         platform: platformOptions[0]?.key ?? 'douyin',
         packageDefinitions,
         packageKeys: resolveFactoryPackageSelection(roleCode, packageDefinitions),
@@ -13716,7 +13857,7 @@ export default function App() {
     if (isAcademicDemoFactory(factory)) {
       return {
         roleCode,
-        useKnowledge: true,
+        useKnowledge: false,
         projectName: '',
         researchDirection: '',
         keywords: '',
@@ -13741,7 +13882,6 @@ export default function App() {
     const packageOptions = readFactoryPackageOptions(factory);
     const packageDefinitions = readFactoryPackagePreset(roleCode, packageOptions);
     const platformOptions = readFactoryPlatformOptions(factory);
-    const qualityModes = readFactoryQualityModes(factory);
 
     return {
       roleCode,
@@ -13749,7 +13889,6 @@ export default function App() {
       platform: platformOptions[0]?.key ?? 'ratio_1_1',
       packageDefinitions,
       packageKeys: resolveFactoryPackageSelection(roleCode, packageDefinitions),
-      qualityCheckMode: qualityModes[0]?.key ?? 'basic',
       enableImageUnderstanding: false,
       promptLanguage: isImageGenerationFactory(factory) ? '中文' : '',
       promptStyle: '',
@@ -13767,6 +13906,7 @@ export default function App() {
       return false;
     }
 
+    cancelFactoryRunParameterMemorySchedule();
     removeFactoryRunParameterMemory(roleCode);
     removeFactoryPackageSelection(roleCode);
     factoryRunForm.resetFields();
@@ -13848,6 +13988,20 @@ export default function App() {
           }
         : {})
     });
+    scheduleFactoryRunParameterMemory({
+      ...(factoryRunForm.getFieldsValue(true) as FactoryRunFormValues),
+      academicSections: nextSections,
+      ...(academicSectionEditorType === 'cover'
+        ? {
+            projectName: values.projectName?.trim() ?? '',
+            researchDirection: values.researchDirection?.trim() ?? '',
+            keywords: values.keywords?.trim() ?? '',
+            organization: values.organization?.trim() ?? '',
+            team: values.team?.trim() ?? '',
+            coreConclusion: values.coreConclusion?.trim() ?? ''
+          }
+        : {})
+    });
     setAcademicSectionEditorOpen(false);
     message.success(`${academicDemoSectionTitles[academicSectionEditorType]}已保存。`);
   }
@@ -13866,10 +14020,54 @@ export default function App() {
 
   function rememberFactoryRunParameters(values: FactoryRunFormValues, factory: DigitalFactoryManifest) {
     rememberFactoryRunPackageSelection(values, factory);
-    writeFactoryRunParameterMemory(values.roleCode, {
+    writeFactoryRunParameterMemory(values.roleCode, values);
+  }
+
+  function cancelFactoryRunParameterMemorySchedule() {
+    if (factoryRunParameterMemoryTimerRef.current !== null) {
+      window.clearTimeout(factoryRunParameterMemoryTimerRef.current);
+      factoryRunParameterMemoryTimerRef.current = null;
+    }
+    factoryRunParameterMemoryValuesRef.current = null;
+  }
+
+  function flushFactoryRunParameterMemory() {
+    if (factoryRunParameterMemoryTimerRef.current !== null) {
+      window.clearTimeout(factoryRunParameterMemoryTimerRef.current);
+      factoryRunParameterMemoryTimerRef.current = null;
+    }
+
+    const pendingValues = factoryRunParameterMemoryValuesRef.current;
+    const currentValues = factoryRunForm.getFieldsValue(true) as FactoryRunFormValues;
+    const values = pendingValues?.roleCode ? pendingValues : currentValues;
+    factoryRunParameterMemoryValuesRef.current = null;
+
+    if (!values.roleCode) {
+      return;
+    }
+
+    const factory = readFactoryManifestForRoleCode(values.roleCode);
+    rememberFactoryRunParameters(values, factory);
+  }
+
+  function scheduleFactoryRunParameterMemory(values: FactoryRunFormValues) {
+    const roleCode = values.roleCode ?? factoryRunForm.getFieldValue('roleCode');
+    if (!roleCode) {
+      return;
+    }
+
+    factoryRunParameterMemoryValuesRef.current = {
       ...values,
-      packageDefinitions: undefined
-    });
+      roleCode
+    };
+    if (factoryRunParameterMemoryTimerRef.current !== null) {
+      window.clearTimeout(factoryRunParameterMemoryTimerRef.current);
+    }
+
+    factoryRunParameterMemoryTimerRef.current = window.setTimeout(() => {
+      factoryRunParameterMemoryTimerRef.current = null;
+      flushFactoryRunParameterMemory();
+    }, 300);
   }
 
   function readFactoryManifestForRoleCode(roleCode: string) {
@@ -13960,6 +14158,16 @@ export default function App() {
       packageDefinitions: normalizedPackages,
       packageKeys: selectedPackageKeys
     });
+    cancelFactoryRunParameterMemorySchedule();
+    rememberFactoryRunParameters(
+      {
+        ...(factoryRunForm.getFieldsValue(true) as FactoryRunFormValues),
+        roleCode: factoryPackageEditorRoleCode,
+        packageDefinitions: normalizedPackages,
+        packageKeys: selectedPackageKeys
+      },
+      factory
+    );
     writeFactoryPackageSelection(
       factoryPackageEditorRoleCode,
       selectedPackageKeys,
@@ -13990,6 +14198,16 @@ export default function App() {
       packageDefinitions: defaultPackages,
       packageKeys: selectedPackageKeys
     });
+    cancelFactoryRunParameterMemorySchedule();
+    rememberFactoryRunParameters(
+      {
+        ...(factoryRunForm.getFieldsValue(true) as FactoryRunFormValues),
+        roleCode: factoryPackageEditorRoleCode,
+        packageDefinitions: defaultPackages,
+        packageKeys: selectedPackageKeys
+      },
+      factory
+    );
     setFactoryPackageEditorDraft(defaultPackages);
     message.success('已恢复官方默认产物包。');
   }
@@ -14209,6 +14427,10 @@ export default function App() {
 
     writeFactoryCustomScreeningProfiles(factoryScreeningEditorRoleCode, customProfiles);
     factoryRunForm.setFieldsValue({ screeningProfileKey: selectedProfile?.key });
+    scheduleFactoryRunParameterMemory({
+      ...(factoryRunForm.getFieldsValue(true) as FactoryRunFormValues),
+      screeningProfileKey: selectedProfile?.key
+    });
     refreshFactoryScreeningProfiles((value) => value + 1);
     setFactoryScreeningEditorOpen(false);
     message.success('筛选标准已保存并应用到当前任务。');
@@ -14223,6 +14445,7 @@ export default function App() {
 
     const factory = readFactoryManifest(template.dependencyManifest);
     const maxItems = readFactoryMaxItems(factory);
+    const useKnowledge = factorySupportsKnowledgeUsage(factory) && values.useKnowledge === true;
     const aiPointEstimate = buildAiPointFactoryConsumptionEstimate({
       state: runtimeState,
       roleCode: values.roleCode,
@@ -14271,7 +14494,7 @@ export default function App() {
         title,
         input,
         attachments: videoAttachments,
-        useKnowledge: values.useKnowledge === true
+        useKnowledge
       });
       if (created) {
         rememberFactoryRunParameters(values, factory);
@@ -14311,16 +14534,6 @@ export default function App() {
         message.warning('请至少选择一个产物包。');
         return;
       }
-      const optionalVisionModelProfileIds =
-        ecommerceVideoValues.qualityCheckMode === 'smart'
-          ? findReadyImageUnderstandingModelProfileIds(runtimeState, values.roleCode)
-          : [];
-      if (ecommerceVideoValues.qualityCheckMode === 'smart' && optionalVisionModelProfileIds.length === 0) {
-        message.warning('智能质检需要先配置并启用图片理解模型；也可以改为基础质检或不质检后运行。');
-        navigateToSection('models');
-        return;
-      }
-
       const selectedPackageCount = ecommerceVideoValues.packageKeys.length;
       const title = `${template.name} - ${ecommerceAttachments.length * selectedPackageCount} 条视频`;
       const input = buildEcommerceProductVideoFactoryTaskInput({
@@ -14334,8 +14547,7 @@ export default function App() {
         title,
         input,
         attachments: factoryAttachments,
-        extraModelProfileIds: optionalVisionModelProfileIds,
-        useKnowledge: ecommerceVideoValues.useKnowledge === true
+        useKnowledge
       });
       if (created) {
         rememberFactoryRunParameters(ecommerceVideoValues, factory);
@@ -14386,7 +14598,7 @@ export default function App() {
         title,
         input,
         attachments: validAttachments,
-        useKnowledge: aiVideoValues.useKnowledge === true
+        useKnowledge
       });
       if (created) {
         rememberFactoryRunParameters(aiVideoValues, factory);
@@ -14427,7 +14639,7 @@ export default function App() {
         operationFactoryValues.sourceUrls,
         operationFactoryValues.brandTone,
         operationFactoryValues.instruction
-      ].some((item) => item?.trim()) || operationAttachments.length > 0 || operationFactoryValues.useKnowledge === true;
+      ].some((item) => item?.trim()) || operationAttachments.length > 0 || useKnowledge;
       if (!hasUserContext) {
         message.warning('请至少填写产品/客户/来源链接/补充要求，或开启知识库后再运行。');
         return;
@@ -14456,7 +14668,7 @@ export default function App() {
         title,
         input,
         attachments: operationAttachments,
-        useKnowledge: operationFactoryValues.useKnowledge === true
+        useKnowledge
       });
       if (created) {
         rememberFactoryRunParameters(operationFactoryValues, factory);
@@ -14515,7 +14727,7 @@ export default function App() {
         title,
         input,
         attachments: academicAttachments,
-        useKnowledge: academicFactoryValues.useKnowledge === true
+        useKnowledge
       });
       if (created) {
         rememberFactoryRunParameters(academicFactoryValues, factory);
@@ -14553,16 +14765,6 @@ export default function App() {
       message.warning('请至少选择一个产物包。');
       return;
     }
-    const optionalVisionModelProfileIds =
-      imageFactoryValues.qualityCheckMode === 'smart'
-        ? findReadyImageUnderstandingModelProfileIds(runtimeState, values.roleCode)
-        : [];
-    if (imageFactoryValues.qualityCheckMode === 'smart' && optionalVisionModelProfileIds.length === 0) {
-      message.warning('智能质检需要先配置并启用图片理解模型；也可以改用基础质检后走快速生成。');
-      navigateToSection('models');
-      return;
-    }
-
     const platform = readFactoryPlatformOptions(factory).find((item) => item.key === imageFactoryValues.platform);
     const title = `${template.name} - ${platform?.label ?? imageFactoryValues.platform} - ${imageAttachments.length} 张图片`;
     const input = buildFactoryTaskInput({
@@ -14577,8 +14779,7 @@ export default function App() {
       title,
       input,
       attachments: factoryAttachments,
-      extraModelProfileIds: optionalVisionModelProfileIds,
-      useKnowledge: values.useKnowledge === true
+      useKnowledge
     });
     if (created) {
       rememberFactoryRunParameters(imageFactoryValues, factory);
@@ -17461,13 +17662,6 @@ interface FactoryTaskBatchStats {
   edited?: number;
 }
 
-interface FactoryBatchStatItem {
-  key: string;
-  label: string;
-  value: string | number;
-  tone?: 'good' | 'warning' | 'danger' | 'neutral';
-}
-
 function buildFactoryTaskBatchStats(task: DesktopTaskDetail, isVideoFactory: boolean): FactoryTaskBatchStats {
   if (task.factoryOutputs?.length) {
     const visibleOutputs = task.factoryOutputs.filter((item) => item.status !== 'excluded');
@@ -17528,44 +17722,6 @@ function buildFactoryTaskBatchStats(task: DesktopTaskDetail, isVideoFactory: boo
       /(\d+)\s*个初剪/
     ])
   };
-}
-
-function buildFactoryBatchStatItems(
-  stats: FactoryTaskBatchStats,
-  isVideoFactory: boolean,
-  isVideoGenerationFactory = false
-): FactoryBatchStatItem[] {
-  const items: FactoryBatchStatItem[] = [
-    { key: 'total', label: '输入', value: stats.total, tone: 'neutral' },
-    { key: 'artifacts', label: '产物', value: stats.artifacts, tone: stats.artifacts > 0 ? 'good' : 'neutral' }
-  ];
-
-  if (isVideoGenerationFactory) {
-    return [
-      { key: 'total', label: '输入', value: stats.total, tone: 'neutral' },
-      { key: 'qualified', label: '成功', value: stats.qualified ?? '待统计', tone: 'good' },
-      ...(stats.processingError !== undefined
-        ? [{ key: 'processingError', label: '失败', value: stats.processingError, tone: 'danger' as const }]
-        : []),
-      { key: 'artifacts', label: '输出物', value: stats.artifacts, tone: stats.artifacts > 0 ? 'good' : 'neutral' }
-    ];
-  }
-
-  if (!isVideoFactory) {
-    return items;
-  }
-
-  return [
-    { key: 'total', label: '输入视频', value: stats.total, tone: 'neutral' },
-    { key: 'qualified', label: '合格', value: stats.qualified ?? '待统计', tone: 'good' },
-    { key: 'rejected', label: '筛掉', value: stats.rejected ?? '待统计', tone: 'danger' },
-    { key: 'review', label: '需复核', value: stats.review ?? '待统计', tone: 'warning' },
-    ...(stats.processingError !== undefined
-      ? [{ key: 'processingError', label: '异常', value: stats.processingError, tone: 'danger' as const }]
-      : []),
-    { key: 'edited', label: '初剪', value: stats.edited ?? '未开启', tone: 'neutral' },
-    { key: 'artifacts', label: '产物', value: stats.artifacts, tone: stats.artifacts > 0 ? 'good' : 'neutral' }
-  ];
 }
 
 function buildFactoryQueueStatLabels(
@@ -18602,6 +18758,8 @@ interface DigitalFactoryPackageOption {
   key: string;
   label: string;
   description?: string;
+  promptTemplate?: string;
+  negativePrompt?: string;
   outputType?: string;
   defaultSelected?: boolean;
 }
@@ -18741,12 +18899,6 @@ const defaultFactoryPackages: DigitalFactoryPackageOption[] = [
     outputType: 'image',
     defaultSelected: true
   }
-];
-
-const defaultFactoryQualityModes: DigitalFactoryQualityModeOption[] = [
-  { key: 'none', label: '不质检', description: '不额外调用模型，只生成图片。' },
-  { key: 'basic', label: '基础质检', description: '检查文件数量、命名、格式和基础规则。' },
-  { key: 'smart', label: '智能质检', description: '调用多模态模型检查主体一致性、平台合规和卖点可读性。' }
 ];
 
 const defaultFactoryOperationGoals = [
@@ -19142,10 +19294,6 @@ function readFactoryPackageOptions(factory: DigitalFactoryManifest): DigitalFact
   return factory.packages?.length ? factory.packages : defaultFactoryPackages;
 }
 
-function readFactoryQualityModes(factory: DigitalFactoryManifest): DigitalFactoryQualityModeOption[] {
-  return factory.qualityCheck?.modes?.length ? factory.qualityCheck.modes : defaultFactoryQualityModes;
-}
-
 function readFactoryKeyLabelOptionsFromValue(value: unknown): Array<{ key: string; label: string }> {
   if (!Array.isArray(value)) {
     return [];
@@ -19343,6 +19491,10 @@ function isAcademicDemoFactory(factory: DigitalFactoryManifest) {
   return readFactoryKind(factory) === 'academic_project_demo_factory';
 }
 
+function factorySupportsKnowledgeUsage(factory: DigitalFactoryManifest): boolean {
+  return isOperationVideoFactory(factory) || isAcademicDemoFactory(factory);
+}
+
 function buildFactoryPromptControls(values: FactoryRunFormValues) {
   const promptControls = {
     language: values.promptLanguage?.trim() || undefined,
@@ -19374,9 +19526,10 @@ function buildFactoryTaskInput({
   );
   const selectedPackageKeys = values.packageKeys ?? [];
   const selectedPackages = packageOptions.filter((item) => selectedPackageKeys.includes(item.key));
-  const qualityMode = readFactoryQualityModes(factory).find((item) => item.key === values.qualityCheckMode);
   const imageAttachments = attachments.filter((attachment) => isFactoryImageAttachment(attachment));
-  const promptControls = buildFactoryPromptControls(values);
+  const promptControls = isImageGenerationFactory(factory)
+    ? { language: values.promptLanguage?.trim() || '中文' }
+    : buildFactoryPromptControls(values);
   const factoryRequest = {
     applicationType: 'digital_factory',
     factoryKind: factory.kind ?? 'cross_border_product_image_factory',
@@ -19391,10 +19544,11 @@ function buildFactoryTaskInput({
       key: item.key,
       label: item.label,
       description: item.description,
+      promptTemplate: item.promptTemplate ?? item.description,
+      negativePrompt: item.negativePrompt,
       outputType: item.outputType ?? 'image'
     })),
-    qualityCheckMode: values.qualityCheckMode ?? 'basic',
-    qualityCheckLabel: qualityMode?.label ?? values.qualityCheckMode ?? 'basic',
+    qualityCheckMode: 'none',
     enableImageUnderstanding: false,
     imageTextLanguage: isImageGenerationFactory(factory) ? values.promptLanguage?.trim() || '中文' : undefined,
     itemCount: imageAttachments.length,
@@ -19404,7 +19558,7 @@ function buildFactoryTaskInput({
       packageFormat: factory.output?.packageFormat ?? 'url_manifest',
       folder: factory.output?.folder ?? 'product-images'
     },
-    promptControls: isImageGenerationFactory(factory) ? undefined : promptControls,
+    promptControls,
     attachments: imageAttachments.map((attachment) => ({
       name: attachment.name,
       size: attachment.size,
@@ -19429,16 +19583,15 @@ function buildFactoryTaskInput({
       instructions: [
         '按 factory_request 逐项处理每张参考图片。',
         isImageGenerationFactory(factory)
-          ? '直接使用图片比例和产物包内置模板生成生图提示词。'
+          ? '每个产物包都包含独立的完整生成提示词；图片比例和文字语言属于通用约束。'
           : factoryRequest.enableImageUnderstanding
             ? '已开启图片理解增强：先用图片理解模型分析商品图并生成分包提示词。'
             : '未开启图片理解增强：直接使用平台、产物包和提示词控制生成基础生图提示词。',
         isImageGenerationFactory(factory)
-          ? '只使用当前产物包模板中的要求；不要额外要求用户编写复杂提示词。'
+          ? '严格使用当前产物包自己的提示词和反向提示词，不与其他产物包混用背景、风格、光影或构图要求。'
           : '提示词生成必须优先遵守 factory_request.promptControls；不要出现的内容必须写入 negativePrompt。',
         '只生成用户勾选的产物包；不要生成未勾选的图片类型。',
-        '生成结果只保存图片 URL 元数据；大图片不经过服务端，PC 端按 URL 展示缩略图。',
-        '如果质检方式为 none，跳过额外智能质检；如果为 basic，只做文件数量、格式、命名检查。'
+        '生成结果只保存图片 URL 元数据；大图片不经过服务端，PC 端按 URL 展示缩略图。'
       ]
     },
     null,
@@ -19471,7 +19624,6 @@ function buildEcommerceProductVideoFactoryTaskInput({
   );
   const selectedPackageKeys = values.packageKeys ?? [];
   const selectedPackages = packageOptions.filter((item) => selectedPackageKeys.includes(item.key));
-  const qualityMode = readFactoryQualityModes(factory).find((item) => item.key === values.qualityCheckMode);
   const imageAttachments = attachments.filter((attachment) => isFactoryImageAttachment(attachment));
   const durationOptions = readFactoryVideoDurationOptions(factory);
   const requestedDuration = Number(values.videoDurationSeconds);
@@ -19487,10 +19639,11 @@ function buildEcommerceProductVideoFactoryTaskInput({
       key: item.key,
       label: item.label,
       description: item.description,
+      promptTemplate: item.promptTemplate ?? item.description,
+      negativePrompt: item.negativePrompt,
       outputType: item.outputType ?? 'video'
     })),
-    qualityCheckMode: values.qualityCheckMode ?? 'basic',
-    qualityCheckLabel: qualityMode?.label ?? values.qualityCheckMode ?? 'basic',
+    qualityCheckMode: 'none',
     itemCount: imageAttachments.length,
     maxItems: readFactoryMaxItems(factory),
     concurrency: 3,
@@ -19531,9 +19684,9 @@ function buildEcommerceProductVideoFactoryTaskInput({
       instructions: [
         '按 factory_request 逐项处理每张参考图片。',
         '只生成用户勾选的视频产物包；不要生成未勾选的视频类型。',
-        '生视频提示词必须以所选产物包 description 为核心，并遵守 videoGeneration 的时长和画幅。',
-        '生成结果只保存视频 URL 元数据；大视频不经过服务端，PC 端按 URL 展示和导出。',
-        '如果质检方式为 none，跳过额外智能质检；如果为 basic，只做产物数量、URL、命名和基础元数据检查。'
+        '每个视频产物包都包含独立的场景、动作、镜头和节奏要求；时长和画幅属于通用约束。',
+        '严格使用当前产物包自己的提示词和反向提示词，不与其他产物包混用场景、动作、镜头或节奏要求。',
+        '生成结果只保存视频 URL 元数据；大视频不经过服务端，PC 端按 URL 展示和导出。'
       ]
     },
     null,
@@ -19990,6 +20143,8 @@ function readFactoryPackageOptionsFromValue(value: unknown): DigitalFactoryPacka
         key,
         label,
         description: readString(item.description),
+        promptTemplate: readString(item.promptTemplate) ?? readString(item.prompt),
+        negativePrompt: readString(item.negativePrompt),
         outputType: readString(item.outputType),
         defaultSelected: typeof item.defaultSelected === 'boolean' ? item.defaultSelected : undefined
       }
@@ -21282,10 +21437,25 @@ function resolveModelProfileLabel(modelProfiles: ModelProfile[], profileId: stri
 
 function modelProfileDisplayName(profile: ModelProfile): string {
   if (isOfficialPointsModelProfile(profile)) {
-    return `官方通道 · ${profile.modelName}`;
+    return `官方通道·${profile.modelName}·${officialModelPublicName(profile)}`;
   }
 
   return `${profile.providerName} / ${profile.modelName}`;
+}
+
+function officialModelPublicName(profile: ModelProfile): string {
+  const publicModelNames: Record<string, string> = {
+    'official-text-1': 'deepseek-v4-flash',
+    'official-reasoning-1': 'deepseek-v4-pro',
+    'official-image-1': 'gpt-image-2',
+    'official-image-2': 'nano-banana-2',
+    'official-audio-1': 'speech-02-turbo',
+    'official-video-1': 'MiniMax-Hailuo-2.3-Fast',
+    'official-video-2': 'MiniMax-Hailuo-2.3',
+    'official-video-3': 'MiniMax H3'
+  };
+
+  return profile.officialRouteKey ? publicModelNames[profile.officialRouteKey] ?? profile.modelName : profile.modelName;
 }
 
 function modelRequirementSlotLabel(profile: ModelProfile): string {

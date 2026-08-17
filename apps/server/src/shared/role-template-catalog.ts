@@ -1135,6 +1135,23 @@ const crossBorderFactoryPackageOptions: Array<{
   }
 ];
 
+const crossBorderFactoryPackageNegativePrompts: Record<CrossBorderFactoryPackageKey, string> = {
+  white_background:
+    'watermark, promotional text, random text, garbled characters, colored background pollution, people, extra props, distorted product, changed logo, low quality, blur',
+  main_image:
+    'watermark, random text, garbled characters, distorted product, changed logo, false function, messy background, excessive promotion, low quality, blur',
+  scene_image:
+    'watermark, random text, garbled characters, distorted product, changed logo, unrealistic use, messy background, unrelated people, exaggerated special effects, low quality',
+  background_replacement:
+    'watermark, random text, garbled characters, changed product shape, changed material, changed logo, changed color, incorrect perspective, edge artifacts, low quality',
+  model_replacement:
+    'watermark, random text, garbled characters, distorted product, changed logo, deformed hands, extra fingers, incorrect wearing, unrealistic pose, low quality',
+  dimension_image:
+    'watermark, garbled characters, fabricated dimensions, incorrect labels, wrong measurement lines, product obstruction, messy layout, distorted product, low quality',
+  selling_point_image:
+    'watermark, garbled characters, false claims, exaggerated effect, wrong logo, cluttered layout, excessive promotion, distorted product, low quality'
+};
+
 const crossBorderFactoryPlatforms = [
   { key: 'ratio_1_1', label: '1:1 方图', imageRatio: '1:1', notes: '适合商品主图、白底图、卖点图和大多数电商列表图。' },
   { key: 'ratio_3_4', label: '3:4 竖图', imageRatio: '3:4', notes: '适合服饰、模特展示、详情页长图素材和小红书式视觉。' },
@@ -1546,6 +1563,42 @@ const ecommerceProductVideoPackageOptions = [
   }
 ];
 
+const ecommerceProductVideoPackagePromptTemplates: Record<string, {
+  promptTemplate: string;
+  negativePrompt: string;
+}> = {
+  product_showcase_video: {
+    promptTemplate:
+      '生成商品展示短视频：以参考图中的商品为唯一主体，使用干净商业摄影环境，稳定展示外观、材质、结构和关键细节。镜头缓慢推进或轻微环绕，动作克制，商品始终清晰可辨，画面高级、真实、适合电商商品页。',
+    negativePrompt:
+      'watermark, random text, garbled characters, distorted product, changed logo, duplicate product, extra accessories, heavy shaking, fast morphing, unrealistic function, blur'
+  },
+  usage_scene_video: {
+    promptTemplate:
+      '生成真实使用场景短视频：严格保留参考图商品的外观、颜色、材质、Logo 和比例，将商品自然放入符合品类的真实生活、办公或家居场景。通过合理的拿取、使用或结果展示说明价值，镜头稳定，人物和手部自然，商品始终是视觉重点。',
+    negativePrompt:
+      'watermark, random text, garbled characters, distorted product, changed logo, unrealistic use, deformed hands, extra fingers, unrelated people, messy background, heavy shaking, blur'
+  },
+  feature_demo_video: {
+    promptTemplate:
+      '生成功能演示短视频：围绕一个明确的商品功能、结构细节或使用步骤展开，先给出完整商品，再用稳定近景突出关键部位和操作结果。动作简单可理解，镜头节奏清晰，严格保持商品身份、结构、颜色、材质和 Logo 一致。',
+    negativePrompt:
+      'watermark, random text, garbled characters, distorted product, changed logo, fabricated function, impossible operation, misleading claim, messy scene, fast morphing, blur'
+  },
+  ad_creative_video: {
+    promptTemplate:
+      '生成电商广告创意短视频：以参考图商品为主角，构建有吸引力但不过度夸张的商业场景，通过一个清晰的视觉亮点突出材质、外观或使用价值。镜头运动平滑、节奏明确、商品真实稳定，不直接生成画面文字、价格或促销口号。',
+    negativePrompt:
+      'watermark, random text, garbled characters, distorted product, changed logo, false claim, excessive special effects, duplicate product, heavy shaking, unstable identity, blur'
+  },
+  detail_page_motion_video: {
+    promptTemplate:
+      '生成详情页动效视频：在简洁干净的背景中展示参考图商品的整体与局部细节，采用稳定的缓慢旋转、推进或平移镜头，适合嵌入商品详情页循环播放。画面信息单一清晰，保留干净留白，不直接生成字幕、水印或营销文字。',
+    negativePrompt:
+      'watermark, random text, garbled characters, distorted product, changed logo, extra accessories, cluttered background, heavy shaking, fast morphing, low quality, blur'
+  }
+};
+
 const ecommerceProductVideoDefaultPackageKeys = ecommerceProductVideoPackageOptions
   .filter((item) => item.defaultSelected)
   .map((item) => item.key);
@@ -1713,6 +1766,8 @@ function buildCrossBorderImageFactoryManifest() {
       key: item.key,
       label: item.label,
       description: item.description,
+      promptTemplate: item.description,
+      negativePrompt: crossBorderFactoryPackageNegativePrompts[item.key],
       outputType: item.outputType,
       defaultSelected: crossBorderFactoryDefaultPackageKeys.includes(item.key)
     })),
@@ -1752,7 +1807,10 @@ function buildEcommerceProductVideoFactoryManifest() {
       imageExtensions: ['png', 'jpg', 'jpeg', 'webp']
     },
     platforms: [referenceVideoFactoryDefaultPlatform],
-    packages: ecommerceProductVideoPackageOptions,
+    packages: ecommerceProductVideoPackageOptions.map((item) => ({
+      ...item,
+      ...ecommerceProductVideoPackagePromptTemplates[item.key]
+    })),
     contentControls: {
       defaultVideoCount: 1,
       maxVideoCount: 50,

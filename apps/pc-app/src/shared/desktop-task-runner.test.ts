@@ -3304,6 +3304,13 @@ let factoryModelInvocationCount = 0;
 let factorySubmitModelCallCount = 0;
 let factoryPollModelCallCount = 0;
 let factoryDownloadCallCount = 0;
+const factoryProgressSnapshots: Array<{
+  completed: number;
+  failed: number;
+  localPathCount: number;
+  statuses: string[];
+
+}> = [];
 const factoryTask = await runDesktopTask({
   task: createMockTaskDetail({
     taskId: 'task-runner-factory-image-batch-001',
@@ -3314,12 +3321,23 @@ const factoryTask = await runDesktopTask({
       factory_request: {
         platform: { key: 'amazon', label: 'Amazon', imageRatio: '1:1' },
         packages: [
-          { key: 'main_image', label: 'Main image', description: 'Marketplace main product image.' },
-          { key: 'white_background', label: 'White background', description: 'Pure white product image.' }
+          {
+            key: 'main_image',
+            label: 'Main image',
+            description: 'Marketplace main product image.',
+            promptTemplate: 'MAIN_PACKAGE_ONLY: premium dark studio hero image with dramatic lighting and a reflective pedestal.',
+            negativePrompt: 'main-package-negative'
+          },
+          {
+            key: 'white_background',
+            label: 'White background',
+            description: 'Pure white product image.',
+            promptTemplate: 'WHITE_PACKAGE_ONLY: pure white background, soft studio light, centered product, no props.',
+            negativePrompt: 'white-package-negative'
+          }
         ],
         promptControls: {
-          language: 'English',
-          avoid: 'watermark, malformed logo'
+          language: 'English'
         }
       }
     }),
@@ -3430,7 +3448,14 @@ const factoryTask = await runDesktopTask({
         factorySubmitModelCallCount += 1;
         assert.ok(request.imageGeneration?.prompt);
         assert.match(request.imageGeneration?.prompt ?? '', /Text language: English/);
-        assert.equal(request.imageGeneration?.negativePrompt, 'watermark, malformed logo');
+        const generatedPrompt = request.imageGeneration?.prompt ?? '';
+        const isMainImage = generatedPrompt.includes('MAIN_PACKAGE_ONLY');
+        const isWhiteBackground = generatedPrompt.includes('WHITE_PACKAGE_ONLY');
+        assert.notEqual(isMainImage, isWhiteBackground);
+        assert.equal(
+          request.imageGeneration?.negativePrompt,
+          isMainImage ? 'main-package-negative' : 'white-package-negative'
+        );
         assert.equal(request.imageGeneration?.aspectRatio, '1:1');
         assert.match(request.imageGeneration?.sourceImagePath ?? '', /sku-[12]\.png/);
         assert.match(request.messages[1]?.content ?? '', /Source image local path/);
@@ -3500,6 +3525,18 @@ const factoryTask = await runDesktopTask({
       }
     };
   },
+  onProgress: (progressTask) => {
+    const preview = progressTask.artifacts.find((artifact) => artifact.factoryPreview)?.factoryPreview;
+    if (!preview) {
+      return;
+    }
+    factoryProgressSnapshots.push({
+      completed: preview.completed,
+      failed: preview.failed,
+      localPathCount: preview.items.filter((item) => Boolean(item.localPath)).length,
+      statuses: preview.items.map((item) => item.status)
+    });
+  },
   completedAt: '2026-07-20T10:00:14.000Z'
 });
 
@@ -3514,6 +3551,17 @@ assert.equal(factoryMaxActiveModelCalls <= 2, true);
 assert.equal(factoryPreviewArtifact?.factoryPreview?.total, 4);
 assert.equal(factoryPreviewArtifact?.factoryPreview?.completed, 4);
 assert.equal(factoryPreviewArtifact?.factoryPreview?.failed, 0);
+assert.ok(
+  factoryProgressSnapshots.some((snapshot) =>
+    snapshot.statuses.length === 4 && snapshot.statuses.every((status) => status === 'queued')
+  )
+);
+assert.ok(factoryProgressSnapshots.some((snapshot) => snapshot.statuses.includes('running')));
+assert.ok(
+  factoryProgressSnapshots.some((snapshot) =>
+    snapshot.completed > 0 && snapshot.completed < 4 && snapshot.localPathCount === snapshot.completed
+  )
+);
 assert.deepEqual(
   factoryPreviewArtifact?.factoryPreview?.items.map((item) => item.order),
   [1, 2, 3, 4]
@@ -3537,6 +3585,178 @@ assert.ok(
 assert.ok(
   factoryTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_RUNTIME_FACTORY_REMOTE_ASSETS_SAVED')
 );
+
+let modularVideoFactoryModelCalls = 0;
+let modularVideoFactoryDownloadCalls = 0;
+const modularVideoFactoryTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-factory-video-modular-prompt-001',
+    roleCode: 'ecommerce-video-factory',
+    roleName: 'Ecommerce Video Factory',
+    title: 'Generate ecommerce product video',
+    input: JSON.stringify({
+      factory_request: {
+        factoryKind: 'ecommerce_product_video_factory',
+        platform: { key: 'default_video_ratio', label: '通用视频', imageRatio: '9:16' },
+        videoGeneration: {
+          durationSeconds: 6,
+          ratio: { key: '9:16', label: '竖屏 9:16' }
+        },
+        packages: [
+          {
+            key: 'product_showcase',
+            label: '商品展示视频',
+            description: 'Show the product as the clear hero.',
+            promptTemplate: 'VIDEO_PACKAGE_ONLY: premium commercial product showcase, slow turntable motion and a stable push-in camera.',
+            negativePrompt: 'video-package-negative'
+          }
+        ]
+      }
+    }),
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0,
+    executionContext: {
+      modelProfileIds: ['qiu-video-generation-default'],
+      toolIds: ['local-filesystem'],
+      knowledgeBindingIds: [],
+      attachmentPaths: ['C:\\QiuAI\\factory\\video-sku-1.png']
+    }
+  }),
+  rolePackage: {
+    roleCode: 'ecommerce-video-factory',
+    applicationType: 'digital_factory',
+    name: 'Ecommerce Video Factory',
+    version: '1.0.0',
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      runtimePolicy: {
+        maxNodeExecutions: 8,
+        maxLoopIterations: 4,
+        requireApprovalBeforeTools: false
+      },
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'prepare_batch',
+          type: 'data',
+          name: 'Prepare batch',
+          inputVariables: ['start.files', 'factory_request'],
+          outputVariables: ['factory_items', 'selected_packages', 'target_platform'],
+          config: {
+            dataMode: 'code',
+            outputVariable: 'factory_items',
+            code:
+              'const files = Array.isArray(input["start.files"]) ? input["start.files"] : [];\n' +
+              'const request = input.factory_request && typeof input.factory_request === "object" ? input.factory_request : {};\n' +
+              'const packages = Array.isArray(request.packages) ? request.packages : [];\n' +
+              'return {\n' +
+              '  factory_items: files.map((file, index) => ({ sku: `SKU-${index + 1}`, image: file, sourceName: file.name })),\n' +
+              '  selected_packages: packages,\n' +
+              '  target_platform: request.platform\n' +
+              '};'
+          }
+        },
+        {
+          id: 'generate_videos',
+          type: 'llm',
+          name: 'Generate videos',
+          modelProfileId: 'qiu-video-generation-default',
+          inputVariables: ['factory_items', 'selected_packages', 'target_platform'],
+          outputVariables: ['factory_generated_videos'],
+          config: {
+            llmTaskType: 'video_generation',
+            concurrency: 1,
+            maxRetries: 0,
+            timeoutMs: 20_000
+          }
+        }
+      ],
+      edges: [
+        { id: 'start-prepare', sourceNodeId: 'start', targetNodeId: 'prepare_batch' },
+        { id: 'prepare-generate', sourceNodeId: 'prepare_batch', targetNodeId: 'generate_videos' }
+      ]
+    },
+    modelProfileIds: ['qiu-video-generation-default'],
+    toolIds: ['local-filesystem'],
+    requiredKnowledgeSources: [],
+    defaultTaskTypes: ['factory_video_batch'],
+    syncPolicy: 'summary_only'
+  },
+  modelProfiles: modelProfiles.concat([
+    {
+      id: 'qiu-video-generation-default',
+      providerId: 'video-provider',
+      providerName: 'Video Provider',
+      modelName: 'image-to-video',
+      purpose: 'vision',
+      capabilities: ['video_generation', 'image_to_video'],
+      apiBaseUrl: 'https://video.example/v1',
+      apiKey: 'video-key'
+    }
+  ]),
+  tools,
+  workspaceId: 'workspace-factory-video-batch',
+  enabledModelProfileIds: ['qiu-video-generation-default'],
+  enabledToolIds: ['local-filesystem'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    modularVideoFactoryModelCalls += 1;
+    assert.equal(request.profile.id, 'qiu-video-generation-default');
+    assert.equal(request.taskKind, 'video_generation');
+    assert.match(request.videoGeneration?.prompt ?? '', /VIDEO_PACKAGE_ONLY/);
+    assert.equal(request.videoGeneration?.negativePrompt, 'video-package-negative');
+    assert.equal(request.videoGeneration?.durationSeconds, 6);
+    assert.equal(request.videoGeneration?.aspectRatio, '9:16');
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: JSON.stringify({
+        remoteUrl: 'https://cdn.example.test/factory/video-1.mp4',
+        thumbnailPath: 'https://cdn.example.test/factory/video-thumb-1.jpg'
+      }),
+      artifacts: [
+        {
+          type: 'video',
+          remoteUrl: 'https://cdn.example.test/factory/video-1.mp4',
+          thumbnailPath: 'https://cdn.example.test/factory/video-thumb-1.jpg'
+        }
+      ]
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    if (request.action === 'filesystem.write_text_file') {
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          localPath: 'C:\\QiuAI\\workspace\\product-videos\\video-summary.md'
+        }
+      };
+    }
+
+    modularVideoFactoryDownloadCalls += 1;
+    assert.equal(request.action, 'filesystem.download_remote_file');
+    assert.equal(request.input.mediaKind, 'video');
+    assert.equal(request.input.folder, 'product-videos');
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\product-videos\\video-1.mp4',
+        sourceUrl: request.input.url
+      }
+    };
+  },
+  completedAt: '2026-07-20T10:00:14.050Z'
+});
+assert.equal(modularVideoFactoryTask.task.state, 'completed');
+assert.equal(modularVideoFactoryModelCalls, 1);
+assert.equal(modularVideoFactoryDownloadCalls, 1);
+assert.equal(modularVideoFactoryTask.task.factoryOutputs?.length, 1);
 
 let fallbackFactoryImageCalls = 0;
 const fallbackFactoryTask = await runDesktopTask({

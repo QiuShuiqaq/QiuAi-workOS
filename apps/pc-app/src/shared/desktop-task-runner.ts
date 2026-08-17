@@ -86,6 +86,14 @@ export type DesktopTaskProgressCallback = (
   task: DesktopTaskDetail
 ) => void | Promise<void>;
 
+type WorkflowRuntimeNodeProgressEmitter = (input: {
+  updatedAt?: string;
+  executionLogs?: DesktopExecutionLogEntry[];
+  artifacts?: DesktopArtifactSummary[];
+  state?: DesktopTaskDetail['state'];
+  currentRunStatus?: NonNullable<DesktopTaskDetail['currentRun']>['status'];
+}) => Promise<DesktopTaskDetail>;
+
 export interface RunDesktopTaskInput {
   task: DesktopTaskDetail;
   workspaceId?: string;
@@ -139,6 +147,8 @@ interface FactoryRuntimePackage {
   key: string;
   label: string;
   description?: string;
+  promptTemplate?: string;
+  negativePrompt?: string;
 }
 
 interface FactoryRuntimePlatform {
@@ -188,6 +198,11 @@ interface FactoryImageGenerationTask {
 
 type FactoryImageGenerationResult = FactoryArtifactPreviewItem;
 type FactoryImageGenerationErrorType = NonNullable<FactoryArtifactPreviewItem['errorType']>;
+type FactoryImageGenerationResultUpdatePhase = 'submitted' | 'polled' | 'timeout' | 'completed';
+type FactoryImageGenerationResultUpdateHandler = (
+  result: FactoryImageGenerationResult,
+  phase: FactoryImageGenerationResultUpdatePhase
+) => Promise<FactoryImageGenerationResult>;
 
 interface FactoryVideoGenerationTask {
   id: string;
@@ -412,6 +427,27 @@ async function emitTaskProgress(input: {
 
   await input.onProgress(snapshot);
   return snapshot;
+}
+
+function upsertDesktopArtifacts(
+  existing: DesktopArtifactSummary[],
+  updates: DesktopArtifactSummary[]
+): DesktopArtifactSummary[] {
+  if (updates.length === 0) {
+    return existing;
+  }
+
+  const nextArtifacts = existing.map((artifact) =>
+    updates.find((update) => update.id === artifact.id) ?? artifact
+  );
+  const existingIds = new Set(existing.map((artifact) => artifact.id));
+  for (const update of updates) {
+    if (!existingIds.has(update.id)) {
+      nextArtifacts.push(update);
+      existingIds.add(update.id);
+    }
+  }
+  return nextArtifacts;
 }
 
 export async function runDesktopTask(input: RunDesktopTaskInput): Promise<RunDesktopTaskResult> {
@@ -1230,6 +1266,20 @@ async function runWorkflowRuntime(input: {
     modelName: primaryProfile?.modelName ?? 'unknown',
     content: ''
   };
+  const emitNodeProgress: WorkflowRuntimeNodeProgressEmitter = async (progress) => {
+    progressTask = await emitTaskProgress({
+      onProgress: input.onProgress,
+      task: progressTask,
+      updatedAt: progress.updatedAt ?? input.createdAt,
+      executionLogs: progress.executionLogs,
+      artifacts: progress.artifacts
+        ? upsertDesktopArtifacts(progressTask.artifacts, progress.artifacts)
+        : undefined,
+      state: progress.state ?? 'running',
+      currentRunStatus: progress.currentRunStatus ?? 'running'
+    });
+    return progressTask;
+  };
 
   if (input.workflowPlan.logs.length > 0) {
     progressTask = await emitTaskProgress({
@@ -1327,7 +1377,8 @@ async function runWorkflowRuntime(input: {
         workspaceId: input.workspaceId,
         createdAt: input.createdAt,
         currentResponse,
-        primaryProfile
+        primaryProfile,
+        emitProgress: emitNodeProgress
       });
 
       primaryProfile = nodeResult.primaryProfile;
@@ -1374,7 +1425,7 @@ async function runWorkflowRuntime(input: {
         updatedAt: input.createdAt,
         executionLogs: [...nodeResult.logs, nodeCompletedLog],
         artifacts: nodeResult.generatedArtifacts.length > 0
-          ? [...progressTask.artifacts, ...nodeResult.generatedArtifacts]
+          ? upsertDesktopArtifacts(progressTask.artifacts, nodeResult.generatedArtifacts)
           : progressTask.artifacts,
         state: 'running',
         currentRunStatus: 'running'
@@ -1658,6 +1709,7 @@ async function executeWorkflowRuntimeNode(input: {
   createdAt: string;
   currentResponse: DesktopModelChatResponse;
   primaryProfile: ModelProfile;
+  emitProgress?: WorkflowRuntimeNodeProgressEmitter;
 }): Promise<{
   response: DesktopModelChatResponse;
   primaryProfile: ModelProfile;
@@ -3144,6 +3196,7 @@ async function invokeWorkflowRuntimeModelNode(input: {
   createdAt: string;
   currentResponse: DesktopModelChatResponse;
   primaryProfile: ModelProfile;
+  emitProgress?: WorkflowRuntimeNodeProgressEmitter;
 }): Promise<{
   response: DesktopModelChatResponse;
   primaryProfile: ModelProfile;
@@ -4630,6 +4683,7 @@ async function invokeWorkflowRuntimeEcommerceProductVideoFactoryNode(input: {
   const outputConfig = isWorkflowRuntimeRecord(factoryRequest?.output) ? factoryRequest.output : undefined;
   const outputFolder = readWorkflowRuntimeString(outputConfig?.folder) ?? 'product-videos';
   const videoConfig = readFactoryRuntimeVideoGenerationConfig(factoryRequest);
+  const promptControls = readFactoryRuntimePromptControls(factoryRequest?.promptControls);
   const concurrency = clampWorkflowRuntimeLimit(
     readFactoryRuntimeNumber(input.node.config?.concurrency ?? factoryRequest?.concurrency),
     3,
@@ -4646,6 +4700,7 @@ async function invokeWorkflowRuntimeEcommerceProductVideoFactoryNode(input: {
     items,
     packages,
     targetPlatform,
+    promptControls,
     videoConfig,
     createdAt: input.createdAt
   });
@@ -6239,6 +6294,87 @@ function inferSingleVideoDurationSeconds(text: string, fallback: number): number
   return Math.min(30, Math.max(1, Math.round(duration)));
 }
 
+function buildQueuedFactoryImageGenerationResult(task: FactoryImageGenerationTask): FactoryImageGenerationResult {
+  return {
+    id: task.id,
+    order: task.order,
+    sku: task.sku,
+    sourceName: task.sourceName,
+    packageKey: task.packageKey,
+    packageLabel: task.packageLabel,
+    status: 'queued',
+    sourceImagePath: task.sourceImage.localPath,
+    prompt: task.prompt,
+    attempts: 0,
+    createdAt: task.createdAt
+  };
+}
+
+function buildFactoryImageBatchArtifact(input: {
+  task: DesktopTaskDetail;
+  artifactId: string;
+  createdAt: string;
+  targetPlatform: FactoryRuntimePlatform;
+  concurrency: number;
+  total: number;
+  results: FactoryImageGenerationResult[];
+  minConcurrency?: number;
+  maxObservedConcurrency?: number;
+  completedRun?: boolean;
+}): {
+  artifact: DesktopArtifactSummary;
+  summaryContent: string;
+  completed: number;
+  failed: number;
+} {
+  const completed = input.results.filter((item) => item.status === 'completed').length;
+  const failed = input.results.filter((item) => item.status === 'failed').length;
+  const running = input.results.filter((item) => item.status === 'running').length;
+  const queued = input.results.filter((item) => item.status === 'queued').length;
+  const concurrencyLabel =
+    input.minConcurrency !== undefined &&
+    input.maxObservedConcurrency !== undefined &&
+    input.minConcurrency !== input.maxObservedConcurrency
+      ? `${input.minConcurrency}-${input.maxObservedConcurrency}`
+      : String(input.maxObservedConcurrency ?? input.concurrency);
+  const summaryContent = [
+    input.completedRun
+      ? `数字工厂图片批次完成：${completed}/${input.total}`
+      : `数字工厂图片批次进度：${completed}/${input.total}`,
+    failed > 0 ? `失败：${failed}` : '失败：0',
+    running > 0 ? `生成中：${running}` : undefined,
+    queued > 0 ? `等待中：${queued}` : undefined,
+    `并发数：${concurrencyLabel}（上限 ${input.concurrency}）`,
+    input.targetPlatform.label ? `图片比例：${input.targetPlatform.label}` : undefined
+  ].filter(Boolean).join('\n');
+  const preview = {
+    kind: 'digital_factory_image_batch' as const,
+    title: input.task.title,
+    platformLabel: input.targetPlatform.label,
+    concurrency: input.concurrency,
+    total: input.total,
+    completed,
+    failed,
+    items: input.results
+  };
+
+  return {
+    completed,
+    failed,
+    summaryContent,
+    artifact: {
+      id: input.artifactId,
+      type: 'image',
+      title: `${input.task.title} 图片结果`,
+      content: summaryContent,
+      createdAt: input.createdAt,
+      remoteUrl: input.results.find((item) => item.remoteUrl)?.remoteUrl,
+      localPath: input.results.find((item) => item.localPath)?.localPath,
+      factoryPreview: preview
+    }
+  };
+}
+
 function normalizeSingleMediaGenerationTimeoutMs(value: unknown, fallback: number): number {
   const timeoutMs = readWorkflowRuntimeNumber(value, fallback);
   return Math.min(300_000, Math.max(10_000, Math.round(timeoutMs)));
@@ -6258,6 +6394,7 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
   currentResponse: DesktopModelChatResponse;
   primaryProfile: ModelProfile;
   profile: ModelProfile;
+  emitProgress?: WorkflowRuntimeNodeProgressEmitter;
 }): Promise<{
   response: DesktopModelChatResponse;
   primaryProfile: ModelProfile;
@@ -6288,7 +6425,7 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
   );
   const maxRetries = clampWorkflowRuntimeLimit(
     readFactoryRuntimeNumber(input.node.config?.maxRetries ?? factoryRequest?.maxRetries),
-    2,
+    0,
     0,
     5
   );
@@ -6300,6 +6437,77 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
     packageInstructions,
     createdAt: input.createdAt
   });
+  const artifactId = `${input.task.taskId}-factory-preview-${Date.parse(input.createdAt) || Date.now()}`;
+  let streamingResults = batchTasks.map(buildQueuedFactoryImageGenerationResult);
+  const streamingLocalSaveLogs: DesktopExecutionLogEntry[] = [];
+  const streamingUsedToolIds = new Set<string>();
+  let streamingSavedCount = 0;
+
+  const emitBatchPreview = async (options?: {
+    completedRun?: boolean;
+    minConcurrency?: number;
+    maxObservedConcurrency?: number;
+  }) => {
+    if (!input.emitProgress) {
+      return;
+    }
+
+    const { artifact } = buildFactoryImageBatchArtifact({
+      task: input.task,
+      artifactId,
+      createdAt: input.createdAt,
+      targetPlatform,
+      concurrency,
+      total: batchTasks.length,
+      results: streamingResults,
+      minConcurrency: options?.minConcurrency,
+      maxObservedConcurrency: options?.maxObservedConcurrency,
+      completedRun: options?.completedRun
+    });
+    await input.emitProgress({
+      updatedAt: input.createdAt,
+      artifacts: [artifact],
+      state: 'running',
+      currentRunStatus: 'running'
+    });
+  };
+
+  const saveAndPublishResult: FactoryImageGenerationResultUpdateHandler = async (result) => {
+    const resultIndex = streamingResults.findIndex((item) => item.id === result.id);
+    const previousResult = resultIndex >= 0 ? streamingResults[resultIndex] : undefined;
+    let nextResult = result;
+
+    if (nextResult.status === 'completed' && nextResult.remoteUrl && !nextResult.localPath) {
+      const localSave = await persistFactoryRemoteAssetsLocally({
+        task: input.task,
+        binding: input.binding,
+        desktopToolInvoker: input.desktopToolInvoker,
+        workspaceId: input.workspaceId,
+        results: [nextResult],
+        mediaKind: 'image',
+        folder: outputFolder,
+        createdAt: input.createdAt,
+        logSuffix: `${input.node.id}-${sanitizeLogSuffix(outputFolder)}-${sanitizeLogSuffix(nextResult.id)}`,
+        includeSuccessLog: false
+      });
+      nextResult = localSave.results[0] ?? nextResult;
+      streamingLocalSaveLogs.push(...localSave.logs);
+      for (const toolId of localSave.usedToolIds) {
+        streamingUsedToolIds.add(toolId);
+      }
+      if (!previousResult?.localPath && Boolean(nextResult.localPath)) {
+        streamingSavedCount += 1;
+      }
+    }
+
+    if (resultIndex >= 0) {
+      streamingResults[resultIndex] = nextResult;
+    } else {
+      streamingResults = [...streamingResults, nextResult];
+    }
+    await emitBatchPreview();
+    return nextResult;
+  };
 
   const startedLog = createLog(
     input.task.taskId,
@@ -6309,25 +6517,31 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
     input.createdAt,
     sanitizeLogSuffix(input.node.id)
   );
-  const batchRun = isGrsaiFactoryImageModelProfile(input.profile)
+  await emitBatchPreview();
+
+  const batchRun = isAsyncPolledFactoryImageModelProfile(input.profile)
     ? await runFactoryImageGenerationTasksWithProviderPolling({
         tasks: batchTasks,
         maxConcurrency: concurrency,
         node: input.node,
         profile: input.profile,
         modelInvoker: input.modelInvoker,
-        maxRetries
+        maxRetries,
+        onResultUpdate: saveAndPublishResult
       })
     : await runFactoryImageGenerationTasksAdaptive({
         tasks: batchTasks,
         maxConcurrency: concurrency,
-        worker: (task) => runFactoryImageGenerationTask({
-          task,
-          node: input.node,
-          profile: input.profile,
-          modelInvoker: input.modelInvoker,
-          maxRetries
-        })
+        worker: async (task) => saveAndPublishResult(
+          await runFactoryImageGenerationTask({
+            task,
+            node: input.node,
+            profile: input.profile,
+            modelInvoker: input.modelInvoker,
+            maxRetries
+          }),
+          'completed'
+        )
       });
   const localAssetSave = await persistFactoryRemoteAssetsLocally({
     task: input.task,
@@ -6340,9 +6554,33 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
     createdAt: input.createdAt,
     logSuffix: `${input.node.id}-${sanitizeLogSuffix(outputFolder)}`
   });
-  const results = localAssetSave.results;
-  const completed = results.filter((item) => item.status === 'completed').length;
-  const failed = results.filter((item) => item.status === 'failed').length;
+  streamingResults = localAssetSave.results;
+  for (const toolId of localAssetSave.usedToolIds) {
+    streamingUsedToolIds.add(toolId);
+  }
+  await emitBatchPreview({
+    completedRun: true,
+    minConcurrency: batchRun.minConcurrency,
+    maxObservedConcurrency: batchRun.maxObservedConcurrency
+  });
+  const results = streamingResults;
+  const {
+    artifact,
+    summaryContent,
+    completed,
+    failed
+  } = buildFactoryImageBatchArtifact({
+    task: input.task,
+    artifactId,
+    createdAt: input.createdAt,
+    targetPlatform,
+    concurrency,
+    total: batchTasks.length,
+    results,
+    minConcurrency: batchRun.minConcurrency,
+    maxObservedConcurrency: batchRun.maxObservedConcurrency,
+    completedRun: true
+  });
   const generatedImages = results.map((item) => {
     const displayName = getFactoryImageResultDisplayName(item);
     const order = String(item.order || 1).padStart(2, '0');
@@ -6376,34 +6614,16 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
     result: results,
     outputValue: generatedImages
   });
-  const summaryContent = [
-    `数字工厂图片批次完成：${completed}/${batchTasks.length}`,
-    failed > 0 ? `失败：${failed}` : '失败：0',
-    `并发数：${batchRun.minConcurrency === batchRun.maxObservedConcurrency
-      ? batchRun.maxObservedConcurrency
-      : `${batchRun.minConcurrency}-${batchRun.maxObservedConcurrency}`}（上限 ${concurrency}）`,
-    targetPlatform.label ? `图片比例：${targetPlatform.label}` : undefined
-  ].filter(Boolean).join('\n');
-  const preview = {
-    kind: 'digital_factory_image_batch' as const,
-    title: input.task.title,
-    platformLabel: targetPlatform.label,
-    concurrency,
-    total: batchTasks.length,
-    completed,
-    failed,
-    items: results
-  };
-  const artifact: DesktopArtifactSummary = {
-    id: `${input.task.taskId}-factory-preview-${Date.parse(input.createdAt) || Date.now()}`,
-    type: 'image',
-    title: `${input.task.title} 图片结果`,
-    content: summaryContent,
-    createdAt: input.createdAt,
-    remoteUrl: results.find((item) => item.remoteUrl)?.remoteUrl,
-    localPath: results.find((item) => item.localPath)?.localPath,
-    factoryPreview: preview
-  };
+  const streamingSavedLog = streamingSavedCount > 0
+    ? createLog(
+        input.task.taskId,
+        'info',
+        'WORKFLOW_RUNTIME_FACTORY_REMOTE_ASSETS_SAVED',
+        `Factory remote image assets saved locally: ${streamingSavedCount}/${results.filter((item) => item.status === 'completed' && Boolean(item.remoteUrl)).length}.`,
+        input.createdAt,
+        sanitizeLogSuffix(`${input.node.id}-${sanitizeLogSuffix(outputFolder)}-remote-assets-streaming`)
+      )
+    : undefined;
   const completedLog = createLog(
     input.task.taskId,
     failed > 0 ? 'warning' : 'info',
@@ -6439,8 +6659,14 @@ async function invokeWorkflowRuntimeFactoryImageGenerationNode(input: {
       content: summaryContent
     }),
     primaryProfile: input.profile,
-    logs: [startedLog, ...localAssetSave.logs, completedLog],
-    usedToolIds: localAssetSave.usedToolIds,
+    logs: [
+      startedLog,
+      ...(streamingSavedLog ? [streamingSavedLog] : []),
+      ...streamingLocalSaveLogs,
+      ...localAssetSave.logs,
+      completedLog
+    ],
+    usedToolIds: [...streamingUsedToolIds],
     generatedArtifacts: [artifact],
     inputVariables: ['factory_request', 'factory_items', 'selected_packages', 'target_platform', 'package_instructions'],
     outputVariables,
@@ -6565,7 +6791,11 @@ function readFactoryRuntimePackage(value: unknown, index: number): FactoryRuntim
   return {
     key,
     label,
-    description: readWorkflowRuntimeString(value.description)
+    description: readWorkflowRuntimeString(value.description),
+    promptTemplate: readWorkflowRuntimeString(value.promptTemplate)
+      ?? readWorkflowRuntimeString(value.prompt)
+      ?? readWorkflowRuntimeString(value.description),
+    negativePrompt: readWorkflowRuntimeString(value.negativePrompt)
   };
 }
 
@@ -7125,6 +7355,7 @@ async function persistFactoryRemoteAssetsLocally<T extends {
     folder: string;
     createdAt: string;
     logSuffix: string;
+    includeSuccessLog?: boolean;
   }
 ): Promise<{
   results: T[];
@@ -7231,7 +7462,7 @@ async function persistFactoryRemoteAssetsLocally<T extends {
     ));
   }
 
-  if (savedCount > 0) {
+  if (savedCount > 0 && input.includeSuccessLog !== false) {
     logs.unshift(createLog(
       input.task.taskId,
       'info',
@@ -8856,7 +9087,7 @@ function createFactoryImageGenerationTasks(input: {
           input.targetPlatform,
           input.promptControls
         ),
-        negativePrompt: instruction?.negativePrompt ?? input.promptControls?.avoid,
+        negativePrompt: instruction?.negativePrompt ?? packageItem.negativePrompt ?? input.promptControls?.avoid,
         targetPlatform: input.targetPlatform,
         createdAt: input.createdAt
       });
@@ -8948,7 +9179,7 @@ function createFactoryVideoGenerationTasks(input: {
           input.videoConfig,
           input.promptControls
         ),
-        negativePrompt: input.promptControls?.avoid,
+        negativePrompt: packageItem.negativePrompt ?? input.promptControls?.avoid,
         targetPlatform: input.targetPlatform,
         durationSeconds: input.videoConfig.durationSeconds,
         videoRatio: input.videoConfig.ratio,
@@ -9260,6 +9491,7 @@ async function runFactoryImageGenerationTasksWithProviderPolling(input: {
   profile: ModelProfile;
   modelInvoker: DesktopModelInvoker;
   maxRetries: number;
+  onResultUpdate?: FactoryImageGenerationResultUpdateHandler;
 }): Promise<{
   results: FactoryImageGenerationResult[];
   minConcurrency: number;
@@ -9283,10 +9515,13 @@ async function runFactoryImageGenerationTasksWithProviderPolling(input: {
         modelInvoker: input.modelInvoker,
         maxRetries: input.maxRetries
       });
-      if (result.providerJobId && result.status === 'running') {
-        submittedAtById.set(result.id, Date.now());
+      const updatedResult = input.onResultUpdate
+        ? await input.onResultUpdate(result, 'submitted')
+        : result;
+      if (updatedResult.providerJobId && updatedResult.status === 'running') {
+        submittedAtById.set(updatedResult.id, Date.now());
       }
-      return result;
+      return updatedResult;
     }
   });
 
@@ -9312,13 +9547,16 @@ async function runFactoryImageGenerationTasksWithProviderPolling(input: {
 
     for (const index of expiredIndexes) {
       const current = results[index]!;
-      results[index] = {
+      const timeoutResult: FactoryImageGenerationResult = {
         ...current,
         status: 'failed',
-        error: `GrsAI image task timed out after 30 minutes. taskId=${current.providerJobId}${current.providerStatus ? `, status=${current.providerStatus}` : ''}`,
+        error: `Image generation task timed out after 30 minutes. taskId=${current.providerJobId}${current.providerStatus ? `, status=${current.providerStatus}` : ''}`,
         errorType: 'timeout',
         attempts: current.attempts ?? 1
       };
+      results[index] = input.onResultUpdate
+        ? await input.onResultUpdate(timeoutResult, 'timeout')
+        : timeoutResult;
     }
 
     if (pendingIndexes.length === 0) {
@@ -9331,14 +9569,18 @@ async function runFactoryImageGenerationTasksWithProviderPolling(input: {
       input.maxConcurrency,
       async (resultIndex) => {
         const current = results[resultIndex]!;
+        const polledResult = await pollFactoryImageGenerationTaskOnce({
+          current,
+          node: input.node,
+          profile: input.profile,
+          modelInvoker: input.modelInvoker
+        });
+        const updatedResult = input.onResultUpdate
+          ? await input.onResultUpdate(polledResult, 'polled')
+          : polledResult;
         return {
           resultIndex,
-          result: await pollFactoryImageGenerationTaskOnce({
-            current,
-            node: input.node,
-            profile: input.profile,
-            modelInvoker: input.modelInvoker
-          })
+          result: updatedResult
         };
       }
     );
@@ -9410,6 +9652,14 @@ function isGrsaiFactoryImageModelProfile(profile: ModelProfile): boolean {
     profile.apiBaseUrl
   ].filter(Boolean).join(' ').toLowerCase();
   return normalized.includes('grsai') || normalized.includes('dakka.com.cn');
+}
+
+function isOfficialImageFactoryModelProfile(profile: ModelProfile): boolean {
+  return isOfficialPointsModelProfile(profile) && Boolean(profile.officialRouteKey?.startsWith('official-image-'));
+}
+
+function isAsyncPolledFactoryImageModelProfile(profile: ModelProfile): boolean {
+  return isGrsaiFactoryImageModelProfile(profile) || isOfficialImageFactoryModelProfile(profile);
 }
 
 async function submitFactoryImageGenerationTask(input: {
@@ -9526,7 +9776,7 @@ async function pollFactoryImageGenerationTaskOnce(input: {
         asyncMode: 'poll_once',
         providerJobId: input.current.providerJobId
       },
-      messages: [{ role: 'user', content: `Poll GrsAI image task ${input.current.providerJobId}.` }],
+      messages: [{ role: 'user', content: `Poll image generation task ${input.current.providerJobId}.` }],
       timeoutMs: readWorkflowRuntimeModelTimeoutMs(
         input.node.config?.pollRequestTimeoutMs ?? factoryGrsaiImagePollRequestTimeoutMs
       )
@@ -10034,10 +10284,12 @@ function buildFactoryImageGenerationFallbackPrompt(
   platform: FactoryRuntimePlatform,
   promptControls?: FactoryRuntimePromptControls
 ): string {
+  const packagePrompt = packageItem.promptTemplate ?? packageItem.description;
+
   return [
     `Use the source product image ${item.image.localPath} as the reference.`,
     `Create a ${packageItem.label} image for source image ${item.sourceName ?? item.image.name ?? item.sku}.`,
-    packageItem.description ? `Package requirement: ${packageItem.description}.` : undefined,
+    packagePrompt ? `Package prompt: ${packagePrompt}.` : undefined,
     platform.label ? `Target platform: ${platform.label}.` : undefined,
     platform.imageRatio ? `Required ratio: ${platform.imageRatio}.` : undefined,
     platform.notes ? `Platform notes: ${platform.notes}.` : undefined,
@@ -10058,11 +10310,13 @@ function buildFactoryVideoGenerationFallbackPrompt(
   videoConfig: { durationSeconds: number; ratio: string },
   promptControls?: FactoryRuntimePromptControls
 ): string {
+  const packagePrompt = packageItem.promptTemplate ?? packageItem.description;
+
   return [
     `Use the source product image ${item.image.localPath} as the visual reference.`,
     `Create one ecommerce product video for source image ${item.sourceName ?? item.image.name ?? item.sku}.`,
     `Video package: ${packageItem.label} (${packageItem.key}).`,
-    packageItem.description ? `Package requirement: ${packageItem.description}.` : undefined,
+    packagePrompt ? `Package prompt: ${packagePrompt}.` : undefined,
     `Required duration: ${videoConfig.durationSeconds} seconds.`,
     `Required aspect ratio: ${videoConfig.ratio}.`,
     promptControls?.language ? `On-screen text language: ${promptControls.language}.` : undefined,
