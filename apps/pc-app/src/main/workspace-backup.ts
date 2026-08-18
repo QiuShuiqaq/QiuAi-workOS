@@ -686,11 +686,13 @@ function validateFactoryArtifactPreviewItem(
           'timeout',
           'network',
           'provider',
+          'policy_violation',
           'unknown'
         ]) as FactoryArtifactPreview['items'][number]['errorType'],
     attempts: optionalInteger(record.attempts, `${fieldName}.attempts`),
     providerJobId: optionalString(record.providerJobId, `${fieldName}.providerJobId`),
     providerStatus: optionalString(record.providerStatus, `${fieldName}.providerStatus`),
+    providerSubmittedAt: optionalString(record.providerSubmittedAt, `${fieldName}.providerSubmittedAt`),
     createdAt: requireString(record.createdAt, `${fieldName}.createdAt`)
   };
 }

@@ -97,10 +97,11 @@ export interface FactoryArtifactPreviewItem {
   sourceImagePath?: string;
   prompt?: string;
   error?: string;
-  errorType?: 'configuration' | 'quota' | 'rate_limit' | 'timeout' | 'network' | 'provider' | 'unknown';
+  errorType?: 'configuration' | 'quota' | 'rate_limit' | 'timeout' | 'network' | 'provider' | 'policy_violation' | 'unknown';
   attempts?: number;
   providerJobId?: string;
   providerStatus?: string;
+  providerSubmittedAt?: string;
   createdAt: string;
 }
 

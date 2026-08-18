@@ -150,7 +150,11 @@ import {
   createTaskDetailFromSummary,
   toDesktopTaskSummary
 } from '../shared/workbench-data';
-import { runDesktopTask } from '../shared/desktop-task-runner';
+import {
+  getFactoryImageBatchRecoveryHealth,
+  recoverFactoryImageBatch,
+  runDesktopTask
+} from '../shared/desktop-task-runner';
 import {
   ensureModelProfilesForRolePackage,
   findFirstUnreadyRequiredModelProfileId,
@@ -3288,6 +3292,7 @@ export default function App() {
   const [savingFactoryImageId, setSavingFactoryImageId] = useState('');
   const [exportingFactoryOutputId, setExportingFactoryOutputId] = useState('');
   const [exportingFactoryOutputBatch, setExportingFactoryOutputBatch] = useState('');
+  const [recoveringFactoryBatchTaskId, setRecoveringFactoryBatchTaskId] = useState('');
   const [roleTemplateNotice, setRoleTemplateNotice] = useState('');
   const [isLoadingRoleTemplates, setIsLoadingRoleTemplates] = useState(false);
   const [authorizedRoleTemplateCatalog, setAuthorizedRoleTemplateCatalog] =
@@ -3393,6 +3398,7 @@ export default function App() {
   const [factoryScreeningEditorSelectedKey, setFactoryScreeningEditorSelectedKey] = useState('');
   const runtimeStateRef = useRef(runtimeState);
   const runningWatchRoleCodesRef = useRef<Set<string>>(new Set());
+  const factoryRecoveryCooldownRef = useRef<Map<string, number>>(new Map());
   const factoryRunParameterMemoryTimerRef = useRef<number | null>(null);
   const factoryRunParameterMemoryValuesRef = useRef<FactoryRunFormValues | null>(null);
 
@@ -4293,6 +4299,117 @@ export default function App() {
       message.error(errorMessage);
     } finally {
       setExportingFactoryOutputBatch('');
+    }
+  }
+
+  async function recoverFactoryImages(task: DesktopTaskDetail) {
+    const preview = findFactoryImageBatchPreview(task);
+    if (!preview) {
+      return;
+    }
+
+    const nowMs = Date.now();
+    const health = getFactoryImageBatchRecoveryHealth(preview, nowMs);
+    if (health.recoverableCount === 0) {
+      message.info(
+        health.expiredCount > 0
+          ? '这批图片的补全窗口已结束。'
+          : '当前没有可补全的图片。'
+      );
+      return;
+    }
+
+    const lastRunAt = factoryRecoveryCooldownRef.current.get(task.taskId) ?? 0;
+    if (nowMs - lastRunAt < 30_000) {
+      message.info('补全检查正在冷却，请稍后再试。');
+      return;
+    }
+
+    const preparedState = prepareRoleForTaskRun(task.roleCode);
+    if (!preparedState) {
+      return;
+    }
+
+    const preparedTask =
+      getRuntimeTaskDetails(preparedState).find((item) => item.taskId === task.taskId) ?? task;
+    const rolePackage = getPreparedInstalledRolePackage(task.roleCode);
+    if (!rolePackage) {
+      message.warning('当前数字工厂配置不存在，无法执行补全检查。');
+      return;
+    }
+
+    factoryRecoveryCooldownRef.current.set(task.taskId, nowMs);
+    setRecoveringFactoryBatchTaskId(task.taskId);
+    setLocalActionNotice('');
+
+    try {
+      const result = await recoverFactoryImageBatch({
+        task: preparedTask,
+        rolePackage,
+        workspaceId: preparedState.localRuntime.workspaceId,
+        modelProfiles: preparedState.modelProfiles,
+        modelCredentials: preparedState.modelCredentials,
+        roleModelCredentialBindings: preparedState.roleModelCredentialBindings,
+        tools: preparedState.tools,
+        knowledgeSources: preparedState.knowledgeSources,
+        enabledModelProfileIds: preparedState.localRuntime.enabledModelProfileIds,
+        enabledToolIds: preparedState.localRuntime.enabledToolIds,
+        enabledKnowledgeBindingIds: preparedState.localRuntime.knowledgeBindingIds,
+        modelInvoker: window.qiuDesktop?.invokeModelChat,
+        desktopToolInvoker: window.qiuDesktop?.invokeDesktopTool,
+        onProgress: (progressTask) => {
+          upsertTaskDetail(progressTask, [], progressTask.updatedAt);
+        }
+      });
+
+      upsertTaskDetail(result.task, [], result.task.updatedAt);
+      const finalHealth = result.health;
+      const allImagesUnresolved = finalHealth.unresolvedCount === finalHealth.totalCount;
+      const allImagesPolicyRejected =
+        allImagesUnresolved && finalHealth.policyViolationCount === finalHealth.totalCount;
+      const allImagesProviderFailed =
+        allImagesUnresolved && finalHealth.providerFailureCount === finalHealth.totalCount;
+      if (allImagesPolicyRejected) {
+        message.error(
+          '当前提示词可能存在违规内容，请修改后重试。'
+        );
+      } else if (allImagesProviderFailed && finalHealth.pendingCount === 0) {
+        message.error(
+          '当前上游链路瘫痪，请稍后重试。'
+        );
+      } else if (finalHealth.unresolvedCount > 0) {
+        const detail = [
+          '当前上游链路不稳定，部分图片未返回。',
+          finalHealth.policyViolationCount > 0
+            ? `其中 ${finalHealth.policyViolationCount} 张可能是提示词违规。`
+            : undefined,
+          finalHealth.providerFailureCount > 0
+            ? `另有 ${finalHealth.providerFailureCount} 张可能是上游链路异常。`
+            : undefined
+        ].filter(Boolean).join('');
+        message.warning(
+          result.recoveredCount > 0
+            ? `补全检查完成，新增 ${result.recoveredCount} 张图片。${detail}`
+            : detail
+        );
+      } else {
+        message.success(
+          result.recoveredCount > 0
+            ? `补全检查完成，新增 ${result.recoveredCount} 张图片。`
+            : '补全检查完成，当前批次没有新增结果。'
+        );
+      }
+    } catch (error) {
+      const errorMessage = `补全检查失败：${error instanceof Error ? error.message : 'unknown error'}`;
+      setLocalActionNotice(errorMessage);
+      message.error(errorMessage);
+    } finally {
+      setRecoveringFactoryBatchTaskId('');
+      window.setTimeout(() => {
+        if (factoryRecoveryCooldownRef.current.get(task.taskId) === nowMs) {
+          factoryRecoveryCooldownRef.current.delete(task.taskId);
+        }
+      }, 30_000);
     }
   }
 
@@ -9457,6 +9574,12 @@ export default function App() {
       focusedFactoryTask?.costCents ??
       focusedFactoryTask?.costRecords.reduce((total, record) => total + record.costCents, 0);
     const focusedFactoryInputFiles = readFactoryTaskInputFiles(focusedFactoryTask);
+    const focusedFactoryImagePreview = focusedFactoryTask
+      ? findFactoryImageBatchPreview(focusedFactoryTask)
+      : undefined;
+    const focusedFactoryImageRecoveryHealth = focusedFactoryImagePreview
+      ? getFactoryImageBatchRecoveryHealth(focusedFactoryImagePreview)
+      : undefined;
     const missingFactoryModel = selectedFactoryModelReadiness.find((requirement) => !requirement.ready);
     const missingFactoryToolId = selectedFactoryPackage?.toolIds.find((toolId) => {
       const known = runtimeState.tools.some((tool) => tool.id === toolId);
@@ -10686,15 +10809,30 @@ export default function App() {
                           <Typography.Text strong>输出队列</Typography.Text>
                         </InlineHelpTitle>
                         {focusedFactoryTask ? (
-                          <Button
-                            size="small"
-                            icon={<DownloadOutlined />}
-                            loading={exportingFactoryOutputBatch === `preview-images-${focusedFactoryTask.taskId}`}
-                            disabled={collectFactoryPreviewImageFiles(focusedFactoryTask).length === 0}
-                            onClick={() => void exportFactoryPreviewImages(focusedFactoryTask)}
-                          >
-                            下载全部图片
-                          </Button>
+                          <Space size={6}>
+                            <Button
+                              size="small"
+                              icon={<DownloadOutlined />}
+                              loading={exportingFactoryOutputBatch === `preview-images-${focusedFactoryTask.taskId}`}
+                              disabled={collectFactoryPreviewImageFiles(focusedFactoryTask).length === 0}
+                              onClick={() => void exportFactoryPreviewImages(focusedFactoryTask)}
+                            >
+                              下载全部图片
+                            </Button>
+                            {focusedFactoryImageRecoveryHealth &&
+                            focusedFactoryImageRecoveryHealth.recoverableCount > 0 ? (
+                              <Button
+                                size="small"
+                                icon={<ReloadOutlined />}
+                                loading={recoveringFactoryBatchTaskId === focusedFactoryTask.taskId}
+                                disabled={recoveringFactoryBatchTaskId !== '' &&
+                                  recoveringFactoryBatchTaskId !== focusedFactoryTask.taskId}
+                                onClick={() => void recoverFactoryImages(focusedFactoryTask)}
+                              >
+                                补全检查（{focusedFactoryImageRecoveryHealth.recoverableCount}）
+                              </Button>
+                            ) : null}
+                          </Space>
                         ) : null}
                       </Flex>
 
@@ -18010,6 +18148,12 @@ function formatFactoryPreviewMeta(preview: FactoryArtifactPreview) {
   const failedText = preview.failed > 0 ? `，失败 ${preview.failed}` : '';
   const platformText = preview.platformLabel ? ` · ${preview.platformLabel}` : '';
   return `完成 ${preview.completed}/${preview.total}${failedText} · 并发 ${preview.concurrency}${platformText}`;
+}
+
+function findFactoryImageBatchPreview(task: DesktopTaskDetail): FactoryArtifactPreview | undefined {
+  return task.artifacts.find(
+    (artifact) => artifact.factoryPreview?.kind === 'digital_factory_image_batch'
+  )?.factoryPreview;
 }
 
 function getFactoryPreviewImageFileName(item: FactoryArtifactPreviewItem) {

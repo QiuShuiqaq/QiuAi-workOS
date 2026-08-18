@@ -1,6 +1,7 @@
 ﻿import type {
   DesktopArtifactSummary,
   DesktopExecutionLogEntry,
+  FactoryArtifactPreview,
   FactoryArtifactPreviewItem,
   FactoryArtifactPreviewItemStatus,
   FactoryOutputItem,
@@ -172,6 +173,7 @@ const factoryGrsaiImagePollRequestTimeoutMs = 30_000;
 const factoryGrsaiImageFinalDeadlineMs = 30 * 60 * 1000;
 const factoryGrsaiImagePollInitialIntervalMs = 3_000;
 const factoryGrsaiImagePollMaxIntervalMs = 15_000;
+export const factoryImageRecoveryWindowMs = 2 * 60 * 60 * 1000;
 
 interface FactoryRuntimePackageInstruction {
   sku?: string;
@@ -313,6 +315,29 @@ interface FactoryVideoPreparedAudioResult {
   error?: string;
   risks: string[];
 }
+
+export interface FactoryImageBatchRecoveryHealth {
+  totalCount: number;
+  completedCount: number;
+  unresolvedCount: number;
+  recoverableCount: number;
+  policyViolationCount: number;
+  providerFailureCount: number;
+  pendingCount: number;
+  expiredCount: number;
+}
+
+export interface RecoverFactoryImageBatchResult {
+  task: DesktopTaskDetail;
+  health: FactoryImageBatchRecoveryHealth;
+  recoveredCount: number;
+}
+
+export type RecoverFactoryImageBatchInput = Omit<RunDesktopTaskInput, 'task' | 'onProgress' | 'completedAt'> & {
+  task: DesktopTaskDetail;
+  nowMs?: number;
+  onProgress?: DesktopTaskProgressCallback;
+};
 
 interface ModelInvocationSuccess {
   ok: true;
@@ -9611,6 +9636,9 @@ function shouldBackoffFactoryImageConcurrency(errorType: FactoryImageGenerationE
 
 function classifyFactoryImageGenerationError(message: string): FactoryImageGenerationErrorType {
   const normalized = message.toLowerCase();
+  if (/policy|safety|moderation|content violation|prompt rejected|违规|敏感|内容限制|不合规/.test(normalized)) {
+    return 'policy_violation';
+  }
   if (/api key|unauthorized|forbidden|401|403|base url|model name|does not support|invalidparameter|invalid parameter/.test(normalized)) {
     return 'configuration';
   }
@@ -9633,7 +9661,7 @@ function classifyFactoryImageGenerationError(message: string): FactoryImageGener
 }
 
 function shouldStopFactoryImageRetry(errorType: FactoryImageGenerationErrorType): boolean {
-  return errorType === 'configuration' || errorType === 'quota';
+  return errorType === 'configuration' || errorType === 'quota' || errorType === 'policy_violation';
 }
 
 function getFactoryImageRetryDelayMs(errorType: FactoryImageGenerationErrorType, attempt: number): number {
@@ -9715,6 +9743,7 @@ async function submitFactoryImageGenerationTask(input: {
           attempts,
           providerJobId: imageResult.providerJobId,
           providerStatus: imageResult.providerStatus ?? 'submitted',
+          providerSubmittedAt: new Date().toISOString(),
           createdAt: input.task.createdAt
         };
       }
@@ -9804,7 +9833,8 @@ async function pollFactoryImageGenerationTaskOnce(input: {
         imageResult: {
           ...imageResult,
           providerJobId: imageResult.providerJobId ?? input.current.providerJobId,
-          providerStatus: imageResult.providerStatus ?? input.current.providerStatus
+          providerStatus: imageResult.providerStatus ?? input.current.providerStatus,
+          providerSubmittedAt: input.current.providerSubmittedAt
         },
         attempts: input.current.attempts ?? 1
       });
@@ -9836,6 +9866,281 @@ async function pollFactoryImageGenerationTaskOnce(input: {
   }
 }
 
+function isFactoryImagePolicyViolationItem(item: FactoryArtifactPreviewItem): boolean {
+  const normalizedStatus = item.providerStatus?.trim().toLowerCase() ?? '';
+  const normalizedError = item.error?.trim().toLowerCase() ?? '';
+  return item.errorType === 'policy_violation' ||
+    /violation|policy|safety|moderation|prompt rejected|content restriction|违规|敏感|不合规/.test(
+      `${normalizedStatus} ${normalizedError}`
+    );
+}
+
+function readFactoryImageProviderSubmittedAtMs(item: FactoryArtifactPreviewItem): number | undefined {
+  const raw = item.providerSubmittedAt ?? item.createdAt;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function hasFactoryImageResult(item: FactoryArtifactPreviewItem): boolean {
+  return Boolean(item.remoteUrl || item.localPath) || item.status === 'completed';
+}
+
+export function getFactoryImageBatchRecoveryHealth(
+  preview: FactoryArtifactPreview,
+  nowMs = Date.now()
+): FactoryImageBatchRecoveryHealth {
+  let recoverableCount = 0;
+  let pendingCount = 0;
+  let expiredCount = 0;
+
+  for (const item of preview.items) {
+    if (hasFactoryImageResult(item) || !item.providerJobId || isFactoryImagePolicyViolationItem(item)) {
+      continue;
+    }
+
+    const submittedAtMs = readFactoryImageProviderSubmittedAtMs(item);
+    const ageMs = submittedAtMs === undefined ? Number.POSITIVE_INFINITY : nowMs - submittedAtMs;
+    if (ageMs >= 0 && ageMs < factoryImageRecoveryWindowMs) {
+      recoverableCount += 1;
+      if (item.status === 'running') {
+        pendingCount += 1;
+      }
+    } else if (ageMs >= factoryImageRecoveryWindowMs) {
+      expiredCount += 1;
+    }
+  }
+
+  const completedCount = preview.items.filter(hasFactoryImageResult).length;
+  const unresolvedCount = preview.items.length - completedCount;
+  const policyViolationCount = preview.items.filter(isFactoryImagePolicyViolationItem).length;
+  const providerFailureCount = preview.items.filter(
+    (item) => item.status === 'failed' && !isFactoryImagePolicyViolationItem(item)
+  ).length;
+
+  return {
+    totalCount: preview.items.length,
+    completedCount,
+    unresolvedCount,
+    recoverableCount,
+    policyViolationCount,
+    providerFailureCount,
+    pendingCount,
+    expiredCount
+  };
+}
+
+function buildFactoryImageRecoveryArtifact(
+  artifact: DesktopArtifactSummary,
+  results: FactoryArtifactPreviewItem[],
+  updatedAt: string
+): DesktopArtifactSummary {
+  const preview = artifact.factoryPreview;
+  if (!preview || preview.kind !== 'digital_factory_image_batch') {
+    return artifact;
+  }
+
+  const completed = results.filter(hasFactoryImageResult).length;
+  const failed = results.filter((item) => item.status === 'failed').length;
+  const running = results.filter((item) => item.status === 'running').length;
+  const summaryContent = [
+    `数字工厂图片批次进度：${completed}/${preview.total}`,
+    `失败：${failed}`,
+    running > 0 ? `生成中：${running}` : undefined,
+    `并发数：${preview.concurrency}`,
+    preview.platformLabel ? `图片比例：${preview.platformLabel}` : undefined
+  ].filter(Boolean).join('\n');
+
+  return {
+    ...artifact,
+    content: summaryContent,
+    remoteUrl: results.find((item) => item.remoteUrl)?.remoteUrl ?? artifact.remoteUrl,
+    localPath: results.find((item) => item.localPath)?.localPath ?? artifact.localPath,
+    factoryPreview: {
+      ...preview,
+      completed,
+      failed,
+      items: results
+    }
+  };
+}
+
+function updateFactoryImageRecoveryTask(
+  task: DesktopTaskDetail,
+  artifactId: string,
+  results: FactoryArtifactPreviewItem[],
+  updatedAt: string
+): DesktopTaskDetail {
+  return {
+    ...task,
+    updatedAt,
+    artifacts: task.artifacts.map((artifact) =>
+      artifact.id === artifactId
+        ? buildFactoryImageRecoveryArtifact(artifact, results, updatedAt)
+        : artifact
+    )
+  };
+}
+
+export async function recoverFactoryImageBatch(
+  input: RecoverFactoryImageBatchInput
+): Promise<RecoverFactoryImageBatchResult> {
+  const previewArtifact = input.task.artifacts.find(
+    (artifact) => artifact.factoryPreview?.kind === 'digital_factory_image_batch'
+  );
+  const preview = previewArtifact?.factoryPreview;
+  if (!preview || preview.kind !== 'digital_factory_image_batch' || !previewArtifact) {
+    throw new Error('当前任务没有可补全的图片批次。');
+  }
+
+  const nowMs = input.nowMs ?? Date.now();
+  const initialHealth = getFactoryImageBatchRecoveryHealth(preview, nowMs);
+  if (initialHealth.recoverableCount === 0) {
+    return {
+      task: input.task,
+      health: initialHealth,
+      recoveredCount: 0
+    };
+  }
+  if (!input.modelInvoker) {
+    throw new Error('桌面端模型桥接不可用，无法执行补全检查。');
+  }
+
+  const createdAt = input.task.updatedAt || input.task.createdAt;
+  const workflowPlan = buildWorkflowExecutionPlan({
+    task: input.task,
+    rolePackage: input.rolePackage,
+    createdAt
+  });
+  const imageNode = workflowPlan.orderedNodes.find(
+    (node) =>
+      node.type === 'llm' &&
+      (node.outputVariables ?? []).includes('factory_generated_images')
+  );
+  if (!imageNode) {
+    throw new Error('当前任务没有找到图片批次生成节点。');
+  }
+
+  const context = augmentExecutionContextWithWorkflowPlan(
+    input.task.executionContext ?? buildContextFromRolePackage(input.rolePackage),
+    workflowPlan
+  );
+  if (!context) {
+    throw new Error('当前任务缺少执行上下文，无法补全图片批次。');
+  }
+
+  const binding = resolveRuntimeBinding({
+    context,
+    roleCode: input.task.roleCode,
+    roleModelCredentialBindings: input.roleModelCredentialBindings ?? [],
+    modelProfiles: input.modelProfiles,
+    tools: input.tools,
+    knowledgeSources: input.knowledgeSources ?? [],
+    enabledModelProfileIds: input.enabledModelProfileIds,
+    enabledToolIds: input.enabledToolIds,
+    enabledKnowledgeBindingIds: input.enabledKnowledgeBindingIds
+  });
+  const credentialedBinding: ResolvedRuntimeBinding = {
+    ...binding,
+    modelProfiles: binding.modelProfiles.map(
+      (profile) =>
+        resolveModelProfileCredential({
+          profile,
+          roleCode: input.task.roleCode,
+          credentials: input.modelCredentials,
+          roleBindings: input.roleModelCredentialBindings
+        }).profile
+    )
+  };
+  const configuredModelProfiles = credentialedBinding.modelProfiles.filter(isModelApiConfigured);
+  const profile = selectWorkflowRuntimeModelProfile(
+    imageNode,
+    configuredModelProfiles,
+    input.rolePackage,
+    input.task.roleCode,
+    input.roleModelCredentialBindings ?? []
+  );
+
+  let results = [...preview.items];
+  let recoveredCount = 0;
+  const recoverableItems = results.filter((item) => {
+    const currentHealth = getFactoryImageBatchRecoveryHealth(
+      { ...preview, items: [item] },
+      nowMs
+    );
+    return currentHealth.recoverableCount === 1;
+  });
+  let currentTask = input.task;
+
+  const publish = async () => {
+    currentTask = updateFactoryImageRecoveryTask(
+      currentTask,
+      previewArtifact.id,
+      results,
+      new Date().toISOString()
+    );
+    await input.onProgress?.(currentTask);
+  };
+
+  await runWorkflowRuntimeConcurrent(
+    recoverableItems,
+    Math.min(4, recoverableItems.length),
+    async (current) => {
+      const resultIndex = results.findIndex((item) => item.id === current.id);
+      if (resultIndex < 0) {
+        return current;
+      }
+
+      let nextResult = await pollFactoryImageGenerationTaskOnce({
+        current,
+        node: imageNode,
+        profile,
+        modelInvoker: input.modelInvoker!
+      });
+
+      if (nextResult.status === 'completed' && nextResult.remoteUrl && !nextResult.localPath) {
+        const localSave = await persistFactoryRemoteAssetsLocally({
+          task: currentTask,
+          binding: credentialedBinding,
+          desktopToolInvoker: input.desktopToolInvoker,
+          workspaceId: input.workspaceId,
+          results: [nextResult],
+          mediaKind: 'image',
+          folder: 'product-images',
+          createdAt,
+          logSuffix: `factory-recovery-${sanitizeLogSuffix(nextResult.id)}`,
+          includeSuccessLog: false
+        });
+        nextResult = localSave.results[0] ?? nextResult;
+      }
+
+      results[resultIndex] = nextResult;
+      if (hasFactoryImageResult(nextResult) && !hasFactoryImageResult(current)) {
+        recoveredCount += 1;
+      }
+      await publish();
+      return nextResult;
+    }
+  );
+
+  const finalPreview = {
+    ...preview,
+    items: results
+  };
+  const health = getFactoryImageBatchRecoveryHealth(finalPreview, nowMs);
+  currentTask = updateFactoryImageRecoveryTask(
+    currentTask,
+    previewArtifact.id,
+    results,
+    new Date().toISOString()
+  );
+
+  return {
+    task: currentTask,
+    health,
+    recoveredCount
+  };
+}
+
 function buildCompletedFactoryImageGenerationResult(input: {
   task: Pick<FactoryImageGenerationTask, 'id' | 'order' | 'sku' | 'sourceName' | 'sourceImage' | 'packageKey' | 'packageLabel' | 'prompt' | 'createdAt'>;
   imageResult: {
@@ -9844,6 +10149,7 @@ function buildCompletedFactoryImageGenerationResult(input: {
     thumbnailPath?: string;
     providerJobId?: string;
     providerStatus?: string;
+    providerSubmittedAt?: string;
   };
   attempts: number;
 }): FactoryImageGenerationResult {
@@ -9863,6 +10169,7 @@ function buildCompletedFactoryImageGenerationResult(input: {
     attempts: input.attempts,
     providerJobId: input.imageResult.providerJobId,
     providerStatus: input.imageResult.providerStatus,
+    providerSubmittedAt: input.imageResult.providerSubmittedAt,
     createdAt: input.task.createdAt
   };
 }
@@ -10093,30 +10400,52 @@ function buildFactoryVideoGenerationMessages(task: FactoryVideoGenerationTask): 
   ];
 }
 
-function readFactoryImageGenerationResponse(
+export function readFactoryImageGenerationResponse(
   response: DesktopModelChatResponse
 ): { remoteUrl?: string; localPath?: string; thumbnailPath?: string; providerJobId?: string; providerStatus?: string; pending?: boolean } {
-  const artifact = response.artifacts?.find((item) => item.remoteUrl || item.localPath || item.providerJobId);
-  if (artifact) {
+  const artifactResults = (response.artifacts ?? []).map((artifact) => ({
+    remoteUrl: readWorkflowRuntimeString(artifact.remoteUrl),
+    localPath: readWorkflowRuntimeString(artifact.localPath),
+    thumbnailPath: readWorkflowRuntimeString(artifact.thumbnailPath),
+    providerJobId: readWorkflowRuntimeString(artifact.providerJobId)
+      ?? readWorkflowRuntimeString(artifact.metadata?.providerJobId),
+    providerStatus: readWorkflowRuntimeString(artifact.providerStatus)
+      ?? readWorkflowRuntimeString(artifact.metadata?.providerStatus),
+    pending: artifact.metadata?.pending === true ? true : undefined
+  }));
+  const successfulArtifact = artifactResults.find((item) => item.remoteUrl || item.localPath);
+  if (successfulArtifact) {
+    return successfulArtifact;
+  }
+
+  const pendingArtifact = artifactResults.find((item) => item.providerJobId);
+  const parsed = parseWorkflowRuntimeJson(response.content);
+  const parsedResult = readFactoryImageResultFromValue(parsed);
+  if (parsedResult.remoteUrl || parsedResult.localPath) {
     return {
-      remoteUrl: readWorkflowRuntimeString(artifact.remoteUrl),
-      localPath: readWorkflowRuntimeString(artifact.localPath),
-      thumbnailPath: readWorkflowRuntimeString(artifact.thumbnailPath),
-      providerJobId: readWorkflowRuntimeString(artifact.providerJobId),
-      providerStatus: readWorkflowRuntimeString(artifact.providerStatus),
-      pending: !artifact.remoteUrl && !artifact.localPath && Boolean(artifact.providerJobId)
+      ...parsedResult,
+      providerJobId: parsedResult.providerJobId ?? pendingArtifact?.providerJobId,
+      providerStatus: parsedResult.providerStatus ?? pendingArtifact?.providerStatus
     };
   }
 
-  const parsed = parseWorkflowRuntimeJson(response.content);
-  const fromJson = readFactoryImageResultFromValue(parsed);
-  if (fromJson.remoteUrl || fromJson.localPath) {
-    return fromJson;
+  const contentUrl = extractFirstHttpUrl(response.content);
+  if (contentUrl) {
+    return {
+      remoteUrl: contentUrl,
+      providerJobId: pendingArtifact?.providerJobId,
+      providerStatus: pendingArtifact?.providerStatus
+    };
   }
 
-  return {
-    remoteUrl: extractFirstHttpUrl(response.content)
-  };
+  if (pendingArtifact) {
+    return {
+      ...pendingArtifact,
+      pending: true
+    };
+  }
+
+  return parsedResult;
 }
 
 function readFactoryImageResultFromValue(value: unknown): {

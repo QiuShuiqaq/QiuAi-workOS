@@ -1912,6 +1912,12 @@ export class AiPointsService implements OnModuleInit, OnModuleDestroy {
     const submittedUrl = readMediaUrlFromUnknown(submitResponse.body, 'image');
     const providerJobId = readProviderJobId(submitResponse.body);
     const submittedStatus = readProviderStatus(submitResponse.body);
+    if (
+      isProviderPolicyViolation(submittedStatus) ||
+      isProviderPolicyViolation(readProviderFailureMessage(submitResponse.body))
+    ) {
+      throw new OfficialProviderPolicyViolationError('Official image prompt was rejected by the provider.');
+    }
     if (isFailedStatus(submittedStatus)) {
       throw new OfficialProviderUnavailableError('Official image route task failed.');
     }
@@ -2099,6 +2105,7 @@ export class AiPointsService implements OnModuleInit, OnModuleDestroy {
 }
 
 class OfficialProviderUnavailableError extends Error {}
+class OfficialProviderPolicyViolationError extends Error {}
 
 function parseOfficialInvokeRequest(body: unknown): OfficialInvokeRequest {
   if (!isRecord(body)) {
@@ -2555,6 +2562,15 @@ function getCreditBucketDeductionPriority(sourceType: string): number {
 }
 
 function sanitizeOfficialProviderError(error: unknown) {
+  if (error instanceof OfficialProviderPolicyViolationError) {
+    return new BadRequestException({
+      error: {
+        code: 'OFFICIAL_PROMPT_VIOLATION',
+        message: '当前提示词可能触发上游内容限制，请修改提示词后重试。'
+      }
+    });
+  }
+
   if (
     error instanceof BadRequestException ||
     error instanceof ForbiddenException ||
@@ -2595,6 +2611,11 @@ function shouldCooldownOfficialApiKey(error: unknown): boolean {
     'insufficient_balance',
     '402'
   ].some((pattern) => message.includes(pattern));
+}
+
+function isProviderPolicyViolation(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase() ?? '';
+  return /violation|policy|safety|moderation|prompt rejected|content restriction|违规|敏感|不合规/.test(normalized);
 }
 
 function officialKeyCooldownMs(error: unknown): number {
@@ -2720,6 +2741,12 @@ async function queryGrsaiResult(input: {
     'Official image route result'
   );
   const status = readProviderStatus(response.body);
+  if (
+    isProviderPolicyViolation(status) ||
+    isProviderPolicyViolation(readProviderFailureMessage(response.body))
+  ) {
+    throw new OfficialProviderPolicyViolationError('Official image prompt was rejected by the provider.');
+  }
   if (isFailedStatus(status)) {
     throw new OfficialProviderUnavailableError('Official image route task failed.');
   }
@@ -3090,6 +3117,30 @@ function readProviderStatus(value: unknown): string | undefined {
   return undefined;
 }
 
+function readProviderFailureMessage(value: unknown): string | undefined {
+  const record = readRecord(value);
+  const directMessage = ['message', 'errorMessage', 'error_message', 'reason']
+    .map((key) => record?.[key])
+    .find((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  if (directMessage) {
+    return directMessage.trim();
+  }
+
+  const error = readRecord(record?.error);
+  const errorMessage = ['message', 'reason', 'code']
+    .map((key) => error?.[key])
+    .find((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  if (errorMessage) {
+    return errorMessage.trim();
+  }
+
+  const data = readRecord(record?.data);
+  const nestedMessage = ['message', 'errorMessage', 'error_message', 'reason']
+    .map((key) => data?.[key])
+    .find((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  return nestedMessage?.trim();
+}
+
 function readMiniMaxProviderError(value: unknown): string | undefined {
   const record = readRecord(value);
   const baseResp = readRecord(record?.base_resp);
@@ -3100,20 +3151,25 @@ function readMiniMaxProviderError(value: unknown): string | undefined {
   return undefined;
 }
 
-function readMediaUrlFromUnknown(value: unknown, type: 'image' | 'video' | 'audio', depth = 0): string | undefined {
+export function readMediaUrlFromUnknown(
+  value: unknown,
+  type: 'image' | 'video' | 'audio',
+  depth = 0,
+  allowGenericHttpUrl = false
+): string | undefined {
   if (depth > 6 || value === undefined || value === null) {
     return undefined;
   }
   if (typeof value === 'string') {
     const normalized = value.trim();
-    if (/^https?:\/\//i.test(normalized) && looksLikeMediaUrl(normalized, type)) {
+    if (/^https?:\/\//i.test(normalized) && (allowGenericHttpUrl || looksLikeMediaUrl(normalized, type))) {
       return normalized;
     }
     return undefined;
   }
   if (Array.isArray(value)) {
     for (const item of value) {
-      const url = readMediaUrlFromUnknown(item, type, depth + 1);
+      const url = readMediaUrlFromUnknown(item, type, depth + 1, allowGenericHttpUrl);
       if (url) {
         return url;
       }
@@ -3124,18 +3180,28 @@ function readMediaUrlFromUnknown(value: unknown, type: 'image' | 'video' | 'audi
     return undefined;
   }
   const preferredKeys = type === 'image'
-    ? ['url', 'image_url', 'imageUrl', 'output_url', 'outputUrl']
+    ? ['url', 'remoteUrl', 'image_url', 'imageUrl', 'output_url', 'outputUrl']
     : type === 'video'
       ? ['url', 'video_url', 'videoUrl', 'download_url', 'downloadUrl', 'file_url', 'fileUrl']
       : ['url', 'audio', 'audio_url', 'audioUrl', 'download_url', 'downloadUrl', 'file_url', 'fileUrl'];
   for (const key of preferredKeys) {
-    const url = readMediaUrlFromUnknown(value[key], type, depth + 1);
+    const url = readMediaUrlFromUnknown(value[key], type, depth + 1, true);
     if (url) {
       return url;
     }
   }
-  for (const item of Object.values(value)) {
-    const url = readMediaUrlFromUnknown(item, type, depth + 1);
+  const mediaContainerKeys = type === 'image'
+    ? ['results', 'images', 'data', 'result', 'output', 'file', 'files', 'artifacts', 'artifact']
+    : type === 'video'
+      ? ['results', 'videos', 'data', 'result', 'output', 'file', 'files', 'artifacts', 'artifact']
+      : ['results', 'audio', 'data', 'result', 'output', 'file', 'files', 'artifacts', 'artifact'];
+  for (const [key, item] of Object.entries(value)) {
+    const url = readMediaUrlFromUnknown(
+      item,
+      type,
+      depth + 1,
+      allowGenericHttpUrl || mediaContainerKeys.includes(key)
+    );
     if (url) {
       return url;
     }
@@ -3165,7 +3231,20 @@ function isSucceededStatus(value: string | undefined): boolean {
 
 function isFailedStatus(value: string | undefined): boolean {
   const normalized = value?.trim().toLowerCase();
-  return Boolean(normalized && ['failed', 'fail', 'error', 'cancelled', 'canceled', 'rejected'].includes(normalized));
+  return Boolean(
+    normalized &&
+      [
+        'failed',
+        'fail',
+        'error',
+        'violation',
+        'policy_violation',
+        'safety_violation',
+        'cancelled',
+        'canceled',
+        'rejected'
+      ].includes(normalized)
+  );
 }
 
 function parseJsonBody(bodyText: string): unknown {

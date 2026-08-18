@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 
 import type { ModelProfile, RoleModelCredentialBinding, RolePackageManifest, ToolManifest } from './desktop-contract.js';
 import { officialModelProfiles } from './desktop-state.js';
-import { runDesktopTask } from './desktop-task-runner.js';
+import {
+  getFactoryImageBatchRecoveryHealth,
+  recoverFactoryImageBatch,
+  readFactoryImageGenerationResponse,
+  runDesktopTask
+} from './desktop-task-runner.js';
 import { createMockTaskDetail } from './workbench-data.js';
 
 const modelProfiles: ModelProfile[] = [
@@ -227,6 +232,247 @@ const task = createMockTaskDetail({
     knowledgeBindingIds: ['kb-local-folder']
   }
 });
+
+const pendingThenSuccessfulResponse = readFactoryImageGenerationResponse({
+  provider: 'QiuAI official route',
+  modelName: 'gpt-image-2',
+  content: JSON.stringify({
+    remoteUrl: 'https://cdn.example.test/factory/recovered-from-content.png',
+    providerStatus: 'succeeded'
+  }),
+  artifacts: [
+    {
+      type: 'image',
+      providerJobId: 'grsai-job-pending-first',
+      providerStatus: 'pending',
+      metadata: { pending: true }
+    },
+    {
+      type: 'image',
+      remoteUrl: 'https://cdn.example.test/factory/recovered-from-artifact.png',
+      providerStatus: 'succeeded'
+    }
+  ]
+});
+assert.equal(
+  pendingThenSuccessfulResponse.remoteUrl,
+  'https://cdn.example.test/factory/recovered-from-artifact.png'
+);
+assert.equal(pendingThenSuccessfulResponse.pending, undefined);
+
+const pendingArtifactWithSuccessfulContent = readFactoryImageGenerationResponse({
+  provider: 'QiuAI official route',
+  modelName: 'gpt-image-2',
+  content: JSON.stringify({
+    remoteUrl: 'https://cdn.example.test/factory/recovered-from-content-only.png',
+    providerStatus: 'succeeded'
+  }),
+  artifacts: [
+    {
+      type: 'image',
+      providerJobId: 'grsai-job-pending-content',
+      providerStatus: 'pending',
+      metadata: { pending: true }
+    }
+  ]
+});
+assert.equal(
+  pendingArtifactWithSuccessfulContent.remoteUrl,
+  'https://cdn.example.test/factory/recovered-from-content-only.png'
+);
+assert.equal(pendingArtifactWithSuccessfulContent.providerJobId, 'grsai-job-pending-content');
+assert.equal(pendingArtifactWithSuccessfulContent.pending, undefined);
+
+const recoveryNow = Date.parse('2026-07-20T10:00:00.000Z');
+const recoveryPreview = {
+  kind: 'digital_factory_image_batch' as const,
+  title: '批量商品图',
+  concurrency: 4,
+  total: 4,
+  completed: 1,
+  failed: 1,
+  items: [
+    {
+      id: 'recovery-completed',
+      order: 1,
+      sku: 'SKU-1',
+      packageKey: 'main',
+      packageLabel: '商品主图',
+      status: 'completed' as const,
+      localPath: 'C:\\images\\completed.png',
+      createdAt: '2026-07-20T09:00:00.000Z'
+    },
+    {
+      id: 'recovery-pending',
+      order: 2,
+      sku: 'SKU-2',
+      packageKey: 'main',
+      packageLabel: '商品主图',
+      status: 'running' as const,
+      providerJobId: 'recovery-job-pending',
+      providerSubmittedAt: '2026-07-20T09:30:00.000Z',
+      createdAt: '2026-07-20T09:30:00.000Z'
+    },
+    {
+      id: 'recovery-failed',
+      order: 3,
+      sku: 'SKU-3',
+      packageKey: 'main',
+      packageLabel: '商品主图',
+      status: 'failed' as const,
+      providerJobId: 'recovery-job-failed',
+      providerSubmittedAt: '2026-07-20T09:30:00.000Z',
+      errorType: 'provider' as const,
+      createdAt: '2026-07-20T09:30:00.000Z'
+    },
+    {
+      id: 'recovery-policy',
+      order: 4,
+      sku: 'SKU-4',
+      packageKey: 'main',
+      packageLabel: '商品主图',
+      status: 'failed' as const,
+      providerJobId: 'recovery-job-policy',
+      providerSubmittedAt: '2026-07-20T09:30:00.000Z',
+      errorType: 'policy_violation' as const,
+      createdAt: '2026-07-20T09:30:00.000Z'
+    }
+  ]
+};
+assert.deepEqual(
+  getFactoryImageBatchRecoveryHealth(recoveryPreview, recoveryNow),
+  {
+    totalCount: 4,
+    completedCount: 1,
+    unresolvedCount: 3,
+    recoverableCount: 2,
+    policyViolationCount: 1,
+    providerFailureCount: 1,
+    pendingCount: 1,
+    expiredCount: 0
+  }
+);
+assert.equal(
+  getFactoryImageBatchRecoveryHealth(
+    {
+      ...recoveryPreview,
+      items: [recoveryPreview.items[1]!]
+    },
+    Date.parse('2026-07-20T12:00:01.000Z')
+  ).recoverableCount,
+  0
+);
+
+let recoveryPollCount = 0;
+const recoveryTask = createMockTaskDetail({
+  taskId: 'task-runner-factory-recovery-001',
+  roleCode: 'factory-image',
+  roleName: '图片工厂',
+  title: '补全图片批次',
+  input: '继续检查未返回的图片。',
+  state: 'completed',
+  artifactCount: 1,
+  costCents: 0,
+  executionContext: {
+    modelProfileIds: ['factory-image-model'],
+    toolIds: [],
+    knowledgeBindingIds: []
+  }
+});
+recoveryTask.artifacts = [
+  {
+    id: 'factory-recovery-artifact',
+    type: 'image',
+    title: '补全图片批次图片结果',
+    content: '数字工厂图片批次进度：1/1',
+    createdAt: '2026-07-20T09:30:00.000Z',
+    factoryPreview: {
+      ...recoveryPreview,
+      total: 1,
+      completed: 0,
+      failed: 1,
+      items: [recoveryPreview.items[1]!]
+    }
+  }
+];
+const recoveredFactoryTask = await recoverFactoryImageBatch({
+  task: recoveryTask,
+  rolePackage: {
+    roleCode: 'factory-image',
+    name: '图片工厂',
+    version: '1.0.0',
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: '开始' },
+        {
+          id: 'generate_images',
+          type: 'llm',
+          name: '批量生成图片',
+          inputVariables: ['factory_items'],
+          outputVariables: ['factory_generated_images'],
+          config: {
+            llmTaskType: 'image_editing',
+            outputMode: 'json'
+          }
+        }
+      ],
+      edges: [
+        {
+          id: 'start-generate',
+          sourceNodeId: 'start',
+          targetNodeId: 'generate_images',
+          condition: { type: 'always' }
+        }
+      ]
+    },
+    modelProfileIds: ['factory-image-model'],
+    toolIds: [],
+    requiredKnowledgeSources: [],
+    defaultTaskTypes: ['image_editing'],
+    syncPolicy: 'summary_only'
+  },
+  modelProfiles: [
+    {
+      id: 'factory-image-model',
+      providerId: 'grsai',
+      providerName: 'Official image route',
+      modelName: 'image-model',
+      purpose: 'image',
+      capabilities: ['image_editing', 'image_generation'],
+      apiBaseUrl: 'https://api.example.test/v1',
+      apiKey: 'test-key'
+    }
+  ],
+  tools: [],
+  enabledModelProfileIds: ['factory-image-model'],
+  enabledToolIds: [],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    recoveryPollCount += 1;
+    assert.equal(request.taskKind, 'image_generation');
+    assert.equal(request.imageGeneration?.asyncMode, 'poll_once');
+    assert.equal(request.imageGeneration?.providerJobId, 'recovery-job-pending');
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: JSON.stringify({
+        remoteUrl: 'https://cdn.example.test/recovered.png',
+        providerStatus: 'succeeded'
+      })
+    };
+  },
+  nowMs: recoveryNow
+});
+assert.equal(recoveryPollCount, 1);
+assert.equal(recoveredFactoryTask.recoveredCount, 1);
+assert.equal(recoveredFactoryTask.health.completedCount, 1);
+assert.equal(recoveredFactoryTask.health.unresolvedCount, 0);
+assert.equal(
+  recoveredFactoryTask.task.artifacts[0]?.factoryPreview?.items[0]?.remoteUrl,
+  'https://cdn.example.test/recovered.png'
+);
 
 const completed = await runDesktopTask({
   task,
