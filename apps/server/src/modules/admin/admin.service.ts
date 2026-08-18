@@ -662,8 +662,7 @@ export class AdminService {
   ): Promise<ListAdminDesktopReleasesResponseDto> {
     await this.requireAdminOperator(cookieHeader);
 
-    const page = query.page ?? 1;
-    const pageSize = query.pageSize ?? 20;
+    const { page, pageSize } = this.normalizeListPagination(query);
 
     if (!isDatabasePersistenceEnabled()) {
       const filtered = this.store
@@ -1005,8 +1004,7 @@ export class AdminService {
     cookieHeader?: string
   ): Promise<ListAdminIssueMessagesResponseDto> {
     await this.requireAdminOperator(cookieHeader);
-    const page = query.page ?? 1;
-    const pageSize = query.pageSize ?? 20;
+    const { page, pageSize } = this.normalizeListPagination(query);
 
     if (!isDatabasePersistenceEnabled()) {
       const filtered = this.store
@@ -1226,8 +1224,7 @@ export class AdminService {
     await this.requireAdminOperator(cookieHeader);
     this.requireDatabaseMode();
 
-    const page = query.page ?? 1;
-    const pageSize = query.pageSize ?? 20;
+    const { page, pageSize } = this.normalizeListPagination(query);
     const where = this.buildWorkspaceWhere(query.query, query.workspaceType);
 
     const [totalItems, workspaces] = await this.prismaService.$transaction([
@@ -2175,8 +2172,7 @@ export class AdminService {
     await this.requireAdminOperator(cookieHeader);
     this.requireDatabaseMode();
 
-    const page = query.page ?? 1;
-    const pageSize = query.pageSize ?? 20;
+    const { page, pageSize } = this.normalizeListPagination(query);
     const where = this.buildActionLogWhere(query);
 
     const [totalItems, logs] = await this.prismaService.$transaction([
@@ -2258,6 +2254,31 @@ export class AdminService {
         }
       });
     }
+  }
+
+  private normalizeListPagination(query: { page?: number | string; pageSize?: number | string }): {
+    page: number;
+    pageSize: number;
+  } {
+    return {
+      page: this.normalizePositiveInteger(query.page, 1, 1, Number.MAX_SAFE_INTEGER),
+      pageSize: this.normalizePositiveInteger(query.pageSize, 20, 1, 100)
+    };
+  }
+
+  private normalizePositiveInteger(
+    value: number | string | undefined,
+    fallback: number,
+    minimum: number,
+    maximum: number
+  ): number {
+    const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN;
+
+    if (!Number.isInteger(parsed) || parsed < minimum) {
+      return fallback;
+    }
+
+    return Math.min(parsed, maximum);
   }
 
   private requirePlanCode(planCode: string): PlanCode {
