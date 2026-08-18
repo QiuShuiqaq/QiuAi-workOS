@@ -18,6 +18,11 @@ import {
 } from '../../shared/desktop-release-assets';
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
+import {
+  forceReleaseOfficialModelApiKeyLeases,
+  reapExpiredOfficialModelApiKeyLeases,
+  reapExpiredOfficialModelApiKeyLeasesForKey
+} from '../../shared/official-model-api-key-lease-cleanup';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { listServerToolActionCatalog } from '../../shared/tool-action-catalog';
 import { AuthService } from '../auth/auth.service';
@@ -43,6 +48,7 @@ import {
   CancelAdminWorkspaceInvitationResponseDto,
   CreateAdminOfficialModelApiKeyRequestDto,
   CreateAdminOfficialModelApiKeyResponseDto,
+  ForceReleaseAdminOfficialModelApiKeyLeasesResponseDto,
   CreateAdminDesktopReleaseRequestDto,
   CreateAdminDesktopReleaseResponseDto,
   CreateAdminDesktopBindingCodeRequestDto,
@@ -67,6 +73,7 @@ import {
   ListAdminPlansResponseDto,
   ListAdminWorkspacesQueryDto,
   ListAdminWorkspacesResponseDto,
+  ReclaimAdminOfficialModelApiKeyLeasesResponseDto,
   PublishAdminDesktopReleaseResponseDto,
   RevokeAdminDesktopDeviceResponseDto,
   UpdateAdminIssueMessageRequestDto,
@@ -424,6 +431,7 @@ export class AdminService {
   async listOfficialModelRoutes(cookieHeader?: string): Promise<ListAdminOfficialModelRoutesResponseDto> {
     await this.requireAdminOperator(cookieHeader);
     this.requireDatabaseMode();
+    await reapExpiredOfficialModelApiKeyLeases(this.prismaService);
 
     const routes = await this.prismaService.officialModelRoute.findMany({
       include: {
@@ -545,6 +553,106 @@ export class AdminService {
 
     return {
       data: this.toAdminOfficialModelApiKeySummary(updated)
+    };
+  }
+
+  async reclaimExpiredOfficialModelApiKeyLeases(
+    apiKeyId: string,
+    cookieHeader?: string
+  ): Promise<ReclaimAdminOfficialModelApiKeyLeasesResponseDto> {
+    const operator = await this.requireAdminOperator(cookieHeader);
+    this.requireDatabaseMode();
+
+    const id = apiKeyId.trim();
+    const current = await this.prismaService.officialModelApiKey.findUnique({
+      where: { id },
+      include: { route: true }
+    });
+    if (!current) {
+      throw this.officialApiKeyNotFound(id);
+    }
+
+    const result = await this.prismaService.$transaction(async (tx) => {
+      const releasedLeaseCount = await reapExpiredOfficialModelApiKeyLeasesForKey(tx, id);
+      const key = await tx.officialModelApiKey.findUnique({
+        where: { id }
+      });
+      if (!key) {
+        throw this.officialApiKeyNotFound(id);
+      }
+
+      await this.recordAdminAction(tx, {
+        operatorAccountId: operator.account.id,
+        action: 'RECLAIM_EXPIRED_OFFICIAL_MODEL_API_KEY_LEASES',
+        targetType: 'official_model_api_key',
+        targetId: key.id,
+        summary: `Reclaimed expired official model API key leases for ${current.routeKey}`,
+        metadata: {
+          routeKey: current.routeKey,
+          providerId: current.providerId,
+          apiKeyLastFour: key.apiKeyLastFour,
+          releasedLeaseCount,
+          currentConcurrency: key.currentConcurrency
+        }
+      });
+
+      return {
+        apiKeyId: key.id,
+        status: key.status.toLowerCase() as 'active' | 'disabled' | 'cooldown',
+        releasedLeaseCount,
+        currentConcurrency: key.currentConcurrency
+      };
+    });
+
+    return {
+      data: result
+    };
+  }
+
+  async forceReleaseOfficialModelApiKeyLeases(
+    apiKeyId: string,
+    cookieHeader?: string
+  ): Promise<ForceReleaseAdminOfficialModelApiKeyLeasesResponseDto> {
+    const operator = await this.requireAdminOperator(cookieHeader);
+    this.requireDatabaseMode();
+
+    const id = apiKeyId.trim();
+    const current = await this.prismaService.officialModelApiKey.findUnique({
+      where: { id },
+      include: { route: true }
+    });
+    if (!current) {
+      throw this.officialApiKeyNotFound(id);
+    }
+
+    const result = await this.prismaService.$transaction(async (tx) => {
+      const forced = await forceReleaseOfficialModelApiKeyLeases(tx, id, new Date(), operator.account.id);
+
+      await this.recordAdminAction(tx, {
+        operatorAccountId: operator.account.id,
+        action: 'FORCE_RELEASE_OFFICIAL_MODEL_API_KEY_LEASES',
+        targetType: 'official_model_api_key',
+        targetId: forced.key.id,
+        summary: `Force released and paused official model API key for ${current.routeKey}`,
+        metadata: {
+          routeKey: current.routeKey,
+          providerId: current.providerId,
+          apiKeyLastFour: current.apiKeyLastFour,
+          releasedLeaseCount: forced.releasedLeaseCount,
+          status: forced.key.status
+        }
+      });
+
+      return {
+        apiKeyId: forced.key.id,
+        status: forced.key.status.toLowerCase() as 'active' | 'disabled' | 'cooldown',
+        releasedLeaseCount: forced.releasedLeaseCount,
+        currentConcurrency: forced.key.currentConcurrency
+      };
+    });
+
+    return {
+      data: result
     };
   }
 
@@ -2222,6 +2330,9 @@ export class AdminService {
       data.status = status;
       if (status === 'ACTIVE' || status === 'DISABLED') {
         data.cooldownUntil = null;
+      }
+      if (status === 'ACTIVE') {
+        data.lastError = null;
       }
       if (status === 'COOLDOWN') {
         data.cooldownUntil = new Date(Date.now() + 60_000);

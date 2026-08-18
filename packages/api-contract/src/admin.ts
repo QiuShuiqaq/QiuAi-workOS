@@ -135,6 +135,21 @@ export interface UpdateAdminOfficialModelApiKeyResponse {
   data: AdminOfficialModelApiKeySummary;
 }
 
+export interface AdminOfficialModelApiKeyLeaseActionResult {
+  apiKeyId: string;
+  status: AdminOfficialModelApiKeyStatus;
+  releasedLeaseCount: number;
+  currentConcurrency: number;
+}
+
+export interface ReclaimAdminOfficialModelApiKeyLeasesResponse {
+  data: AdminOfficialModelApiKeyLeaseActionResult;
+}
+
+export interface ForceReleaseAdminOfficialModelApiKeyLeasesResponse {
+  data: AdminOfficialModelApiKeyLeaseActionResult;
+}
+
 export interface AdminWorkspaceSummary {
   id: string;
   tenantId: string;

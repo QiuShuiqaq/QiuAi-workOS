@@ -4,6 +4,7 @@ import type {
   CreateAdminAssetDefinitionResponse,
   CreateAdminOfficialModelApiKeyRequest,
   CreateAdminOfficialModelApiKeyResponse,
+  ForceReleaseAdminOfficialModelApiKeyLeasesResponse,
   CreateBillingOrderRequest,
   CreateBillingOrderResponse,
   BindSoftwareCopilotDeviceRequest,
@@ -108,6 +109,7 @@ import type {
   UpdateAdminIssueMessageResponse,
   UpdateAdminOfficialModelApiKeyRequest,
   UpdateAdminOfficialModelApiKeyResponse,
+  ReclaimAdminOfficialModelApiKeyLeasesResponse,
   UpdateAdminWorkspaceStatusRequest,
   UpdateAdminWorkspaceStatusResponse,
   UploadAdminDesktopReleaseAssetResponse,
@@ -215,6 +217,24 @@ export class QiuApiClient {
     input: UpdateAdminOfficialModelApiKeyRequest
   ): Promise<UpdateAdminOfficialModelApiKeyResponse> {
     return this.patch(`/api/v1/admin/official-model-api-keys/${encodeURIComponent(apiKeyId)}`, input);
+  }
+
+  reclaimExpiredAdminOfficialModelApiKeyLeases(
+    apiKeyId: string
+  ): Promise<ReclaimAdminOfficialModelApiKeyLeasesResponse> {
+    return this.post(
+      `/api/v1/admin/official-model-api-keys/${encodeURIComponent(apiKeyId)}/reclaim-expired`,
+      {}
+    );
+  }
+
+  forceReleaseAdminOfficialModelApiKeyLeases(
+    apiKeyId: string
+  ): Promise<ForceReleaseAdminOfficialModelApiKeyLeasesResponse> {
+    return this.post(
+      `/api/v1/admin/official-model-api-keys/${encodeURIComponent(apiKeyId)}/force-release`,
+      {}
+    );
   }
 
   listAdminAssets(

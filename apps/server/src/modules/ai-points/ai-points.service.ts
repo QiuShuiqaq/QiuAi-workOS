@@ -5,6 +5,8 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
   ServiceUnavailableException,
   UnauthorizedException
 } from '@nestjs/common';
@@ -15,6 +17,7 @@ import { AuthService } from '../auth/auth.service';
 import { MockPlatformStore } from '../../shared/mock/mock-platform-store.service';
 import { isLocalDevelopmentUnlimitedEnabled } from '../../shared/local-development-mode';
 import { isDatabasePersistenceEnabled } from '../../shared/persistence/persistence-mode';
+import { reapExpiredOfficialModelApiKeyLeases } from '../../shared/official-model-api-key-lease-cleanup';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { officialModelRouteSeeds } from './official-model-routes';
 
@@ -148,8 +151,9 @@ const officialRouteQueueWaitMsByCapability: Record<OfficialCapability, number> =
 };
 
 @Injectable()
-export class AiPointsService {
+export class AiPointsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(AiPointsService.name);
+  private officialModelApiKeyLeaseCleanupTimer?: NodeJS.Timeout;
 
   constructor(
     @Inject(MockPlatformStore)
@@ -159,6 +163,25 @@ export class AiPointsService {
     @Inject(AuthService)
     private readonly authService: AuthService
   ) {}
+
+  onModuleInit() {
+    if (!isDatabasePersistenceEnabled()) {
+      return;
+    }
+
+    void this.reapExpiredOfficialModelApiKeyLeases();
+    this.officialModelApiKeyLeaseCleanupTimer = setInterval(() => {
+      void this.reapExpiredOfficialModelApiKeyLeases();
+    }, 60_000);
+    this.officialModelApiKeyLeaseCleanupTimer.unref?.();
+  }
+
+  onModuleDestroy() {
+    if (this.officialModelApiKeyLeaseCleanupTimer) {
+      clearInterval(this.officialModelApiKeyLeaseCleanupTimer);
+      this.officialModelApiKeyLeaseCleanupTimer = undefined;
+    }
+  }
 
   async getOverview(workspaceId: string, deviceToken?: string, cookieHeader?: string) {
     const device = await this.requireWorkspaceAccess(workspaceId, deviceToken, cookieHeader);
@@ -227,6 +250,7 @@ export class AiPointsService {
 
   async listRoutes(workspaceId: string, deviceToken?: string, cookieHeader?: string) {
     await this.requireWorkspaceAccess(workspaceId, deviceToken, cookieHeader);
+    await this.reapExpiredOfficialModelApiKeyLeases();
     const routes = await this.listRouteRecords();
     return {
       data: routes.map(toRouteSummary)
@@ -548,7 +572,7 @@ export class AiPointsService {
     route: OfficialRouteRecord,
     request: OfficialInvokeRequest
   ): Promise<OfficialApiCredential | undefined> {
-    await this.expireOfficialApiKeyLeases();
+    await this.reapExpiredOfficialModelApiKeyLeases();
 
     const now = new Date();
     const [totalKeyCount, keys] = await Promise.all([
@@ -935,49 +959,20 @@ export class AiPointsService {
     });
   }
 
-  private async expireOfficialApiKeyLeases(routeKey?: string): Promise<void> {
-    const expiredLeases = await this.prismaService.officialModelApiKeyLease.findMany({
-      where: {
-        ...(routeKey ? { routeKey } : {}),
-        status: 'ACTIVE',
-        expiresAt: {
-          lt: new Date()
-        }
-      },
-      select: {
-        id: true,
-        apiKeyId: true
-      },
-      take: 100
-    });
+  private async reapExpiredOfficialModelApiKeyLeases(routeKey?: string): Promise<void> {
+    if (!isDatabasePersistenceEnabled()) {
+      return;
+    }
 
-    for (const lease of expiredLeases) {
-      const updatedLease = await this.prismaService.officialModelApiKeyLease.updateMany({
-        where: {
-          id: lease.id,
-          status: 'ACTIVE'
-        },
-        data: {
-          status: 'EXPIRED',
-          releasedAt: new Date()
-        }
-      });
-      if (updatedLease.count > 0) {
-        await this.prismaService.officialModelApiKey.updateMany({
-          where: {
-            id: lease.apiKeyId,
-            currentConcurrency: {
-              gt: 0
-            }
-          },
-          data: {
-            currentConcurrency: {
-              decrement: 1
-            },
-            lastError: 'Official route lease expired before release.'
-          }
-        });
-      }
+    try {
+      await reapExpiredOfficialModelApiKeyLeases(this.prismaService, routeKey);
+    } catch (error) {
+      this.logger.error(
+        routeKey
+          ? `Official route lease cleanup failed for route=${routeKey}`
+          : 'Official route lease cleanup failed',
+        error instanceof Error ? error.stack : String(error)
+      );
     }
   }
 

@@ -261,6 +261,30 @@ export class UpdateAdminOfficialModelApiKeyResponseDto {
   data!: AdminOfficialModelApiKeySummaryDto;
 }
 
+export class AdminOfficialModelApiKeyLeaseActionResultDto {
+  @ApiProperty({ example: 'api-key-id' })
+  apiKeyId!: string;
+
+  @ApiProperty({ enum: ['active', 'disabled', 'cooldown'], example: 'disabled' })
+  status!: 'active' | 'disabled' | 'cooldown';
+
+  @ApiProperty({ example: 3 })
+  releasedLeaseCount!: number;
+
+  @ApiProperty({ example: 0 })
+  currentConcurrency!: number;
+}
+
+export class ReclaimAdminOfficialModelApiKeyLeasesResponseDto {
+  @ApiProperty({ type: AdminOfficialModelApiKeyLeaseActionResultDto })
+  data!: AdminOfficialModelApiKeyLeaseActionResultDto;
+}
+
+export class ForceReleaseAdminOfficialModelApiKeyLeasesResponseDto {
+  @ApiProperty({ type: AdminOfficialModelApiKeyLeaseActionResultDto })
+  data!: AdminOfficialModelApiKeyLeaseActionResultDto;
+}
+
 export class DesktopReleaseSummaryDto {
   @ApiProperty({ example: 'release-id' })
   id!: string;

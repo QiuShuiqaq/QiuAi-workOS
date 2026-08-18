@@ -10,6 +10,7 @@ import {
   CancelAdminWorkspaceInvitationResponseDto,
   CreateAdminOfficialModelApiKeyRequestDto,
   CreateAdminOfficialModelApiKeyResponseDto,
+  ForceReleaseAdminOfficialModelApiKeyLeasesResponseDto,
   CreateAdminDesktopReleaseRequestDto,
   CreateAdminDesktopReleaseResponseDto,
   CreateAdminDesktopBindingCodeRequestDto,
@@ -34,6 +35,7 @@ import {
   ListAdminPlansResponseDto,
   ListAdminWorkspacesQueryDto,
   ListAdminWorkspacesResponseDto,
+  ReclaimAdminOfficialModelApiKeyLeasesResponseDto,
   PublishAdminDesktopReleaseResponseDto,
   RevokeAdminDesktopDeviceResponseDto,
   UpdateAdminIssueMessageRequestDto,
@@ -102,6 +104,24 @@ export class AdminController {
     @Req() request: FastifyRequest
   ): Promise<UpdateAdminOfficialModelApiKeyResponseDto> {
     return this.adminService.updateOfficialModelApiKey(apiKeyId, body, request.headers.cookie);
+  }
+
+  @Post('official-model-api-keys/:apiKeyId/reclaim-expired')
+  @ApiOkResponse({ type: ReclaimAdminOfficialModelApiKeyLeasesResponseDto })
+  reclaimExpiredOfficialModelApiKeyLeases(
+    @Param('apiKeyId') apiKeyId: string,
+    @Req() request: FastifyRequest
+  ): Promise<ReclaimAdminOfficialModelApiKeyLeasesResponseDto> {
+    return this.adminService.reclaimExpiredOfficialModelApiKeyLeases(apiKeyId, request.headers.cookie);
+  }
+
+  @Post('official-model-api-keys/:apiKeyId/force-release')
+  @ApiOkResponse({ type: ForceReleaseAdminOfficialModelApiKeyLeasesResponseDto })
+  forceReleaseOfficialModelApiKeyLeases(
+    @Param('apiKeyId') apiKeyId: string,
+    @Req() request: FastifyRequest
+  ): Promise<ForceReleaseAdminOfficialModelApiKeyLeasesResponseDto> {
+    return this.adminService.forceReleaseOfficialModelApiKeyLeases(apiKeyId, request.headers.cookie);
   }
 
   @Get('desktop-releases')

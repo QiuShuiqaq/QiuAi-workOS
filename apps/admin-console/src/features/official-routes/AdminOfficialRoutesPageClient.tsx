@@ -9,7 +9,14 @@ import type {
   UpdateAdminOfficialModelApiKeyRequest
 } from '@qiuai/api-contract';
 import { QiuPage, QiuStatusTag } from '@qiuai/ui';
-import { EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import {
+  EditOutlined,
+  PauseCircleOutlined,
+  PlayCircleOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  WarningOutlined
+} from '@ant-design/icons';
 import Alert from 'antd/es/alert';
 import Button from 'antd/es/button';
 import Card from 'antd/es/card';
@@ -134,6 +141,7 @@ export function AdminOfficialRoutesPageClient({
   const [editing, setEditing] = useState<EditingState | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [actionKeyId, setActionKeyId] = useState<string | null>(null);
   const [form] = Form.useForm<KeyFormValues>();
 
   useEffect(() => {
@@ -214,6 +222,56 @@ export function AdminOfficialRoutesPageClient({
     }
   }
 
+  async function reclaimExpiredLeases(apiKey: AdminOfficialModelApiKeySummary) {
+    setActionKeyId(apiKey.id);
+    try {
+      const response = await createBrowserApiClient().reclaimExpiredAdminOfficialModelApiKeyLeases(apiKey.id);
+      message.success(`已释放 ${response.data.releasedLeaseCount} 个过期占用`);
+      await reloadRoutes();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '释放过期占用失败');
+    } finally {
+      setActionKeyId(null);
+    }
+  }
+
+  function forceReleaseLeases(apiKey: AdminOfficialModelApiKeySummary) {
+    Modal.confirm({
+      title: '强制释放并暂停此 Key？',
+      icon: <WarningOutlined />,
+      content: '此操作只释放本地并发占用，不会取消供应商侧任务，也不会自动退款或重试。完成后 Key 会暂停，需要确认供应商侧无任务后再恢复调度。',
+      okText: '强制释放并暂停',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        setActionKeyId(apiKey.id);
+        try {
+          const response = await createBrowserApiClient().forceReleaseAdminOfficialModelApiKeyLeases(apiKey.id);
+          message.success(`已强制释放 ${response.data.releasedLeaseCount} 个占用，Key 已暂停`);
+          await reloadRoutes();
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : '强制释放失败');
+          throw error;
+        } finally {
+          setActionKeyId(null);
+        }
+      }
+    });
+  }
+
+  async function resumeKey(apiKey: AdminOfficialModelApiKeySummary) {
+    setActionKeyId(apiKey.id);
+    try {
+      await createBrowserApiClient().updateAdminOfficialModelApiKey(apiKey.id, { status: 'active' });
+      message.success('Key 已恢复调度');
+      await reloadRoutes();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '恢复调度失败');
+    } finally {
+      setActionKeyId(null);
+    }
+  }
+
   const columns: ColumnsType<AdminOfficialModelApiKeySummary> = [
     {
       title: 'Key',
@@ -263,20 +321,56 @@ export function AdminOfficialRoutesPageClient({
     {
       title: '操作',
       key: 'actions',
-      width: 100,
+      width: 250,
       render: (_value, item) => (
-        <Button
-          size="small"
-          icon={<EditOutlined />}
-          onClick={() => {
-            const route = rows.find((candidate) => candidate.routeKey === item.routeKey);
-            if (route) {
-              setEditing({ mode: 'edit', route, apiKey: item });
-            }
-          }}
-        >
-          编辑
-        </Button>
+        <Space wrap size={[4, 4]}>
+          <Button
+            size="small"
+            icon={<EditOutlined />}
+            disabled={actionKeyId === item.id}
+            onClick={() => {
+              const route = rows.find((candidate) => candidate.routeKey === item.routeKey);
+              if (route) {
+                setEditing({ mode: 'edit', route, apiKey: item });
+              }
+            }}
+          >
+            编辑
+          </Button>
+          {item.status === 'disabled' ? (
+            <Button
+              size="small"
+              type="link"
+              icon={<PlayCircleOutlined />}
+              loading={actionKeyId === item.id}
+              onClick={() => void resumeKey(item)}
+            >
+              恢复调度
+            </Button>
+          ) : (
+            <>
+              <Button
+                size="small"
+                type="link"
+                icon={<ReloadOutlined />}
+                loading={actionKeyId === item.id}
+                onClick={() => void reclaimExpiredLeases(item)}
+              >
+                释放过期
+              </Button>
+              <Button
+                size="small"
+                danger
+                type="link"
+                icon={<PauseCircleOutlined />}
+                loading={actionKeyId === item.id}
+                onClick={() => forceReleaseLeases(item)}
+              >
+                强制释放
+              </Button>
+            </>
+          )}
+        </Space>
       )
     }
   ];

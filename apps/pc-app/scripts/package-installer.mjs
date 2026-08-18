@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import process from 'node:process';
@@ -23,6 +23,7 @@ const installerIncludeSourcePath = path.join(appDir, 'build', 'installer.nsh');
 const releaseDir = path.join(appDir, 'release');
 const stageDir = path.join(releaseDir, 'installer-stage');
 const outputDir = path.join(releaseDir, 'installers');
+const finalPackageRootDir = path.resolve('F:/Package/QiuAI-workOS');
 const stageNodeModulesDir = path.join(stageDir, 'node_modules');
 const stageConfigPath = path.join(stageDir, 'electron-builder.config.cjs');
 const stagePackageJsonPath = path.join(stageDir, 'package.json');
@@ -131,7 +132,11 @@ await run(process.execPath, [
   stageConfigPath
 ]);
 
+const finalPackageDir = path.join(finalPackageRootDir, `v${appPackageJson.version}`);
+await publishInstallerArtifacts(outputDir, finalPackageDir, appPackageJson.version);
+
 console.log(`Packaged Windows installer at ${outputDir}`);
+console.log(`Published Windows installer to ${finalPackageDir}`);
 
 function run(command, args) {
   return new Promise((resolve, reject) => {
@@ -164,4 +169,22 @@ function normalizePackageVersion(version) {
   }
 
   return normalizedVersion;
+}
+
+async function publishInstallerArtifacts(sourceDir, targetDir, version) {
+  await rm(targetDir, { recursive: true, force: true });
+  await mkdir(targetDir, { recursive: true });
+
+  const expectedFiles = new Set([
+    `QiuAI WorkOS Setup ${version}.exe`,
+    `QiuAI WorkOS Setup ${version}.exe.blockmap`
+  ]);
+  const entries = await readdir(sourceDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile() || !expectedFiles.has(entry.name)) {
+      continue;
+    }
+
+    await cp(path.join(sourceDir, entry.name), path.join(targetDir, entry.name));
+  }
 }
