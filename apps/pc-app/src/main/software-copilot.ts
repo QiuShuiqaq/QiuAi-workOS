@@ -23,7 +23,12 @@ export async function listDesktopSoftwareCopilots(): Promise<ListSoftwareCopilot
     return createFallbackResponse('workspace_pending_login');
   }
 
-  return fetchSoftwareCopilots(appInfo.serverBaseUrl, identity.workspaceId, identity.deviceToken);
+  try {
+    const response = await fetchSoftwareCopilots(appInfo.serverBaseUrl, identity.workspaceId, identity.deviceToken);
+    return response.data.length > 0 ? response : createFallbackResponse(identity.workspaceId);
+  } catch {
+    return createFallbackResponse(identity.workspaceId);
+  }
 }
 
 function createFallbackResponse(workspaceId: string): ListSoftwareCopilotsResponse {

@@ -1089,48 +1089,63 @@ const crossBorderFactoryPackageOptions: Array<{
   key: CrossBorderFactoryPackageKey;
   label: string;
   description: string;
+  promptTemplate: string;
   outputType: 'image';
 }> = [
   {
     key: 'white_background',
     label: '白底图',
-    description: '生成标准电商白底图：纯白背景、柔和棚拍光、商品居中完整展示，保留原始颜色、结构、材质、Logo 和关键细节，边缘干净无阴影污染。避免促销文字、水印、边框、人物、多余道具、乱码文字和低清晰度。',
+    description: '生成适合商品上架和列表展示的标准白底图。',
+    promptTemplate:
+      '用于商品上架和列表展示。商品完整居中、边界清楚，背景纯白，采用柔和均匀的商业棚拍光，画面干净并保留适度留白。严格保持原始颜色、材质、结构、比例、Logo 与关键细节，不添加水印、促销文字、人物、道具或装饰性背景。',
     outputType: 'image'
   },
   {
     key: 'main_image',
     label: '商品主图',
-    description: '生成高转化商品主图：商品占画面主体，构图清晰有层次，光线明亮真实，突出材质、造型和核心卖点，可加入克制的场景氛围。避免改变商品结构、颜色、品牌标识、真实比例，避免虚假功能、杂乱背景和过度促销。',
+    description: '生成突出商品主体和核心卖点的电商主图。',
+    promptTemplate:
+      '用于商品主图和首屏展示。商品作为唯一视觉主体，构图简洁、主体突出、层次清晰，光线明亮真实，可使用克制的空间感强化商品质感和识别度。保持商品原始颜色、结构、材质、比例、Logo 和功能边界，不虚构卖点，不加入杂乱背景、过度促销文字或无关物件。',
     outputType: 'image'
   },
   {
     key: 'scene_image',
     label: '场景图',
-    description: '生成真实使用场景图：把商品自然放入符合品类的生活、办公、户外或家居场景，环境干净高级，主体清晰可识别，画面有购买代入感。避免夸张特效、虚假功能、杂乱背景、无关人物抢占主体和商品变形。',
+    description: '生成符合商品品类和使用方式的真实场景展示图。',
+    promptTemplate:
+      '用于商品详情页和内容传播的场景展示。将商品自然放入与品类匹配的生活、办公、家居或户外环境，形成清晰的主体与环境关系，画面有真实使用代入感且方便识别商品。商品外观、颜色、材质、比例和 Logo 必须稳定，不虚构使用方式，不让人物、道具或背景抢占主体。',
     outputType: 'image'
   },
   {
     key: 'background_replacement',
     label: '换背景',
-    description: '生成换背景商品图：严格保持商品主体不变，只替换为更适合电商展示的背景，如极简渐变、轻奢台面、节日活动、自然光空间或品牌色氛围，主体边缘自然融合。避免改变商品形状、材质、Logo、颜色和真实比例。',
+    description: '保留商品主体，只更换为适合展示的电商背景。',
+    promptTemplate:
+      '在保留原商品的前提下更换展示背景。商品主体、视角、轮廓、颜色、材质、比例和 Logo 保持不变，只根据商品属性匹配简洁的电商背景，并让接触面、光线和阴影自然衔接。不要重新设计商品，不增加不相关道具、文字、水印或难以解释的特效。',
     outputType: 'image'
   },
   {
     key: 'model_replacement',
     label: '换模特',
-    description: '生成模特展示图：适合服饰、配饰、美妆、家居小件等商品。模特姿态自然，画面有商业摄影质感，商品佩戴、持握或使用方式合理，必须保持商品真实外观、颜色、比例和关键细节。避免畸形肢体、错误穿戴、商品变形和虚假材质。',
+    description: '生成适合服饰、配饰、美妆等商品的模特展示图。',
+    promptTemplate:
+      '用于服饰、配饰、美妆和适合人物展示的商品。让模特以自然、符合商品使用方式的姿态佩戴、持握或展示商品，人物与商品比例协调，采用清晰的商业人像构图。商品的颜色、材质、结构、Logo、尺寸感和关键细节必须保持真实，避免错误穿戴、畸形肢体、手部异常、商品变形或不自然动作。',
     outputType: 'image'
   },
   {
     key: 'dimension_image',
     label: '尺寸图',
-    description: '生成尺寸规格说明图：画面清晰展示商品正面或关键角度，预留干净信息区域，可加入简洁尺寸线、参数标注和规格层级；文字必须清晰、少量、规整。避免编造不确定参数、乱码文字、错误尺寸线、遮挡商品和杂乱排版。',
+    description: '生成展示商品尺寸、规格和关键参数的说明图。',
+    promptTemplate:
+      '用于商品尺寸和规格信息展示。完整呈现商品主体并安排清晰、规整的信息区域，尺寸线、方向标注和文字只使用用户提供或可确认的内容，整体层级明确、便于阅读和后续校对。不要编造参数，不要让标注遮挡商品，不要出现乱码、错误尺寸关系、过度装饰或杂乱排版。',
     outputType: 'image'
   },
   {
     key: 'selling_point_image',
     label: '卖点图',
-    description: '生成详情页卖点图：围绕材质、功能、结构、容量、适用场景或对比优势进行视觉表达，版式清爽、主次明确，可带少量标题式文字。避免虚假承诺、夸张功效、乱码文字、错误 Logo、过度促销风格和信息堆砌。',
+    description: '生成围绕商品核心卖点和使用价值的详情页说明图。',
+    promptTemplate:
+      '用于详情页和商品卖点说明。围绕用户提供的材质、功能、结构、容量、适用场景或对比优势组织画面，突出一个清晰主题，形成明确的主体、说明区域和视觉层级，便于快速理解。只表达可确认的信息，保持商品真实外观和品牌标识，不生成夸张功效、虚假承诺、错误文字、过度促销或信息堆叠。',
     outputType: 'image'
   }
 ];
@@ -1174,6 +1189,7 @@ type ImageFactoryPackageOption = {
   key: string;
   label: string;
   description: string;
+  promptTemplate: string;
   outputType: 'image';
 };
 
@@ -1360,12 +1376,54 @@ const horizontalImageFactoryDefinitions: ImageFactoryTemplateDefinition[] = [
     description: '面向动漫创作者、IP 团队和内容运营人员，把参考设定图或文字方向整理为可直接选择的动漫图片产物包，批量生成角色与场景素材。',
     businessGoal: '降低动漫项目早期概念设计和内容配图成本，让创作者可以快速获得风格统一、方便筛选的视觉草稿。',
     packageOptions: [
-      { key: 'character_illustration', label: '角色立绘', description: '生成完整角色立绘，保持角色设定、服饰、发型、配色和关键道具一致，画面主体完整、姿态自然、适合角色展示。', outputType: 'image' },
-      { key: 'character_turnaround', label: '角色三视图', description: '生成角色正面、侧面和背面设定展示，保持比例、服饰结构和配色一致，适合后续建模或绘制参考。', outputType: 'image' },
-      { key: 'scene_concept', label: '场景概念图', description: '生成符合故事背景的动漫场景概念图，明确前中后景、光线氛围和空间关系，避免无关主体抢占画面。', outputType: 'image' },
-      { key: 'storyboard_frame', label: '漫画分镜', description: '生成单格或连续分镜参考，突出人物动作、镜头关系和叙事重点，画面文字保持少量且清晰。', outputType: 'image' },
-      { key: 'chibi_character', label: 'Q版形象', description: '生成简洁可爱的 Q 版角色，保留原角色最重要的发型、服装、颜色和道具特征。', outputType: 'image' },
-      { key: 'character_expression_sheet', label: '表情设定图', description: '生成同一角色的多种表情参考，保持脸型、发型和服装一致，适合表情包和剧情设定使用。', outputType: 'image' }
+      {
+        key: 'character_illustration',
+        label: '角色立绘',
+        description: '生成完整角色立绘，保持角色设定和关键特征一致。',
+        promptTemplate:
+          '用于角色设定和展示。完整呈现角色主体，姿态自然、轮廓清晰，服饰、发型、配色、道具和身份特征保持统一，画面重点服务于角色辨识度。根据参考图或设定组织构图，不混入无关角色、错误道具、冲突服装或无法解释的肢体结构。',
+        outputType: 'image'
+      },
+      {
+        key: 'character_turnaround',
+        label: '角色三视图',
+        description: '生成正面、侧面和背面统一的角色设定展示图。',
+        promptTemplate:
+          '用于角色建模和绘制参考。以正面、侧面和背面为核心展示角色，三种视角的身材比例、服饰结构、发型、配色、鞋履和道具必须对应一致，画面清楚、规整、便于核对。不要添加动态场景、夸张透视、遮挡部件、额外角色或不同视角之间不一致的设计。',
+        outputType: 'image'
+      },
+      {
+        key: 'scene_concept',
+        label: '场景概念图',
+        description: '生成符合故事背景和空间关系的动漫场景概念图。',
+        promptTemplate:
+          '用于故事世界观和场景方向探索。围绕参考设定建立清晰的前景、中景和远景，表现空间关系、建筑或自然元素、光线氛围与故事重点，整体风格统一且具有可延展性。不要让无关人物或装饰抢占画面，不混入与世界观冲突的时代、材质或视觉元素。',
+        outputType: 'image'
+      },
+      {
+        key: 'storyboard_frame',
+        label: '漫画分镜',
+        description: '生成突出动作、镜头关系和叙事重点的漫画分镜参考。',
+        promptTemplate:
+          '用于漫画或动画的单格、连续镜头参考。明确人物动作、视线方向、景别和叙事焦点，让读者能够快速理解发生了什么；构图清楚、角色关系明确，必要文字区域保持少量且可后续排版。不要堆叠无关情节、复杂背景或难以阅读的文字，不改变角色身份和关键动作逻辑。',
+        outputType: 'image'
+      },
+      {
+        key: 'chibi_character',
+        label: 'Q版形象',
+        description: '生成保留原角色特征的简洁可爱 Q 版形象。',
+        promptTemplate:
+          '用于表情包、社媒素材和轻量角色展示。将角色转化为简洁、可爱、易识别的 Q 版比例，突出最有辨识度的发型、服装、主色、表情和道具，轮廓干净、情绪明确。不要遗失角色核心特征，不使用复杂写实背景，不加入多余文字、道具或与原设定冲突的服装。',
+        outputType: 'image'
+      },
+      {
+        key: 'character_expression_sheet',
+        label: '表情设定图',
+        description: '生成同一角色多种表情且设定一致的参考图。',
+        promptTemplate:
+          '用于角色表情设计和后续表情包制作。以同一角色为主体，展示多种清晰可辨的情绪和面部变化，脸型、五官、发型、服装和配色保持一致，排列规整、便于挑选。不要让不同表情变成不同人物，不添加复杂场景、遮挡面部的动作、乱码文字或不一致的角色设定。',
+        outputType: 'image'
+      }
     ],
     defaultPackageKeys: ['character_illustration', 'scene_concept', 'chibi_character'],
     sampleInputs: ['上传角色参考图，生成角色立绘、Q版形象和表情设定图。', '上传场景草图，生成统一动漫风格的场景概念图和漫画分镜。']
@@ -1380,12 +1438,54 @@ const horizontalImageFactoryDefinitions: ImageFactoryTemplateDefinition[] = [
     description: '面向游戏团队和独立开发者，把游戏设定、参考图或概念方向整理为角色原画、场景概念和道具设计等可筛选的视觉资产。',
     businessGoal: '加快游戏前期概念验证和资产备选产出，减少反复寻找参考图和手工制作初稿的时间。',
     packageOptions: [
-      { key: 'character_concept', label: '角色原画', description: '生成完整游戏角色原画，突出职业定位、服装结构、装备细节和轮廓识别度，保持设定一致。', outputType: 'image' },
-      { key: 'environment_concept', label: '场景概念图', description: '生成游戏环境概念图，明确空间层次、光照氛围、地标元素和可探索区域，不添加无关风格元素。', outputType: 'image' },
-      { key: 'weapon_prop_design', label: '武器道具设计', description: '生成武器、装备或关键道具设计图，突出结构、材质、比例和功能识别，不改变核心造型。', outputType: 'image' },
-      { key: 'card_illustration', label: '卡牌立绘', description: '生成适合卡牌展示的角色或物件立绘，主体集中、边缘清晰、预留卡面信息区域。', outputType: 'image' },
-      { key: 'monster_design', label: '怪物设计', description: '生成具有明确体型、材质和攻击特征的怪物设计，保持轮廓可识别，避免肢体数量和结构错误。', outputType: 'image' },
-      { key: 'game_ui_asset', label: '游戏界面素材', description: '生成按钮、面板、图标或界面装饰素材，保持视觉层级清晰，文字只在明确要求时生成。', outputType: 'image' }
+      {
+        key: 'character_concept',
+        label: '角色原画',
+        description: '生成突出职业定位和装备细节的完整游戏角色原画。',
+        promptTemplate:
+          '用于游戏角色概念设计。完整呈现角色主体，明确职业定位、轮廓特征、服装层次、装备结构和主色关系，让角色在缩略图中也具有辨识度。严格遵守参考设定，不混入其他阵营、时代或品类的元素，不出现武器结构错误、比例失衡、重复肢体或无法解释的功能细节。',
+        outputType: 'image'
+      },
+      {
+        key: 'environment_concept',
+        label: '场景概念图',
+        description: '生成具备空间层次和探索感的游戏环境概念图。',
+        promptTemplate:
+          '用于游戏世界、关卡和环境方向探索。建立清晰的空间层次、光照氛围、地标元素和可探索区域，使玩家能够快速理解场景用途与世界观。保留参考资料中的时代、材质和阵营特征，不添加无关风格、现代物件或会破坏空间逻辑的主体。',
+        outputType: 'image'
+      },
+      {
+        key: 'weapon_prop_design',
+        label: '武器道具设计',
+        description: '生成结构、材质和功能识别清晰的武器或道具设计图。',
+        promptTemplate:
+          '用于武器、装备和关键道具的概念设计。突出整体轮廓、结构分区、材质关系、尺寸感和功能识别，让道具在画面中清楚可读并符合项目设定。保持核心造型和可确认的功能边界，不加入不合理的部件、错误接口、过量装饰或与题材冲突的科技元素。',
+        outputType: 'image'
+      },
+      {
+        key: 'card_illustration',
+        label: '卡牌立绘',
+        description: '生成主体集中、适合卡牌展示的角色或物件立绘。',
+        promptTemplate:
+          '用于卡牌角色或物件展示。主体集中、边缘清晰、视觉重心明确，构图为后续卡框、名称和数值信息预留合理空间，同时保留角色或物件的关键识别特征。不要让背景喧宾夺主，不生成难以阅读的画面文字，不裁切关键部位或改变设定中的武器、服饰和颜色。',
+        outputType: 'image'
+      },
+      {
+        key: 'monster_design',
+        label: '怪物设计',
+        description: '生成轮廓、材质和攻击特征明确的怪物设计图。',
+        promptTemplate:
+          '用于游戏怪物和敌对生物设计。明确体型结构、轮廓特征、皮肤或甲壳材质、行动方式和攻击识别点，使其在远距离也容易区分。遵守设定中的生物逻辑和肢体数量，不出现重复器官、关节错误、无意义装饰或与怪物定位不一致的表情和姿态。',
+        outputType: 'image'
+      },
+      {
+        key: 'game_ui_asset',
+        label: '游戏界面素材',
+        description: '生成视觉层级清晰的游戏按钮、面板、图标或界面装饰素材。',
+        promptTemplate:
+          '用于游戏界面中的按钮、面板、图标或装饰素材。保持统一的形状语言、边框层级、材质表现、颜色规则和可读性，为交互文字和状态信息预留空间。不要直接生成大量界面文字，不混入无关图标、过度特效、不可识别的符号或与项目风格冲突的装饰。',
+        outputType: 'image'
+      }
     ],
     defaultPackageKeys: ['character_concept', 'environment_concept', 'weapon_prop_design'],
     sampleInputs: ['上传角色草图，生成角色原画、卡牌立绘和装备展示图。', '上传游戏世界观资料，生成场景概念图、怪物设计和道具设计。']
@@ -1400,12 +1500,54 @@ const horizontalImageFactoryDefinitions: ImageFactoryTemplateDefinition[] = [
     description: '面向企业市场和运营团队，选择海报产物包与图片比例，快速生成多版本宣传视觉，减少从零构图和提示词调试。',
     businessGoal: '快速准备不同渠道和活动场景的视觉方案，用于内部筛选、设计沟通和后续人工定稿。',
     packageOptions: [
-      { key: 'brand_key_visual', label: '品牌主视觉', description: '生成围绕品牌核心概念的主视觉画面，构图集中、风格统一、预留标题和品牌信息区域。', outputType: 'image' },
-      { key: 'product_launch_poster', label: '新品发布海报', description: '突出新品主体、核心卖点和发布氛围，画面清晰有层次，避免生成未经确认的产品参数。', outputType: 'image' },
-      { key: 'event_promotion_poster', label: '活动宣传海报', description: '生成适合活动宣传的视觉构图，突出活动主题、时间信息区域和参与氛围，文字保持少量清晰。', outputType: 'image' },
-      { key: 'festival_campaign_poster', label: '节日营销海报', description: '结合节日氛围和品牌视觉生成营销海报，主体醒目、色彩协调，避免堆叠装饰和俗套元素。', outputType: 'image' },
-      { key: 'feed_ad_creative', label: '信息流广告图', description: '生成适合信息流快速浏览的广告视觉，前三秒视觉焦点明确，商品或服务主体清楚，预留文案区域。', outputType: 'image' },
-      { key: 'social_cover', label: '社媒封面图', description: '生成适合公众号、小红书、视频号或其他社媒的封面视觉，主体突出、留白合理、便于后续排版。', outputType: 'image' }
+      {
+        key: 'brand_key_visual',
+        label: '品牌主视觉',
+        description: '生成围绕品牌核心概念、适合后续排版的主视觉画面。',
+        promptTemplate:
+          '用于品牌活动、官网或传播物料的核心主视觉。围绕品牌提供的主题、产品或符号建立一个明确视觉重心，构图集中、风格统一，并为标题、Logo 和必要信息保留干净区域。不要虚构品牌承诺、产品参数或不属于品牌的标识，不堆叠无关装饰和难以阅读的文字。',
+        outputType: 'image'
+      },
+      {
+        key: 'product_launch_poster',
+        label: '新品发布海报',
+        description: '生成突出新品主体、卖点和发布氛围的宣传海报。',
+        promptTemplate:
+          '用于新品发布和新品预热。让新品成为最明确的视觉主体，通过克制的背景、光线和空间层次突出外观、材质或一个可确认的核心卖点，整体具备发布感并预留标题区域。只表达用户提供的产品信息，不编造参数、上市日期、价格或效果承诺，不让文字和装饰遮挡产品。',
+        outputType: 'image'
+      },
+      {
+        key: 'event_promotion_poster',
+        label: '活动宣传海报',
+        description: '生成突出活动主题和信息区域的宣传视觉。',
+        promptTemplate:
+          '用于线下活动、线上专题或报名传播。围绕明确活动主题组织主视觉、氛围元素和信息留白，让用户一眼识别活动方向，并为时间、地点、规则和报名信息保留清晰排版区域。不要擅自生成活动事实、奖励、价格或日期，不堆砌装饰，不输出乱码或难以校对的文字。',
+        outputType: 'image'
+      },
+      {
+        key: 'festival_campaign_poster',
+        label: '节日营销海报',
+        description: '生成兼顾节日氛围和品牌识别的营销海报。',
+        promptTemplate:
+          '用于节日营销和品牌节点传播。将节日的代表性氛围、色彩或材质与品牌产品自然结合，主体醒目、层级清晰、情绪统一，并保留品牌和文案区域。不要使用俗套堆砌的节日符号，不改变产品真实外观，不生成未经确认的促销信息、价格或夸张承诺。',
+        outputType: 'image'
+      },
+      {
+        key: 'feed_ad_creative',
+        label: '信息流广告图',
+        description: '生成适合快速浏览、焦点明确的信息流广告视觉。',
+        promptTemplate:
+          '用于移动端信息流和广告素材测试。前景主体、视觉焦点和核心利益点关系明确，用户在快速浏览时能够先看到产品或服务主题，画面简洁并预留少量文案位置。只使用可确认的卖点和数据，不添加密集文字、夸张功效、误导性对比或会干扰主体的复杂背景。',
+        outputType: 'image'
+      },
+      {
+        key: 'social_cover',
+        label: '社媒封面图',
+        description: '生成主体突出、方便后续裁切和排版的社媒封面视觉。',
+        promptTemplate:
+          '用于公众号、小红书、视频号和其他社媒内容封面。画面主题明确、主体突出、留白合理，保证在常见裁切比例下仍保留核心信息，并预留可人工添加标题的位置。不要直接生成大量文字或平台 Logo，不使用杂乱背景、无关人物或会削弱封面识别度的装饰。',
+        outputType: 'image'
+      }
     ],
     defaultPackageKeys: ['brand_key_visual', 'product_launch_poster', 'social_cover'],
     sampleInputs: ['上传品牌标志和产品图，生成新品发布海报、品牌主视觉和社媒封面。', '选择节日营销产物包，生成多种比例的活动宣传图片。']
@@ -1420,12 +1562,54 @@ const horizontalImageFactoryDefinitions: ImageFactoryTemplateDefinition[] = [
     description: '面向个人用户、企业品牌和内容团队，把人物参考图整理为职业形象、写真、头像和场景人像等产物包，尽量保持人物身份特征稳定。',
     businessGoal: '降低人像拍摄和多场景视觉准备成本，为个人形象、品牌宣传和内容创作快速提供可筛选方案。',
     packageOptions: [
-      { key: 'professional_headshot', label: '职业形象照', description: '生成干净可信的职业肖像，保持人物脸部特征、发型和身份一致，适合个人简介、企业资料和职业展示。', outputType: 'image' },
-      { key: 'lifestyle_portrait', label: '生活方式写真', description: '生成自然生活场景人像，动作和表情真实放松，环境服务于人物主体，避免过度磨皮和不自然姿态。', outputType: 'image' },
-      { key: 'traditional_style_portrait', label: '古风人像', description: '生成具有明确服饰、妆发和场景氛围的古风人像，保留人物身份特征，服饰结构完整。', outputType: 'image' },
-      { key: 'avatar_portrait', label: '头像组图', description: '生成适合头像使用的多种构图，脸部清晰、背景简洁、人物比例自然，便于不同平台裁切。', outputType: 'image' },
-      { key: 'brand_model_image', label: '品牌模特图', description: '生成适合品牌展示的模特视觉，人物姿态自然，商品或品牌主体清晰，避免改变服装和产品细节。', outputType: 'image' },
-      { key: 'scene_character_portrait', label: '场景人像', description: '把人物放入指定生活、工作或旅行场景，保持人物身份、服饰和关键特征一致。', outputType: 'image' }
+      {
+        key: 'professional_headshot',
+        label: '职业形象照',
+        description: '生成干净可信、适合职业展示的正式人像。',
+        promptTemplate:
+          '用于个人简介、企业资料和职业展示。保持人物面部特征、发型、年龄感和身份辨识度稳定，采用自然端正的姿态、干净背景和专业但不过度修饰的光线，让形象可信、清晰、易于使用。不要改变人物身份，不要过度磨皮、美化五官或使用夸张表情、复杂服装和抢眼背景。',
+        outputType: 'image'
+      },
+      {
+        key: 'lifestyle_portrait',
+        label: '生活方式写真',
+        description: '生成动作自然、环境服务于人物主体的生活方式人像。',
+        promptTemplate:
+          '用于社媒、个人内容和生活化品牌表达。将人物放在与其状态相符的自然生活、工作或休闲环境中，动作和表情放松，人物始终是视觉主体，环境只用于补充情绪和故事感。保持人物脸部、发型和关键身份特征，不使用过度磨皮、不自然姿势、失真肢体或喧宾夺主的背景。',
+        outputType: 'image'
+      },
+      {
+        key: 'traditional_style_portrait',
+        label: '古风人像',
+        description: '生成保留人物身份特征、服饰结构完整的古风人像。',
+        promptTemplate:
+          '用于古风写真和传统风格人像创作。保留人物的脸部特征和身份辨识度，结合用户指定或参考的服饰、妆发、道具和场景氛围，服装结构完整、人物姿态自然、画面具有明确时代感。不要混用冲突的时代元素，不改变人物五官，不生成错误服饰结构、夸张肢体或无关文字。',
+        outputType: 'image'
+      },
+      {
+        key: 'avatar_portrait',
+        label: '头像组图',
+        description: '生成适合多平台裁切、脸部清晰的头像构图。',
+        promptTemplate:
+          '用于社交账号、职业平台和内容账号头像。以人物脸部和肩部为核心，表情自然、五官清晰、背景简洁，构图适合方形和圆形裁切，并提供稳定易识别的人物形象。保持人物真实身份特征，不让头发、手部或道具遮挡面部，不生成过度滤镜、异常比例或复杂背景文字。',
+        outputType: 'image'
+      },
+      {
+        key: 'brand_model_image',
+        label: '品牌模特图',
+        description: '生成突出人物、商品或品牌主体的自然商业模特图。',
+        promptTemplate:
+          '用于品牌商品展示和宣传物料。人物姿态自然、画面具有清晰商业摄影感，商品、服装或品牌主体与人物关系明确，并保证用户能够看清关键材质、颜色和使用方式。严格保持人物与产品参考中的重要特征，不改变服装版型、产品细节或品牌标识，不加入错误穿戴、夸张动作和不相关场景。',
+        outputType: 'image'
+      },
+      {
+        key: 'scene_character_portrait',
+        label: '场景人像',
+        description: '生成身份和服饰特征稳定的指定场景人像。',
+        promptTemplate:
+          '用于旅行、工作、生活或主题化场景的人像表达。把人物自然放入用户指定或参考的环境，人物身份、服饰和关键特征保持一致，构图服务于场景故事但不牺牲人物辨识度。不要让背景替代人物成为主角，不生成不合理的互动、错误肢体、无关人物或与人物设定冲突的服装。',
+        outputType: 'image'
+      }
     ],
     defaultPackageKeys: ['professional_headshot', 'lifestyle_portrait', 'avatar_portrait'],
     sampleInputs: ['上传人物参考图，生成职业形象照、头像组图和生活方式写真。', '上传服装或品牌参考图，生成品牌模特图和场景人像。']
@@ -1440,12 +1624,54 @@ const horizontalImageFactoryDefinitions: ImageFactoryTemplateDefinition[] = [
     description: '面向产品、设计和开发团队，把产品主题和参考风格整理为图标、UI 插画与界面配图，方便快速准备产品原型和视觉备选。',
     businessGoal: '提升产品早期视觉探索和界面素材准备效率，让非专业用户也能快速得到风格一致的 UI 视觉草稿。',
     packageOptions: [
-      { key: 'feature_icon_set', label: '功能图标组', description: '生成同一套视觉语言的功能图标，保持线条、比例、视角、颜色和背景规则一致，适合产品功能入口。', outputType: 'image' },
-      { key: 'ui_illustration', label: 'UI插画', description: '生成适合页面展示的 UI 插画，主题明确、构图简洁、留白合理，不堆叠无关装饰。', outputType: 'image' },
-      { key: 'web_banner', label: '网页 Banner', description: '生成适合网页首屏或功能页的横向视觉，主体和信息区域分明，预留文字排版空间。', outputType: 'image' },
-      { key: 'app_splash', label: '应用启动页', description: '生成适合应用启动页的简洁视觉，品牌识别明确、构图稳定、避免过多细节影响加载展示。', outputType: 'image' },
-      { key: 'empty_state_illustration', label: '空状态插画', description: '生成适合无数据、完成、错误或引导状态的插画，情绪表达清晰，主体简洁友好。', outputType: 'image' },
-      { key: 'component_visual', label: '组件配图', description: '生成适合卡片、弹窗、表单或功能模块的配图，尺寸感明确、内容不抢占界面信息。', outputType: 'image' }
+      {
+        key: 'feature_icon_set',
+        label: '功能图标组',
+        description: '生成视觉语言统一、适合产品功能入口的图标组。',
+        promptTemplate:
+          '用于产品功能入口和工具栏。生成同一套视觉语言的功能图标，保持线条粗细、比例、视角、颜色规则、圆角和背景处理一致，让每个图标都能快速识别对应功能。不要混用不同风格，不添加未经要求的文字、复杂场景、无关装饰或难以理解的符号。',
+        outputType: 'image'
+      },
+      {
+        key: 'ui_illustration',
+        label: 'UI插画',
+        description: '生成主题明确、构图简洁、方便放入页面的 UI 插画。',
+        promptTemplate:
+          '用于产品页面、引导页或功能说明区域。围绕明确主题组织主体、辅助元素和留白，构图简洁、层级清楚，插画能够服务页面信息而不是遮挡或抢占内容。保持视觉风格统一，不堆叠无关装饰，不直接生成大量文字、按钮或虚构的产品界面。',
+        outputType: 'image'
+      },
+      {
+        key: 'web_banner',
+        label: '网页 Banner',
+        description: '生成横向构图清晰、预留排版区域的网页 Banner。',
+        promptTemplate:
+          '用于网页首屏、专题页或功能页横幅。建立明确的主体和视觉方向，按横向阅读习惯安排层次，并为标题、说明和按钮预留干净区域，保证裁切后仍能识别核心内容。不要让主体铺满全部画面，不生成难以校对的文字、错误 Logo 或过度复杂的背景。',
+        outputType: 'image'
+      },
+      {
+        key: 'app_splash',
+        label: '应用启动页',
+        description: '生成品牌识别明确、构图稳定的应用启动页视觉。',
+        promptTemplate:
+          '用于应用启动页和首次打开画面。以品牌、产品主题或核心符号为视觉中心，构图简洁稳定、识别明确，在不同尺寸屏幕上都保持主体完整，并避免过多细节影响第一眼理解。不要生成复杂操作界面、密集文字、错误品牌标识或会干扰启动展示的杂乱背景。',
+        outputType: 'image'
+      },
+      {
+        key: 'empty_state_illustration',
+        label: '空状态插画',
+        description: '生成适合无数据、完成、错误或引导状态的友好插画。',
+        promptTemplate:
+          '用于无数据、完成、错误、等待或首次引导等产品状态。根据状态表达清晰的情绪和动作，主体简洁友好，构图为标题、说明和操作入口保留空间，用户能够快速理解当前状态。不要使用与状态冲突的情绪，不堆叠复杂背景，不生成大量文字、错误图标或会干扰产品信息的装饰。',
+        outputType: 'image'
+      },
+      {
+        key: 'component_visual',
+        label: '组件配图',
+        description: '生成适合卡片、弹窗、表单和功能模块的配图。',
+        promptTemplate:
+          '用于卡片、弹窗、表单或功能模块中的辅助视觉。内容主题明确、尺寸感稳定、构图紧凑，并把主要信息留给界面文字和交互控件，配图不能压过页面功能。不要生成无关场景、密集文字、复杂边框或与组件尺寸不匹配的主体。',
+        outputType: 'image'
+      }
     ],
     defaultPackageKeys: ['feature_icon_set', 'ui_illustration', 'empty_state_illustration'],
     sampleInputs: ['上传产品界面截图，生成同风格功能图标组、空状态插画和组件配图。', '输入产品主题，生成网页 Banner、启动页和 UI 插画。']
@@ -1460,12 +1686,54 @@ const horizontalImageFactoryDefinitions: ImageFactoryTemplateDefinition[] = [
     description: '面向制造企业、工业设计和产品研发团队，把产品照片、草图或规格资料转化为产品展示和方案沟通所需的工业视觉素材。',
     businessGoal: '减少工业产品早期展示、方案沟通和包装预览中的重复制图工作，让团队更快比较不同视觉方向。',
     packageOptions: [
-      { key: 'product_rendering', label: '产品渲染图', description: '生成干净专业的工业产品渲染图，保持结构、材质、颜色和接口位置一致，突出产品完整外观。', outputType: 'image' },
-      { key: 'structure_exploded_view', label: '结构展示图', description: '生成产品结构或部件展示图，明确层级和对应关系，不编造内部结构或未经确认的零部件。', outputType: 'image' },
-      { key: 'industrial_scene', label: '工业场景图', description: '把产品放入真实工业、实验室或使用场景，突出产品与环境的关系，避免虚假功能和夸张效果。', outputType: 'image' },
-      { key: 'packaging_mockup', label: '包装效果图', description: '生成产品包装或包装陈列效果，保留产品和包装核心信息，预留可供设计师后续排版的区域。', outputType: 'image' },
-      { key: 'material_scheme', label: '材质方案图', description: '围绕材质、颜色、表面处理和工艺效果生成对比方案，保持产品结构不变，便于内部选型。', outputType: 'image' },
-      { key: 'concept_design', label: '概念设计图', description: '生成基于现有产品方向的概念外观方案，明确哪些是概念变化，避免误称为已量产结构。', outputType: 'image' }
+      {
+        key: 'product_rendering',
+        label: '产品渲染图',
+        description: '生成突出完整外观、结构和材质表现的工业产品渲染图。',
+        promptTemplate:
+          '用于产品展示、方案沟通和研发评审。以产品完整外观为主体，清楚表现结构、材质、颜色、接口和关键细节，采用干净、可控的工业展示光线，让产品边界和尺寸感易于判断。严格依据参考图或资料，不虚构零部件、接口、功能和制造细节，不用过度特效遮盖结构。',
+        outputType: 'image'
+      },
+      {
+        key: 'structure_exploded_view',
+        label: '结构展示图',
+        description: '生成层级和部件关系清晰的产品结构展示图。',
+        promptTemplate:
+          '用于产品内部结构、部件层级和装配关系说明。把可确认的部件按清晰的空间层次展开或分层展示，并保持对应关系、方向和主要外形便于核对。只表现参考资料中存在或明确要求的结构，不编造内部组件、连接方式、尺寸和材料，不让装饰背景干扰结构阅读。',
+        outputType: 'image'
+      },
+      {
+        key: 'industrial_scene',
+        label: '工业场景图',
+        description: '生成产品与真实工业、实验室或使用环境关系清晰的场景图。',
+        promptTemplate:
+          '用于产品在工业、实验室、生产线或实际使用环境中的展示。让产品与环境形成合理的尺寸、位置、光线和使用关系，场景服务于产品能力与应用背景，产品主体始终清晰可见。不要虚构产品功能、工艺流程、安全标识或无法确认的操作，不添加会改变产品定位的夸张特效和无关设备。',
+        outputType: 'image'
+      },
+      {
+        key: 'packaging_mockup',
+        label: '包装效果图',
+        description: '生成产品包装、陈列和应用场景的效果预览图。',
+        promptTemplate:
+          '用于包装方案、陈列沟通和市场预览。展示产品与包装的比例、材质、结构和摆放关系，保留已经确认的产品与品牌核心信息，并为后续设计排版留出干净区域。不要生成未经确认的成分、规格、认证、价格和宣传文字，不改变产品外观，不让包装装饰遮挡主体。',
+        outputType: 'image'
+      },
+      {
+        key: 'material_scheme',
+        label: '材质方案图',
+        description: '生成用于比较材质、颜色和表面处理的产品方案图。',
+        promptTemplate:
+          '用于内部选型和外观方案比较。以同一产品结构为基础，重点呈现材质、颜色、纹理、光泽和表面处理之间的差异，保持视角、比例、接口和轮廓尽量一致，方便直接比较。不要擅自改变产品结构、增加功能或混合互相冲突的工艺表现，不生成未经确认的生产结论。',
+        outputType: 'image'
+      },
+      {
+        key: 'concept_design',
+        label: '概念设计图',
+        description: '生成基于现有产品方向的概念外观方案图。',
+        promptTemplate:
+          '用于产品早期概念探索和外观方向比较。在保留产品用途、核心结构和识别特征的前提下提出适度的外观变化，明确表现设计重点、材料方向和形态关系，方便团队筛选讨论。所有变化都属于概念方案，不要写成已量产结构，不虚构安全性能、接口规格或未经确认的功能。',
+        outputType: 'image'
+      }
     ],
     defaultPackageKeys: ['product_rendering', 'industrial_scene', 'material_scheme'],
     sampleInputs: ['上传产品照片，生成产品渲染图、工业场景图和材质方案图。', '上传产品草图，生成结构展示图、包装效果图和概念设计图。']
@@ -1480,12 +1748,54 @@ const horizontalImageFactoryDefinitions: ImageFactoryTemplateDefinition[] = [
     description: '面向自媒体、教育和内容团队，把主题或参考资料整理为适合传播的图文视觉素材，重点保持内容清晰和版式可编辑。',
     businessGoal: '降低日常图文配图和知识视觉化成本，让内容团队快速获得可筛选、可继续排版的素材。',
     packageOptions: [
-      { key: 'science_illustration', label: '科普插图', description: '生成围绕明确知识主题的科普插图，主体关系清楚、信息表达克制，不添加资料中没有的结论。', outputType: 'image' },
-      { key: 'knowledge_card', label: '知识卡片', description: '生成适合知识传播的卡片视觉，层级清晰、留白合理，文字区域便于后续人工排版和校对。', outputType: 'image' },
-      { key: 'picture_book_page', label: '绘本插画', description: '生成适合绘本页面的角色与场景插画，风格统一、叙事明确、画面适合连续阅读。', outputType: 'image' },
-      { key: 'meme_sticker', label: '表情包素材', description: '生成情绪明确、动作易识别的表情包素材，主体简洁，文字仅在明确要求时保留。', outputType: 'image' },
-      { key: 'official_account_visual', label: '公众号配图', description: '生成适合文章头图、章节配图和观点插图的视觉，主体清晰、风格稳重、便于裁切。', outputType: 'image' },
-      { key: 'infographic_visual', label: '信息图视觉', description: '生成适合数据或流程说明的信息图视觉草稿，结构清晰，具体数字和结论只使用明确提供的内容。', outputType: 'image' }
+      {
+        key: 'science_illustration',
+        label: '科普插图',
+        description: '生成围绕明确知识主题、关系清楚的科普插图。',
+        promptTemplate:
+          '用于科普文章、课程和知识内容配图。围绕明确主题组织主体、过程或关系，画面信息清楚、表达克制、适合快速理解，并把重点放在资料能够支持的事实和现象上。不要添加资料中没有的结论、数据、器官结构或因果关系，不用复杂装饰和难以校对的文字替代内容说明。',
+        outputType: 'image'
+      },
+      {
+        key: 'knowledge_card',
+        label: '知识卡片',
+        description: '生成层级清晰、方便后续排版的知识卡片视觉。',
+        promptTemplate:
+          '用于知识分享、课程摘要和社媒传播。建立清晰的标题区域、主题主体和辅助信息层级，画面有留白、重点突出，便于后续人工添加和校对文字。只围绕用户提供的主题和事实组织视觉，不生成密集乱码、虚构数据、错误结论或过度装饰。',
+        outputType: 'image'
+      },
+      {
+        key: 'picture_book_page',
+        label: '绘本插画',
+        description: '生成角色和场景统一、适合连续阅读的绘本页面插画。',
+        promptTemplate:
+          '用于绘本页面和连续故事视觉。根据故事梗概安排角色、动作、场景和叙事焦点，画面温和清楚、风格统一，并为后续文字排版保留合适区域。保持角色外观、服饰和年龄感连续，不凭空增加剧情、人物或道具，不生成无法阅读的大段文字。',
+        outputType: 'image'
+      },
+      {
+        key: 'meme_sticker',
+        label: '表情包素材',
+        description: '生成情绪明确、动作易识别的简洁表情包素材。',
+        promptTemplate:
+          '用于表情包、聊天素材和社媒互动。通过清楚的表情、动作和轮廓表达单一情绪或反应，主体简洁、识别快速，并为需要时的文字添加保留空间。不要混入复杂场景、多个冲突动作、无关人物、模糊表情或未经要求的长篇文字。',
+        outputType: 'image'
+      },
+      {
+        key: 'official_account_visual',
+        label: '公众号配图',
+        description: '生成适合文章头图、章节配图和观点插图的稳重视觉。',
+        promptTemplate:
+          '用于公众号文章头图、章节配图和观点说明。围绕文章主题建立一个清晰的视觉中心，风格稳重、构图易裁切、主体与留白关系适合后续排版，并避免画面信息过载。不要生成未经资料支持的观点、数据或文字，不使用会削弱内容可信度的夸张特效和无关装饰。',
+        outputType: 'image'
+      },
+      {
+        key: 'infographic_visual',
+        label: '信息图视觉',
+        description: '生成结构清晰、适合数据和流程说明的信息图草稿。',
+        promptTemplate:
+          '用于数据、流程、分类或步骤说明的视觉草稿。按照用户提供的内容建立清晰的层级、方向、节点和对比关系，重点是信息结构易读、版式便于后续编辑。只使用明确提供的数字、名称和结论，不编造统计结果、流程节点、标签和文字，不用复杂装饰掩盖信息关系。',
+        outputType: 'image'
+      }
     ],
     defaultPackageKeys: ['science_illustration', 'knowledge_card', 'official_account_visual'],
     sampleInputs: ['上传科普资料，生成科普插图、知识卡片和公众号配图。', '输入故事梗概，生成绘本插画、表情包素材和章节配图。']
@@ -1500,12 +1810,54 @@ const horizontalImageFactoryDefinitions: ImageFactoryTemplateDefinition[] = [
     description: '面向设计师、创作者和文创团队，把主题、参考图或艺术方向整理为不同风格的创作草稿，用于灵感探索、方案比较和后续创作。',
     businessGoal: '帮助用户快速尝试多种艺术表达方向，减少反复编写复杂提示词的门槛，同时保留人工创作和定稿空间。',
     packageOptions: [
-      { key: 'traditional_chinese_art', label: '国风国画', description: '生成具有明确构图、笔墨和留白关系的国风视觉，主体清晰、气韵统一，避免堆叠无关元素。', outputType: 'image' },
-      { key: 'watercolor_art', label: '水彩插画', description: '生成透明叠色、纸张肌理和自然笔触明显的水彩风格画面，保持主题主体和色彩关系稳定。', outputType: 'image' },
-      { key: 'oil_painting', label: '油画创作', description: '生成具有明确笔触、厚涂质感和光影层次的油画风格画面，主体结构完整、色彩不过度混乱。', outputType: 'image' },
-      { key: 'digital_art', label: '数字艺术', description: '生成具有数字绘画质感的艺术视觉，强化主题、构图和色彩设计，避免只追求复杂特效。', outputType: 'image' },
-      { key: 'abstract_creation', label: '抽象创意', description: '围绕主题生成抽象构成、形状、色彩和空间关系，保持画面有明确视觉重心。', outputType: 'image' },
-      { key: 'art_poster', label: '艺术海报', description: '生成适合展览、活动或艺术项目展示的海报视觉，构图有识别度并预留标题和信息区域。', outputType: 'image' }
+      {
+        key: 'traditional_chinese_art',
+        label: '国风国画',
+        description: '生成重视构图、笔墨和留白关系的国风国画视觉。',
+        promptTemplate:
+          '用于国风国画方向的创作草稿。围绕主题安排主体、远近层次、笔墨浓淡和留白关系，画面气韵统一、视觉重心明确，并保留传统绘画的空间和节奏感。不要混入与主题冲突的现代材质、过度写实特效或堆叠装饰，不让细节破坏整体留白。',
+        outputType: 'image'
+      },
+      {
+        key: 'watercolor_art',
+        label: '水彩插画',
+        description: '生成具有透明叠色、纸张肌理和自然笔触的水彩插画。',
+        promptTemplate:
+          '用于水彩插画创作。以透明叠色、纸张肌理、自然晕染和轻盈笔触表现主题，保留主体轮廓与色彩关系，画面有呼吸感并保持适度留白。不要变成塑料质感或过度锐利的写实渲染，不堆叠复杂背景，不让水彩效果掩盖主题结构。',
+        outputType: 'image'
+      },
+      {
+        key: 'oil_painting',
+        label: '油画创作',
+        description: '生成具有笔触、厚涂质感和光影层次的油画创作画面。',
+        promptTemplate:
+          '用于油画创作和视觉方向探索。通过明确的笔触、厚涂质感、色彩关系和光影层次表现主题，主体结构完整，画面具有稳定的视觉重心和材质感。不要让笔触变成杂乱噪点，不混用互相冲突的画种效果，不用无关细节遮挡主体或破坏构图。',
+        outputType: 'image'
+      },
+      {
+        key: 'digital_art',
+        label: '数字艺术',
+        description: '生成强化主题、构图和色彩设计的数字艺术视觉。',
+        promptTemplate:
+          '用于数字绘画、概念视觉和创意方案探索。围绕主题建立明确构图、色彩体系和视觉焦点，使用适度的数字绘画质感与光影表现提升画面完成度，同时保持主体可识别。不要只堆叠发光、粒子和复杂特效，不牺牲结构、层级和主题表达。',
+        outputType: 'image'
+      },
+      {
+        key: 'abstract_creation',
+        label: '抽象创意',
+        description: '围绕主题生成具有明确视觉重心的抽象构成和色彩空间。',
+        promptTemplate:
+          '用于抽象艺术和视觉灵感探索。把主题转化为有组织的形状、色彩、材质和空间关系，建立明确的视觉重心、节奏和层次，即使不具象也能感受到创作方向。不要让画面变成无序纹理或随机元素堆叠，不加入与主题无关的具象物件和难以解释的文字。',
+        outputType: 'image'
+      },
+      {
+        key: 'art_poster',
+        label: '艺术海报',
+        description: '生成适合展览、活动或艺术项目展示的艺术海报视觉。',
+        promptTemplate:
+          '用于展览、艺术活动和创作项目展示。以作品主题或核心视觉建立有识别度的构图和层次，为标题、艺术家信息和活动信息预留清晰区域，整体保持统一的艺术气质和传播识别度。不要虚构活动日期、地点、作者和作品说明，不生成难以校对的大段文字，不用装饰遮挡主体。',
+        outputType: 'image'
+      }
     ],
     defaultPackageKeys: ['traditional_chinese_art', 'watercolor_art', 'digital_art'],
     sampleInputs: ['上传一张参考图，生成国风国画、水彩插画和数字艺术三个方向。', '输入艺术主题，生成抽象创意、油画创作和艺术海报。']
@@ -1766,7 +2118,7 @@ function buildCrossBorderImageFactoryManifest() {
       key: item.key,
       label: item.label,
       description: item.description,
-      promptTemplate: item.description,
+      promptTemplate: item.promptTemplate,
       negativePrompt: crossBorderFactoryPackageNegativePrompts[item.key],
       outputType: item.outputType,
       defaultSelected: crossBorderFactoryDefaultPackageKeys.includes(item.key)

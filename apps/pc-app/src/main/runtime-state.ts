@@ -8,6 +8,7 @@ import {
   fetchPublicDesktopToolActionCatalog,
   fetchWorkspaceDesktopToolActionCatalog,
   listAuthorizedRoleTemplates as fetchAuthorizedRoleTemplates,
+  listPublicFreeRoleTemplates as fetchPublicFreeRoleTemplates,
   loginDesktopAccount as submitDesktopAccountLogin,
   redeemDesktopBindingCode,
   registerDesktopAccount as submitDesktopAccountRegister,
@@ -450,13 +451,12 @@ export async function listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRo
   const installedTemplateIds = readInstalledTemplateIds(persistedState);
 
   if (!identity.deviceToken) {
-    return {
-      source: 'local_fallback',
+    return fetchPublicRoleTemplateCatalog(
+      appInfo.serverBaseUrl,
       workspaceId,
-      loadedAt: new Date().toISOString(),
-      templates: [],
-      message: '请先登录或注册账号，注册后默认进入免费版。'
-    };
+      installedTemplateIds,
+      '请先登录或注册账号，注册后默认进入免费版。'
+    );
   }
 
   try {
@@ -476,12 +476,39 @@ export async function listAuthorizedRoleTemplates(): Promise<DesktopAuthorizedRo
       deletedTemplateIds: response.deletedTemplateIds
     };
   } catch (error) {
+    return fetchPublicRoleTemplateCatalog(
+      appInfo.serverBaseUrl,
+      workspaceId,
+      installedTemplateIds,
+      error instanceof Error ? error.message : '授权模板目录加载失败。'
+    );
+  }
+}
+
+async function fetchPublicRoleTemplateCatalog(
+  serverBaseUrl: string,
+  workspaceId: string,
+  installedTemplateIds: string[],
+  fallbackMessage: string
+): Promise<DesktopAuthorizedRoleTemplateCatalog> {
+  try {
+    const response = await fetchPublicFreeRoleTemplates(serverBaseUrl, installedTemplateIds);
+    return {
+      source: 'local_fallback',
+      workspaceId,
+      loadedAt: new Date().toISOString(),
+      templates: response.data,
+      deviceCapacity: response.deviceCapacity,
+      deletedTemplateIds: response.deletedTemplateIds,
+      message: fallbackMessage
+    };
+  } catch {
     return {
       source: 'local_fallback',
       workspaceId,
       loadedAt: new Date().toISOString(),
       templates: [],
-      message: error instanceof Error ? error.message : '授权模板目录加载失败。'
+      message: fallbackMessage
     };
   }
 }

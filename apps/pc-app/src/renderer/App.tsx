@@ -10452,8 +10452,8 @@ export default function App() {
                                 </Form.Item>
                                 <Form.Item
                                   name="promptLanguage"
-                                  label="图片文字语言"
-                                  rules={[{ required: true, message: '请选择图片文字语言' }]}
+                                  label="语言"
+                                  rules={[{ required: true, message: '请选择语言' }]}
                                 >
                                   <Select size="large" options={ecommerceImageTextLanguageOptions} />
                                 </Form.Item>
@@ -19069,7 +19069,7 @@ function extractAcademicDemoSectionDraft(sectionType: AcademicDemoSectionType, s
 const defaultFactoryPromptControlFields: DigitalFactoryPromptControlField[] = [
   {
     key: 'promptLanguage',
-    label: '文字语言',
+    label: '语言',
     placeholder: '例如：English、中文、Deutsch、Español；不需要文字可填：不生成文字',
     inputType: 'text'
   },
@@ -19104,9 +19104,20 @@ const ecommerceImageTextLanguageOptions = [
   '英文',
   '日语',
   '韩语',
+  '法语',
   '德语',
   '西班牙语',
-  '法语',
+  '葡萄牙语',
+  '意大利语',
+  '俄语',
+  '阿拉伯语',
+  '印地语',
+  '印尼语',
+  '泰语',
+  '越南语',
+  '土耳其语',
+  '荷兰语',
+  '波兰语',
   '不生成文字'
 ].map((value) => ({ value, label: value }));
 
@@ -19583,7 +19594,7 @@ function buildFactoryTaskInput({
       instructions: [
         '按 factory_request 逐项处理每张参考图片。',
         isImageGenerationFactory(factory)
-          ? '每个产物包都包含独立的完整生成提示词；图片比例和文字语言属于通用约束。'
+          ? '每个产物包都包含独立的完整生成提示词；图片比例和语言属于通用约束。'
           : factoryRequest.enableImageUnderstanding
             ? '已开启图片理解增强：先用图片理解模型分析商品图并生成分包提示词。'
             : '未开启图片理解增强：直接使用平台、产物包和提示词控制生成基础生图提示词。',

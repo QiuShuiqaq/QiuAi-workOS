@@ -172,11 +172,12 @@ export class SoftwareCopilotService {
     ]);
 
     const canPurchase = this.canPurchaseForPlan(access.workspaceType, access.planCode);
+    const catalogProducts = products.length > 0 ? products : this.createSeedSoftwareCopilotProducts();
 
     return {
       workspaceId,
       workspaceType: access.workspaceType,
-      data: products.map((product) => {
+      data: catalogProducts.map((product) => {
         const productLicenses = licenses.filter((license) => license.productId === product.id);
         const activeBindings = productLicenses.flatMap((license) => license.deviceBindings);
         const seatLimit = productLicenses.reduce((sum, license) => sum + license.seatLimit, 0);
@@ -997,6 +998,30 @@ export class SoftwareCopilotService {
       currency: product.currency,
       sortOrder: product.sortOrder
     };
+  }
+
+  private createSeedSoftwareCopilotProducts(): SoftwareCopilotProduct[] {
+    const seedDate = new Date(0);
+    return softwareCopilotProductSeeds.map((product) => ({
+      id: `seed_${product.code}`,
+      createdAt: seedDate,
+      updatedAt: seedDate,
+      code: product.code,
+      name: product.name,
+      softwareName: product.softwareName,
+      category: product.category,
+      description: product.description,
+      status: product.status,
+      platforms: product.platforms,
+      capabilities: product.capabilities,
+      personalMonthlyPriceCents: product.personalMonthlyPriceCents,
+      personalAnnualPriceCents: product.personalAnnualPriceCents,
+      enterpriseMonthlyUnitPriceCents: product.enterpriseMonthlyUnitPriceCents,
+      enterpriseAnnualUnitPriceCents: product.enterpriseAnnualUnitPriceCents,
+      currency: product.currency,
+      metadata: {},
+      sortOrder: product.sortOrder
+    }));
   }
 
   private toLicenseSummary(
