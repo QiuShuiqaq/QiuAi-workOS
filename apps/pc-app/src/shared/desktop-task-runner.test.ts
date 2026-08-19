@@ -3565,7 +3565,7 @@ const factoryTask = await runDesktopTask({
     title: 'Generate marketplace product images',
     input: JSON.stringify({
       factory_request: {
-        platform: { key: 'amazon', label: 'Amazon', imageRatio: '1:1' },
+        platform: { key: 'amazon', label: 'Amazon', imageRatio: '1:1', imageSize: '4K' },
         packages: [
           {
             key: 'main_image',
@@ -3703,6 +3703,7 @@ const factoryTask = await runDesktopTask({
           isMainImage ? 'main-package-negative' : 'white-package-negative'
         );
         assert.equal(request.imageGeneration?.aspectRatio, '1:1');
+        assert.equal(request.imageGeneration?.size, '4K');
         assert.match(request.imageGeneration?.sourceImagePath ?? '', /sku-[12]\.png/);
         assert.match(request.messages[1]?.content ?? '', /Source image local path/);
         assert.match(request.messages[1]?.content ?? '', /Package:/);
@@ -3727,6 +3728,7 @@ const factoryTask = await runDesktopTask({
       }
 
       assert.equal(asyncMode, 'poll_once');
+      assert.equal(request.imageGeneration?.size, '4K');
       factoryPollModelCallCount += 1;
       assert.equal(factorySubmitModelCallCount, 4);
       assert.match(request.imageGeneration?.providerJobId ?? '', /^grsai-job-\d+$/);
@@ -3824,6 +3826,9 @@ assert.ok(
 );
 assert.ok(
   factoryPreviewArtifact?.factoryPreview?.items.every((item) => item.attempts === 1)
+);
+assert.ok(
+  factoryPreviewArtifact?.factoryPreview?.items.every((item) => item.imageSize === '4K')
 );
 assert.ok(
   factoryTask.task.executionLogs.some((log) => log.eventType === 'WORKFLOW_RUNTIME_FACTORY_BATCH_COMPLETED')

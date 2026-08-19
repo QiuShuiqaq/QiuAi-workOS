@@ -2,6 +2,8 @@ export type OfficialModelRouteCapability = 'text' | 'reasoning' | 'image' | 'vid
 
 export type OfficialModelRouteStatus = 'active' | 'disabled';
 
+export type OfficialImageSize = '1K' | '2K' | '4K';
+
 export interface OfficialModelRouteSummary {
   routeKey: string;
   displayName: string;
@@ -9,6 +11,9 @@ export interface OfficialModelRouteSummary {
   status: OfficialModelRouteStatus;
   pointPrice: number;
   pointPricesByDurationSeconds?: Record<string, number>;
+  supportedImageSizes?: OfficialImageSize[];
+  defaultImageSize?: OfficialImageSize;
+  pointPricesByImageSize?: Partial<Record<OfficialImageSize, number>>;
   sortOrder: number;
 }
 

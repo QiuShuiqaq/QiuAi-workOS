@@ -85,6 +85,7 @@ export interface AdminOfficialModelRouteSummary {
   capability: AdminOfficialModelRouteCapability;
   status: AdminOfficialModelRouteStatus;
   pointPrice: number;
+  pointPricesByImageSize?: Partial<Record<'1K' | '2K' | '4K', number>>;
   providerId: string;
   providerName: string;
   modelName: string;

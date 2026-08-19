@@ -86,6 +86,16 @@ function routeStatusTone(status: AdminOfficialModelRouteSummary['status']): 'suc
   return status === 'active' ? 'success' : 'warning';
 }
 
+function routePointPriceText(route: AdminOfficialModelRouteSummary) {
+  const sizePrices = route.pointPricesByImageSize;
+  if (!sizePrices) {
+    return `${route.pointPrice}/次`;
+  }
+  return (['1K', '2K', '4K'] as const)
+    .flatMap((size) => sizePrices[size] === undefined ? [] : [`${size} ${sizePrices[size]}`])
+    .join(' / ');
+}
+
 function formatDateTime(value?: string) {
   if (!value) {
     return '-';
@@ -421,7 +431,7 @@ export function AdminOfficialRoutesPageClient({
               <Flex gap={12} wrap="wrap" style={{ marginBottom: 16 }}>
                 <RouteMeta label="供应商" value={route.providerName} />
                 <RouteMeta label="模型" value={route.modelName} />
-                <RouteMeta label="点数" value={`${route.pointPrice}/次`} />
+                <RouteMeta label="点数" value={routePointPriceText(route)} />
                 <RouteMeta label="并发" value={`${route.currentConcurrency}/${route.totalMaxConcurrency}`} />
                 <RouteMeta label="Key" value={`${route.activeKeyCount}/${route.apiKeys.length}`} />
               </Flex>

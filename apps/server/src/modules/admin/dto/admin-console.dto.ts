@@ -133,6 +133,9 @@ export class AdminOfficialModelRouteSummaryDto {
   @ApiProperty({ example: 30 })
   pointPrice!: number;
 
+  @ApiPropertyOptional({ example: { '1K': 30, '2K': 45, '4K': 65 } })
+  pointPricesByImageSize?: Partial<Record<'1K' | '2K' | '4K', number>>;
+
   @ApiProperty({ example: 'grsai' })
   providerId!: string;
 

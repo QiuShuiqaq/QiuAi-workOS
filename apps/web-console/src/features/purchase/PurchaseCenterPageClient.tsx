@@ -123,8 +123,14 @@ const aiPointPurchaseMin = 100;
 const aiPointPurchaseMax = 1_000_000;
 const aiPointPurchaseStep = 100;
 const aiPointProductExamples = [
-  { label: '图片线路一', points: 15, unit: '张' },
-  { label: '图片线路二', points: 25, unit: '张' },
+  { label: '图片线路一（1K）', points: 15, unit: '张' },
+  { label: '图片线路二（1K）', points: 30, unit: '张' },
+  { label: '图片线路二（2K）', points: 45, unit: '张' },
+  { label: '图片线路二（4K）', points: 65, unit: '张' },
+  { label: '图片线路三（1K）', points: 20, unit: '张' },
+  { label: '图片线路三（2K）', points: 30, unit: '张' },
+  { label: '图片线路三（4K）', points: 45, unit: '张' },
+  { label: '图片线路四（1K）', points: 10, unit: '张' },
   { label: '视频线路一（6 秒）', points: 200, unit: '个' },
   { label: '视频线路一（10 秒）', points: 280, unit: '个' },
   { label: '视频线路二（6 秒）', points: 300, unit: '个' },

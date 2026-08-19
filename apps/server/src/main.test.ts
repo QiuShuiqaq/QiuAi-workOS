@@ -2009,7 +2009,8 @@ test('official model routes expose only QiuAI line labels to desktop clients', a
     nodeEnvironment: process.env.NODE_ENV,
     serverHost: process.env.SERVER_HOST,
     localUnlimited: process.env.WORKOS_LOCAL_DEV_UNLIMITED,
-    deepseekKey: process.env.QIUAI_OFFICIAL_DEEPSEEK_API_KEY
+    deepseekKey: process.env.QIUAI_OFFICIAL_DEEPSEEK_API_KEY,
+    grsaiKey: process.env.QIUAI_OFFICIAL_GRSAI_API_KEY
   };
   const originalFetch = globalThis.fetch;
 
@@ -2020,9 +2021,23 @@ test('official model routes expose only QiuAI line labels to desktop clients', a
   process.env.SERVER_HOST = '127.0.0.1';
   process.env.WORKOS_LOCAL_DEV_UNLIMITED = 'true';
   process.env.QIUAI_OFFICIAL_DEEPSEEK_API_KEY = 'test-official-key';
+  process.env.QIUAI_OFFICIAL_GRSAI_API_KEY = 'test-official-image-key';
 
-  globalThis.fetch = (async () =>
-    new Response(JSON.stringify({
+  let capturedOfficialImageBody: Record<string, unknown> | undefined;
+  globalThis.fetch = (async (input, init) => {
+    if (String(input).includes('/api/generate')) {
+      capturedOfficialImageBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      return new Response(JSON.stringify({
+        url: 'https://cdn.example.test/official/image-4k.png',
+        status: 'succeeded'
+      }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        }
+      });
+    }
+    return new Response(JSON.stringify({
       choices: [
         {
           message: {
@@ -2039,7 +2054,8 @@ test('official model routes expose only QiuAI line labels to desktop clients', a
       headers: {
         'content-type': 'application/json'
       }
-    })) as typeof fetch;
+    });
+  }) as typeof fetch;
 
   const app = await createApplication();
   app.useLogger(false);
@@ -2082,13 +2098,32 @@ test('official model routes expose only QiuAI line labels to desktop clients', a
     });
     assert.equal(routesResponse.statusCode, 200);
     const routesBody = JSON.parse(routesResponse.body) as {
-      data: Array<{ displayName: string; routeKey: string }>;
+      data: Array<{
+        displayName: string;
+        routeKey: string;
+        pointPrice: number;
+        supportedImageSizes?: string[];
+        defaultImageSize?: string;
+        pointPricesByImageSize?: Record<string, number>;
+      }>;
     };
     assert.ok(routesBody.data.some((route) => route.displayName === '官方通道 · 文本线路一'));
     assert.equal(
       routesBody.data.some((route) => /DeepSeek|GRSAI|MiniMax|Hailuo|gpt-image|nano-banana/i.test(route.displayName)),
       false
     );
+    const imageRoute1 = routesBody.data.find((route) => route.routeKey === 'official-image-1');
+    const imageRoute2 = routesBody.data.find((route) => route.routeKey === 'official-image-2');
+    const imageRoute3 = routesBody.data.find((route) => route.routeKey === 'official-image-3');
+    const imageRoute4 = routesBody.data.find((route) => route.routeKey === 'official-image-4');
+    assert.deepEqual(imageRoute1?.supportedImageSizes, ['1K']);
+    assert.deepEqual(imageRoute1?.pointPricesByImageSize, { '1K': 15 });
+    assert.deepEqual(imageRoute2?.supportedImageSizes, ['1K', '2K', '4K']);
+    assert.deepEqual(imageRoute2?.pointPricesByImageSize, { '1K': 30, '2K': 45, '4K': 65 });
+    assert.deepEqual(imageRoute3?.supportedImageSizes, ['1K', '2K', '4K']);
+    assert.deepEqual(imageRoute3?.pointPricesByImageSize, { '1K': 20, '2K': 30, '4K': 45 });
+    assert.deepEqual(imageRoute4?.supportedImageSizes, ['1K']);
+    assert.deepEqual(imageRoute4?.pointPricesByImageSize, { '1K': 10 });
 
     const overviewResponse = await app.inject({
       method: 'GET',
@@ -2132,6 +2167,50 @@ test('official model routes expose only QiuAI line labels to desktop clients', a
       /DeepSeek|GRSAI|MiniMax|Hailuo|gpt-image|nano-banana/i.test(JSON.stringify(invokeBody)),
       false
     );
+
+    const imageInvokeResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/workspaces/enterprise/desktop/official-model/invoke',
+      headers: {
+        'content-type': 'application/json',
+        'x-qiuai-device-token': deviceToken
+      },
+      payload: {
+        officialRouteKey: 'official-image-2',
+        taskKind: 'image_generation',
+        messages: [{ role: 'user', content: 'Generate a product image.' }],
+        imageGeneration: {
+          prompt: 'Generate a product image.',
+          size: '4K',
+          aspectRatio: '1:1',
+          responseFormat: 'url'
+        }
+      }
+    });
+    assert.equal(imageInvokeResponse.statusCode, 201);
+    assert.equal(JSON.parse(imageInvokeResponse.body).data.pointsCharged, 65);
+    assert.equal(capturedOfficialImageBody?.model, 'gpt-image-2-vip');
+    assert.equal(capturedOfficialImageBody?.imageSize, '4K');
+
+    const unsupportedImageSizeResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/workspaces/enterprise/desktop/official-model/invoke',
+      headers: {
+        'content-type': 'application/json',
+        'x-qiuai-device-token': deviceToken
+      },
+      payload: {
+        officialRouteKey: 'official-image-1',
+        taskKind: 'image_generation',
+        messages: [{ role: 'user', content: 'Generate a product image.' }],
+        imageGeneration: {
+          prompt: 'Generate a product image.',
+          size: '4K',
+          responseFormat: 'url'
+        }
+      }
+    });
+    assert.equal(unsupportedImageSizeResponse.statusCode, 400);
   } finally {
     await app.close();
     globalThis.fetch = originalFetch;
@@ -2176,6 +2255,12 @@ test('official model routes expose only QiuAI line labels to desktop clients', a
       delete process.env.QIUAI_OFFICIAL_DEEPSEEK_API_KEY;
     } else {
       process.env.QIUAI_OFFICIAL_DEEPSEEK_API_KEY = previousEnvironment.deepseekKey;
+    }
+
+    if (previousEnvironment.grsaiKey === undefined) {
+      delete process.env.QIUAI_OFFICIAL_GRSAI_API_KEY;
+    } else {
+      process.env.QIUAI_OFFICIAL_GRSAI_API_KEY = previousEnvironment.grsaiKey;
     }
   }
 });

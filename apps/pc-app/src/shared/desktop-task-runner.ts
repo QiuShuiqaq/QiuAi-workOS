@@ -156,6 +156,7 @@ interface FactoryRuntimePlatform {
   key?: string;
   label?: string;
   imageRatio?: string;
+  imageSize?: '1K' | '2K' | '4K';
   notes?: string;
 }
 
@@ -195,6 +196,7 @@ interface FactoryImageGenerationTask {
   prompt: string;
   negativePrompt?: string;
   targetPlatform: FactoryRuntimePlatform;
+  imageSize?: '1K' | '2K' | '4K';
   createdAt: string;
 }
 
@@ -6327,6 +6329,7 @@ function buildQueuedFactoryImageGenerationResult(task: FactoryImageGenerationTas
     sourceName: task.sourceName,
     packageKey: task.packageKey,
     packageLabel: task.packageLabel,
+    imageSize: task.imageSize,
     status: 'queued',
     sourceImagePath: task.sourceImage.localPath,
     prompt: task.prompt,
@@ -6839,8 +6842,16 @@ function readFactoryRuntimePlatform(value: WorkflowRuntimeValue | undefined): Fa
     key: readWorkflowRuntimeString(normalizedValue.key),
     label: readWorkflowRuntimeString(normalizedValue.label) ?? readWorkflowRuntimeString(normalizedValue.name),
     imageRatio: readWorkflowRuntimeString(normalizedValue.imageRatio),
+    imageSize: readWorkflowRuntimeImageSize(normalizedValue.imageSize),
     notes: readWorkflowRuntimeString(normalizedValue.notes)
   };
+}
+
+function readWorkflowRuntimeImageSize(value: unknown): '1K' | '2K' | '4K' | undefined {
+  const normalized = readWorkflowRuntimeString(value)?.toUpperCase();
+  return normalized === '1K' || normalized === '2K' || normalized === '4K'
+    ? normalized
+    : undefined;
 }
 
 function readFactoryRuntimePromptControls(value: unknown): FactoryRuntimePromptControls | undefined {
@@ -9114,6 +9125,7 @@ function createFactoryImageGenerationTasks(input: {
         ),
         negativePrompt: instruction?.negativePrompt ?? packageItem.negativePrompt ?? input.promptControls?.avoid,
         targetPlatform: input.targetPlatform,
+        imageSize: input.targetPlatform.imageSize,
         createdAt: input.createdAt
       });
     }
@@ -9710,6 +9722,7 @@ async function submitFactoryImageGenerationTask(input: {
           prompt: input.task.prompt,
           negativePrompt: input.task.negativePrompt,
           sourceImagePath: input.task.sourceImage.localPath,
+          size: input.task.imageSize,
           aspectRatio: input.task.targetPlatform.imageRatio,
           responseFormat: 'url',
           asyncMode: 'submit_only'
@@ -9737,6 +9750,7 @@ async function submitFactoryImageGenerationTask(input: {
           sourceName: input.task.sourceName,
           packageKey: input.task.packageKey,
           packageLabel: input.task.packageLabel,
+          imageSize: input.task.imageSize,
           status: 'running',
           sourceImagePath: input.task.sourceImage.localPath,
           prompt: input.task.prompt,
@@ -9801,6 +9815,7 @@ async function pollFactoryImageGenerationTaskOnce(input: {
       imageGeneration: {
         prompt: input.current.prompt ?? '',
         sourceImagePath: input.current.sourceImagePath,
+        size: input.current.imageSize,
         responseFormat: 'url',
         asyncMode: 'poll_once',
         providerJobId: input.current.providerJobId
@@ -9818,6 +9833,7 @@ async function pollFactoryImageGenerationTaskOnce(input: {
           order: input.current.order,
           sku: input.current.sku,
           sourceName: input.current.sourceName,
+          imageSize: input.current.imageSize,
           sourceImage: {
             id: input.current.id,
             name: input.current.sourceName ?? input.current.sku,
@@ -10142,7 +10158,10 @@ export async function recoverFactoryImageBatch(
 }
 
 function buildCompletedFactoryImageGenerationResult(input: {
-  task: Pick<FactoryImageGenerationTask, 'id' | 'order' | 'sku' | 'sourceName' | 'sourceImage' | 'packageKey' | 'packageLabel' | 'prompt' | 'createdAt'>;
+  task: Pick<
+    FactoryImageGenerationTask,
+    'id' | 'order' | 'sku' | 'sourceName' | 'sourceImage' | 'packageKey' | 'packageLabel' | 'imageSize' | 'prompt' | 'createdAt'
+  >;
   imageResult: {
     remoteUrl?: string;
     localPath?: string;
@@ -10160,6 +10179,7 @@ function buildCompletedFactoryImageGenerationResult(input: {
     sourceName: input.task.sourceName,
     packageKey: input.task.packageKey,
     packageLabel: input.task.packageLabel,
+    imageSize: input.task.imageSize,
     status: 'completed',
     remoteUrl: input.imageResult.remoteUrl,
     localPath: input.imageResult.localPath,
@@ -10194,6 +10214,7 @@ async function runFactoryImageGenerationTask(input: {
           prompt: input.task.prompt,
           negativePrompt: input.task.negativePrompt,
           sourceImagePath: input.task.sourceImage.localPath,
+          size: input.task.imageSize,
           aspectRatio: input.task.targetPlatform.imageRatio,
           responseFormat: 'url'
         },
@@ -10212,6 +10233,7 @@ async function runFactoryImageGenerationTask(input: {
         sourceName: input.task.sourceName,
         packageKey: input.task.packageKey,
         packageLabel: input.task.packageLabel,
+        imageSize: input.task.imageSize,
         status: 'completed',
         remoteUrl: imageResult.remoteUrl,
         localPath: imageResult.localPath,
@@ -10243,6 +10265,7 @@ async function runFactoryImageGenerationTask(input: {
     sourceName: input.task.sourceName,
     packageKey: input.task.packageKey,
     packageLabel: input.task.packageLabel,
+    imageSize: input.task.imageSize,
     status: 'failed',
     sourceImagePath: input.task.sourceImage.localPath,
     prompt: input.task.prompt,
@@ -10356,6 +10379,7 @@ function buildFactoryImageGenerationMessages(task: FactoryImageGenerationTask): 
         `Source image local path: ${task.sourceImage.localPath}`,
         task.sourceImage.uri ? `Source image URI: ${task.sourceImage.uri}` : undefined,
         `Package: ${task.packageLabel} (${task.packageKey})`,
+        task.imageSize ? `Image size: ${task.imageSize}` : undefined,
         task.packageDescription ? `Package description: ${task.packageDescription}` : undefined,
         task.targetPlatform.label ? `Target platform: ${task.targetPlatform.label}` : undefined,
         task.targetPlatform.imageRatio ? `Platform image ratio: ${task.targetPlatform.imageRatio}` : undefined,

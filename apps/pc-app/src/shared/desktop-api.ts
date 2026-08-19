@@ -241,6 +241,9 @@ export interface DesktopAiPointOverview {
     status: 'active' | 'disabled';
     pointPrice: number;
     pointPricesByDurationSeconds?: Record<string, number>;
+    supportedImageSizes?: Array<'1K' | '2K' | '4K'>;
+    defaultImageSize?: '1K' | '2K' | '4K';
+    pointPricesByImageSize?: Partial<Record<'1K' | '2K' | '4K', number>>;
     sortOrder: number;
   }>;
 }

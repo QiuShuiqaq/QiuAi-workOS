@@ -3111,6 +3111,7 @@ export class AdminService {
     modelName: string;
     apiBaseUrl: string;
     apiKeyEnvName: string;
+    providerConfig: unknown;
     sortOrder: number;
     apiKeys: Array<{
       id: string;
@@ -3132,12 +3133,14 @@ export class AdminService {
     }>;
   }): AdminOfficialModelRouteSummaryDto {
     const activeKeys = route.apiKeys.filter((key) => key.status !== 'DISABLED');
+    const pointPricesByImageSize = this.readOfficialImageSizePointPrices(route.providerConfig);
     return {
       routeKey: route.routeKey,
       displayName: route.displayName,
       capability: route.capability.toLowerCase() as AdminOfficialModelRouteSummaryDto['capability'],
       status: route.status.toLowerCase() as AdminOfficialModelRouteSummaryDto['status'],
       pointPrice: route.pointPrice,
+      pointPricesByImageSize,
       providerId: route.providerId,
       providerName: route.providerName,
       modelName: route.modelName,
@@ -3149,6 +3152,30 @@ export class AdminService {
       currentConcurrency: activeKeys.reduce((total, key) => total + key.currentConcurrency, 0),
       apiKeys: route.apiKeys.map((key) => this.toAdminOfficialModelApiKeySummary(key))
     };
+  }
+
+  private readOfficialImageSizePointPrices(
+    providerConfig: unknown
+  ): Partial<Record<'1K' | '2K' | '4K', number>> | undefined {
+    if (!providerConfig || typeof providerConfig !== 'object' || Array.isArray(providerConfig)) {
+      return undefined;
+    }
+    const pricing = (providerConfig as Record<string, unknown>).pricing;
+    if (!pricing || typeof pricing !== 'object' || Array.isArray(pricing)) {
+      return undefined;
+    }
+    const rawPrices = (pricing as Record<string, unknown>).imageSizePoints;
+    if (!rawPrices || typeof rawPrices !== 'object' || Array.isArray(rawPrices)) {
+      return undefined;
+    }
+    const result: Partial<Record<'1K' | '2K' | '4K', number>> = {};
+    for (const size of ['1K', '2K', '4K'] as const) {
+      const points = Number((rawPrices as Record<string, unknown>)[size]);
+      if (Number.isFinite(points) && points >= 0) {
+        result[size] = Math.trunc(points);
+      }
+    }
+    return Object.keys(result).length > 0 ? result : undefined;
   }
 
   private toAdminOfficialModelApiKeySummary(key: {

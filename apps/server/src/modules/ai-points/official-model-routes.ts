@@ -3,6 +3,8 @@ export type OfficialRouteKey =
   | 'official-reasoning-1'
   | 'official-image-1'
   | 'official-image-2'
+  | 'official-image-3'
+  | 'official-image-4'
   | 'official-audio-1'
   | 'official-video-1'
   | 'official-video-2'
@@ -68,7 +70,17 @@ export const officialModelRouteSeeds: OfficialModelRouteSeed[] = [
     apiBaseUrl: 'https://grsai.dakka.com.cn/v1',
     apiKeyEnvName: 'QIUAI_OFFICIAL_GRSAI_API_KEY',
     providerConfig: {
-      mode: 'grsai_image'
+      mode: 'grsai_image',
+      imageSize: {
+        default: '1K',
+        options: ['1K'],
+        sendParameter: false
+      },
+      pricing: {
+        imageSizePoints: {
+          '1K': 15
+        }
+      }
     },
     sortOrder: 30
   },
@@ -77,16 +89,82 @@ export const officialModelRouteSeeds: OfficialModelRouteSeed[] = [
     displayName: '官方通道 · 图片线路二',
     capability: 'IMAGE',
     status: 'ACTIVE',
-    pointPrice: 25,
+    pointPrice: 30,
+    providerId: 'grsai',
+    providerName: 'GRSAI',
+    modelName: 'gpt-image-2-vip',
+    apiBaseUrl: 'https://grsai.dakka.com.cn/v1',
+    apiKeyEnvName: 'QIUAI_OFFICIAL_GRSAI_API_KEY',
+    providerConfig: {
+      mode: 'grsai_image',
+      imageSize: {
+        default: '1K',
+        options: ['1K', '2K', '4K'],
+        sendParameter: true
+      },
+      pricing: {
+        imageSizePoints: {
+          '1K': 30,
+          '2K': 45,
+          '4K': 65
+        }
+      }
+    },
+    sortOrder: 40
+  },
+  {
+    routeKey: 'official-image-3',
+    displayName: '官方通道 · 图片线路三',
+    capability: 'IMAGE',
+    status: 'ACTIVE',
+    pointPrice: 20,
     providerId: 'grsai',
     providerName: 'GRSAI',
     modelName: 'nano-banana-2',
     apiBaseUrl: 'https://grsai.dakka.com.cn/v1',
     apiKeyEnvName: 'QIUAI_OFFICIAL_GRSAI_API_KEY',
     providerConfig: {
-      mode: 'grsai_image'
+      mode: 'grsai_image',
+      imageSize: {
+        default: '1K',
+        options: ['1K', '2K', '4K'],
+        sendParameter: true
+      },
+      pricing: {
+        imageSizePoints: {
+          '1K': 20,
+          '2K': 30,
+          '4K': 45
+        }
+      }
     },
-    sortOrder: 40
+    sortOrder: 50
+  },
+  {
+    routeKey: 'official-image-4',
+    displayName: '官方通道 · 图片线路四',
+    capability: 'IMAGE',
+    status: 'ACTIVE',
+    pointPrice: 10,
+    providerId: 'grsai',
+    providerName: 'GRSAI',
+    modelName: 'nano-banana-fast',
+    apiBaseUrl: 'https://grsai.dakka.com.cn/v1',
+    apiKeyEnvName: 'QIUAI_OFFICIAL_GRSAI_API_KEY',
+    providerConfig: {
+      mode: 'grsai_image',
+      imageSize: {
+        default: '1K',
+        options: ['1K'],
+        sendParameter: false
+      },
+      pricing: {
+        imageSizePoints: {
+          '1K': 10
+        }
+      }
+    },
+    sortOrder: 60
   },
   {
     routeKey: 'official-audio-1',
@@ -112,7 +190,7 @@ export const officialModelRouteSeeds: OfficialModelRouteSeed[] = [
         funny_2: 'Chinese (Mandarin)_Cute_Spirit'
       }
     },
-    sortOrder: 45
+    sortOrder: 65
   },
   {
     routeKey: 'official-video-1',
@@ -134,7 +212,7 @@ export const officialModelRouteSeeds: OfficialModelRouteSeed[] = [
         }
       }
     },
-    sortOrder: 50
+    sortOrder: 70
   },
   {
     routeKey: 'official-video-2',
@@ -156,7 +234,7 @@ export const officialModelRouteSeeds: OfficialModelRouteSeed[] = [
         }
       }
     },
-    sortOrder: 60
+    sortOrder: 80
   },
   {
     routeKey: 'official-video-3',
@@ -173,6 +251,6 @@ export const officialModelRouteSeeds: OfficialModelRouteSeed[] = [
       mode: 'minimax_h3_video',
       disabledReason: 'MiniMax H3 uses a dedicated v2 API and is staged for a later adapter.'
     },
-    sortOrder: 70
+    sortOrder: 90
   }
 ];

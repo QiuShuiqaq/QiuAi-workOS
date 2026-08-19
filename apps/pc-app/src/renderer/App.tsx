@@ -389,6 +389,7 @@ interface FactoryRunFormValues {
   editEnabled?: boolean;
   editTargetSeconds?: number;
   promptLanguage?: string;
+  imageSize?: '1K' | '2K' | '4K';
   promptStyle?: string;
   promptGoal?: string;
   promptMustKeep?: string;
@@ -1039,8 +1040,14 @@ const aiPointRechargeOptions: AiPointRechargeOption[] = [
 ];
 
 const aiPointProductExamples = [
-  { label: '图片线路一', points: 15, unit: '张' },
-  { label: '图片线路二', points: 25, unit: '张' },
+  { label: '图片线路一（1K）', points: 15, unit: '张' },
+  { label: '图片线路二（1K）', points: 30, unit: '张' },
+  { label: '图片线路二（2K）', points: 45, unit: '张' },
+  { label: '图片线路二（4K）', points: 65, unit: '张' },
+  { label: '图片线路三（1K）', points: 20, unit: '张' },
+  { label: '图片线路三（2K）', points: 30, unit: '张' },
+  { label: '图片线路三（4K）', points: 45, unit: '张' },
+  { label: '图片线路四（1K）', points: 10, unit: '张' },
   { label: '视频线路一（6 秒）', points: 200, unit: '个' },
   { label: '视频线路一（10 秒）', points: 280, unit: '个' },
   { label: '视频线路二（6 秒）', points: 300, unit: '个' },
@@ -2624,6 +2631,7 @@ const factoryRunRememberedFieldKeys: Array<keyof FactoryRunFormValues> = [
   'editEnabled',
   'editTargetSeconds',
   'promptLanguage',
+  'imageSize',
   'promptStyle',
   'promptGoal',
   'promptMustKeep',
@@ -9538,6 +9546,17 @@ export default function App() {
           }
         )
       : [];
+    const selectedFactoryImageRouteKey = isImageFactory
+      ? resolveOfficialRouteKeyForSemanticModel(
+          runtimeState,
+          selectedFactoryCode,
+          'qiu-image-generation-default'
+        )
+      : undefined;
+    const selectedFactoryImageSizeOptions = buildAiPointImageSizeOptions(
+      aiPointOverview,
+      selectedFactoryImageRouteKey
+    );
     const dialectOptions = readFactoryAsrDialectOptions(selectedFactoryManifest);
     const targetSecondOptions = selectedFactoryManifest.editing?.targetSecondOptions?.length
       ? selectedFactoryManifest.editing.targetSecondOptions
@@ -10559,28 +10578,39 @@ export default function App() {
                         ) : (
                           <>
                             {isImageFactory ? (
-                              <div className="factory-inline-form-grid compact">
-                                <Form.Item
-                                  name="platform"
-                                  label="图片比例"
-                                  rules={[{ required: true, message: '请选择图片比例' }]}
-                                >
-                                  <Select
-                                    size="large"
-                                    options={platformOptions.map((item) => ({
-                                      value: item.key,
-                                      label: item.label
-                                    }))}
-                                  />
-                                </Form.Item>
-                                <Form.Item
-                                  name="promptLanguage"
-                                  label="语言"
-                                  rules={[{ required: true, message: '请选择语言' }]}
-                                >
-                                  <Select size="large" options={ecommerceImageTextLanguageOptions} />
-                                </Form.Item>
-                              </div>
+                              <>
+                                <div className="factory-inline-form-grid compact">
+                                  <Form.Item
+                                    name="platform"
+                                    label="图片比例"
+                                    rules={[{ required: true, message: '请选择图片比例' }]}
+                                  >
+                                    <Select
+                                      size="large"
+                                      options={platformOptions.map((item) => ({
+                                        value: item.key,
+                                        label: item.label
+                                      }))}
+                                    />
+                                  </Form.Item>
+                                  <Form.Item
+                                    name="promptLanguage"
+                                    label="语言"
+                                    rules={[{ required: true, message: '请选择语言' }]}
+                                  >
+                                    <Select size="large" options={ecommerceImageTextLanguageOptions} />
+                                  </Form.Item>
+                                </div>
+                                {selectedFactoryImageSizeOptions.length > 1 ? (
+                                  <Form.Item
+                                    name="imageSize"
+                                    label="图片清晰度"
+                                    rules={[{ required: true, message: '请选择图片清晰度' }]}
+                                  >
+                                    <Select size="large" options={selectedFactoryImageSizeOptions} />
+                                  </Form.Item>
+                                ) : null}
+                              </>
                             ) : (
                               <Form.Item
                                 name="platform"
@@ -14029,6 +14059,7 @@ export default function App() {
       packageKeys: resolveFactoryPackageSelection(roleCode, packageDefinitions),
       enableImageUnderstanding: false,
       promptLanguage: isImageGenerationFactory(factory) ? '中文' : '',
+      imageSize: isImageGenerationFactory(factory) ? '1K' : undefined,
       promptStyle: '',
       promptGoal: '',
       promptMustKeep: '',
@@ -14892,12 +14923,18 @@ export default function App() {
       message.warning(`单批最多处理 ${maxItems} 张商品图，请拆分批次。`);
       return;
     }
+    const imageRouteKey = resolveOfficialRouteKeyForSemanticModel(
+      runtimeState,
+      values.roleCode,
+      'qiu-image-generation-default'
+    );
     const imageFactoryValues: FactoryRunFormValues = {
       ...values,
       packageDefinitions: normalizeFactoryPackageDefinitions(
         factoryRunForm.getFieldValue('packageDefinitions'),
         readFactoryPackageOptions(factory)
-      )
+      ),
+      imageSize: resolveAiPointImageSize(aiPointOverview, imageRouteKey, values.imageSize)
     };
     if (!imageFactoryValues.packageKeys?.length) {
       message.warning('请至少选择一个产物包。');
@@ -17572,18 +17609,26 @@ function getAiPointBucketAvailablePoints(
 function resolveAiPointRoutePrice(
   overview: DesktopAiPointOverview | null,
   routeKey: string | undefined,
-  durationSeconds?: number
+  variant?: {
+    durationSeconds?: number;
+    imageSize?: '1K' | '2K' | '4K';
+  }
 ): number | undefined {
   if (!routeKey) {
     return undefined;
   }
 
   const route = overview?.routes.find((item) => item.routeKey === routeKey);
-  const durationPrice = durationSeconds
-    ? route?.pointPricesByDurationSeconds?.[String(durationSeconds)] ?? fallbackRouteDurationPrice(routeKey, durationSeconds)
+  const durationPrice = variant?.durationSeconds
+    ? route?.pointPricesByDurationSeconds?.[String(variant.durationSeconds)] ??
+      fallbackRouteDurationPrice(routeKey, variant.durationSeconds)
+    : undefined;
+  const imageSizePrice = variant?.imageSize
+    ? route?.pointPricesByImageSize?.[variant.imageSize] ??
+      fallbackRouteImageSizePrice(routeKey, variant.imageSize)
     : undefined;
   const routePrice = route?.pointPrice ?? fallbackRoutePointPrice(routeKey);
-  const price = durationPrice ?? routePrice;
+  const price = imageSizePrice ?? durationPrice ?? routePrice;
   return Number.isFinite(price) && price !== undefined ? Math.max(0, Math.floor(price)) : undefined;
 }
 
@@ -17592,11 +17637,76 @@ function fallbackRoutePointPrice(routeKey: string): number | undefined {
     'official-text-1': 1,
     'official-reasoning-1': 3,
     'official-image-1': 15,
-    'official-image-2': 25,
+    'official-image-2': 30,
+    'official-image-3': 20,
+    'official-image-4': 10,
     'official-video-1': 200,
     'official-video-2': 300,
     'official-audio-1': 10
   }[routeKey];
+}
+
+const fallbackImageSizesByRoute: Record<string, Array<'1K' | '2K' | '4K'>> = {
+  'official-image-1': ['1K'],
+  'official-image-2': ['1K', '2K', '4K'],
+  'official-image-3': ['1K', '2K', '4K'],
+  'official-image-4': ['1K']
+};
+
+const fallbackImageSizePricesByRoute: Record<string, Partial<Record<'1K' | '2K' | '4K', number>>> = {
+  'official-image-1': { '1K': 15 },
+  'official-image-2': { '1K': 30, '2K': 45, '4K': 65 },
+  'official-image-3': { '1K': 20, '2K': 30, '4K': 45 },
+  'official-image-4': { '1K': 10 }
+};
+
+function fallbackRouteImageSizePrice(
+  routeKey: string,
+  imageSize: '1K' | '2K' | '4K'
+): number | undefined {
+  return fallbackImageSizePricesByRoute[routeKey]?.[imageSize];
+}
+
+function resolveAiPointImageSizes(
+  overview: DesktopAiPointOverview | null,
+  routeKey: string | undefined
+): Array<'1K' | '2K' | '4K'> {
+  if (!routeKey) {
+    return [];
+  }
+  const route = overview?.routes.find((item) => item.routeKey === routeKey);
+  return route?.supportedImageSizes?.length
+    ? route.supportedImageSizes
+    : fallbackImageSizesByRoute[routeKey] ?? [];
+}
+
+function resolveAiPointImageSize(
+  overview: DesktopAiPointOverview | null,
+  routeKey: string | undefined,
+  requestedSize: string | undefined
+): '1K' | '2K' | '4K' {
+  const sizes = resolveAiPointImageSizes(overview, routeKey);
+  const requested = requestedSize === '1K' || requestedSize === '2K' || requestedSize === '4K'
+    ? requestedSize
+    : undefined;
+  if (requested && sizes.includes(requested)) {
+    return requested;
+  }
+  const route = routeKey ? overview?.routes.find((item) => item.routeKey === routeKey) : undefined;
+  return route?.defaultImageSize ?? sizes[0] ?? '1K';
+}
+
+function buildAiPointImageSizeOptions(
+  overview: DesktopAiPointOverview | null,
+  routeKey: string | undefined
+) {
+  return resolveAiPointImageSizes(overview, routeKey).map((imageSize) => {
+    const points = resolveAiPointRoutePrice(overview, routeKey, { imageSize });
+    return {
+      value: imageSize,
+      label: points === undefined ? imageSize : `${imageSize} · ${points} AI点/张`
+    };
+  });
 }
 
 function fallbackRouteDurationPrice(routeKey: string, durationSeconds: number): number | undefined {
@@ -17671,12 +17781,13 @@ function buildAiPointFactoryConsumptionEstimate(input: {
       input.roleCode,
       'qiu-image-generation-default'
     );
-    const unitPointPrice = resolveAiPointRoutePrice(input.overview, routeKey);
+    const imageSize = resolveAiPointImageSize(input.overview, routeKey, input.values.imageSize);
+    const unitPointPrice = resolveAiPointRoutePrice(input.overview, routeKey, { imageSize });
     const itemCount = imageCount * selectedPackageCount;
     return unitPointPrice && itemCount > 0
       ? {
           visible: true,
-          label: routeLineLabel(input.overview, routeKey, '图片线路'),
+          label: `${routeLineLabel(input.overview, routeKey, '图片线路')} · ${imageSize}`,
           itemCount,
           unitPointPrice,
           totalPoints: itemCount * unitPointPrice,
@@ -17725,7 +17836,7 @@ function buildAiPointFactoryConsumptionEstimate(input: {
       input.roleCode,
       'qiu-video-generation-default'
     );
-    const unitPointPrice = resolveAiPointRoutePrice(input.overview, routeKey, durationSeconds);
+    const unitPointPrice = resolveAiPointRoutePrice(input.overview, routeKey, { durationSeconds });
     const itemCount = imageCount * selectedPackageCount;
     return unitPointPrice && itemCount > 0
       ? {
@@ -17758,7 +17869,7 @@ function buildAiPointFactoryConsumptionEstimate(input: {
       input.roleCode,
       'qiu-video-generation-default'
     );
-    const unitPointPrice = resolveAiPointRoutePrice(input.overview, routeKey, durationSeconds);
+    const unitPointPrice = resolveAiPointRoutePrice(input.overview, routeKey, { durationSeconds });
     return unitPointPrice
       ? {
           visible: true,
@@ -19693,6 +19804,7 @@ function buildFactoryTaskInput({
       key: platform?.key ?? values.platform ?? 'amazon',
       label: platform?.label ?? values.platform ?? 'Amazon',
       imageRatio: platform?.imageRatio,
+      imageSize: isImageGenerationFactory(factory) ? values.imageSize ?? '1K' : undefined,
       notes: platform?.notes
     },
     packages: selectedPackages.map((item) => ({
@@ -21603,7 +21715,9 @@ function officialModelPublicName(profile: ModelProfile): string {
     'official-text-1': 'deepseek-v4-flash',
     'official-reasoning-1': 'deepseek-v4-pro',
     'official-image-1': 'gpt-image-2',
-    'official-image-2': 'nano-banana-2',
+    'official-image-2': 'gpt-image-2-vip',
+    'official-image-3': 'nano-banana-2',
+    'official-image-4': 'nano-banana-fast',
     'official-audio-1': 'speech-02-turbo',
     'official-video-1': 'MiniMax-Hailuo-2.3-Fast',
     'official-video-2': 'MiniMax-Hailuo-2.3',

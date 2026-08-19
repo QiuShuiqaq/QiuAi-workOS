@@ -77,6 +77,32 @@ export const officialModelProfiles: ModelProfile[] = [
     monthlyBudgetCents: 0
   },
   {
+    id: 'qiu-official-image-3',
+    providerId: 'qiuai-official',
+    providerName: 'QiuAI官方通道',
+    modelName: '图片线路三',
+    purpose: 'vision',
+    billingMode: 'official_points',
+    officialRouteKey: 'official-image-3',
+    capabilities: ['image_generation', 'text_to_image', 'image_to_image', 'image_editing'],
+    temperature: 0.2,
+    maxTokens: 4096,
+    monthlyBudgetCents: 0
+  },
+  {
+    id: 'qiu-official-image-4',
+    providerId: 'qiuai-official',
+    providerName: 'QiuAI官方通道',
+    modelName: '图片线路四',
+    purpose: 'vision',
+    billingMode: 'official_points',
+    officialRouteKey: 'official-image-4',
+    capabilities: ['image_generation', 'text_to_image', 'image_to_image', 'image_editing'],
+    temperature: 0.2,
+    maxTokens: 4096,
+    monthlyBudgetCents: 0
+  },
+  {
     id: 'qiu-official-audio-1',
     providerId: 'qiuai-official',
     providerName: 'QiuAI官方通道',

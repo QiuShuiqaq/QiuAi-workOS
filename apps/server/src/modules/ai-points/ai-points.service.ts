@@ -23,6 +23,7 @@ import { officialModelRouteSeeds } from './official-model-routes';
 
 type OfficialCapability = 'TEXT' | 'REASONING' | 'IMAGE' | 'VIDEO' | 'AUDIO';
 type OfficialRouteStatus = 'ACTIVE' | 'DISABLED';
+type OfficialImageSize = '1K' | '2K' | '4K';
 type AiPointCreditBucketSourceType =
   | 'SUBSCRIPTION_MONTHLY'
   | 'PURCHASE_PERMANENT'
@@ -2229,6 +2230,10 @@ const legacyOfficialRoutePricing: Record<
   {
     basePointPrice: number;
     durationPoints?: Record<string, number>;
+    imageSizePoints?: Partial<Record<OfficialImageSize, number>>;
+    supportedImageSizes?: OfficialImageSize[];
+    defaultImageSize?: OfficialImageSize;
+    sendImageSizeParameter?: boolean;
   }
 > = {
   'official-text-1': {
@@ -2238,10 +2243,30 @@ const legacyOfficialRoutePricing: Record<
     basePointPrice: 3
   },
   'official-image-1': {
-    basePointPrice: 15
+    basePointPrice: 15,
+    imageSizePoints: { '1K': 15 },
+    supportedImageSizes: ['1K'],
+    defaultImageSize: '1K'
   },
   'official-image-2': {
-    basePointPrice: 25
+    basePointPrice: 30,
+    imageSizePoints: { '1K': 30, '2K': 45, '4K': 65 },
+    supportedImageSizes: ['1K', '2K', '4K'],
+    defaultImageSize: '1K',
+    sendImageSizeParameter: true
+  },
+  'official-image-3': {
+    basePointPrice: 20,
+    imageSizePoints: { '1K': 20, '2K': 30, '4K': 45 },
+    supportedImageSizes: ['1K', '2K', '4K'],
+    defaultImageSize: '1K',
+    sendImageSizeParameter: true
+  },
+  'official-image-4': {
+    basePointPrice: 10,
+    imageSizePoints: { '1K': 10 },
+    supportedImageSizes: ['1K'],
+    defaultImageSize: '1K'
   },
   'official-audio-1': {
     basePointPrice: 10
@@ -2268,53 +2293,79 @@ const legacyOfficialRoutePricing: Record<
 function resolveOfficialRoutePricing(route: OfficialRouteRecord): {
   basePointPrice: number;
   durationPoints?: Record<string, number>;
+  imageSizePoints?: Partial<Record<OfficialImageSize, number>>;
+  supportedImageSizes?: OfficialImageSize[];
+  defaultImageSize?: OfficialImageSize;
+  sendImageSizeParameter?: boolean;
 } {
   const fallback = legacyOfficialRoutePricing[route.routeKey];
   const providerConfig = readRecord(route.providerConfig);
   const pricing = readRecord(providerConfig?.pricing);
-  const rawDurationPoints = readRecord(pricing?.durationPoints);
-  const durationPoints = rawDurationPoints
-    ? Object.fromEntries(
-        Object.entries(rawDurationPoints).flatMap(([key, value]) => {
-          const points = Number(value);
-          return Number.isFinite(points) && points >= 0 ? [[key, Math.trunc(points)]] : [];
-        })
-      )
-    : undefined;
-
-  if (durationPoints && Object.keys(durationPoints).length > 0) {
-    const configuredBase = Number(route.pointPrice);
-    return {
-      basePointPrice:
-        Number.isFinite(configuredBase) && configuredBase >= 0
-          ? Math.trunc(configuredBase)
-          : Math.min(...Object.values(durationPoints)),
-      durationPoints
-    };
-  }
-
-  if (fallback) {
-    return fallback;
-  }
-
+  const configuredDurationPoints = readPointPriceMap(pricing?.durationPoints);
+  const configuredImageSizePoints = readOfficialImageSizePointMap(pricing?.imageSizePoints);
+  const imageSizeConfig = readRecord(providerConfig?.imageSize);
+  const configuredImageSizes = Array.isArray(imageSizeConfig?.options)
+    ? imageSizeConfig.options.flatMap((value) => {
+        const size = normalizeOfficialImageSize(value);
+        return size ? [size] : [];
+      })
+    : [];
+  const supportedImageSizes = dedupeOfficialImageSizes([
+    ...configuredImageSizes,
+    ...Object.keys(configuredImageSizePoints ?? {}).flatMap((value) => {
+      const size = normalizeOfficialImageSize(value);
+      return size ? [size] : [];
+    })
+  ]);
+  const configuredBase = Number(route.pointPrice);
+  const fallbackImagePricing = fallback?.imageSizePoints;
+  const basePointPrice =
+    fallbackImagePricing && !configuredImageSizePoints
+      ? fallback.basePointPrice
+      : Number.isFinite(configuredBase) && configuredBase >= 0
+        ? Math.trunc(configuredBase)
+        : fallback?.basePointPrice ?? 0;
   return {
-    basePointPrice: Math.max(0, Math.trunc(route.pointPrice))
+    basePointPrice,
+    durationPoints: configuredDurationPoints ?? fallback?.durationPoints,
+    imageSizePoints: configuredImageSizePoints ?? fallback?.imageSizePoints,
+    supportedImageSizes:
+      supportedImageSizes.length > 0
+        ? supportedImageSizes
+        : fallback?.supportedImageSizes,
+    defaultImageSize:
+      normalizeOfficialImageSize(imageSizeConfig?.default) ??
+      fallback?.defaultImageSize,
+    sendImageSizeParameter:
+      typeof imageSizeConfig?.sendParameter === 'boolean'
+        ? imageSizeConfig.sendParameter
+        : fallback?.sendImageSizeParameter
   };
 }
 
 function resolveOfficialRoutePointPrice(route: OfficialRouteRecord, request: OfficialInvokeRequest): number {
   const pricing = resolveOfficialRoutePricing(route);
-  if (route.capability !== 'VIDEO' || !pricing.durationPoints) {
-    return Math.max(0, pricing.basePointPrice);
+  if (route.capability === 'IMAGE' && pricing.imageSizePoints) {
+    const imageSize = resolveOfficialRouteImageSize(route, request, pricing);
+    return Math.max(
+      0,
+      pricing.imageSizePoints[imageSize] ??
+        pricing.imageSizePoints[pricing.defaultImageSize ?? '1K'] ??
+        pricing.basePointPrice
+    );
   }
 
-  const durationSeconds = normalizeMiniMaxVideoDurationSeconds(request.videoGeneration?.durationSeconds) ?? 6;
-  return Math.max(
-    0,
-    pricing.durationPoints[String(durationSeconds)] ??
-      pricing.durationPoints['6'] ??
-      pricing.basePointPrice
-  );
+  if (route.capability === 'VIDEO' && pricing.durationPoints) {
+    const durationSeconds = normalizeMiniMaxVideoDurationSeconds(request.videoGeneration?.durationSeconds) ?? 6;
+    return Math.max(
+      0,
+      pricing.durationPoints[String(durationSeconds)] ??
+        pricing.durationPoints['6'] ??
+        pricing.basePointPrice
+    );
+  }
+
+  return Math.max(0, pricing.basePointPrice);
 }
 
 function toRouteSummary(route: OfficialRouteRecord) {
@@ -2330,8 +2381,85 @@ function toRouteSummary(route: OfficialRouteRecord) {
           pointPricesByDurationSeconds: pricing.durationPoints
         }
       : {}),
+    ...(route.capability === 'IMAGE' && pricing.supportedImageSizes?.length
+      ? {
+          supportedImageSizes: pricing.supportedImageSizes,
+          defaultImageSize: pricing.defaultImageSize ?? pricing.supportedImageSizes[0],
+          pointPricesByImageSize: pricing.imageSizePoints
+        }
+      : {}),
     sortOrder: route.sortOrder
   };
+}
+
+function readPointPriceMap(value: unknown): Record<string, number> | undefined {
+  const record = readRecord(value);
+  if (!record) {
+    return undefined;
+  }
+  const entries = Object.entries(record).flatMap(([key, rawValue]) => {
+    const points = Number(rawValue);
+    return Number.isFinite(points) && points >= 0 ? [[key, Math.trunc(points)] as const] : [];
+  });
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function readOfficialImageSizePointMap(
+  value: unknown
+): Partial<Record<OfficialImageSize, number>> | undefined {
+  const prices = readPointPriceMap(value);
+  if (!prices) {
+    return undefined;
+  }
+  const entries = Object.entries(prices).flatMap(([key, points]) => {
+    const size = normalizeOfficialImageSize(key);
+    return size ? [[size, points] as const] : [];
+  });
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function normalizeOfficialImageSize(value: unknown): OfficialImageSize | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim().toUpperCase();
+  return normalized === '1K' || normalized === '2K' || normalized === '4K'
+    ? normalized
+    : undefined;
+}
+
+function dedupeOfficialImageSizes(values: OfficialImageSize[]): OfficialImageSize[] {
+  const valueSet = new Set(values);
+  return (['1K', '2K', '4K'] as OfficialImageSize[]).filter((value) => valueSet.has(value));
+}
+
+function resolveOfficialRouteImageSize(
+  route: OfficialRouteRecord,
+  request: OfficialInvokeRequest,
+  pricing = resolveOfficialRoutePricing(route)
+): OfficialImageSize {
+  const rawRequestedSize = request.imageGeneration?.size?.trim();
+  const requestedSize = normalizeOfficialImageSize(rawRequestedSize);
+  const supportedSizes = pricing.supportedImageSizes?.length
+    ? pricing.supportedImageSizes
+    : [pricing.defaultImageSize ?? '1K'];
+  if (rawRequestedSize && !requestedSize) {
+    throw new BadRequestException({
+      error: {
+        code: 'OFFICIAL_IMAGE_SIZE_INVALID',
+        message: '图片清晰度仅支持 1K、2K 或 4K。'
+      }
+    });
+  }
+  if (requestedSize && !supportedSizes.includes(requestedSize)) {
+    throw new BadRequestException({
+      error: {
+        code: 'OFFICIAL_IMAGE_SIZE_UNSUPPORTED',
+        message: `${route.displayName} 不支持 ${requestedSize}，请选择 ${supportedSizes.join('、')}。`
+      }
+    });
+  }
+  return requestedSize ?? pricing.defaultImageSize ?? supportedSizes[0] ?? '1K';
 }
 
 function toWalletSummary(wallet: {
@@ -2667,8 +2795,9 @@ function buildGrsaiImagePayload(
   if (grsaiRatio) {
     payload.aspectRatio = grsaiRatio;
   }
-  const imageSize = resolveGrsaiImageSize(route.modelName);
-  if (imageSize) {
+  const routePricing = resolveOfficialRoutePricing(route);
+  const imageSize = resolveOfficialRouteImageSize(route, request, routePricing);
+  if (routePricing.sendImageSizeParameter) {
     payload.imageSize = imageSize;
   }
   return payload;
@@ -2978,20 +3107,6 @@ function resolveGrsaiImageAspectRatio(modelName: string, aspectRatio: string | u
     '2:1': '1792x896'
   };
   return pixelSizeByRatio[aspectRatio] ?? aspectRatio;
-}
-
-function resolveGrsaiImageSize(modelName: string): '1K' | '2K' | '4K' | undefined {
-  const normalized = modelName.trim().toLowerCase();
-  if (!normalized.includes('nano-banana-2')) {
-    return undefined;
-  }
-  if (normalized.includes('4k')) {
-    return '4K';
-  }
-  if (normalized.includes('2k')) {
-    return '2K';
-  }
-  return '1K';
 }
 
 function normalizeMiniMaxVideoDurationSeconds(value: number | undefined): number | undefined {

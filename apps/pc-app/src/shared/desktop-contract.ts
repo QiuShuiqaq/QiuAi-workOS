@@ -90,6 +90,7 @@ export interface FactoryArtifactPreviewItem {
   sourceName?: string;
   packageKey: string;
   packageLabel: string;
+  imageSize?: '1K' | '2K' | '4K';
   status: FactoryArtifactPreviewItemStatus;
   remoteUrl?: string;
   localPath?: string;

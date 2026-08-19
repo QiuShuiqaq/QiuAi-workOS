@@ -21,6 +21,9 @@ assert.deepEqual(state.knowledgeSources, []);
 
 assert.ok(state.modelProfiles.some((profile) => profile.id === 'qiu-official-text-1'));
 assert.ok(state.modelProfiles.some((profile) => profile.id === 'qiu-official-image-1'));
+assert.ok(state.modelProfiles.some((profile) => profile.id === 'qiu-official-image-2'));
+assert.ok(state.modelProfiles.some((profile) => profile.id === 'qiu-official-image-3'));
+assert.ok(state.modelProfiles.some((profile) => profile.id === 'qiu-official-image-4'));
 assert.ok(state.modelProfiles.some((profile) => profile.id === 'qiu-official-video-1'));
 assert.equal(
   state.modelProfiles.some((profile) => profile.billingMode === 'official_points' && /DeepSeek|GRSAI|MiniMax|Hailuo|gpt-image|nano-banana/i.test(`${profile.providerName} ${profile.modelName}`)),
