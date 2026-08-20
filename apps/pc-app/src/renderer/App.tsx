@@ -389,6 +389,7 @@ interface FactoryRunFormValues {
   editEnabled?: boolean;
   editTargetSeconds?: number;
   promptLanguage?: string;
+  promptGlobal?: string;
   imageSize?: '1K' | '2K' | '4K';
   promptStyle?: string;
   promptGoal?: string;
@@ -2631,6 +2632,7 @@ const factoryRunRememberedFieldKeys: Array<keyof FactoryRunFormValues> = [
   'editEnabled',
   'editTargetSeconds',
   'promptLanguage',
+  'promptGlobal',
   'imageSize',
   'promptStyle',
   'promptGoal',
@@ -3490,6 +3492,30 @@ export default function App() {
   ]);
 
   useEffect(() => {
+    if (!hasLoadedPersistedState || !window.qiuDesktop) {
+      return;
+    }
+
+    const checkConnection = () => {
+      if (document.visibilityState === 'hidden') {
+        return;
+      }
+
+      void refreshConnection({ silent: true });
+    };
+
+    const initialHandle = window.setTimeout(checkConnection, 1500);
+    const intervalHandle = window.setInterval(checkConnection, 30000);
+    window.addEventListener('focus', checkConnection);
+
+    return () => {
+      window.clearTimeout(initialHandle);
+      window.clearInterval(intervalHandle);
+      window.removeEventListener('focus', checkConnection);
+    };
+  }, [hasLoadedPersistedState]);
+
+  useEffect(() => {
     if (!hasLoadedPersistedState) {
       return;
     }
@@ -4022,16 +4048,24 @@ export default function App() {
     }
   }
 
-  async function refreshConnection() {
+  async function refreshConnection(options: { silent?: boolean } = {}) {
     if (!window.qiuDesktop) {
       return;
     }
 
-    setIsRefreshing(true);
+    if (!options.silent) {
+      setIsRefreshing(true);
+    }
     try {
-      setRuntimeState(await window.qiuDesktop.getRuntimeState());
+      const serverConnection = await window.qiuDesktop.checkServerConnection();
+      setRuntimeState((current) => ({
+        ...current,
+        serverConnection
+      }));
     } finally {
-      setIsRefreshing(false);
+      if (!options.silent) {
+        setIsRefreshing(false);
+      }
     }
   }
 
@@ -5916,7 +5950,7 @@ export default function App() {
                   <Button
                     icon={<CloudSyncOutlined />}
                     loading={isRefreshing}
-                    onClick={refreshConnection}
+                    onClick={() => void refreshConnection()}
                   >
                     检查连接
                   </Button>
@@ -6038,7 +6072,7 @@ export default function App() {
             title="Check connection"
             icon={<CloudSyncOutlined />}
             loading={isRefreshing}
-            onClick={refreshConnection}
+            onClick={() => void refreshConnection()}
           />
           <div className="window-control-group">
             <Button
@@ -7226,7 +7260,7 @@ export default function App() {
             </div>
 
             <Space wrap>
-              <Button icon={<CloudSyncOutlined />} loading={isRefreshing} onClick={refreshConnection}>
+              <Button icon={<CloudSyncOutlined />} loading={isRefreshing} onClick={() => void refreshConnection()}>
                 检查连接
               </Button>
               {runtimeState.app.installPath ? (
@@ -9550,6 +9584,11 @@ export default function App() {
       ? resolveOfficialRouteKeyForSemanticModel(
           runtimeState,
           selectedFactoryCode,
+          'qiu-image-editing-default'
+        ) ??
+        resolveOfficialRouteKeyForSemanticModel(
+          runtimeState,
+          selectedFactoryCode,
           'qiu-image-generation-default'
         )
       : undefined;
@@ -10577,55 +10616,6 @@ export default function App() {
                           </>
                         ) : (
                           <>
-                            {isImageFactory ? (
-                              <>
-                                <div className="factory-inline-form-grid compact">
-                                  <Form.Item
-                                    name="platform"
-                                    label="图片比例"
-                                    rules={[{ required: true, message: '请选择图片比例' }]}
-                                  >
-                                    <Select
-                                      size="large"
-                                      options={platformOptions.map((item) => ({
-                                        value: item.key,
-                                        label: item.label
-                                      }))}
-                                    />
-                                  </Form.Item>
-                                  <Form.Item
-                                    name="promptLanguage"
-                                    label="语言"
-                                    rules={[{ required: true, message: '请选择语言' }]}
-                                  >
-                                    <Select size="large" options={ecommerceImageTextLanguageOptions} />
-                                  </Form.Item>
-                                </div>
-                                {selectedFactoryImageSizeOptions.length > 1 ? (
-                                  <Form.Item
-                                    name="imageSize"
-                                    label="图片清晰度"
-                                    rules={[{ required: true, message: '请选择图片清晰度' }]}
-                                  >
-                                    <Select size="large" options={selectedFactoryImageSizeOptions} />
-                                  </Form.Item>
-                                ) : null}
-                              </>
-                            ) : (
-                              <Form.Item
-                                name="platform"
-                                label="目标平台"
-                                rules={[{ required: true, message: '请选择目标平台' }]}
-                              >
-                                <Select
-                                  size="large"
-                                  options={platformOptions.map((item) => ({
-                                    value: item.key,
-                                    label: `${item.label}${item.imageRatio ? ` / ${item.imageRatio}` : ''}`
-                                  }))}
-                                />
-                              </Form.Item>
-                            )}
                             <Form.Item shouldUpdate noStyle>
                               {({ getFieldValue }) => {
                                 const currentPackages = normalizeFactoryPackageDefinitions(
@@ -10661,6 +10651,61 @@ export default function App() {
                                 );
                               }}
                             </Form.Item>
+                            {isImageFactory ? (
+                              <>
+                                <div className="factory-inline-form-grid compact factory-image-basic-grid">
+                                  <Form.Item
+                                    name="platform"
+                                    label="图片比例"
+                                    rules={[{ required: true, message: '请选择图片比例' }]}
+                                  >
+                                    <Select
+                                      size="large"
+                                      options={platformOptions.map((item) => ({
+                                        value: item.key,
+                                        label: item.label
+                                      }))}
+                                    />
+                                  </Form.Item>
+                                  <Form.Item
+                                    name="promptLanguage"
+                                    label="语言"
+                                    rules={[{ required: true, message: '请选择语言' }]}
+                                  >
+                                    <Select size="large" options={ecommerceImageTextLanguageOptions} />
+                                  </Form.Item>
+                                  {selectedFactoryImageSizeOptions.length > 0 ? (
+                                    <Form.Item
+                                      name="imageSize"
+                                      label="图片清晰度"
+                                      rules={[{ required: true, message: '请选择图片清晰度' }]}
+                                    >
+                                      <Select size="large" options={selectedFactoryImageSizeOptions} />
+                                    </Form.Item>
+                                  ) : null}
+                                </div>
+                                <Form.Item name="promptGlobal" label="全局提示词">
+                                  <Input.TextArea
+                                    rows={3}
+                                    placeholder="例如：统一高级感、柔光、浅色背景、干净构图。注意避免和白底图、场景图等产物包提示词冲突。"
+                                  />
+                                </Form.Item>
+                              </>
+                            ) : (
+                              <Form.Item
+                                name="platform"
+                                label="目标平台"
+                                rules={[{ required: true, message: '请选择目标平台' }]}
+                              >
+                                <Select
+                                  size="large"
+                                  options={platformOptions.map((item) => ({
+                                    value: item.key,
+                                    label: `${item.label}${item.imageRatio ? ` / ${item.imageRatio}` : ''}`
+                                  }))}
+                                />
+                              </Form.Item>
+                            )}
                             {isImageFactory ? renderSelectedFactoryPackagePromptEditors('image') : null}
                             {!isImageFactory ? (
                               <>
@@ -13662,7 +13707,12 @@ export default function App() {
             </div>
             <Space wrap>
               <Tag color={connectionTone}>{connectionLabel(runtimeState.serverConnection.state)}</Tag>
-              <Button size="small" icon={<CloudSyncOutlined />} loading={isRefreshing} onClick={refreshConnection}>
+              <Button
+                size="small"
+                icon={<CloudSyncOutlined />}
+                loading={isRefreshing}
+                onClick={() => void refreshConnection()}
+              >
                 检查
               </Button>
             </Space>
@@ -14923,11 +14973,17 @@ export default function App() {
       message.warning(`单批最多处理 ${maxItems} 张商品图，请拆分批次。`);
       return;
     }
-    const imageRouteKey = resolveOfficialRouteKeyForSemanticModel(
-      runtimeState,
-      values.roleCode,
-      'qiu-image-generation-default'
-    );
+    const imageRouteKey =
+      resolveOfficialRouteKeyForSemanticModel(
+        runtimeState,
+        values.roleCode,
+        'qiu-image-editing-default'
+      ) ??
+      resolveOfficialRouteKeyForSemanticModel(
+        runtimeState,
+        values.roleCode,
+        'qiu-image-generation-default'
+      );
     const imageFactoryValues: FactoryRunFormValues = {
       ...values,
       packageDefinitions: normalizeFactoryPackageDefinitions(
@@ -17700,7 +17756,9 @@ function buildAiPointImageSizeOptions(
   overview: DesktopAiPointOverview | null,
   routeKey: string | undefined
 ) {
-  return resolveAiPointImageSizes(overview, routeKey).map((imageSize) => {
+  const imageSizes = resolveAiPointImageSizes(overview, routeKey);
+  const effectiveImageSizes = imageSizes.length > 0 ? imageSizes : ['1K' as const];
+  return effectiveImageSizes.map((imageSize) => {
     const points = resolveAiPointRoutePrice(overview, routeKey, { imageSize });
     return {
       value: imageSize,
@@ -17776,11 +17834,17 @@ function buildAiPointFactoryConsumptionEstimate(input: {
   const availablePoints = input.overview?.wallet.availablePoints;
 
   if (isImageGenerationFactory(input.factory)) {
-    const routeKey = resolveOfficialRouteKeyForSemanticModel(
-      input.state,
-      input.roleCode,
-      'qiu-image-generation-default'
-    );
+    const routeKey =
+      resolveOfficialRouteKeyForSemanticModel(
+        input.state,
+        input.roleCode,
+        'qiu-image-editing-default'
+      ) ??
+      resolveOfficialRouteKeyForSemanticModel(
+        input.state,
+        input.roleCode,
+        'qiu-image-generation-default'
+      );
     const imageSize = resolveAiPointImageSize(input.overview, routeKey, input.values.imageSize);
     const unitPointPrice = resolveAiPointRoutePrice(input.overview, routeKey, { imageSize });
     const itemCount = imageCount * selectedPackageCount;
@@ -19794,7 +19858,10 @@ function buildFactoryTaskInput({
   const selectedPackages = packageOptions.filter((item) => selectedPackageKeys.includes(item.key));
   const imageAttachments = attachments.filter((attachment) => isFactoryImageAttachment(attachment));
   const promptControls = isImageGenerationFactory(factory)
-    ? { language: values.promptLanguage?.trim() || '中文' }
+    ? {
+        language: values.promptLanguage?.trim() || '中文',
+        globalPrompt: values.promptGlobal?.trim() || undefined
+      }
     : buildFactoryPromptControls(values);
   const factoryRequest = {
     applicationType: 'digital_factory',

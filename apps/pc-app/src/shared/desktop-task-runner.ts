@@ -162,6 +162,7 @@ interface FactoryRuntimePlatform {
 
 interface FactoryRuntimePromptControls {
   language?: string;
+  globalPrompt?: string;
   style?: string;
   desiredEffect?: string;
   mustKeep?: string;
@@ -6861,6 +6862,7 @@ function readFactoryRuntimePromptControls(value: unknown): FactoryRuntimePromptC
 
   const promptControls = {
     language: readWorkflowRuntimeString(value.language),
+    globalPrompt: readWorkflowRuntimeString(value.globalPrompt),
     style: readWorkflowRuntimeString(value.style),
     desiredEffect: readWorkflowRuntimeString(value.desiredEffect),
     mustKeep: readWorkflowRuntimeString(value.mustKeep),
@@ -10647,6 +10649,7 @@ function buildFactoryImageGenerationFallbackPrompt(
     platform.imageRatio ? `Required ratio: ${platform.imageRatio}.` : undefined,
     platform.notes ? `Platform notes: ${platform.notes}.` : undefined,
     promptControls?.language ? `Text language: ${promptControls.language}.` : undefined,
+    promptControls?.globalPrompt ? `Global prompt: ${promptControls.globalPrompt}.` : undefined,
     promptControls?.style ? `Image style: ${promptControls.style}.` : undefined,
     promptControls?.desiredEffect ? `Desired effect: ${promptControls.desiredEffect}.` : undefined,
     promptControls?.mustKeep ? `Must preserve: ${promptControls.mustKeep}.` : undefined,

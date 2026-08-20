@@ -2517,6 +2517,8 @@ function buildCrossBorderImageFactoryWorkflowGraph(options: {
           'const selectedPackages = Array.isArray(request.packages) ? request.packages : [];\n' +
           'const platform = request.platform && typeof request.platform === "object" ? request.platform : { key: "ratio_1_1", label: "1:1 方图", imageRatio: "1:1" };\n' +
           'const imageTextLanguage = typeof request.imageTextLanguage === "string" && request.imageTextLanguage.trim() ? request.imageTextLanguage.trim() : "中文";\n' +
+          'const promptControls = request.promptControls && typeof request.promptControls === "object" ? request.promptControls : {};\n' +
+          'const globalPrompt = typeof promptControls.globalPrompt === "string" && promptControls.globalPrompt.trim() ? promptControls.globalPrompt.trim() : "";\n' +
           'const imageRatio = typeof platform.imageRatio === "string" && platform.imageRatio.trim() ? platform.imageRatio.trim() : "1:1";\n' +
           'const factoryName = typeof request.factoryName === "string" && request.factoryName.trim() ? request.factoryName.trim() : "图片";\n' +
           `const imageBrief = ${isGenericImageFactory ? '`生成${imageRatio}比例的${factoryName}视觉素材。`' : '`生成${imageRatio}比例的电商商品图片。`'};\n` +
@@ -2533,7 +2535,8 @@ function buildCrossBorderImageFactoryWorkflowGraph(options: {
           '      imageBrief,\n' +
           '      languageInstruction,\n' +
           '      referenceInstruction,\n' +
-          '      packageItem.description ? String(packageItem.description).trim() : `生成${packageItem.label || packageItem.key}。`\n' +
+          '      packageItem.description ? String(packageItem.description).trim() : `生成${packageItem.label || packageItem.key}。`,\n' +
+          '      globalPrompt ? `全局提示词：${globalPrompt}` : ""\n' +
           '    ].filter(Boolean).join("\\n")\n' +
           '  });\n' +
           '}\n' +

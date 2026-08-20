@@ -3934,6 +3934,11 @@ body,
   align-items: end;
 }
 
+.factory-inline-form-grid.factory-image-basic-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+}
+
 .factory-form-label-row {
   width: 100%;
 }
@@ -6239,6 +6244,7 @@ body,
   .factory-console-grid,
   .factory-console-right,
   .factory-inline-form-grid,
+  .factory-inline-form-grid.factory-image-basic-grid,
   .factory-screening-editor,
   .factory-prompt-control-grid {
     grid-template-columns: 1fr;
@@ -6361,7 +6367,8 @@ body,
   }
 
   .factory-console-grid,
-  .factory-inline-form-grid {
+  .factory-inline-form-grid,
+  .factory-inline-form-grid.factory-image-basic-grid {
     grid-template-columns: 1fr;
   }
 
