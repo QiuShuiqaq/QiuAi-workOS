@@ -3,18 +3,12 @@ import { ApiCreatedResponse, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import { serializeExpiredSessionCookie, serializeSessionCookie } from '../../shared/auth/session-cookie';
+import { readTrustedClientIpAddress } from '../../shared/network/client-ip';
 import { LoginRequestDto } from './dto/login-request.dto';
 import { RegisterRequestDto } from './dto/register-request.dto';
 import { AuthSessionResponseDto, LogoutResponseDto } from './dto/auth-session-response.dto';
 import { AuthService } from './auth.service';
 import { AuthRateLimitService } from './auth-rate-limit.service';
-
-function readClientIpAddress(request: FastifyRequest): string | undefined {
-  const forwardedFor = request.headers['x-forwarded-for'];
-  const forwardedValue = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
-  const firstForwardedIp = forwardedValue?.split(',')[0]?.trim();
-  return firstForwardedIp || request.ip;
-}
 
 @ApiTags('auth')
 @Controller({
@@ -34,8 +28,8 @@ export class AuthController {
     @Res({ passthrough: true }) reply: FastifyReply,
     @Req() request: FastifyRequest
   ): Promise<AuthSessionResponseDto> {
-    const ipAddress = readClientIpAddress(request);
-    this.authRateLimitService.assertLoginAllowed({
+    const ipAddress = readTrustedClientIpAddress(request);
+    await this.authRateLimitService.assertLoginAllowed({
       email: body.email,
       ipAddress
     });
@@ -56,8 +50,8 @@ export class AuthController {
     @Res({ passthrough: true }) reply: FastifyReply,
     @Req() request: FastifyRequest
   ): Promise<AuthSessionResponseDto> {
-    const ipAddress = readClientIpAddress(request);
-    this.authRateLimitService.assertRegisterAllowed({
+    const ipAddress = readTrustedClientIpAddress(request);
+    await this.authRateLimitService.assertRegisterAllowed({
       email: body.email,
       ipAddress
     });

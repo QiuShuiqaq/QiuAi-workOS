@@ -5,6 +5,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { DesktopSyncService } from './desktop-sync.service';
 import { openDesktopReleaseAsset } from '../../shared/desktop-release-assets';
 import { KnowledgeService } from '../knowledge/knowledge.service';
+import { readTrustedClientIpAddress } from '../../shared/network/client-ip';
 import {
   CheckDesktopUpdateQueryDto,
   CheckDesktopUpdateResponseDto
@@ -18,13 +19,6 @@ function readDesktopDeviceToken(request: FastifyRequest): string | undefined {
 
   const header = request.headers['x-qiuai-device-token'];
   return Array.isArray(header) ? header[0] : header;
-}
-
-function readClientIpAddress(request: FastifyRequest): string | undefined {
-  const forwardedFor = request.headers['x-forwarded-for'];
-  const forwardedValue = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
-  const firstForwardedIp = forwardedValue?.split(',')[0]?.trim();
-  return firstForwardedIp || request.ip;
 }
 
 function readUserAgent(request: FastifyRequest): string | undefined {
@@ -173,7 +167,7 @@ export class DesktopAccountAuthController {
   @Post('login')
   login(@Body() body: unknown, @Req() request: FastifyRequest) {
     return this.desktopSyncService.loginDesktopAccount(body, {
-      ipAddress: readClientIpAddress(request),
+      ipAddress: readTrustedClientIpAddress(request),
       userAgent: readUserAgent(request)
     });
   }
@@ -181,7 +175,7 @@ export class DesktopAccountAuthController {
   @Post('register')
   register(@Body() body: unknown, @Req() request: FastifyRequest) {
     return this.desktopSyncService.registerDesktopAccount(body, {
-      ipAddress: readClientIpAddress(request),
+      ipAddress: readTrustedClientIpAddress(request),
       userAgent: readUserAgent(request)
     });
   }
@@ -204,7 +198,7 @@ export class DesktopAgreementAcceptanceController {
   acceptAgreement(@Body() body: unknown, @Req() request: FastifyRequest) {
     return this.desktopSyncService.acceptDesktopAgreement(body, {
       deviceToken: readDesktopDeviceToken(request),
-      ipAddress: readClientIpAddress(request),
+      ipAddress: readTrustedClientIpAddress(request),
       userAgent: readUserAgent(request)
     });
   }
