@@ -5855,9 +5855,25 @@ const aiVideoProductionTask = await runDesktopTask({
         },
         materials: {
           introPath: 'C:\\QiuAI\\assets\\intro.mp4',
-          coverPath: 'C:\\QiuAI\\assets\\cover.png',
-          watermarkPath: 'C:\\QiuAI\\assets\\watermark.png'
+          outroPath: 'C:\\QiuAI\\assets\\outro.mp4',
+          transitionPath: 'C:\\QiuAI\\assets\\transition.mp4'
         },
+        attachments: [
+          {
+            id: 'source-video-1',
+            name: 'source-recording-1.mp4',
+            localPath: 'C:\\QiuAI\\factory\\source-recording-1.mp4',
+            order: 1,
+            kind: 'source_video'
+          },
+          {
+            id: 'source-video-2',
+            name: 'source-recording-2.mp4',
+            localPath: 'C:\\QiuAI\\factory\\source-recording-2.mp4',
+            order: 2,
+            kind: 'source_video'
+          }
+        ],
         instruction: 'Keep the strongest AI result segment.'
       }
     }),
@@ -5868,7 +5884,13 @@ const aiVideoProductionTask = await runDesktopTask({
       modelProfileIds: ['qiu-general-default', 'qiu-asr-default', 'qiu-audio-generation-default'],
       toolIds: ['video-processing', 'local-filesystem'],
       knowledgeBindingIds: [],
-      attachmentPaths: ['C:\\QiuAI\\factory\\source-recording.mp4']
+      attachmentPaths: [
+        'C:\\QiuAI\\factory\\source-recording-1.mp4',
+        'C:\\QiuAI\\factory\\source-recording-2.mp4',
+        'C:\\QiuAI\\assets\\intro.mp4',
+        'C:\\QiuAI\\assets\\outro.mp4',
+        'C:\\QiuAI\\assets\\transition.mp4'
+      ]
     }
   }),
   rolePackage: aiVideoProductionRolePackage,
@@ -5894,7 +5916,7 @@ const aiVideoProductionTask = await runDesktopTask({
     if (request.taskKind === 'audio_transcription') {
       aiVideoProductionAsrCalls += 1;
       assert.equal(request.profile.id, 'qiu-asr-default');
-      assert.equal(request.audioTranscription?.audioPath, 'C:\\QiuAI\\workspace\\audio\\source-recording.mp3');
+          assert.match(request.audioTranscription?.audioPath ?? '', /audio/);
       assert.match(request.audioTranscription?.prompt ?? '', /软件录屏/);
       return {
         provider: request.profile.providerName,
@@ -5945,8 +5967,8 @@ const aiVideoProductionTask = await runDesktopTask({
           { start: 39, end: 58, reason: 'Shows the AI worker result.' }
         ],
         cutPlan: [
-          { start: 13, end: 38, label: 'Setup', reason: 'Context for the workflow.' },
-          { start: 39, end: 58, label: 'Result', reason: 'Shows the strongest result.' }
+          { sourceIndex: 1, start: 13, end: 38, label: 'Setup', reason: 'Context for the workflow.' },
+          { sourceIndex: 2, start: 4, end: 23, label: 'Result', reason: 'Shows the strongest result.' }
         ],
         narrationScript: 'This clip shows the AI worker result and why it saves time.'
       }),
@@ -5957,7 +5979,7 @@ const aiVideoProductionTask = await runDesktopTask({
   desktopToolInvoker: async (request) => {
     if (request.action === 'video.probe') {
       assert.equal(request.toolId, 'video-processing');
-      assert.equal(request.input.videoPath, 'C:\\QiuAI\\factory\\source-recording.mp4');
+      assert.match(String(request.input.videoPath), /source-recording-[12]\.mp4/);
       return {
         toolId: request.toolId,
         action: request.action,
@@ -5965,7 +5987,7 @@ const aiVideoProductionTask = await runDesktopTask({
         output: {
           width: 1920,
           height: 1080,
-          durationSeconds: 90,
+          durationSeconds: 45,
           hasVideo: true,
           hasAudio: true,
           audioStreamCount: 1
@@ -5975,14 +5997,14 @@ const aiVideoProductionTask = await runDesktopTask({
 
     if (request.action === 'video.extract_audio') {
       assert.equal(request.toolId, 'video-processing');
-      assert.equal(request.input.videoPath, 'C:\\QiuAI\\factory\\source-recording.mp4');
+      assert.match(String(request.input.videoPath), /source-recording-[12]\.mp4/);
       assert.equal(request.input.audioFormat, 'mp3');
       return {
         toolId: request.toolId,
         action: request.action,
         ok: true,
         output: {
-          localPath: 'C:\\QiuAI\\workspace\\audio\\source-recording.mp3'
+          localPath: `C:\\QiuAI\\workspace\\audio\\${String(request.input.videoPath).includes('-2') ? 'source-recording-2' : 'source-recording-1'}.mp3`
         }
       };
     }
@@ -6006,16 +6028,20 @@ const aiVideoProductionTask = await runDesktopTask({
     aiVideoProductionComposeCalls += 1;
     assert.equal(request.action, 'video.compose_clips');
     assert.equal(request.toolId, 'video-processing');
-    assert.equal(request.input.videoPath, 'C:\\QiuAI\\factory\\source-recording.mp4');
+    assert.deepEqual(request.input.videoPaths, [
+      'C:\\QiuAI\\factory\\source-recording-1.mp4',
+      'C:\\QiuAI\\factory\\source-recording-2.mp4'
+    ]);
     assert.equal(request.input.voiceoverPath, 'C:\\QiuAI\\workspace\\audio\\voiceover.mp3');
     assert.equal(request.input.introPath, 'C:\\QiuAI\\assets\\intro.mp4');
-    assert.equal(request.input.coverPath, 'C:\\QiuAI\\assets\\cover.png');
-    assert.equal(request.input.watermarkPath, 'C:\\QiuAI\\assets\\watermark.png');
+    assert.equal(request.input.outroPath, 'C:\\QiuAI\\assets\\outro.mp4');
+    assert.equal(request.input.transitionPath, 'C:\\QiuAI\\assets\\transition.mp4');
+    assert.equal(request.input.preserveOriginalAudio, true);
     assert.equal(request.input.outputRatio, '9:16');
     assert.equal(request.input.outputResolution, '720p');
     assert.deepEqual(request.input.cutPlan, [
-      { start: 13, end: 38, label: 'Setup', reason: 'Context for the workflow.' },
-      { start: 39, end: 58, label: 'Result', reason: 'Shows the strongest result.' }
+      { sourceIndex: 1, start: 13, end: 38, label: 'Setup', reason: 'Context for the workflow.' },
+      { sourceIndex: 2, start: 4, end: 23, label: 'Result', reason: 'Shows the strongest result.' }
     ]);
     return {
       toolId: request.toolId,
@@ -6034,7 +6060,7 @@ assert.equal(
   'completed',
   JSON.stringify(aiVideoProductionTask.task.executionLogs.slice(-8), null, 2)
 );
-assert.equal(aiVideoProductionAsrCalls, 1);
+assert.equal(aiVideoProductionAsrCalls, 2);
 assert.equal(aiVideoProductionAnalysisCalls, 1);
 assert.equal(aiVideoProductionVoiceCalls, 1);
 assert.equal(aiVideoProductionDownloadCalls, 1);

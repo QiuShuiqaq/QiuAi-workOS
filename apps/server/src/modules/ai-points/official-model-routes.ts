@@ -63,7 +63,7 @@ export const officialModelRouteSeeds: OfficialModelRouteSeed[] = [
     displayName: '官方通道 · 图片线路一',
     capability: 'IMAGE',
     status: 'ACTIVE',
-    pointPrice: 15,
+    pointPrice: 12,
     providerId: 'grsai',
     providerName: 'GRSAI',
     modelName: 'gpt-image-2',
@@ -78,7 +78,7 @@ export const officialModelRouteSeeds: OfficialModelRouteSeed[] = [
       },
       pricing: {
         imageSizePoints: {
-          '1K': 15
+          '1K': 12
         }
       }
     },
@@ -89,7 +89,7 @@ export const officialModelRouteSeeds: OfficialModelRouteSeed[] = [
     displayName: '官方通道 · 图片线路二',
     capability: 'IMAGE',
     status: 'ACTIVE',
-    pointPrice: 30,
+    pointPrice: 20,
     providerId: 'grsai',
     providerName: 'GRSAI',
     modelName: 'gpt-image-2-vip',
@@ -104,9 +104,9 @@ export const officialModelRouteSeeds: OfficialModelRouteSeed[] = [
       },
       pricing: {
         imageSizePoints: {
-          '1K': 30,
-          '2K': 45,
-          '4K': 65
+          '1K': 20,
+          '2K': 30,
+          '4K': 40
         }
       }
     },
@@ -117,7 +117,7 @@ export const officialModelRouteSeeds: OfficialModelRouteSeed[] = [
     displayName: '官方通道 · 图片线路三',
     capability: 'IMAGE',
     status: 'ACTIVE',
-    pointPrice: 20,
+    pointPrice: 12,
     providerId: 'grsai',
     providerName: 'GRSAI',
     modelName: 'nano-banana-2',
@@ -132,9 +132,9 @@ export const officialModelRouteSeeds: OfficialModelRouteSeed[] = [
       },
       pricing: {
         imageSizePoints: {
-          '1K': 20,
-          '2K': 30,
-          '4K': 45
+          '1K': 12,
+          '2K': 18,
+          '4K': 24
         }
       }
     },

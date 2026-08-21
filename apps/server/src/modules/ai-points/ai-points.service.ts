@@ -2243,21 +2243,21 @@ const legacyOfficialRoutePricing: Record<
     basePointPrice: 3
   },
   'official-image-1': {
-    basePointPrice: 15,
-    imageSizePoints: { '1K': 15 },
+    basePointPrice: 12,
+    imageSizePoints: { '1K': 12 },
     supportedImageSizes: ['1K'],
     defaultImageSize: '1K'
   },
   'official-image-2': {
-    basePointPrice: 30,
-    imageSizePoints: { '1K': 30, '2K': 45, '4K': 65 },
+    basePointPrice: 20,
+    imageSizePoints: { '1K': 20, '2K': 30, '4K': 40 },
     supportedImageSizes: ['1K', '2K', '4K'],
     defaultImageSize: '1K',
     sendImageSizeParameter: true
   },
   'official-image-3': {
-    basePointPrice: 20,
-    imageSizePoints: { '1K': 20, '2K': 30, '4K': 45 },
+    basePointPrice: 12,
+    imageSizePoints: { '1K': 12, '2K': 18, '4K': 24 },
     supportedImageSizes: ['1K', '2K', '4K'],
     defaultImageSize: '1K',
     sendImageSizeParameter: true

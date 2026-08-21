@@ -286,6 +286,23 @@ test('server role template catalog only exposes the approved production set', ()
     }).modelAssets.map((asset) => asset.modelProfileId),
     ['qiu-asr-default', 'qiu-audio-generation-default', 'qiu-general-default']
   );
+  const aiVideoProductionManifest = readRecord(aiVideoProductionTemplate.dependencyManifestFactory);
+  const reusableAssets = Array.isArray(aiVideoProductionManifest?.reusableAssets)
+    ? aiVideoProductionManifest.reusableAssets
+    : [];
+  assert.deepEqual(
+    reusableAssets.map((asset) => readRecord(asset)?.key),
+    ['intro', 'outro', 'transition']
+  );
+  for (const asset of reusableAssets) {
+    const record = readRecord(asset);
+    const mimeTypes = record?.mimeTypes;
+    assert.deepEqual(record?.extensions, ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v']);
+    assert.ok(
+      Array.isArray(mimeTypes) &&
+      mimeTypes.every((mimeType) => String(mimeType).startsWith('video/'))
+    );
+  }
 
   const factoryManifestKinds = new Set([
     'cross_border_product_image_factory',
@@ -382,7 +399,7 @@ test('server role template catalog only exposes the approved production set', ()
       const expectedMaxItems = template.templateId === 'factory_academic_project_demo_v1'
         ? 5
         : template.templateId === 'factory_ai_video_production_v1'
-          ? 1
+          ? 30
           : 50;
       assert.equal(
         batch?.maxItems,

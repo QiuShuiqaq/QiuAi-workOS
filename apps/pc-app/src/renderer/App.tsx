@@ -402,11 +402,10 @@ interface FactoryRunFormValues {
   videoRatio?: string;
   outputResolution?: string;
   voicePresetId?: string;
-  sourceVideoPath?: string;
+  sourceVideoPaths?: string[];
   introAssetPath?: string;
   outroAssetPath?: string;
-  coverAssetPath?: string;
-  watermarkAssetPath?: string;
+  transitionAssetPath?: string;
   targetAudience?: string;
   sourceUrls?: string;
   brandTone?: string;
@@ -483,10 +482,13 @@ interface ComposerAttachment {
   size: number;
   type?: string;
   localPath?: string;
+  assetKind?: AiVideoAssetKind;
   progress: number;
   status: 'uploading' | 'ready';
   stagedAt: string;
 }
+
+type AiVideoAssetKind = 'intro' | 'outro' | 'transition';
 
 interface WorkflowRuntimeLogVariable {
   name: string;
@@ -613,6 +615,7 @@ const factoryPackagePresetStorageKey = 'qiuai.pc.factory.package.presets.v1';
 const factoryPackageSelectionStorageKey = 'qiuai.pc.factory.package.selections.v1';
 const factoryRunParameterStorageKey = 'qiuai.pc.factory.run.parameters.v1';
 const factoryScreeningProfileStorageKey = 'qiuai.pc.factory.screening.profiles.v1';
+const factoryVideoAssetStorageKey = 'qiuai.pc.factory.video.assets.v1';
 const documentAssistantPreferencesStorageKey = 'qiuai.pc.document-assistant.preferences.v1';
 const documentAssistantScenarioPresetsStorageKey = 'qiuai.pc.document-assistant.scenario-presets.v1';
 const documentAssistantRoleCode = 'ai-document-assistant';
@@ -1041,13 +1044,13 @@ const aiPointRechargeOptions: AiPointRechargeOption[] = [
 ];
 
 const aiPointProductExamples = [
-  { label: '图片线路一（1K）', points: 15, unit: '张' },
-  { label: '图片线路二（1K）', points: 30, unit: '张' },
-  { label: '图片线路二（2K）', points: 45, unit: '张' },
-  { label: '图片线路二（4K）', points: 65, unit: '张' },
-  { label: '图片线路三（1K）', points: 20, unit: '张' },
-  { label: '图片线路三（2K）', points: 30, unit: '张' },
-  { label: '图片线路三（4K）', points: 45, unit: '张' },
+  { label: '图片线路一（1K）', points: 12, unit: '张' },
+  { label: '图片线路二（1K）', points: 20, unit: '张' },
+  { label: '图片线路二（2K）', points: 30, unit: '张' },
+  { label: '图片线路二（4K）', points: 40, unit: '张' },
+  { label: '图片线路三（1K）', points: 12, unit: '张' },
+  { label: '图片线路三（2K）', points: 18, unit: '张' },
+  { label: '图片线路三（4K）', points: 24, unit: '张' },
   { label: '图片线路四（1K）', points: 10, unit: '张' },
   { label: '视频线路一（6 秒）', points: 200, unit: '个' },
   { label: '视频线路一（10 秒）', points: 280, unit: '个' },
@@ -2447,6 +2450,82 @@ function normalizeFactoryPackageDefinitions(
   return normalized;
 }
 
+function normalizeFactoryVideoAssetAttachments(value: unknown): ComposerAttachment[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item): ComposerAttachment[] => {
+    if (!isPlainObject(item)) {
+      return [];
+    }
+
+    const localPath = readString(item.localPath)?.trim() ?? '';
+    const name = readString(item.name)?.trim() ?? '';
+    const assetKind = readString(item.assetKind)?.trim() ?? '';
+    if (
+      !localPath ||
+      !name ||
+      !(['intro', 'outro', 'transition'] as const).includes(assetKind as AiVideoAssetKind)
+    ) {
+      return [];
+    }
+
+    return [{
+      id: readString(item.id) ?? `video-asset-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name,
+      size: typeof item.size === 'number' && Number.isFinite(item.size) ? item.size : 0,
+      type: readString(item.type) || undefined,
+      localPath,
+      assetKind: assetKind as AiVideoAssetKind,
+      progress: 100,
+      status: 'ready',
+      stagedAt: readString(item.stagedAt) ?? new Date().toISOString()
+    }];
+  }).slice(0, 60);
+}
+
+function readFactoryVideoAssetAttachments(roleCode: string): ComposerAttachment[] {
+  if (typeof window === 'undefined' || !roleCode) {
+    return [];
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(factoryVideoAssetStorageKey);
+    const parsed = rawValue ? JSON.parse(rawValue) : {};
+    return isPlainObject(parsed)
+      ? normalizeFactoryVideoAssetAttachments(parsed[roleCode])
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeFactoryVideoAssetAttachments(roleCode: string, attachments: ComposerAttachment[]) {
+  if (typeof window === 'undefined' || !roleCode) {
+    return;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(factoryVideoAssetStorageKey);
+    const parsed = rawValue ? JSON.parse(rawValue) : {};
+    const current = isPlainObject(parsed) ? parsed : {};
+    window.localStorage.setItem(
+      factoryVideoAssetStorageKey,
+      JSON.stringify({
+        ...current,
+        [roleCode]: normalizeFactoryVideoAssetAttachments(attachments)
+      })
+    );
+  } catch {
+    // Reusable video assets are optional; the current run remains usable if storage is unavailable.
+  }
+}
+
+function aiVideoAssetKindLabel(kind: AiVideoAssetKind): string {
+  return kind === 'intro' ? '片头' : kind === 'outro' ? '片尾' : '过场';
+}
+
 function normalizeFactoryPackageKey(value: string, fallback: string) {
   const normalized = value
     .trim()
@@ -2645,6 +2724,9 @@ const factoryRunRememberedFieldKeys: Array<keyof FactoryRunFormValues> = [
   'videoRatio',
   'outputResolution',
   'voicePresetId',
+  'introAssetPath',
+  'outroAssetPath',
+  'transitionAssetPath',
   'targetAudience',
   'sourceUrls',
   'brandTone',
@@ -3316,6 +3398,7 @@ export default function App() {
   const chatMessageListRef = useRef<HTMLDivElement | null>(null);
   const composerFileInputRef = useRef<HTMLInputElement | null>(null);
   const factoryFileInputRef = useRef<HTMLInputElement | null>(null);
+  const factoryVideoAssetInputRef = useRef<HTMLInputElement | null>(null);
   const [taskForm] = Form.useForm<TaskFormValues>();
   const [factoryRunForm] = Form.useForm<FactoryRunFormValues>();
   const [academicSectionEditorForm] = Form.useForm<AcademicSectionEditorFormValues>();
@@ -3389,7 +3472,11 @@ export default function App() {
   const [pendingUninstallRoleCode, setPendingUninstallRoleCode] = useState('');
   const [selectedFactoryRoleCode, setSelectedFactoryRoleCode] = useState('');
   const [factoryAttachments, setFactoryAttachments] = useState<ComposerAttachment[]>([]);
+  const [factoryVideoAssetAttachments, setFactoryVideoAssetAttachments] = useState<ComposerAttachment[]>([]);
+  const [pendingFactoryVideoAssetKind, setPendingFactoryVideoAssetKind] =
+    useState<AiVideoAssetKind>('transition');
   const [isFactoryDragOver, setIsFactoryDragOver] = useState(false);
+  const [isFactoryVideoAssetDragOver, setIsFactoryVideoAssetDragOver] = useState(false);
   const [academicDemoImportingSection, setAcademicDemoImportingSection] = useState('');
   const [academicSectionEditorOpen, setAcademicSectionEditorOpen] = useState(false);
   const [academicSectionEditorType, setAcademicSectionEditorType] =
@@ -3881,6 +3968,7 @@ export default function App() {
       flushFactoryRunParameterMemory();
       factoryRunForm.resetFields();
       setFactoryAttachments([]);
+      setFactoryVideoAssetAttachments([]);
       return;
     }
 
@@ -3889,6 +3977,7 @@ export default function App() {
     if (defaultValues) {
       factoryRunForm.setFieldsValue(applyFactoryRunParameterMemory(selectedFactoryRoleCode, defaultValues));
       setFactoryAttachments([]);
+      setFactoryVideoAssetAttachments(readFactoryVideoAssetAttachments(selectedFactoryRoleCode));
     }
   }, [factoryRunForm, selectedFactoryRoleCode]);
 
@@ -4736,20 +4825,56 @@ export default function App() {
       ? readFactoryManifestForRoleCode(selectedFactoryRoleCode)
       : {};
     const maxItems = readFactoryMaxItems(currentFactory);
+    const sourceFiles = isAiVideoProductionFactory(currentFactory)
+      ? files.filter((file) => isVideoFileCandidate(file))
+      : files;
+    if (isAiVideoProductionFactory(currentFactory) && sourceFiles.length < files.length) {
+      message.warning('AI制作视频工厂的本次输入只支持视频格式文件。');
+    }
+    if (sourceFiles.length === 0) {
+      return;
+    }
+
     const remainingSlots = Math.max(0, maxItems - factoryAttachments.length);
     if (remainingSlots === 0) {
       message.warning(`当前数字工厂最多添加 ${maxItems} 个文件。`);
       return;
     }
 
-    const acceptedFiles = files.slice(0, remainingSlots);
-    if (acceptedFiles.length < files.length) {
+    const acceptedFiles = sourceFiles.slice(0, remainingSlots);
+    if (acceptedFiles.length < sourceFiles.length) {
       message.warning(`当前数字工厂最多添加 ${maxItems} 个文件，已忽略超出部分。`);
     }
 
     const attachments = buildComposerAttachments(acceptedFiles);
     setFactoryAttachments((current) => [...current, ...attachments]);
     animateAttachmentReadiness(setFactoryAttachments, attachments);
+  }
+
+  function stageFactoryVideoAssetFiles(fileList: FileList | File[]) {
+    const files = Array.from(fileList).filter((file) => file.size >= 0);
+    if (files.length === 0) {
+      return;
+    }
+
+    const acceptedFiles = files.filter((file) => isVideoFileCandidate(file));
+    if (acceptedFiles.length < files.length) {
+      message.warning('片头、片尾和过场动画只支持视频格式文件。');
+    }
+    if (acceptedFiles.length === 0) {
+      return;
+    }
+
+    const attachments = buildComposerAttachments(acceptedFiles).map((attachment) => ({
+      ...attachment,
+      assetKind: pendingFactoryVideoAssetKind
+    }));
+    setFactoryVideoAssetAttachments((current) => {
+      const next = [...current, ...attachments];
+      writeFactoryVideoAssetAttachments(selectedFactoryRoleCode, next);
+      return next;
+    });
+    animateAttachmentReadiness(setFactoryVideoAssetAttachments, attachments);
   }
 
   async function importAcademicDemoSectionDraft(
@@ -4870,6 +4995,22 @@ export default function App() {
     setFactoryAttachments((current) => current.filter((attachment) => attachment.id !== attachmentId));
   }
 
+  function clearAllFactoryVideoAssets() {
+    const values = factoryRunForm.getFieldsValue(true) as FactoryRunFormValues;
+    const clearedValues: Partial<FactoryRunFormValues> = {
+      introAssetPath: undefined,
+      outroAssetPath: undefined,
+      transitionAssetPath: undefined
+    };
+    factoryRunForm.setFieldsValue(clearedValues);
+    scheduleFactoryRunParameterMemory({
+      ...values,
+      ...clearedValues
+    });
+    setFactoryVideoAssetAttachments([]);
+    writeFactoryVideoAssetAttachments(selectedFactoryRoleCode, []);
+  }
+
   function handleComposerDragOver(event: DragEvent<HTMLFormElement>) {
     if (!hasDraggedFiles(event.dataTransfer)) {
       return;
@@ -4915,6 +5056,14 @@ export default function App() {
     event.target.value = '';
   }
 
+  function handleFactoryVideoAssetInputChange(event: ChangeEvent<HTMLInputElement>) {
+    if (event.target.files) {
+      stageFactoryVideoAssetFiles(event.target.files);
+    }
+
+    event.target.value = '';
+  }
+
   function handleFactoryDragOver(event: DragEvent<HTMLDivElement>) {
     if (!hasDraggedFiles(event.dataTransfer)) {
       return;
@@ -4942,6 +5091,35 @@ export default function App() {
     event.preventDefault();
     setIsFactoryDragOver(false);
     stageFactoryFiles(event.dataTransfer.files);
+  }
+
+  function handleFactoryVideoAssetDragOver(event: DragEvent<HTMLDivElement>) {
+    if (!hasDraggedFiles(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setIsFactoryVideoAssetDragOver(true);
+  }
+
+  function handleFactoryVideoAssetDragLeave(event: DragEvent<HTMLDivElement>) {
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
+
+    setIsFactoryVideoAssetDragOver(false);
+  }
+
+  function handleFactoryVideoAssetDrop(event: DragEvent<HTMLDivElement>) {
+    if (!hasDraggedFiles(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    setIsFactoryVideoAssetDragOver(false);
+    stageFactoryVideoAssetFiles(event.dataTransfer.files);
   }
 
   function handleWindowControl(action: DesktopWindowControlAction) {
@@ -9603,7 +9781,7 @@ export default function App() {
     const acceptedFactoryFileTypes = isMedicalVideoFactory
       ? '.mp4,.mov,.mkv,.avi,.webm,.m4v'
       : isAiVideoProductionFactoryType
-        ? '.mp4,.mov,.mkv,.avi,.webm,.m4v,.png'
+        ? '.mp4,.mov,.mkv,.avi,.webm,.m4v'
       : isAcademicDemoFactoryType
         ? '.docx,.pdf,.xlsx,.csv'
       : isOperationFactory
@@ -9614,24 +9792,43 @@ export default function App() {
     const validFactoryAttachments = isMedicalVideoFactory
       ? factoryAttachments.filter((attachment) => isFactoryVideoAttachment(attachment))
       : isAiVideoProductionFactoryType
-        ? factoryAttachments.filter((attachment) => isAiVideoProductionAttachment(attachment))
+        ? factoryAttachments.filter((attachment) => isFactoryVideoAttachment(attachment))
       : isAcademicDemoFactoryType
         ? factoryAttachments.filter((attachment) => isFactoryAcademicDemoAttachment(attachment))
       : isOperationFactory
         ? factoryAttachments.filter((attachment) => isFactoryOperationAttachment(attachment))
         : factoryAttachments.filter((attachment) => isFactoryImageAttachment(attachment));
     const invalidFactoryAttachmentCount = factoryAttachments.length - validFactoryAttachments.length;
-    const aiVideoSourceVideoAttachments = factoryAttachments.filter((attachment) => isFactoryVideoAttachment(attachment));
-    const aiVideoPngAttachments = factoryAttachments.filter((attachment) => isFactoryPngAttachment(attachment));
-    const aiVideoSourceVideoOptions = buildFactoryAttachmentSelectOptions(aiVideoSourceVideoAttachments, '视频');
-    const aiVideoPngAssetOptions = buildFactoryAttachmentSelectOptions(aiVideoPngAttachments, '图片');
+    const aiVideoAssetVideoAttachments = factoryVideoAssetAttachments.filter((attachment) => isFactoryVideoAttachment(attachment));
+    const aiVideoIntroOptions = buildFactoryAttachmentSelectOptions(
+      aiVideoAssetVideoAttachments.filter((attachment) => attachment.assetKind === 'intro'),
+      '片头'
+    );
+    const aiVideoOutroOptions = buildFactoryAttachmentSelectOptions(
+      aiVideoAssetVideoAttachments.filter((attachment) => attachment.assetKind === 'outro'),
+      '片尾'
+    );
+    const aiVideoTransitionOptions = buildFactoryAttachmentSelectOptions(
+      aiVideoAssetVideoAttachments.filter((attachment) => attachment.assetKind === 'transition'),
+      '过场'
+    );
+    const aiVideoAssetGroups = (['intro', 'outro', 'transition'] as const).map((kind) => ({
+      kind,
+      label: aiVideoAssetKindLabel(kind),
+      attachments: aiVideoAssetVideoAttachments.filter((attachment) => attachment.assetKind === kind)
+    }));
+    const factoryInputSummaryLimit = isAiVideoProductionFactoryType ? 2 : 3;
+    const factoryInputSummaryNames = factoryAttachments
+      .slice(0, factoryInputSummaryLimit)
+      .map((attachment) => attachment.name)
+      .join('、');
+    const factoryInputSummaryOverflow = Math.max(0, factoryAttachments.length - factoryInputSummaryLimit);
     const latestFactoryLogs = focusedFactoryTask ? selectFactoryVisibleLogs(focusedFactoryTask) : [];
     const focusedFactoryOutputs =
       focusedFactoryTask?.factoryOutputs?.filter((item) => item.status !== 'excluded') ?? [];
     const focusedFactoryCostCents =
       focusedFactoryTask?.costCents ??
       focusedFactoryTask?.costRecords.reduce((total, record) => total + record.costCents, 0);
-    const focusedFactoryInputFiles = readFactoryTaskInputFiles(focusedFactoryTask);
     const focusedFactoryImagePreview = focusedFactoryTask
       ? findFactoryImageBatchPreview(focusedFactoryTask)
       : undefined;
@@ -9654,7 +9851,7 @@ export default function App() {
     const factoryInputHelp = isMedicalVideoFactory
       ? `上传待质检视频，单批最多 ${maxItems} 个。`
       : isAiVideoProductionFactoryType
-        ? '上传原始视频和可选素材，一次处理 1 个原始视频。'
+        ? '上传本次任务要拼接的视频片段；片头、片尾和过场动画请放到下方的视频资产区。'
         : isEcommerceVideoFactory
           ? `上传参考图，单批最多 ${maxItems} 张。`
           : isAcademicDemoFactoryType
@@ -9992,145 +10189,136 @@ export default function App() {
                         <Tag color="blue">{validFactoryAttachments.length}/{maxItems}</Tag>
                       </Flex>
 
-                      <button
-                        type="button"
-                        className="factory-upload-dropzone"
-                        onClick={() => factoryFileInputRef.current?.click()}
-                      >
-                        <FileAddOutlined />
-                        <span>
-                            {isMedicalVideoFactory
-                              ? '添加视频或拖拽到这里'
-                              : isAcademicDemoFactoryType
-                                ? '添加项目资料或拖拽到这里'
-                            : isOperationFactory
-                              ? '添加资料/图片/表格或拖拽到这里'
-                              : isAiVideoProductionFactoryType
-                                ? '添加视频/PNG素材或拖拽到这里'
-                              : isEcommerceVideoFactory || isImageFactory
-                                ? '添加图片或拖拽到这里'
-                                : '添加图片/表格或拖拽到这里'}
-                        </span>
-                        <small>
-                            {isMedicalVideoFactory
-                              ? 'mp4、mov、mkv、avi、webm、m4v'
-                              : isAcademicDemoFactoryType
-                                ? 'docx、pdf、xlsx、csv'
-                            : isOperationFactory
-                              ? 'pdf、docx、pptx、图片、xlsx、csv、txt'
-                              : isAiVideoProductionFactoryType
-                                ? 'mp4、mov、mkv、avi、webm、m4v、png'
-                              : isEcommerceVideoFactory || isImageFactory
-                                ? 'png、jpg、jpeg、webp'
-                                : 'png、jpg、webp、xlsx、csv'}
-                        </small>
-                      </button>
-                      <input
-                        ref={factoryFileInputRef}
-                        type="file"
-                        multiple
-                        accept={acceptedFactoryFileTypes}
-                        hidden
-                        onChange={handleFactoryFileInputChange}
-                      />
+                      <div className={`factory-input-content ${isAiVideoProductionFactoryType ? 'video' : ''}`}>
+                        <div className="factory-input-primary">
+                          <button
+                            type="button"
+                            className="factory-upload-dropzone"
+                            onClick={() => factoryFileInputRef.current?.click()}
+                          >
+                            <FileAddOutlined />
+                            <span>
+                              {isMedicalVideoFactory
+                                ? '添加视频或拖拽到这里'
+                                : isAcademicDemoFactoryType
+                                  ? '添加项目资料或拖拽到这里'
+                                  : isOperationFactory
+                                    ? '添加资料/图片/表格或拖拽到这里'
+                                    : isAiVideoProductionFactoryType
+                                      ? '添加分段视频或拖拽到这里'
+                                      : isEcommerceVideoFactory || isImageFactory
+                                        ? '添加图片或拖拽到这里'
+                                        : '添加图片/表格或拖拽到这里'}
+                            </span>
+                            <small>
+                              {isMedicalVideoFactory
+                                ? 'mp4、mov、mkv、avi、webm、m4v'
+                                : isAcademicDemoFactoryType
+                                  ? 'docx、pdf、xlsx、csv'
+                                  : isOperationFactory
+                                    ? 'pdf、docx、pptx、图片、xlsx、csv、txt'
+                                    : isAiVideoProductionFactoryType
+                                      ? 'mp4、mov、mkv、avi、webm、m4v'
+                                      : isEcommerceVideoFactory || isImageFactory
+                                        ? 'png、jpg、jpeg、webp'
+                                        : 'png、jpg、webp、xlsx、csv'}
+                            </small>
+                          </button>
+                          <input
+                            ref={factoryFileInputRef}
+                            type="file"
+                            multiple
+                            accept={acceptedFactoryFileTypes}
+                            hidden
+                            onChange={handleFactoryFileInputChange}
+                          />
 
-                      {invalidFactoryAttachmentCount > 0 ? (
-                        <Typography.Text type="warning">
-                          已忽略 {invalidFactoryAttachmentCount} 个不符合当前工厂类型的文件。
-                        </Typography.Text>
-                      ) : null}
+                          {invalidFactoryAttachmentCount > 0 ? (
+                            <Typography.Text type="warning">
+                              已忽略 {invalidFactoryAttachmentCount} 个不符合当前工厂类型的文件。
+                            </Typography.Text>
+                          ) : null}
 
-                      {factoryAttachments.length > 0 ? (
-                        <div className="factory-attachment-list compact">
-                          {factoryAttachments.map((attachment) => {
-                            const valid = isMedicalVideoFactory
-                              ? isFactoryVideoAttachment(attachment)
-                              : isAcademicDemoFactoryType
-                                ? isFactoryAcademicDemoAttachment(attachment)
-                              : isAiVideoProductionFactoryType
-                                ? isAiVideoProductionAttachment(attachment)
-                              : isOperationFactory
-                                ? isFactoryOperationAttachment(attachment)
-                              : isFactoryImageAttachment(attachment);
-                            return (
-                              <div key={attachment.id} className={valid ? 'factory-attachment-item' : 'factory-attachment-item invalid'}>
-                                <Space size={8}>
-                                  {isFactoryVideoAttachment(attachment) ? (
-                                    <VideoCameraOutlined />
-                                  ) : isFactoryImageAttachment(attachment) ? (
-                                    <FileImageOutlined />
-                                  ) : isFactoryTableAttachment(attachment) ? (
-                                    <FileExcelOutlined />
-                                  ) : attachment.name.toLowerCase().endsWith('.pdf') ? (
-                                    <FilePdfOutlined />
-                                  ) : attachment.name.toLowerCase().endsWith('.docx') ? (
-                                    <FileWordOutlined />
-                                  ) : (
-                                    <FileTextOutlined />
-                                  )}
-                                  <span>{attachment.name}</span>
-                                  <Typography.Text type="secondary">{formatFileSize(attachment.size)}</Typography.Text>
-                                  {!valid ? <Tag color="red">不适用</Tag> : null}
-                                </Space>
-                                <Button size="small" type="text" danger onClick={() => removeFactoryAttachment(attachment.id)}>
-                                  移除
+                          {factoryAttachments.length > 0 ? (
+                            <div className="factory-input-summary">
+                              <div className="factory-input-summary-row">
+                                <div className="factory-input-summary-main">
+                                  <PaperClipOutlined />
+                                  <Typography.Text strong className="factory-input-summary-count">
+                                    已添加 {factoryAttachments.length} 个文件
+                                  </Typography.Text>
+                                  <Typography.Text
+                                    type="secondary"
+                                    ellipsis
+                                    className="factory-input-summary-names"
+                                    title={factoryInputSummaryNames}
+                                  >
+                                    {factoryInputSummaryNames}
+                                    {factoryInputSummaryOverflow > 0 ? ` 等 ${factoryInputSummaryOverflow} 个` : ''}
+                                  </Typography.Text>
+                                </div>
+                                <Button size="small" type="text" onClick={() => setFactoryAttachments([])}>
+                                  清空
                                 </Button>
                               </div>
-                            );
-                          })}
+                            </div>
+                          ) : !isAiVideoProductionFactoryType ? (
+                            <Typography.Text type="secondary" className="factory-input-empty">
+                              {isMedicalVideoFactory
+                                ? '尚未添加案例视频'
+                                : isAcademicDemoFactoryType
+                                  ? '尚未添加项目资料'
+                                  : isAiVideoProductionFactoryType
+                                    ? '尚未添加本次任务的视频片段'
+                                    : isOperationFactory
+                                      ? '可添加资料，也可以直接填写参数'
+                                      : isEcommerceVideoFactory
+                                        ? '尚未添加商品参考图'
+                                        : '尚未添加商品素材'}
+                            </Typography.Text>
+                          ) : null}
                         </div>
-                      ) : (
-                        <Empty
-                          image={Empty.PRESENTED_IMAGE_SIMPLE}
-                          description={
-                            isMedicalVideoFactory
-                              ? '请添加案例视频'
-                              : isAcademicDemoFactoryType
-                                ? '请添加项目资料'
-                              : isAiVideoProductionFactoryType
-                                ? '请添加原始视频，可选添加片头/片尾/封面/水印素材'
-                              : isOperationFactory
-                                ? '可添加资料，也可以直接填写参数'
-                                : isEcommerceVideoFactory
-                                  ? '请添加商品参考图'
-                                  : '请添加商品素材'
-                          }
-                        />
-                      )}
 
-                      {focusedFactoryInputFiles.length > 0 ? (
-                        <div className="factory-input-history">
-                          <Flex align="center" justify="space-between" gap={8}>
-                            <Typography.Text strong>当前批次输入</Typography.Text>
-                            <Tag>{focusedFactoryInputFiles.length} 个文件</Tag>
-                          </Flex>
-                          <div className="factory-input-file-list">
-                            {focusedFactoryInputFiles.slice(0, 6).map((filePath) => (
-                              <div key={filePath} className="factory-input-file-item">
-                                  {isMedicalVideoFactory || isAiVideoProductionFactoryType ? (
-                                    <VideoCameraOutlined />
-                                  ) : isEcommerceVideoFactory ? (
-                                    <FileImageOutlined />
-                                  ) : isAcademicDemoFactoryType ? (
-                                    <FileTextOutlined />
-                                  ) : isOperationFactory ? (
-                                    <FileTextOutlined />
-                                  ) : (
-                                    <PaperClipOutlined />
-                                  )}
-                                <Typography.Text ellipsis title={filePath}>
-                                  {getPathFileName(filePath)}
-                                </Typography.Text>
-                              </div>
-                            ))}
-                            {focusedFactoryInputFiles.length > 6 ? (
-                              <Typography.Text type="secondary">
-                                还有 {focusedFactoryInputFiles.length - 6} 个文件未展开显示
-                              </Typography.Text>
+                        {isAiVideoProductionFactoryType ? (
+                          <div
+                            className={`factory-video-asset-controls ${isFactoryVideoAssetDragOver ? 'dragging' : ''}`}
+                            onDragOver={handleFactoryVideoAssetDragOver}
+                            onDragLeave={handleFactoryVideoAssetDragLeave}
+                            onDrop={handleFactoryVideoAssetDrop}
+                          >
+                            <Typography.Text strong>上传视频资产</Typography.Text>
+                            <Space direction="vertical" size={6} className="factory-video-asset-actions">
+                              {aiVideoAssetGroups.map((group) => (
+                                <Button
+                                  key={group.kind}
+                                  block
+                                  size="small"
+                                  icon={<VideoCameraOutlined />}
+                                  onClick={() => {
+                                    setPendingFactoryVideoAssetKind(group.kind);
+                                    factoryVideoAssetInputRef.current?.click();
+                                  }}
+                                >
+                                  上传{group.label}（{group.attachments.length}）
+                                </Button>
+                              ))}
+                            </Space>
+                            {factoryVideoAssetAttachments.length > 0 ? (
+                              <Button size="small" type="text" danger onClick={clearAllFactoryVideoAssets}>
+                                清空资产
+                              </Button>
                             ) : null}
+                            <input
+                              ref={factoryVideoAssetInputRef}
+                              type="file"
+                              multiple
+                              accept=".mp4,.mov,.mkv,.avi,.webm,.m4v"
+                              hidden
+                              onChange={handleFactoryVideoAssetInputChange}
+                            />
                           </div>
-                        </div>
-                      ) : null}
+                        ) : null}
+                      </div>
                     </section>
 
                     <Form<FactoryRunFormValues>
@@ -10255,13 +10443,6 @@ export default function App() {
                           </>
                         ) : isAiVideoProductionFactoryType ? (
                           <>
-                            <Form.Item name="sourceVideoPath" label="原始视频">
-                              <Select
-                                size="large"
-                                placeholder="先上传原始视频"
-                                options={aiVideoSourceVideoOptions}
-                              />
-                            </Form.Item>
                             <div className="factory-inline-form-grid compact">
                               <Form.Item name="platform" label="制作类型" rules={[{ required: true }]}>
                                 <Select
@@ -10301,20 +10482,15 @@ export default function App() {
                             </Form.Item>
                             <div className="factory-inline-form-grid compact">
                               <Form.Item name="introAssetPath" label="片头选择">
-                                <Select allowClear size="large" placeholder="不使用片头" options={aiVideoSourceVideoOptions} />
+                                <Select allowClear size="large" placeholder="不使用片头" options={aiVideoIntroOptions} />
                               </Form.Item>
                               <Form.Item name="outroAssetPath" label="片尾选择">
-                                <Select allowClear size="large" placeholder="不使用片尾" options={aiVideoSourceVideoOptions} />
+                                <Select allowClear size="large" placeholder="不使用片尾" options={aiVideoOutroOptions} />
                               </Form.Item>
                             </div>
-                            <div className="factory-inline-form-grid compact">
-                              <Form.Item name="coverAssetPath" label="封面选择">
-                                <Select allowClear size="large" placeholder="不使用封面" options={aiVideoPngAssetOptions} />
-                              </Form.Item>
-                              <Form.Item name="watermarkAssetPath" label="水印选择">
-                                <Select allowClear size="large" placeholder="不使用水印" options={aiVideoPngAssetOptions} />
-                              </Form.Item>
-                            </div>
+                            <Form.Item name="transitionAssetPath" label="过场选择">
+                              <Select allowClear size="large" placeholder="不使用过场" options={aiVideoTransitionOptions} />
+                            </Form.Item>
                             <Form.Item name="instruction" label="补充要求">
                               <Input.TextArea rows={2} placeholder="例如：重点突出自动完成结果，节奏快一点，避免太像教程口吻。" />
                             </Form.Item>
@@ -14036,11 +14212,9 @@ export default function App() {
         videoRatio: platformOptions[0]?.imageRatio ?? ratios[0]?.key ?? '16:9',
         outputResolution: resolutionOptions.find((item) => item.key === '1080p')?.key ?? resolutionOptions[0]?.key ?? '1080p',
         voicePresetId: voicePresetOptions[0]?.key ?? 'male_pro_1',
-        sourceVideoPath: undefined,
         introAssetPath: undefined,
         outroAssetPath: undefined,
-        coverAssetPath: undefined,
-        watermarkAssetPath: undefined,
+        transitionAssetPath: undefined,
         instruction: ''
       };
     }
@@ -14778,45 +14952,51 @@ export default function App() {
     }
 
     if (isAiVideoProductionFactory(factory)) {
-      const validAttachments = factoryAttachments.filter((attachment) => isAiVideoProductionAttachment(attachment));
-      const invalidAttachments = factoryAttachments.filter((attachment) => !isAiVideoProductionAttachment(attachment));
-      const videoAttachments = validAttachments.filter((attachment) => isFactoryVideoAttachment(attachment));
-      const selectedSource =
-        findFactoryAttachmentByPath(videoAttachments, values.sourceVideoPath) ??
-        (videoAttachments.length === 1 ? videoAttachments[0] : undefined);
+      const videoAttachments = factoryAttachments.filter((attachment) => isFactoryVideoAttachment(attachment));
+      const invalidAttachments = factoryAttachments.filter((attachment) => !isFactoryVideoAttachment(attachment));
+      const selectedVideoAssets = factoryVideoAssetAttachments.filter(
+        (attachment) =>
+          (attachment.assetKind === 'intro' && values.introAssetPath === attachment.localPath) ||
+          (attachment.assetKind === 'outro' && values.outroAssetPath === attachment.localPath) ||
+          (attachment.assetKind === 'transition' && values.transitionAssetPath === attachment.localPath)
+      );
       if (invalidAttachments.length > 0) {
-        message.warning('当前工厂只支持视频和 PNG 素材，请移除不适用文件后再运行。');
+        message.warning('AI制作视频工厂的本次输入只支持视频格式文件，请移除不适用文件后再运行。');
         return;
       }
-      if (!selectedSource?.localPath) {
-        message.warning('请上传并选择一个原始视频。');
+      if (videoAttachments.length === 0) {
+        message.warning('请至少添加一段本次任务的视频素材。');
         return;
       }
-      if (validAttachments.some((attachment) => !attachment.localPath)) {
+      if (videoAttachments.some((attachment) => !attachment.localPath)) {
         message.warning('当前运行环境没有暴露文件本地路径，无法执行本机视频制作。');
+        return;
+      }
+      if (selectedVideoAssets.some((attachment) => !attachment.localPath)) {
+        message.warning('选中的固定视频资产没有可用的本地路径，请重新上传后再运行。');
         return;
       }
 
       const aiVideoValues: FactoryRunFormValues = {
         ...values,
-        sourceVideoPath: selectedSource.localPath,
         videoDurationSeconds: Number(values.videoDurationSeconds) || 180,
         outputResolution: values.outputResolution ?? '1080p',
         voicePresetId: values.voicePresetId ?? 'male_pro_1'
       };
       const platform = readFactoryPlatformOptions(factory).find((item) => item.key === aiVideoValues.platform);
-      const title = `${template.name} - ${platform?.label ?? aiVideoValues.platform ?? '视频制作'} - ${selectedSource.name}`;
+      const title = `${template.name} - ${platform?.label ?? aiVideoValues.platform ?? '视频制作'} - ${videoAttachments.length} 段视频`;
       const input = buildAiVideoProductionFactoryTaskInput({
         template,
         factory,
         values: aiVideoValues,
-        attachments: validAttachments
+        attachments: videoAttachments,
+        videoAssets: factoryVideoAssetAttachments
       });
       const created = createTask({
         roleCode: values.roleCode,
         title,
         input,
-        attachments: validAttachments,
+        attachments: [...videoAttachments, ...selectedVideoAssets],
         useKnowledge
       });
       if (created) {
@@ -17692,9 +17872,9 @@ function fallbackRoutePointPrice(routeKey: string): number | undefined {
   return {
     'official-text-1': 1,
     'official-reasoning-1': 3,
-    'official-image-1': 15,
-    'official-image-2': 30,
-    'official-image-3': 20,
+    'official-image-1': 12,
+    'official-image-2': 20,
+    'official-image-3': 12,
     'official-image-4': 10,
     'official-video-1': 200,
     'official-video-2': 300,
@@ -17710,9 +17890,9 @@ const fallbackImageSizesByRoute: Record<string, Array<'1K' | '2K' | '4K'>> = {
 };
 
 const fallbackImageSizePricesByRoute: Record<string, Partial<Record<'1K' | '2K' | '4K', number>>> = {
-  'official-image-1': { '1K': 15 },
-  'official-image-2': { '1K': 30, '2K': 45, '4K': 65 },
-  'official-image-3': { '1K': 20, '2K': 30, '4K': 45 },
+  'official-image-1': { '1K': 12 },
+  'official-image-2': { '1K': 20, '2K': 30, '4K': 40 },
+  'official-image-3': { '1K': 12, '2K': 18, '4K': 24 },
   'official-image-4': { '1K': 10 }
 };
 
@@ -19737,17 +19917,13 @@ function isFactoryVideoAttachment(attachment: ComposerAttachment) {
   return factoryVideoExtensions.has(extension);
 }
 
-function isFactoryPngAttachment(attachment: ComposerAttachment) {
-  if (attachment.type?.toLowerCase() === 'image/png') {
+function isVideoFileCandidate(file: File) {
+  if (file.type?.toLowerCase().startsWith('video/')) {
     return true;
   }
 
-  const extension = attachment.name.split('.').pop()?.trim().toLowerCase() ?? '';
-  return extension === 'png';
-}
-
-function isAiVideoProductionAttachment(attachment: ComposerAttachment) {
-  return isFactoryVideoAttachment(attachment) || isFactoryPngAttachment(attachment);
+  const extension = file.name.split('.').pop()?.trim().toLowerCase() ?? '';
+  return factoryVideoExtensions.has(extension);
 }
 
 function buildFactoryAttachmentSelectOptions(attachments: ComposerAttachment[], labelPrefix: string) {
@@ -20032,20 +20208,19 @@ function buildAiVideoProductionFactoryTaskInput({
   template,
   factory,
   values,
-  attachments
+  attachments,
+  videoAssets
 }: {
   template: DesktopRoleTemplate;
   factory: DigitalFactoryManifest;
   values: FactoryRunFormValues;
   attachments: ComposerAttachment[];
+  videoAssets: ComposerAttachment[];
 }) {
-  const sourceVideo =
-    findFactoryAttachmentByPath(attachments, values.sourceVideoPath) ??
-    attachments.find((attachment) => isFactoryVideoAttachment(attachment));
-  const introAsset = findFactoryAttachmentByPath(attachments, values.introAssetPath);
-  const outroAsset = findFactoryAttachmentByPath(attachments, values.outroAssetPath);
-  const coverAsset = findFactoryAttachmentByPath(attachments, values.coverAssetPath);
-  const watermarkAsset = findFactoryAttachmentByPath(attachments, values.watermarkAssetPath);
+  const sourceVideos = attachments.filter((attachment) => isFactoryVideoAttachment(attachment));
+  const introAsset = findFactoryAttachmentByPath(videoAssets, values.introAssetPath);
+  const outroAsset = findFactoryAttachmentByPath(videoAssets, values.outroAssetPath);
+  const transitionAsset = findFactoryAttachmentByPath(videoAssets, values.transitionAssetPath);
   const platform = readFactoryPlatformOptions(factory).find((item) => item.key === values.platform);
   const ratio = readFactoryOperationRatios(factory).find((item) => item.key === values.videoRatio);
   const resolution =
@@ -20080,36 +20255,33 @@ function buildAiVideoProductionFactoryTaskInput({
       introName: introAsset?.name,
       outroPath: outroAsset?.localPath,
       outroName: outroAsset?.name,
-      coverPath: coverAsset?.localPath,
-      coverName: coverAsset?.name,
-      watermarkPath: watermarkAsset?.localPath,
-      watermarkName: watermarkAsset?.name
+      transitionPath: transitionAsset?.localPath,
+      transitionName: transitionAsset?.name
     },
     output: {
       folder: factory.output?.folder ?? 'ai-video-production',
       packageFormat: factory.output?.packageFormat ?? 'single_mp4',
       videoFormat: factory.output?.videoFormat ?? 'mp4'
     },
-    attachments: sourceVideo
-      ? [{
-          id: sourceVideo.id,
-          name: sourceVideo.name,
-          size: sourceVideo.size,
-          type: sourceVideo.type,
-          localPath: sourceVideo.localPath,
-          order: 1,
-          kind: 'source_video'
-        }]
-      : [],
+    attachments: sourceVideos.map((sourceVideo, index) => ({
+      id: sourceVideo.id,
+      name: sourceVideo.name,
+      size: sourceVideo.size,
+      type: sourceVideo.type,
+      localPath: sourceVideo.localPath,
+      order: index + 1,
+      kind: 'source_video'
+    })),
     instruction: values.instruction?.trim() || undefined
   };
-  const taskBrief = `请运行「${template.name}」，把 1 个原始视频制作成 ${factoryRequest.platformLabel} MP4。`;
+  const taskBrief = `请运行「${template.name}」，按上传顺序把 ${sourceVideos.length} 段视频制作成 ${factoryRequest.platformLabel} MP4。`;
 
   return JSON.stringify(
     {
       taskBrief,
       factory_request: factoryRequest,
       sourceVideo: factoryRequest.attachments[0],
+      sourceVideos: factoryRequest.attachments,
       platform: {
         key: factoryRequest.platform,
         label: factoryRequest.platformLabel
@@ -20124,7 +20296,7 @@ function buildAiVideoProductionFactoryTaskInput({
         '只使用 ASR 转写文本和时间轴分析视频内容，不调用图像理解或视频理解。',
         '一次任务只产出一个 MP4，不导出字幕文件，不自动发布。',
         '口播音色必须按 voicePresetId 生成，口播模型不可用时任务硬失败。',
-        '片头、片尾、封面和水印只按用户上传素材做确定式合成，不让 AI 重新生成。',
+        '片头、片尾和过场动画只按用户上传的视频资产做确定式合成，不让 AI 重新生成。',
         '最终输出只返回 MP4 产物，标题、简介、发布文案由用户自行填写。'
       ]
     },

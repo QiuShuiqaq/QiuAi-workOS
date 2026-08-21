@@ -447,12 +447,15 @@ export const serverToolActions: ServerToolActionDefinition[] = [
     description: '根据 cutPlan 把原视频剪辑成新的 MP4 文件。',
     input: [
       { key: 'videoPath', label: '视频路径', type: 'video', required: true },
+      { key: 'videoPaths', label: '视频路径列表', type: 'json' },
       { key: 'cutPlan', label: '剪辑方案', type: 'json', required: true },
       { key: 'voiceoverPath', label: 'Voiceover audio path', type: 'file' },
       { key: 'coverPath', label: 'Cover PNG path', type: 'image' },
       { key: 'introPath', label: 'Intro MP4 path', type: 'video' },
       { key: 'outroPath', label: 'Outro MP4 path', type: 'video' },
+      { key: 'transitionPath', label: 'Transition MP4 path', type: 'video' },
       { key: 'watermarkPath', label: 'Watermark PNG path', type: 'image' },
+      { key: 'preserveOriginalAudio', label: 'Preserve original audio', type: 'boolean' },
       { key: 'outputRatio', label: 'Output ratio', type: 'text' },
       { key: 'outputResolution', label: 'Output resolution', type: 'text' }
     ],
@@ -460,13 +463,16 @@ export const serverToolActions: ServerToolActionDefinition[] = [
     defaultInput: { videoPath: '$runtime.current_item.localPath', cutPlan: [{ start: 0, end: 15 }], folder: 'videos', fileName: '{{task.title}}' },
     uiFields: [
       { key: 'videoPath', label: '视频路径', placeholder: '$runtime.current_item.localPath' },
+      { key: 'videoPaths', label: '视频路径列表 JSON', type: 'textarea', format: 'json' },
       { key: 'cutPlan', label: '剪辑方案 JSON', type: 'textarea', format: 'json', placeholder: '[{"start":0,"end":15}]' },
 
       { key: 'voiceoverPath', label: 'Voiceover audio path' },
       { key: 'coverPath', label: 'Cover PNG path' },
       { key: 'introPath', label: 'Intro MP4 path' },
       { key: 'outroPath', label: 'Outro MP4 path' },
+      { key: 'transitionPath', label: 'Transition MP4 path' },
       { key: 'watermarkPath', label: 'Watermark PNG path' },
+      { key: 'preserveOriginalAudio', label: 'Preserve original audio' },
       { key: 'outputRatio', label: 'Output ratio' },
       { key: 'outputResolution', label: 'Output resolution' },
       { key: 'folder', label: '保存目录' },

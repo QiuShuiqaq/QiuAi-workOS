@@ -657,10 +657,12 @@ async function composeVideoClips(
   userDataPath: string,
   request: DesktopToolInvocationRequest
 ): Promise<DesktopToolInvocationResult> {
-  const videoPath = readVideoInputPath(request);
-  assertReadPathAllowed(request, videoPath);
-  if (!existsSync(videoPath) || !statSync(videoPath).isFile()) {
-    return fail(request, `Video file does not exist: ${videoPath}`);
+  const videoPaths = readVideoInputPaths(request);
+  for (const videoPath of videoPaths) {
+    assertReadPathAllowed(request, videoPath);
+    if (!existsSync(videoPath) || !statSync(videoPath).isFile()) {
+      return fail(request, `Video file does not exist: ${videoPath}`);
+    }
   }
 
   const segments = readVideoCutPlan(request.input.cutPlan ?? request.input.segments);
@@ -673,7 +675,10 @@ async function composeVideoClips(
   const layout = getDesktopStorageLayout(userDataPath, request.workspaceId);
   ensureDesktopStorageLayout(layout);
   const folder = readString(request.input.folder, 'videos');
-  const fileName = normalizePathSegment(readString(request.input.fileName, `${path.basename(videoPath, path.extname(videoPath))}-edited`));
+  const primaryVideoPath = videoPaths[0]!;
+  const fileName = normalizePathSegment(
+    readString(request.input.fileName, `${path.basename(primaryVideoPath, path.extname(primaryVideoPath))}-edited`)
+  );
   const outputFolderPath = path.join(layout.assetsPath, 'tools', normalizePathSegment(folder));
   const workingFolderPath = path.join(outputFolderPath, `.qiuai-video-${Date.now()}`);
   mkdirSync(workingFolderPath, { recursive: true });
@@ -684,9 +689,11 @@ async function composeVideoClips(
   );
   const introPath = readOptionalExistingToolPath(request, request.input.introPath);
   const outroPath = readOptionalExistingToolPath(request, request.input.outroPath);
+  const transitionPath = readOptionalExistingToolPath(request, request.input.transitionPath);
   const coverPath = readOptionalExistingToolPath(request, request.input.coverPath);
   const watermarkPath = readOptionalExistingToolPath(request, request.input.watermarkPath);
   const voiceoverPath = readOptionalExistingToolPath(request, request.input.voiceoverPath ?? request.input.voiceAudioPath);
+  const preserveOriginalAudio = request.input.preserveOriginalAudio === true;
   const clipTimeoutMs = readOptionalPositiveInteger(request.input.timeoutMs, 180_000);
   const clipPaths: string[] = [];
   try {
@@ -715,17 +722,40 @@ async function composeVideoClips(
       clipPaths.push(introClipPath);
     }
 
-    for (const [index, segment] of segments.entries()) {
-      const clipPath = path.join(workingFolderPath, `clip-${clipPaths.length + 1}-${index + 1}.mp4`);
-      await normalizeVideoSourceClip({
-        ffmpegPath,
-        inputPath: videoPath,
-        outputPath: clipPath,
-        renderSize,
-        segment,
-        timeoutMs: clipTimeoutMs
-      });
-      clipPaths.push(clipPath);
+    for (const [videoIndex, sourceVideoPath] of videoPaths.entries()) {
+      const sourceSegments = segments.filter((segment) => segment.sourceIndex === videoIndex + 1);
+      const segmentsForVideo = videoPaths.length === 1 && sourceSegments.length === 0
+        ? segments
+        : sourceSegments;
+      const renderSegments = segmentsForVideo.length > 0 ? segmentsForVideo : [undefined];
+
+      for (const [segmentIndex, segment] of renderSegments.entries()) {
+        const clipPath = path.join(
+          workingFolderPath,
+          `clip-${clipPaths.length + 1}-${videoIndex + 1}-${segmentIndex + 1}.mp4`
+        );
+        await normalizeVideoSourceClip({
+          ffmpegPath,
+          inputPath: sourceVideoPath,
+          outputPath: clipPath,
+          renderSize,
+          segment,
+          timeoutMs: clipTimeoutMs
+        });
+        clipPaths.push(clipPath);
+      }
+
+      if (transitionPath && videoIndex < videoPaths.length - 1) {
+        const transitionClipPath = path.join(workingFolderPath, `clip-${clipPaths.length + 1}-transition-${videoIndex + 1}.mp4`);
+        await normalizeVideoSourceClip({
+          ffmpegPath,
+          inputPath: transitionPath,
+          outputPath: transitionClipPath,
+          renderSize,
+          timeoutMs: clipTimeoutMs
+        });
+        clipPaths.push(transitionClipPath);
+      }
     }
 
     if (outroPath) {
@@ -748,7 +778,7 @@ async function composeVideoClips(
     );
 
     const outputPath = path.join(outputFolderPath, `${fileName}.mp4`);
-    const baseOutputPath = voiceoverPath || watermarkPath
+    const baseOutputPath = voiceoverPath || watermarkPath || preserveOriginalAudio
       ? path.join(workingFolderPath, 'base-concat.mp4')
       : outputPath;
     await execFileAsync(
@@ -757,7 +787,7 @@ async function composeVideoClips(
       { windowsHide: true, timeout: clipTimeoutMs }
     );
 
-    if (voiceoverPath || watermarkPath) {
+    if (voiceoverPath || watermarkPath || preserveOriginalAudio) {
       const baseDurationSeconds = await probeVideoDurationSeconds(ffprobePath, baseOutputPath, clipTimeoutMs);
       await applyVideoPostProcessing({
         ffmpegPath,
@@ -766,6 +796,7 @@ async function composeVideoClips(
         renderSize,
         voiceoverPath,
         watermarkPath,
+        preserveOriginalAudio,
         durationSeconds: baseDurationSeconds,
         timeoutMs: Math.max(clipTimeoutMs, 300_000)
       });
@@ -781,12 +812,14 @@ async function composeVideoClips(
         localPath: outputPath,
         fileName: path.basename(outputPath),
         sizeBytes: outputStats.size,
+        videoPaths,
         segments,
         outputRatio: `${renderSize.width}:${renderSize.height}`,
         outputResolution: `${renderSize.width}x${renderSize.height}`,
         coverPath,
         introPath,
         outroPath,
+        transitionPath,
         watermarkPath,
         voiceoverPath
       }
@@ -950,6 +983,7 @@ async function applyVideoPostProcessing(input: {
   renderSize: VideoRenderSize;
   voiceoverPath?: string;
   watermarkPath?: string;
+  preserveOriginalAudio?: boolean;
   durationSeconds?: number;
   timeoutMs: number;
 }): Promise<void> {
@@ -965,25 +999,44 @@ async function applyVideoPostProcessing(input: {
     args.push('-i', input.watermarkPath);
   }
 
+  const filterComplexParts: string[] = [];
+  let videoMap = '0:v:0';
   if (watermarkInputIndex !== undefined) {
     const watermarkWidth = Math.max(96, Math.min(240, Math.round(input.renderSize.width * 0.14)));
-    args.push(
-      '-filter_complex',
-      `[${watermarkInputIndex}:v]scale=${watermarkWidth}:-1[wm];[0:v][wm]overlay=W-w-24:H-h-24[v]`,
-      '-map',
-      '[v]'
+    filterComplexParts.push(
+      `[${watermarkInputIndex}:v]scale=${watermarkWidth}:-1[wm]`,
+      `[0:v][wm]overlay=W-w-24:H-h-24[video]`
     );
-  } else {
-    args.push('-map', '0:v:0');
+    videoMap = '[video]';
   }
 
-  if (voiceoverInputIndex !== undefined) {
-    args.push('-map', `${voiceoverInputIndex}:a:0`, '-af', 'apad');
+  let audioMap = '0:a?';
+  if (voiceoverInputIndex !== undefined && input.preserveOriginalAudio) {
+    filterComplexParts.push(
+      `[0:a:0]volume=0.22[original_audio];[${voiceoverInputIndex}:a:0]volume=1.0[voiceover_audio];[original_audio][voiceover_audio]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[mixed_audio]`,
+    );
+    audioMap = '[mixed_audio]';
     if (input.durationSeconds && Number.isFinite(input.durationSeconds)) {
       args.push('-t', String(Math.round(input.durationSeconds * 1000) / 1000));
     }
-  } else {
-    args.push('-map', '0:a?');
+  } else if (voiceoverInputIndex !== undefined) {
+    audioMap = `${voiceoverInputIndex}:a:0`;
+    args.push('-af', 'apad');
+    if (input.durationSeconds && Number.isFinite(input.durationSeconds)) {
+      args.push('-t', String(Math.round(input.durationSeconds * 1000) / 1000));
+    }
+  }
+
+  if (filterComplexParts.length > 0) {
+    args.push('-filter_complex', filterComplexParts.join(';'));
+  }
+  args.push('-map', videoMap, '-map', audioMap);
+
+  if (voiceoverInputIndex !== undefined && input.preserveOriginalAudio) {
+    args.push(
+      '-af',
+      'apad'
+    );
   }
 
   args.push(
@@ -3236,12 +3289,26 @@ function readVideoInputPath(request: DesktopToolInvocationRequest): string {
   return readRequiredString(request.input.videoPath ?? request.input.path ?? request.input.localPath, 'videoPath');
 }
 
+function readVideoInputPaths(request: DesktopToolInvocationRequest): string[] {
+  const rawPaths = Array.isArray(request.input.videoPaths)
+    ? request.input.videoPaths
+    : [request.input.videoPath ?? request.input.path ?? request.input.localPath];
+  const paths = rawPaths.flatMap((value) => {
+    const filePath = readString(value, '');
+    return filePath ? [filePath] : [];
+  });
+  if (paths.length === 0) {
+    throw new Error('Tool input videoPath or videoPaths is required.');
+  }
+  return paths;
+}
+
 function readAudioOutputFormat(value: unknown): 'm4a' | 'mp3' | 'wav' {
   const normalized = typeof value === 'string' ? value.trim().toLowerCase().replace(/^\./, '') : '';
   return normalized === 'mp3' || normalized === 'wav' || normalized === 'm4a' ? normalized : 'm4a';
 }
 
-function readVideoCutPlan(value: unknown): Array<{ start: number; end: number }> {
+function readVideoCutPlan(value: unknown): Array<{ start: number; end: number; sourceIndex?: number }> {
   const rawPlan = typeof value === 'string' ? parseJson(value) : value;
   if (!Array.isArray(rawPlan)) {
     return [];
@@ -3258,7 +3325,12 @@ function readVideoCutPlan(value: unknown): Array<{ start: number; end: number }>
       return [];
     }
 
-    return [{ start, end }];
+    const sourceIndex = readSeconds(item.sourceIndex);
+    return [{
+      start,
+      end,
+      ...(sourceIndex !== undefined && sourceIndex >= 1 ? { sourceIndex: Math.floor(sourceIndex) } : {})
+    }];
   });
 }
 

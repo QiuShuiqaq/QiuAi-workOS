@@ -2116,12 +2116,16 @@ test('official model routes expose only QiuAI line labels to desktop clients', a
     const imageRoute2 = routesBody.data.find((route) => route.routeKey === 'official-image-2');
     const imageRoute3 = routesBody.data.find((route) => route.routeKey === 'official-image-3');
     const imageRoute4 = routesBody.data.find((route) => route.routeKey === 'official-image-4');
+    assert.equal(imageRoute1?.pointPrice, 12);
     assert.deepEqual(imageRoute1?.supportedImageSizes, ['1K']);
-    assert.deepEqual(imageRoute1?.pointPricesByImageSize, { '1K': 15 });
+    assert.deepEqual(imageRoute1?.pointPricesByImageSize, { '1K': 12 });
+    assert.equal(imageRoute2?.pointPrice, 20);
     assert.deepEqual(imageRoute2?.supportedImageSizes, ['1K', '2K', '4K']);
-    assert.deepEqual(imageRoute2?.pointPricesByImageSize, { '1K': 30, '2K': 45, '4K': 65 });
+    assert.deepEqual(imageRoute2?.pointPricesByImageSize, { '1K': 20, '2K': 30, '4K': 40 });
+    assert.equal(imageRoute3?.pointPrice, 12);
     assert.deepEqual(imageRoute3?.supportedImageSizes, ['1K', '2K', '4K']);
-    assert.deepEqual(imageRoute3?.pointPricesByImageSize, { '1K': 20, '2K': 30, '4K': 45 });
+    assert.deepEqual(imageRoute3?.pointPricesByImageSize, { '1K': 12, '2K': 18, '4K': 24 });
+    assert.equal(imageRoute4?.pointPrice, 10);
     assert.deepEqual(imageRoute4?.supportedImageSizes, ['1K']);
     assert.deepEqual(imageRoute4?.pointPricesByImageSize, { '1K': 10 });
 
@@ -2188,7 +2192,7 @@ test('official model routes expose only QiuAI line labels to desktop clients', a
       }
     });
     assert.equal(imageInvokeResponse.statusCode, 201);
-    assert.equal(JSON.parse(imageInvokeResponse.body).data.pointsCharged, 65);
+    assert.equal(JSON.parse(imageInvokeResponse.body).data.pointsCharged, 40);
     assert.equal(capturedOfficialImageBody?.model, 'gpt-image-2-vip');
     assert.equal(capturedOfficialImageBody?.imageSize, '4K');
 
