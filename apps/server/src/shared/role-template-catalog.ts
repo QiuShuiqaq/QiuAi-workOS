@@ -2247,10 +2247,10 @@ function buildAiVideoProductionFactoryManifest() {
         optional: true
       },
       {
-        key: 'transition',
-        label: '过场动画',
-        mimeTypes: ['video/mp4', 'video/quicktime', 'video/x-matroska', 'video/x-msvideo', 'video/webm', 'video/x-m4v'],
-        extensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v'],
+        key: 'music',
+        label: '背景音乐',
+        mimeTypes: ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/aac', 'audio/ogg'],
+        extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg'],
         optional: true
       }
     ],
@@ -2263,7 +2263,7 @@ function buildAiVideoProductionFactoryManifest() {
     requiredCapabilities: ['text', 'audio_to_text', 'text_to_audio'],
     ui: {
       primaryActionLabel: '开始制作',
-      uploadHint: '输入区上传本次任务的一段段视频；固定片头、片尾和过场动画在视频资产区上传并重复使用。',
+      uploadHint: '输入区上传本次任务的一段段视频；固定片头、片尾和背景音乐在资产区上传并重复使用。',
       packageSelection: 'none'
     }
   };
@@ -2844,7 +2844,7 @@ function buildAiVideoProductionFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
       id: 'factory_input',
       type: 'input',
       name: '接收原始视频',
-      instruction: '接收用户上传的一段段视频，以及平台、画幅、时长、清晰度、口播音色和片头、片尾、过场视频资产选择。',
+      instruction: '接收用户上传的一段段视频，以及平台、画幅、时长、清晰度、口播音色、片头、片尾、过场效果和背景音乐选择。',
       inputVariables: ['start.text', 'start.files', 'start.videos'],
       outputVariables: ['task_brief'],
       config: {
@@ -2857,7 +2857,7 @@ function buildAiVideoProductionFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
       id: 'produce_video',
       type: 'llm',
       name: 'AI制作视频',
-      instruction: 'PC 端按固定流程执行：逐段视频探测、音频抽取、ASR 转写、文本结构分析、生成口播、按顺序拼接视频并在片段之间插入过场，最后合成片头/片尾并导出单个 MP4。只依据 ASR 文本分析内容，不使用图像理解或视频理解。',
+      instruction: 'PC 端按固定流程执行：逐段视频探测、音频抽取、ASR 转写、文本结构分析、按成片片段分别生成口播音频、按顺序拼接视频并在片段之间插入过场效果，最后合成片头、片尾和背景音乐并导出单个 MP4。只依据 ASR 文本分析内容，不使用图像理解或视频理解。',
       modelProfileId: 'qiu-general-default',
       inputVariables: ['factory_request', 'start.files', 'task_brief'],
       outputVariables: ['ai_video_production_result', 'generated_video_path', 'video_production_summary'],
@@ -2876,6 +2876,7 @@ function buildAiVideoProductionFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
           transcript: 'string',
           cutPlan: [{ sourceIndex: 1, start: 0, end: 30, label: 'string', reason: 'string' }],
           narrationScript: 'string',
+          narrationSegments: [{ sourceIndex: 1, segmentIndex: 1, text: 'string' }],
           outputVideoPath: 'string'
         }
       }
@@ -5624,7 +5625,7 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     skills: [
       skill('asr_timeline_analysis', '语音转写分析', '只依据 ASR 文本和时间信息分析原始视频结构，不做图像理解。'),
       skill('narration_generation', '口播脚本生成', '根据平台目标生成专业口播脚本，并调用口播模型生成音频。'),
-      skill('deterministic_video_rendering', '确定式视频合成', '按用户选择的片头、片尾、过场动画、画幅、时长和清晰度导出单个 MP4。')
+      skill('deterministic_video_rendering', '确定式视频合成', '按用户选择的片头、片尾、过场效果、背景音乐、画幅、时长和清晰度导出单个 MP4。')
     ],
     workflowSteps: [
       {
@@ -5632,7 +5633,7 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
         order: 1,
         type: 'input',
         name: '接收原始视频',
-        instruction: '接收一段段原始录屏或视频，以及平台、画幅、时长、清晰度、口播音色和片头、片尾、过场视频资产选择。'
+        instruction: '接收一段段原始录屏或视频，以及平台、画幅、时长、清晰度、口播音色、片头、片尾、过场效果和背景音乐选择。'
       },
       {
         id: 'produce_video',
@@ -5655,7 +5656,7 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
       '请把这段 QiuAI-workOS 使用录屏制作成 B站教程视频，横屏 1080P，保留重点操作步骤。',
       '请把这段产品演示视频制作成抖音宣传短视频，竖屏 60 秒，突出 AI 自动完成工作的结果。'
     ],
-    outputFormat: '单个 MP4 成片，包含可选片头、片尾、过场动画和口播音频。',
+    outputFormat: '单个 MP4 成片，包含可选片头、片尾、过场效果、背景音乐和口播音频。',
     allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_BASIC_MONTHLY'),
     approvalPolicy: '本工厂只生成视频成片，不自动发布；对外发布前必须由用户人工确认事实、版权、平台规则和品牌口径。'
   },

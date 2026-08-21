@@ -292,16 +292,25 @@ test('server role template catalog only exposes the approved production set', ()
     : [];
   assert.deepEqual(
     reusableAssets.map((asset) => readRecord(asset)?.key),
-    ['intro', 'outro', 'transition']
+    ['intro', 'outro', 'music']
   );
   for (const asset of reusableAssets) {
     const record = readRecord(asset);
     const mimeTypes = record?.mimeTypes;
-    assert.deepEqual(record?.extensions, ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v']);
-    assert.ok(
-      Array.isArray(mimeTypes) &&
-      mimeTypes.every((mimeType) => String(mimeType).startsWith('video/'))
-    );
+    const key = readRecord(asset)?.key;
+    if (key === 'music') {
+      assert.deepEqual(record?.extensions, ['mp3', 'wav', 'm4a', 'aac', 'ogg']);
+      assert.ok(
+        Array.isArray(mimeTypes) &&
+        mimeTypes.every((mimeType) => String(mimeType).startsWith('audio/'))
+      );
+    } else {
+      assert.deepEqual(record?.extensions, ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v']);
+      assert.ok(
+        Array.isArray(mimeTypes) &&
+        mimeTypes.every((mimeType) => String(mimeType).startsWith('video/'))
+      );
+    }
   }
 
   const factoryManifestKinds = new Set([

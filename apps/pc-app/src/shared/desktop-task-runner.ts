@@ -3536,6 +3536,7 @@ async function invokeWorkflowRuntimeAiVideoProductionNode(input: {
   const asr = isWorkflowRuntimeRecord(factoryRequest?.asr) ? factoryRequest.asr : {};
   const sourceTimeline: Array<{ sourceIndex: number; name: string; durationSeconds: number }> = [];
   const transcriptParts: string[] = [];
+  const sourceTranscripts: Array<{ sourceIndex: number; text: string }> = [];
   let totalDurationSeconds = 0;
 
   for (const [videoIndex, sourceVideo] of videos.entries()) {
@@ -3592,6 +3593,10 @@ async function invokeWorkflowRuntimeAiVideoProductionNode(input: {
     }
 
     transcriptParts.push(`【第 ${videoIndex + 1} 段：${sourceVideo.name}】\n${asrResult.transcript}`);
+    sourceTranscripts.push({
+      sourceIndex: videoIndex + 1,
+      text: asrResult.transcript
+    });
     if (videoIndex === 0) {
       Object.assign(metrics, sourceMetrics);
     }
@@ -3619,43 +3624,51 @@ async function invokeWorkflowRuntimeAiVideoProductionNode(input: {
     rawContent: analysisResponse.content,
     transcript,
     settings,
-    videoDurationSeconds: readFactoryRuntimeNumber(metrics.durationSeconds)
+    videoDurationSeconds: readFactoryRuntimeNumber(metrics.durationSeconds),
+    sourceTranscripts
   });
 
-  const voiceResponse = await input.modelInvoker({
-    profile: voiceProfile,
-    taskKind: 'audio_generation',
-    audioGeneration: {
-      text: plan.narrationScript,
-      voicePresetId: settings.voicePresetId,
-      language: 'zh',
-      format: 'mp3'
-    },
-    messages: [
-      {
-        role: 'user',
-        content: `请生成视频口播音频，音色=${settings.voicePresetId}。\n\n${plan.narrationScript}`
-      }
-    ],
-    timeoutMs: 180_000
-  });
-  const voiceResult = readFactoryVideoGenerationResponse(voiceResponse);
-  const voiceAudioPath = voiceResult.localPath
-    ? voiceResult.localPath
-    : voiceResult.remoteUrl
-      ? await downloadAiVideoProductionVoiceAudio({
-          task: input.task,
-          remoteUrl: voiceResult.remoteUrl,
-          desktopToolInvoker: input.desktopToolInvoker,
-          workspaceId: input.workspaceId,
-          binding: input.binding,
-          createdAt: input.createdAt
-        })
-      : undefined;
-  if (!voiceAudioPath) {
-    throw new Error('口播模型没有返回可下载的音频文件。');
+  const segmentAudioPaths: string[] = [];
+  for (const [segmentIndex, narrationSegment] of plan.narrationSegments.entries()) {
+    const voiceResponse = await input.modelInvoker({
+      profile: voiceProfile,
+      taskKind: 'audio_generation',
+      audioGeneration: {
+        text: narrationSegment.text,
+        voicePresetId: settings.voicePresetId,
+        language: 'zh',
+        format: 'mp3'
+      },
+      messages: [
+        {
+          role: 'user',
+          content: `请生成第 ${segmentIndex + 1} 段视频的口播音频，音色=${settings.voicePresetId}。\n\n${narrationSegment.text}`
+        }
+      ],
+      timeoutMs: 180_000
+    });
+    const voiceResult = readFactoryVideoGenerationResponse(voiceResponse);
+    const voiceAudioPath = voiceResult.localPath
+      ? voiceResult.localPath
+      : voiceResult.remoteUrl
+        ? await downloadAiVideoProductionVoiceAudio({
+            task: input.task,
+            remoteUrl: voiceResult.remoteUrl,
+            fileNameSuffix: `口播音频-${segmentIndex + 1}`,
+            desktopToolInvoker: input.desktopToolInvoker,
+            workspaceId: input.workspaceId,
+            binding: input.binding,
+            createdAt: input.createdAt
+          })
+        : undefined;
+    if (!voiceAudioPath) {
+      throw new Error(`第 ${segmentIndex + 1} 段口播模型没有返回可下载的音频文件。`);
+    }
+    segmentAudioPaths.push(voiceAudioPath);
   }
-  usedToolIds.add('local-filesystem');
+  if (segmentAudioPaths.length > 0) {
+    usedToolIds.add('local-filesystem');
+  }
 
   const composeResult = await input.desktopToolInvoker({
     workspaceId: input.workspaceId,
@@ -3665,11 +3678,12 @@ async function invokeWorkflowRuntimeAiVideoProductionNode(input: {
       videoPath: video.localPath,
       videoPaths: videos.map((item) => item.localPath),
       cutPlan: plan.cutPlan,
-      voiceoverPath: voiceAudioPath,
+      segmentAudioPaths,
       introPath: settings.introPath,
       outroPath: settings.outroPath,
-      transitionPath: settings.transitionPath,
-      preserveOriginalAudio: true,
+      musicPath: settings.musicPath,
+      transitionEffect: settings.transitionEffect,
+      preserveOriginalAudio: false,
       outputRatio: settings.outputRatio,
       outputResolution: settings.outputResolution,
       folder: 'ai-video-production',
@@ -3703,7 +3717,8 @@ async function invokeWorkflowRuntimeAiVideoProductionNode(input: {
     highlightSegments: plan.highlightSegments,
     cutPlan: plan.cutPlan,
     narrationScript: plan.narrationScript,
-    voiceAudioPath,
+    narrationSegments: plan.narrationSegments,
+    segmentAudioPaths,
     outputVideoPath
   };
   const summaryContent = `已生成 MP4：${outputVideoPath}`;
@@ -7124,7 +7139,8 @@ interface AiVideoProductionSettings {
   voicePresetId: string;
   introPath?: string;
   outroPath?: string;
-  transitionPath?: string;
+  musicPath?: string;
+  transitionEffect: 'none' | 'fade' | 'black_fade' | 'white_fade';
 }
 
 interface AiVideoProductionPlan {
@@ -7132,6 +7148,11 @@ interface AiVideoProductionPlan {
   highlightSegments: Array<{ start: number; end: number; reason: string }>;
   cutPlan: Array<{ start: number; end: number; sourceIndex?: number; label?: string; reason?: string }>;
   narrationScript: string;
+  narrationSegments: Array<{
+    sourceIndex?: number;
+    segmentIndex?: number;
+    text: string;
+  }>;
 }
 
 function readAiVideoProductionSettings(factoryRequest: Record<string, unknown> | undefined): AiVideoProductionSettings {
@@ -7160,18 +7181,26 @@ function readAiVideoProductionSettings(factoryRequest: Record<string, unknown> |
     voicePresetId: readWorkflowRuntimeString(factoryRequest?.voicePresetId) ?? 'male_pro_1',
     introPath: readAiVideoMaterialPath(factoryRequest, materials, 'intro'),
     outroPath: readAiVideoMaterialPath(factoryRequest, materials, 'outro'),
-    transitionPath: readAiVideoMaterialPath(factoryRequest, materials, 'transition')
+    musicPath: readAiVideoMaterialPath(factoryRequest, materials, 'music'),
+    transitionEffect: readAiVideoTransitionEffect(factoryRequest?.transitionEffect)
   };
 }
 
 function readAiVideoMaterialPath(
   factoryRequest: Record<string, unknown> | undefined,
   materials: Record<string, unknown>,
-  key: 'intro' | 'outro' | 'transition'
+  key: 'intro' | 'outro' | 'music'
 ): string | undefined {
   return readWorkflowRuntimeString(materials[`${key}Path`])
     ?? readWorkflowRuntimeString(materials[key])
     ?? readWorkflowRuntimeString(factoryRequest?.[`${key}Path`]);
+}
+
+function readAiVideoTransitionEffect(value: unknown): AiVideoProductionSettings['transitionEffect'] {
+  const normalized = readWorkflowRuntimeString(value);
+  return normalized === 'none' || normalized === 'black_fade' || normalized === 'white_fade'
+    ? normalized
+    : 'fade';
 }
 
 function buildAiVideoProductionAnalysisMessages(input: {
@@ -7190,10 +7219,11 @@ function buildAiVideoProductionAnalysisMessages(input: {
         '你是 QiuAI WorkOS 的视频内容制作规划器。',
         '只依据 ASR 转写文本和视频基础元数据做内容结构分析，不做图像理解或视频理解。',
         '必须返回 JSON，不要 markdown，不要解释。',
-        '输出字段：chapters、highlightSegments、cutPlan、narrationScript。',
+        '输出字段：chapters、highlightSegments、cutPlan、narrationScript、narrationSegments。',
         'cutPlan 每项必须包含 sourceIndex、start、end、label、reason；start/end 是对应 sourceIndex 视频片段内的本地秒数。',
         '每个 sourceIndex 至少保留一个连续片段；如果无法细分，就保留该段视频的完整范围。',
-        'narrationScript 是最终 TTS 口播脚本，语言为中文，适合直接口播。'
+        'narrationScript 是全部口播的合并文本，语言为中文，适合直接口播。',
+        'narrationSegments 必须按 cutPlan 顺序返回，每项包含 sourceIndex、segmentIndex、text；每一项只对应一个最终视频片段，适合单独生成一段口播音频。'
       ].join('\n')
     },
     {
@@ -7227,6 +7257,7 @@ function normalizeAiVideoProductionPlan(input: {
   transcript: string;
   settings: AiVideoProductionSettings;
   videoDurationSeconds?: number;
+  sourceTranscripts: Array<{ sourceIndex: number; text: string }>;
 }): AiVideoProductionPlan {
   const record = isWorkflowRuntimeRecord(input.parsed) ? input.parsed : {};
   const fallbackEnd = Math.max(
@@ -7241,13 +7272,72 @@ function normalizeAiVideoProductionPlan(input: {
     readWorkflowRuntimeString(record.narration_script) ??
     readWorkflowRuntimeString(record.script) ??
     buildFallbackAiVideoNarrationScript(input.transcript, input.settings);
+  const narrationSegments = normalizeAiVideoNarrationSegments(
+    record.narrationSegments ?? record.narration_segments,
+    cutPlan,
+    input.sourceTranscripts,
+    narrationScript
+  );
 
   return {
     chapters,
     highlightSegments,
     cutPlan,
-    narrationScript
+    narrationScript,
+    narrationSegments
   };
+}
+
+function normalizeAiVideoNarrationSegments(
+  value: unknown,
+  cutPlan: Array<{ start: number; end: number; sourceIndex?: number; label?: string; reason?: string }>,
+  sourceTranscripts: Array<{ sourceIndex: number; text: string }>,
+  fallbackScript: string
+): Array<{ sourceIndex?: number; segmentIndex?: number; text: string }> {
+  const parsed = Array.isArray(value)
+    ? value.flatMap((item): Array<{ sourceIndex?: number; segmentIndex?: number; text: string }> => {
+        if (!isWorkflowRuntimeRecord(item)) {
+          return [];
+        }
+        const text = readWorkflowRuntimeString(item.text)
+          ?? readWorkflowRuntimeString(item.script)
+          ?? readWorkflowRuntimeString(item.narration);
+        if (!text?.trim()) {
+          return [];
+        }
+        const rawSourceIndex = readWorkflowRuntimeNumber(item.sourceIndex, Number.NaN);
+        const rawSegmentIndex = readWorkflowRuntimeNumber(item.segmentIndex, Number.NaN);
+        const sourceIndex = Number.isFinite(rawSourceIndex) ? rawSourceIndex : undefined;
+        const segmentIndex = Number.isFinite(rawSegmentIndex) ? rawSegmentIndex : undefined;
+        return [{
+          ...(sourceIndex !== undefined ? { sourceIndex: Math.max(1, Math.floor(sourceIndex)) } : {}),
+          ...(segmentIndex !== undefined ? { segmentIndex: Math.max(1, Math.floor(segmentIndex)) } : {}),
+          text: text.trim()
+        }];
+      })
+    : [];
+
+  if (parsed.length > 0) {
+    return cutPlan.map((segment, index) => {
+      const sourceIndex = segment.sourceIndex;
+      const matching = parsed[index]
+        ?? (sourceIndex !== undefined
+          ? parsed.find((item) => item.sourceIndex === sourceIndex)
+          : undefined);
+      return {
+        ...(sourceIndex !== undefined ? { sourceIndex } : {}),
+        segmentIndex: index + 1,
+        text: matching?.text ?? fallbackScript
+      };
+    });
+  }
+
+  const sourceTextByIndex = new Map(sourceTranscripts.map((item) => [item.sourceIndex, item.text]));
+  return cutPlan.map((segment, index) => ({
+    ...(segment.sourceIndex !== undefined ? { sourceIndex: segment.sourceIndex } : {}),
+    segmentIndex: index + 1,
+    text: sourceTextByIndex.get(segment.sourceIndex ?? 1)?.trim() || fallbackScript
+  }));
 }
 
 function normalizeAiVideoTimelineItems(value: unknown): Array<{ title: string; start: number; end: number }> {
@@ -7355,6 +7445,7 @@ function buildFallbackAiVideoNarrationScript(transcript: string, settings: AiVid
 async function downloadAiVideoProductionVoiceAudio(input: {
   task: DesktopTaskDetail;
   remoteUrl: string;
+  fileNameSuffix?: string;
   desktopToolInvoker: DesktopToolInvoker;
   workspaceId: string;
   binding: ResolvedRuntimeBinding;
@@ -7370,7 +7461,7 @@ async function downloadAiVideoProductionVoiceAudio(input: {
     input: {
       url: input.remoteUrl,
       folder: 'ai-video-production-audio',
-      fileName: buildWorkflowArtifactFileName(input.task.title, '口播音频'),
+      fileName: buildWorkflowArtifactFileName(input.task.title, input.fileNameSuffix ?? '口播音频'),
       mediaKind: 'file',
       timeoutMs: 300_000
     },

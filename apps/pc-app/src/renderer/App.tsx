@@ -2,6 +2,7 @@ import {
   ApiOutlined,
   ApartmentOutlined,
   AppstoreOutlined,
+  AudioOutlined,
   BankOutlined,
   BellOutlined,
   BorderOutlined,
@@ -405,7 +406,8 @@ interface FactoryRunFormValues {
   sourceVideoPaths?: string[];
   introAssetPath?: string;
   outroAssetPath?: string;
-  transitionAssetPath?: string;
+  musicAssetPath?: string;
+  transitionEffect?: 'none' | 'fade' | 'black_fade' | 'white_fade';
   targetAudience?: string;
   sourceUrls?: string;
   brandTone?: string;
@@ -488,7 +490,7 @@ interface ComposerAttachment {
   stagedAt: string;
 }
 
-type AiVideoAssetKind = 'intro' | 'outro' | 'transition';
+type AiVideoAssetKind = 'intro' | 'outro' | 'music';
 
 interface WorkflowRuntimeLogVariable {
   name: string;
@@ -2466,7 +2468,7 @@ function normalizeFactoryVideoAssetAttachments(value: unknown): ComposerAttachme
     if (
       !localPath ||
       !name ||
-      !(['intro', 'outro', 'transition'] as const).includes(assetKind as AiVideoAssetKind)
+      !(['intro', 'outro', 'music'] as const).includes(assetKind as AiVideoAssetKind)
     ) {
       return [];
     }
@@ -2523,7 +2525,7 @@ function writeFactoryVideoAssetAttachments(roleCode: string, attachments: Compos
 }
 
 function aiVideoAssetKindLabel(kind: AiVideoAssetKind): string {
-  return kind === 'intro' ? '片头' : kind === 'outro' ? '片尾' : '过场';
+  return kind === 'intro' ? '片头' : kind === 'outro' ? '片尾' : '背景音乐';
 }
 
 function normalizeFactoryPackageKey(value: string, fallback: string) {
@@ -2726,7 +2728,8 @@ const factoryRunRememberedFieldKeys: Array<keyof FactoryRunFormValues> = [
   'voicePresetId',
   'introAssetPath',
   'outroAssetPath',
-  'transitionAssetPath',
+  'musicAssetPath',
+  'transitionEffect',
   'targetAudience',
   'sourceUrls',
   'brandTone',
@@ -3474,7 +3477,7 @@ export default function App() {
   const [factoryAttachments, setFactoryAttachments] = useState<ComposerAttachment[]>([]);
   const [factoryVideoAssetAttachments, setFactoryVideoAssetAttachments] = useState<ComposerAttachment[]>([]);
   const [pendingFactoryVideoAssetKind, setPendingFactoryVideoAssetKind] =
-    useState<AiVideoAssetKind>('transition');
+    useState<AiVideoAssetKind>('intro');
   const [isFactoryDragOver, setIsFactoryDragOver] = useState(false);
   const [isFactoryVideoAssetDragOver, setIsFactoryVideoAssetDragOver] = useState(false);
   const [academicDemoImportingSection, setAcademicDemoImportingSection] = useState('');
@@ -4857,9 +4860,17 @@ export default function App() {
       return;
     }
 
-    const acceptedFiles = files.filter((file) => isVideoFileCandidate(file));
+    const acceptedFiles = files.filter((file) =>
+      pendingFactoryVideoAssetKind === 'music'
+        ? isAudioFileCandidate(file)
+        : isVideoFileCandidate(file)
+    );
     if (acceptedFiles.length < files.length) {
-      message.warning('片头、片尾和过场动画只支持视频格式文件。');
+      message.warning(
+        pendingFactoryVideoAssetKind === 'music'
+          ? '背景音乐只支持音频格式文件。'
+          : '片头和片尾只支持视频格式文件。'
+      );
     }
     if (acceptedFiles.length === 0) {
       return;
@@ -5000,7 +5011,7 @@ export default function App() {
     const clearedValues: Partial<FactoryRunFormValues> = {
       introAssetPath: undefined,
       outroAssetPath: undefined,
-      transitionAssetPath: undefined
+      musicAssetPath: undefined
     };
     factoryRunForm.setFieldsValue(clearedValues);
     scheduleFactoryRunParameterMemory({
@@ -9808,14 +9819,14 @@ export default function App() {
       aiVideoAssetVideoAttachments.filter((attachment) => attachment.assetKind === 'outro'),
       '片尾'
     );
-    const aiVideoTransitionOptions = buildFactoryAttachmentSelectOptions(
-      aiVideoAssetVideoAttachments.filter((attachment) => attachment.assetKind === 'transition'),
-      '过场'
+    const aiVideoMusicOptions = buildFactoryAttachmentSelectOptions(
+      factoryVideoAssetAttachments.filter((attachment) => attachment.assetKind === 'music'),
+      '音乐'
     );
-    const aiVideoAssetGroups = (['intro', 'outro', 'transition'] as const).map((kind) => ({
+    const aiVideoAssetGroups = (['intro', 'outro', 'music'] as const).map((kind) => ({
       kind,
       label: aiVideoAssetKindLabel(kind),
-      attachments: aiVideoAssetVideoAttachments.filter((attachment) => attachment.assetKind === kind)
+      attachments: factoryVideoAssetAttachments.filter((attachment) => attachment.assetKind === kind)
     }));
     const factoryInputSummaryLimit = isAiVideoProductionFactoryType ? 2 : 3;
     const factoryInputSummaryNames = factoryAttachments
@@ -9851,7 +9862,7 @@ export default function App() {
     const factoryInputHelp = isMedicalVideoFactory
       ? `上传待质检视频，单批最多 ${maxItems} 个。`
       : isAiVideoProductionFactoryType
-        ? '上传本次任务要拼接的视频片段；片头、片尾和过场动画请放到下方的视频资产区。'
+        ? '上传本次任务要拼接的视频片段；片头、片尾和背景音乐可在右侧资产区重复使用。'
         : isEcommerceVideoFactory
           ? `上传参考图，单批最多 ${maxItems} 张。`
           : isAcademicDemoFactoryType
@@ -10286,14 +10297,14 @@ export default function App() {
                             onDragLeave={handleFactoryVideoAssetDragLeave}
                             onDrop={handleFactoryVideoAssetDrop}
                           >
-                            <Typography.Text strong>上传视频资产</Typography.Text>
+                            <Typography.Text strong>上传固定资产</Typography.Text>
                             <Space direction="vertical" size={6} className="factory-video-asset-actions">
                               {aiVideoAssetGroups.map((group) => (
                                 <Button
                                   key={group.kind}
                                   block
                                   size="small"
-                                  icon={<VideoCameraOutlined />}
+                                  icon={group.kind === 'music' ? <AudioOutlined /> : <VideoCameraOutlined />}
                                   onClick={() => {
                                     setPendingFactoryVideoAssetKind(group.kind);
                                     factoryVideoAssetInputRef.current?.click();
@@ -10312,7 +10323,7 @@ export default function App() {
                               ref={factoryVideoAssetInputRef}
                               type="file"
                               multiple
-                              accept=".mp4,.mov,.mkv,.avi,.webm,.m4v"
+                              accept=".mp4,.mov,.mkv,.avi,.webm,.m4v,.mp3,.wav,.m4a,.aac,.ogg"
                               hidden
                               onChange={handleFactoryVideoAssetInputChange}
                             />
@@ -10488,9 +10499,22 @@ export default function App() {
                                 <Select allowClear size="large" placeholder="不使用片尾" options={aiVideoOutroOptions} />
                               </Form.Item>
                             </div>
-                            <Form.Item name="transitionAssetPath" label="过场选择">
-                              <Select allowClear size="large" placeholder="不使用过场" options={aiVideoTransitionOptions} />
-                            </Form.Item>
+                            <div className="factory-inline-form-grid compact">
+                              <Form.Item name="transitionEffect" label="过场效果">
+                                <Select
+                                  size="large"
+                                  options={[
+                                    { value: 'none', label: '无' },
+                                    { value: 'fade', label: '柔和淡化' },
+                                    { value: 'black_fade', label: '黑场淡入淡出' },
+                                    { value: 'white_fade', label: '白场淡入淡出' }
+                                  ]}
+                                />
+                              </Form.Item>
+                              <Form.Item name="musicAssetPath" label="背景音乐">
+                                <Select allowClear size="large" placeholder="不使用音乐" options={aiVideoMusicOptions} />
+                              </Form.Item>
+                            </div>
                             <Form.Item name="instruction" label="补充要求">
                               <Input.TextArea rows={2} placeholder="例如：重点突出自动完成结果，节奏快一点，避免太像教程口吻。" />
                             </Form.Item>
@@ -14214,7 +14238,8 @@ export default function App() {
         voicePresetId: voicePresetOptions[0]?.key ?? 'male_pro_1',
         introAssetPath: undefined,
         outroAssetPath: undefined,
-        transitionAssetPath: undefined,
+        musicAssetPath: undefined,
+        transitionEffect: 'fade',
         instruction: ''
       };
     }
@@ -14958,7 +14983,7 @@ export default function App() {
         (attachment) =>
           (attachment.assetKind === 'intro' && values.introAssetPath === attachment.localPath) ||
           (attachment.assetKind === 'outro' && values.outroAssetPath === attachment.localPath) ||
-          (attachment.assetKind === 'transition' && values.transitionAssetPath === attachment.localPath)
+          (attachment.assetKind === 'music' && values.musicAssetPath === attachment.localPath)
       );
       if (invalidAttachments.length > 0) {
         message.warning('AI制作视频工厂的本次输入只支持视频格式文件，请移除不适用文件后再运行。');
@@ -19623,6 +19648,7 @@ const ecommerceImageTextLanguageOptions = [
 const factoryImageExtensions = new Set(['png', 'jpg', 'jpeg', 'webp']);
 const factoryTableExtensions = new Set(['xlsx', 'csv']);
 const factoryVideoExtensions = new Set(['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v']);
+const factoryAudioExtensions = new Set(['mp3', 'wav', 'm4a', 'aac', 'ogg']);
 const factoryAcademicDemoAttachmentExtensions = new Set(['docx', 'pdf', 'xlsx', 'csv']);
 const factoryOperationAttachmentExtensions = new Set([
   'png',
@@ -19926,6 +19952,15 @@ function isVideoFileCandidate(file: File) {
   return factoryVideoExtensions.has(extension);
 }
 
+function isAudioFileCandidate(file: File) {
+  if (file.type?.toLowerCase().startsWith('audio/')) {
+    return true;
+  }
+
+  const extension = file.name.split('.').pop()?.trim().toLowerCase() ?? '';
+  return factoryAudioExtensions.has(extension);
+}
+
 function buildFactoryAttachmentSelectOptions(attachments: ComposerAttachment[], labelPrefix: string) {
   return attachments.flatMap((attachment, index) =>
     attachment.localPath
@@ -20220,7 +20255,7 @@ function buildAiVideoProductionFactoryTaskInput({
   const sourceVideos = attachments.filter((attachment) => isFactoryVideoAttachment(attachment));
   const introAsset = findFactoryAttachmentByPath(videoAssets, values.introAssetPath);
   const outroAsset = findFactoryAttachmentByPath(videoAssets, values.outroAssetPath);
-  const transitionAsset = findFactoryAttachmentByPath(videoAssets, values.transitionAssetPath);
+  const musicAsset = findFactoryAttachmentByPath(videoAssets, values.musicAssetPath);
   const platform = readFactoryPlatformOptions(factory).find((item) => item.key === values.platform);
   const ratio = readFactoryOperationRatios(factory).find((item) => item.key === values.videoRatio);
   const resolution =
@@ -20245,6 +20280,7 @@ function buildAiVideoProductionFactoryTaskInput({
     videoDurationSeconds: targetDurationSeconds,
     voicePresetId: voicePreset?.key ?? values.voicePresetId ?? 'male_pro_1',
     voicePresetLabel: voicePreset?.label ?? values.voicePresetId ?? '专业男声',
+    transitionEffect: values.transitionEffect ?? 'fade',
     asr: {
       modelProfileId: 'qiu-asr-default',
       language: factory.asr?.defaultLanguage ?? 'zh',
@@ -20255,8 +20291,8 @@ function buildAiVideoProductionFactoryTaskInput({
       introName: introAsset?.name,
       outroPath: outroAsset?.localPath,
       outroName: outroAsset?.name,
-      transitionPath: transitionAsset?.localPath,
-      transitionName: transitionAsset?.name
+      musicPath: musicAsset?.localPath,
+      musicName: musicAsset?.name
     },
     output: {
       folder: factory.output?.folder ?? 'ai-video-production',
@@ -20296,7 +20332,8 @@ function buildAiVideoProductionFactoryTaskInput({
         '只使用 ASR 转写文本和时间轴分析视频内容，不调用图像理解或视频理解。',
         '一次任务只产出一个 MP4，不导出字幕文件，不自动发布。',
         '口播音色必须按 voicePresetId 生成，口播模型不可用时任务硬失败。',
-        '片头、片尾和过场动画只按用户上传的视频资产做确定式合成，不让 AI 重新生成。',
+        '片头和片尾按用户上传的视频资产做确定式合成；过场使用无独立音频的确定式效果。',
+        '每段视频生成对应的口播音频，整片只叠加一条背景音乐，不保留原始视频音频。',
         '最终输出只返回 MP4 产物，标题、简介、发布文案由用户自行填写。'
       ]
     },

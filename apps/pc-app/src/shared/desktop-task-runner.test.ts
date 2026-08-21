@@ -5856,8 +5856,9 @@ const aiVideoProductionTask = await runDesktopTask({
         materials: {
           introPath: 'C:\\QiuAI\\assets\\intro.mp4',
           outroPath: 'C:\\QiuAI\\assets\\outro.mp4',
-          transitionPath: 'C:\\QiuAI\\assets\\transition.mp4'
+          musicPath: 'C:\\QiuAI\\assets\\background.mp3'
         },
+        transitionEffect: 'black_fade',
         attachments: [
           {
             id: 'source-video-1',
@@ -5887,9 +5888,9 @@ const aiVideoProductionTask = await runDesktopTask({
       attachmentPaths: [
         'C:\\QiuAI\\factory\\source-recording-1.mp4',
         'C:\\QiuAI\\factory\\source-recording-2.mp4',
-        'C:\\QiuAI\\assets\\intro.mp4',
-        'C:\\QiuAI\\assets\\outro.mp4',
-        'C:\\QiuAI\\assets\\transition.mp4'
+          'C:\\QiuAI\\assets\\intro.mp4',
+          'C:\\QiuAI\\assets\\outro.mp4',
+          'C:\\QiuAI\\assets\\background.mp3'
       ]
     }
   }),
@@ -5934,7 +5935,7 @@ const aiVideoProductionTask = await runDesktopTask({
       assert.equal(request.profile.id, 'qiu-official-audio-1');
       assert.equal(request.profile.billingMode, 'official_points');
       assert.equal(request.audioGeneration?.voicePresetId, 'male_pro_1');
-      assert.match(request.audioGeneration?.text ?? '', /AI worker result/);
+      assert.ok(request.audioGeneration?.text);
       return {
         provider: request.profile.providerName,
         modelName: request.profile.modelName,
@@ -5970,7 +5971,11 @@ const aiVideoProductionTask = await runDesktopTask({
           { sourceIndex: 1, start: 13, end: 38, label: 'Setup', reason: 'Context for the workflow.' },
           { sourceIndex: 2, start: 4, end: 23, label: 'Result', reason: 'Shows the strongest result.' }
         ],
-        narrationScript: 'This clip shows the AI worker result and why it saves time.'
+        narrationScript: 'This clip shows the AI worker result and why it saves time.',
+        narrationSegments: [
+          { sourceIndex: 1, segmentIndex: 1, text: 'First explain the AI worker setup.' },
+          { sourceIndex: 2, segmentIndex: 2, text: 'This clip shows the AI worker result and why it saves time.' }
+        ]
       }),
       inputTokens: 320,
       outputTokens: 180
@@ -6020,7 +6025,7 @@ const aiVideoProductionTask = await runDesktopTask({
         action: request.action,
         ok: true,
         output: {
-          localPath: 'C:\\QiuAI\\workspace\\audio\\voiceover.mp3'
+          localPath: `C:\\QiuAI\\workspace\\audio\\voiceover-${aiVideoProductionDownloadCalls}.mp3`
         }
       };
     }
@@ -6032,11 +6037,15 @@ const aiVideoProductionTask = await runDesktopTask({
       'C:\\QiuAI\\factory\\source-recording-1.mp4',
       'C:\\QiuAI\\factory\\source-recording-2.mp4'
     ]);
-    assert.equal(request.input.voiceoverPath, 'C:\\QiuAI\\workspace\\audio\\voiceover.mp3');
+    assert.deepEqual(request.input.segmentAudioPaths, [
+      'C:\\QiuAI\\workspace\\audio\\voiceover-1.mp3',
+      'C:\\QiuAI\\workspace\\audio\\voiceover-2.mp3'
+    ]);
     assert.equal(request.input.introPath, 'C:\\QiuAI\\assets\\intro.mp4');
     assert.equal(request.input.outroPath, 'C:\\QiuAI\\assets\\outro.mp4');
-    assert.equal(request.input.transitionPath, 'C:\\QiuAI\\assets\\transition.mp4');
-    assert.equal(request.input.preserveOriginalAudio, true);
+    assert.equal(request.input.musicPath, 'C:\\QiuAI\\assets\\background.mp3');
+    assert.equal(request.input.transitionEffect, 'black_fade');
+    assert.equal(request.input.preserveOriginalAudio, false);
     assert.equal(request.input.outputRatio, '9:16');
     assert.equal(request.input.outputResolution, '720p');
     assert.deepEqual(request.input.cutPlan, [
@@ -6062,8 +6071,8 @@ assert.equal(
 );
 assert.equal(aiVideoProductionAsrCalls, 2);
 assert.equal(aiVideoProductionAnalysisCalls, 1);
-assert.equal(aiVideoProductionVoiceCalls, 1);
-assert.equal(aiVideoProductionDownloadCalls, 1);
+assert.equal(aiVideoProductionVoiceCalls, 2);
+assert.equal(aiVideoProductionDownloadCalls, 2);
 assert.equal(aiVideoProductionComposeCalls, 1);
 assert.equal(aiVideoProductionTask.task.artifactCount, 1);
 assert.equal(aiVideoProductionTask.task.factoryOutputs?.length, 1);

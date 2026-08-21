@@ -689,16 +689,32 @@ async function composeVideoClips(
   );
   const introPath = readOptionalExistingToolPath(request, request.input.introPath);
   const outroPath = readOptionalExistingToolPath(request, request.input.outroPath);
-  const transitionPath = readOptionalExistingToolPath(request, request.input.transitionPath);
   const coverPath = readOptionalExistingToolPath(request, request.input.coverPath);
   const watermarkPath = readOptionalExistingToolPath(request, request.input.watermarkPath);
-  const voiceoverPath = readOptionalExistingToolPath(request, request.input.voiceoverPath ?? request.input.voiceAudioPath);
-  const preserveOriginalAudio = request.input.preserveOriginalAudio === true;
+  const musicPath = readOptionalExistingToolPath(request, request.input.musicPath);
+  const rawSegmentAudioPaths = Array.isArray(request.input.segmentAudioPaths)
+    ? request.input.segmentAudioPaths
+    : [];
+  const segmentAudioPaths = rawSegmentAudioPaths.flatMap((value) => {
+    const filePath = readString(value, '');
+    return filePath ? [readOptionalExistingToolPath(request, filePath)!] : [];
+  });
+  const legacyVoiceoverPath = readOptionalExistingToolPath(
+    request,
+    request.input.voiceoverPath ?? request.input.voiceAudioPath
+  );
+  const preserveBaseAudio = request.input.preserveOriginalAudio === true;
+  const hasLegacyVoiceover = Boolean(legacyVoiceoverPath) && segmentAudioPaths.length === 0 && !musicPath;
+  const shouldMixBaseAudio = preserveBaseAudio && hasLegacyVoiceover;
+  const shouldStripOriginalAudio =
+    (segmentAudioPaths.length > 0 || Boolean(musicPath) || hasLegacyVoiceover) &&
+    !shouldMixBaseAudio;
+  const transitionEffect = readVideoTransitionEffect(request.input.transitionEffect);
   const clipTimeoutMs = readOptionalPositiveInteger(request.input.timeoutMs, 180_000);
-  const clipPaths: string[] = [];
+  const clipEntries: Array<{ path: string; segmentAudioPath?: string }> = [];
   try {
     if (coverPath) {
-      const coverClipPath = path.join(workingFolderPath, `clip-${clipPaths.length + 1}-cover.mp4`);
+      const coverClipPath = path.join(workingFolderPath, `clip-${clipEntries.length + 1}-cover.mp4`);
       await normalizeImageCoverClip({
         ffmpegPath,
         inputPath: coverPath,
@@ -707,69 +723,70 @@ async function composeVideoClips(
         durationSeconds: 1.5,
         timeoutMs: clipTimeoutMs
       });
-      clipPaths.push(coverClipPath);
+      clipEntries.push({ path: coverClipPath });
     }
 
     if (introPath) {
-      const introClipPath = path.join(workingFolderPath, `clip-${clipPaths.length + 1}-intro.mp4`);
+      const introClipPath = path.join(workingFolderPath, `clip-${clipEntries.length + 1}-intro.mp4`);
       await normalizeVideoSourceClip({
         ffmpegPath,
         inputPath: introPath,
         outputPath: introClipPath,
         renderSize,
+        includeAudio: preserveBaseAudio,
         timeoutMs: clipTimeoutMs
       });
-      clipPaths.push(introClipPath);
+      clipEntries.push({ path: introClipPath });
     }
 
+    const indexedSegments = segments.map((segment, index) => ({ segment, index }));
     for (const [videoIndex, sourceVideoPath] of videoPaths.entries()) {
-      const sourceSegments = segments.filter((segment) => segment.sourceIndex === videoIndex + 1);
+      const sourceSegments = indexedSegments.filter(({ segment }) => segment.sourceIndex === videoIndex + 1);
       const segmentsForVideo = videoPaths.length === 1 && sourceSegments.length === 0
-        ? segments
+        ? indexedSegments
         : sourceSegments;
-      const renderSegments = segmentsForVideo.length > 0 ? segmentsForVideo : [undefined];
+      const renderSegments = segmentsForVideo.length > 0 ? segmentsForVideo : [{ segment: undefined, index: -1 }];
 
-      for (const [segmentIndex, segment] of renderSegments.entries()) {
+      for (const [segmentIndex, segmentEntry] of renderSegments.entries()) {
         const clipPath = path.join(
           workingFolderPath,
-          `clip-${clipPaths.length + 1}-${videoIndex + 1}-${segmentIndex + 1}.mp4`
+          `clip-${clipEntries.length + 1}-${videoIndex + 1}-${segmentIndex + 1}.mp4`
         );
         await normalizeVideoSourceClip({
           ffmpegPath,
           inputPath: sourceVideoPath,
           outputPath: clipPath,
           renderSize,
-          segment,
+          segment: segmentEntry.segment,
+          includeAudio: !shouldStripOriginalAudio,
           timeoutMs: clipTimeoutMs
         });
-        clipPaths.push(clipPath);
-      }
-
-      if (transitionPath && videoIndex < videoPaths.length - 1) {
-        const transitionClipPath = path.join(workingFolderPath, `clip-${clipPaths.length + 1}-transition-${videoIndex + 1}.mp4`);
-        await normalizeVideoSourceClip({
-          ffmpegPath,
-          inputPath: transitionPath,
-          outputPath: transitionClipPath,
-          renderSize,
-          timeoutMs: clipTimeoutMs
+        clipEntries.push({
+          path: clipPath,
+          ...(segmentEntry.index >= 0 && segmentAudioPaths[segmentEntry.index]
+            ? { segmentAudioPath: segmentAudioPaths[segmentEntry.index] }
+            : {})
         });
-        clipPaths.push(transitionClipPath);
       }
     }
 
     if (outroPath) {
-      const outroClipPath = path.join(workingFolderPath, `clip-${clipPaths.length + 1}-outro.mp4`);
+      const outroClipPath = path.join(workingFolderPath, `clip-${clipEntries.length + 1}-outro.mp4`);
       await normalizeVideoSourceClip({
         ffmpegPath,
         inputPath: outroPath,
         outputPath: outroClipPath,
         renderSize,
+        includeAudio: !shouldStripOriginalAudio,
         timeoutMs: clipTimeoutMs
       });
-      clipPaths.push(outroClipPath);
+      clipEntries.push({ path: outroClipPath });
     }
 
+    const clipPaths = clipEntries.map((entry) => entry.path);
+    const clipDurations = await Promise.all(
+      clipPaths.map((clipPath) => probeVideoDurationSeconds(ffprobePath, clipPath, clipTimeoutMs))
+    );
     const concatListPath = path.join(workingFolderPath, 'concat.txt');
     writeFileSync(
       concatListPath,
@@ -778,25 +795,75 @@ async function composeVideoClips(
     );
 
     const outputPath = path.join(outputFolderPath, `${fileName}.mp4`);
-    const baseOutputPath = voiceoverPath || watermarkPath || preserveOriginalAudio
+    const hasAudioReplacement = segmentAudioPaths.length > 0 || Boolean(musicPath);
+    const requiresPostProcessing =
+      shouldStripOriginalAudio ||
+      shouldMixBaseAudio ||
+      Boolean(watermarkPath);
+    const positiveClipDurations = clipDurations.filter(
+      (duration): duration is number => typeof duration === 'number' && duration > 0
+    );
+    const transitionDuration = positiveClipDurations.length > 0
+      ? Math.min(0.35, Math.max(0.05, Math.min(...positiveClipDurations) * 0.4))
+      : 0;
+    const canRenderTransitions =
+      transitionEffect !== 'none' &&
+      clipPaths.length > 1 &&
+      transitionDuration > 0 &&
+      clipDurations.every((duration) => typeof duration === 'number' && duration > transitionDuration) &&
+      !preserveBaseAudio;
+    const baseOutputPath = requiresPostProcessing || canRenderTransitions
       ? path.join(workingFolderPath, 'base-concat.mp4')
       : outputPath;
-    await execFileAsync(
-      ffmpegPath,
-      ['-y', '-f', 'concat', '-safe', '0', '-i', concatListPath, '-c', 'copy', baseOutputPath],
-      { windowsHide: true, timeout: clipTimeoutMs }
-    );
+    if (canRenderTransitions) {
+      await renderVideoWithTransitions({
+        ffmpegPath,
+        clipPaths,
+        durations: clipDurations.map((duration) => duration ?? 0),
+        transitionEffect,
+        transitionDuration,
+        outputPath: baseOutputPath,
+        timeoutMs: Math.max(clipTimeoutMs, 300_000)
+      });
+    } else {
+      await execFileAsync(
+        ffmpegPath,
+        ['-y', '-f', 'concat', '-safe', '0', '-i', concatListPath, '-c', 'copy', baseOutputPath],
+        { windowsHide: true, timeout: clipTimeoutMs }
+      );
+    }
 
-    if (voiceoverPath || watermarkPath || preserveOriginalAudio) {
-      const baseDurationSeconds = await probeVideoDurationSeconds(ffprobePath, baseOutputPath, clipTimeoutMs);
+    if (requiresPostProcessing) {
+      const transitionOverlapSeconds = canRenderTransitions
+        ? Math.max(0, (clipPaths.length - 1) * transitionDuration)
+        : 0;
+      let elapsedSeconds = 0;
+      const segmentAudioTracks = clipEntries.flatMap((entry, index) => {
+        const delaySeconds = Math.max(0, elapsedSeconds);
+        elapsedSeconds += clipDurations[index] ?? 0;
+        if (canRenderTransitions && index < clipEntries.length - 1) {
+          elapsedSeconds = Math.max(0, elapsedSeconds - transitionDuration);
+        }
+        return entry.segmentAudioPath
+          ? [{ path: entry.segmentAudioPath, delaySeconds }]
+          : [];
+      });
+      const baseDurationSeconds = canRenderTransitions
+        ? Math.max(
+            0.1,
+            clipDurations.reduce<number>((sum, value) => sum + (value ?? 0), 0) - transitionOverlapSeconds
+          )
+        : await probeVideoDurationSeconds(ffprobePath, baseOutputPath, clipTimeoutMs);
       await applyVideoPostProcessing({
         ffmpegPath,
         baseVideoPath: baseOutputPath,
         outputPath,
         renderSize,
-        voiceoverPath,
+        segmentAudioTracks,
+        voiceoverPath: hasLegacyVoiceover ? legacyVoiceoverPath : undefined,
+        musicPath,
         watermarkPath,
-        preserveOriginalAudio,
+        preserveBaseAudio: shouldMixBaseAudio || (!shouldStripOriginalAudio && !hasAudioReplacement),
         durationSeconds: baseDurationSeconds,
         timeoutMs: Math.max(clipTimeoutMs, 300_000)
       });
@@ -819,9 +886,11 @@ async function composeVideoClips(
         coverPath,
         introPath,
         outroPath,
-        transitionPath,
+        transitionEffect,
         watermarkPath,
-        voiceoverPath
+        musicPath,
+        segmentAudioPaths,
+        voiceoverPath: hasLegacyVoiceover ? legacyVoiceoverPath : undefined
       }
     };
   } catch (error) {
@@ -884,6 +953,7 @@ async function normalizeVideoSourceClip(input: {
   outputPath: string;
   renderSize: VideoRenderSize;
   segment?: { start: number; end: number };
+  includeAudio?: boolean;
   timeoutMs: number;
 }): Promise<void> {
   const args = ['-y'];
@@ -895,8 +965,6 @@ async function normalizeVideoSourceClip(input: {
     input.inputPath,
     '-map',
     '0:v:0',
-    '-map',
-    '0:a?',
     '-vf',
     buildVideoScalePadFilter(input.renderSize),
     '-r',
@@ -906,15 +974,14 @@ async function normalizeVideoSourceClip(input: {
     '-preset',
     'veryfast',
     '-crf',
-    '20',
-    '-c:a',
-    'aac',
-    '-b:a',
-    '160k',
-    '-movflags',
-    '+faststart',
-    input.outputPath
+    '20'
   );
+  if (input.includeAudio) {
+    args.push('-map', '0:a?', '-c:a', 'aac', '-b:a', '160k');
+  } else {
+    args.push('-an');
+  }
+  args.push('-movflags', '+faststart', input.outputPath);
   await execFileAsync(input.ffmpegPath, args, { windowsHide: true, timeout: input.timeoutMs });
 }
 
@@ -976,26 +1043,106 @@ function buildVideoScalePadFilter(size: VideoRenderSize): string {
   ].join(',');
 }
 
+function readVideoTransitionEffect(value: unknown): 'none' | 'fade' | 'black_fade' | 'white_fade' {
+  const normalized = readString(value, 'none').toLowerCase();
+  return normalized === 'none' || normalized === 'black_fade' || normalized === 'white_fade'
+    ? normalized
+    : 'fade';
+}
+
+async function renderVideoWithTransitions(input: {
+  ffmpegPath: string;
+  clipPaths: string[];
+  durations: number[];
+  transitionEffect: 'none' | 'fade' | 'black_fade' | 'white_fade';
+  transitionDuration: number;
+  outputPath: string;
+  timeoutMs: number;
+}): Promise<void> {
+  const transitionName = input.transitionEffect === 'black_fade'
+    ? 'fadeblack'
+    : input.transitionEffect === 'white_fade'
+      ? 'fadewhite'
+      : 'fade';
+  const args = ['-y'];
+  for (const clipPath of input.clipPaths) {
+    args.push('-i', clipPath);
+  }
+
+  const filterParts = input.clipPaths.map(
+    (_, index) => `[${index}:v]settb=AVTB,fps=30,format=yuv420p[v${index}]`
+  );
+  let currentLabel = 'v0';
+  let currentDuration = input.durations[0] ?? 0;
+  for (let index = 1; index < input.clipPaths.length; index += 1) {
+    const nextLabel = `v${index}`;
+    const outputLabel = `vx${index}`;
+    const offset = Math.max(0, currentDuration - input.transitionDuration);
+    filterParts.push(
+      `[${currentLabel}][${nextLabel}]xfade=transition=${transitionName}:duration=${input.transitionDuration}:offset=${offset}[${outputLabel}]`
+    );
+    currentLabel = outputLabel;
+    currentDuration = Math.max(
+      0.1,
+      currentDuration + (input.durations[index] ?? 0) - input.transitionDuration
+    );
+  }
+
+  args.push(
+    '-filter_complex',
+    filterParts.join(';'),
+    '-map',
+    `[${currentLabel}]`,
+    '-an',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'veryfast',
+    '-crf',
+    '20',
+    '-movflags',
+    '+faststart',
+    input.outputPath
+  );
+  await execFileAsync(input.ffmpegPath, args, { windowsHide: true, timeout: input.timeoutMs });
+}
+
 async function applyVideoPostProcessing(input: {
   ffmpegPath: string;
   baseVideoPath: string;
   outputPath: string;
   renderSize: VideoRenderSize;
+  segmentAudioTracks?: Array<{ path: string; delaySeconds: number }>;
   voiceoverPath?: string;
+  musicPath?: string;
   watermarkPath?: string;
-  preserveOriginalAudio?: boolean;
+  preserveBaseAudio?: boolean;
   durationSeconds?: number;
   timeoutMs: number;
 }): Promise<void> {
   const args = ['-y', '-i', input.baseVideoPath];
-  let voiceoverInputIndex: number | undefined;
-  let watermarkInputIndex: number | undefined;
-  if (input.voiceoverPath) {
-    voiceoverInputIndex = 1;
-    args.push('-i', input.voiceoverPath);
+  let nextInputIndex = 1;
+  const segmentAudioInputIndexes: Array<{ index: number; delaySeconds: number }> = [];
+  for (const track of input.segmentAudioTracks ?? []) {
+    const index = nextInputIndex;
+    nextInputIndex += 1;
+    segmentAudioInputIndexes.push({ index, delaySeconds: track.delaySeconds });
+    args.push('-i', track.path);
   }
+  if (input.voiceoverPath && segmentAudioInputIndexes.length === 0) {
+    segmentAudioInputIndexes.push({ index: nextInputIndex, delaySeconds: 0 });
+    args.push('-i', input.voiceoverPath);
+    nextInputIndex += 1;
+  }
+  let musicInputIndex: number | undefined;
+  if (input.musicPath) {
+    musicInputIndex = nextInputIndex;
+    nextInputIndex += 1;
+    args.push('-stream_loop', '-1', '-i', input.musicPath);
+  }
+  let watermarkInputIndex: number | undefined;
   if (input.watermarkPath) {
-    watermarkInputIndex = input.voiceoverPath ? 2 : 1;
+    watermarkInputIndex = nextInputIndex;
     args.push('-i', input.watermarkPath);
   }
 
@@ -1010,33 +1157,73 @@ async function applyVideoPostProcessing(input: {
     videoMap = '[video]';
   }
 
-  let audioMap = '0:a?';
-  if (voiceoverInputIndex !== undefined && input.preserveOriginalAudio) {
+  let audioMap: string | undefined;
+  const narrationLabels: string[] = [];
+  for (const [trackIndex, track] of segmentAudioInputIndexes.entries()) {
+    const label = `narration_${trackIndex}`;
+    const delayMs = Math.max(0, Math.round(track.delaySeconds * 1000));
     filterComplexParts.push(
-      `[0:a:0]volume=0.22[original_audio];[${voiceoverInputIndex}:a:0]volume=1.0[voiceover_audio];[original_audio][voiceover_audio]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[mixed_audio]`,
+      `[${track.index}:a:0]adelay=${delayMs}|${delayMs},volume=1.0[${label}]`
     );
-    audioMap = '[mixed_audio]';
-    if (input.durationSeconds && Number.isFinite(input.durationSeconds)) {
-      args.push('-t', String(Math.round(input.durationSeconds * 1000) / 1000));
+    narrationLabels.push(`[${label}]`);
+  }
+
+  if (narrationLabels.length > 0) {
+    const narrationLabel = 'narration_mix';
+    filterComplexParts.push(
+      `${narrationLabels.join('')}amix=inputs=${narrationLabels.length}:duration=longest:dropout_transition=0:normalize=0[${narrationLabel}]`
+    );
+    audioMap = `[${narrationLabel}]`;
+    if (input.preserveBaseAudio) {
+      const mixedLabel = 'narration_with_base';
+      filterComplexParts.push(
+        `[0:a:0]volume=0.22[base_audio];${audioMap}[base_audio]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[${mixedLabel}]`
+      );
+      audioMap = `[${mixedLabel}]`;
     }
-  } else if (voiceoverInputIndex !== undefined) {
-    audioMap = `${voiceoverInputIndex}:a:0`;
-    args.push('-af', 'apad');
-    if (input.durationSeconds && Number.isFinite(input.durationSeconds)) {
-      args.push('-t', String(Math.round(input.durationSeconds * 1000) / 1000));
+  }
+
+  if (musicInputIndex !== undefined) {
+    const musicLabel = 'music_mix';
+    const musicDuration = input.durationSeconds && Number.isFinite(input.durationSeconds)
+      ? Math.max(0.1, input.durationSeconds)
+      : undefined;
+    filterComplexParts.push(
+      `[${musicInputIndex}:a:0]volume=0.16${musicDuration ? `,atrim=duration=${musicDuration}` : ''},asetpts=N/SR/TB[${musicLabel}]`
+    );
+    if (audioMap) {
+      const combinedLabel = 'final_audio';
+      filterComplexParts.push(
+        `${audioMap}[${musicLabel}]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[${combinedLabel}]`
+      );
+      audioMap = `[${combinedLabel}]`;
+    } else {
+      audioMap = `[${musicLabel}]`;
     }
+  }
+
+  if (!audioMap && input.preserveBaseAudio) {
+    audioMap = '0:a?';
+  } else if (audioMap && input.durationSeconds && Number.isFinite(input.durationSeconds)) {
+    const paddedLabel = 'final_audio_padded';
+    filterComplexParts.push(
+      `${audioMap}apad,atrim=duration=${Math.max(0.1, input.durationSeconds)}[${paddedLabel}]`
+    );
+    audioMap = `[${paddedLabel}]`;
+  }
+
+  if (input.durationSeconds && Number.isFinite(input.durationSeconds)) {
+    args.push('-t', String(Math.round(Math.max(0.1, input.durationSeconds) * 1000) / 1000));
   }
 
   if (filterComplexParts.length > 0) {
     args.push('-filter_complex', filterComplexParts.join(';'));
   }
-  args.push('-map', videoMap, '-map', audioMap);
-
-  if (voiceoverInputIndex !== undefined && input.preserveOriginalAudio) {
-    args.push(
-      '-af',
-      'apad'
-    );
+  args.push('-map', videoMap);
+  if (audioMap) {
+    args.push('-map', audioMap);
+  } else {
+    args.push('-an');
   }
 
   args.push(
@@ -1046,10 +1233,7 @@ async function applyVideoPostProcessing(input: {
     'veryfast',
     '-crf',
     '20',
-    '-c:a',
-    'aac',
-    '-b:a',
-    '160k',
+    ...(audioMap ? ['-c:a', 'aac', '-b:a', '160k'] : []),
     '-movflags',
     '+faststart',
     input.outputPath
