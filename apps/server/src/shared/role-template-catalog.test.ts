@@ -224,7 +224,7 @@ test('server role template catalog only exposes the approved production set', ()
     'core_ecommerce_copywriter_v1',
     'core_requirement_analyst_v1'
   ]);
-  assert.equal(expectedFactoryTemplateIds.length, 16);
+  assert.equal(expectedFactoryTemplateIds.length, 17);
   assert.equal(serverRoleTemplateCatalog.length, expectedTemplateIds.length);
   assert.deepEqual(serverRoleTemplateCatalog.map((template) => template.templateId), expectedTemplateIds);
 
@@ -320,6 +320,7 @@ test('server role template catalog only exposes the approved production set', ()
     'digital_spokesperson_video_factory',
     'ad_social_media_video_factory',
     'ai_video_production_factory',
+    'ai_drama_video_factory',
     'medical_case_video_screening_factory',
     'operation_video_factory',
     'academic_project_demo_factory'
@@ -400,6 +401,8 @@ test('server role template catalog only exposes the approved production set', ()
       const batch = readRecord(factoryManifest.batch);
       const expectedMaxItems = template.templateId === 'factory_academic_project_demo_v1'
         ? 5
+        : template.templateId === 'factory_ai_drama_video_v1'
+          ? 12
         : template.templateId === 'factory_ai_video_production_v1'
           ? 30
           : 50;

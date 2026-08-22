@@ -5981,6 +5981,298 @@ assert.ok(
   )
 );
 
+const aiDramaVideoProfile: ModelProfile = {
+  id: 'qiu-video-generation-default',
+  providerId: 'video-provider',
+  providerName: 'Video Provider',
+  modelName: 'video-line-1',
+  purpose: 'video',
+  capabilities: ['video_generation', 'text_to_video'],
+  apiBaseUrl: 'https://video.example/v1',
+  apiKey: 'video-key'
+};
+const aiDramaAudioProfile: ModelProfile = {
+  id: 'qiu-audio-generation-default',
+  providerId: 'audio-provider',
+  providerName: 'Audio Provider',
+  modelName: 'audio-line-1',
+  purpose: 'audio',
+  capabilities: ['text_to_audio'],
+  apiBaseUrl: 'https://audio.example/v1',
+  apiKey: 'audio-key'
+};
+const aiDramaRolePackage: RolePackageManifest = {
+  roleCode: 'ai-drama-video-factory',
+  applicationType: 'digital_factory',
+  name: 'AI Drama Video Factory',
+  version: '1.0.0',
+  workflowGraph: {
+    version: '1.0.0',
+    entryNodeId: 'start',
+    runtimePolicy: {
+      maxNodeExecutions: 8,
+      maxLoopIterations: 2,
+      requireApprovalBeforeTools: false
+    },
+    nodes: [
+      { id: 'start', type: 'start', name: 'Start' },
+      { id: 'factory_input', type: 'input', name: 'Receive story', inputVariables: ['start.text', 'start.images'], outputVariables: ['task_brief'] },
+      {
+        id: 'draft_drama_plan',
+        type: 'llm',
+        name: 'Draft drama plan',
+        modelProfileId: 'qiu-general-default',
+        inputVariables: ['factory_request', 'task_brief', 'start.text', 'start.images'],
+        outputVariables: ['ai_drama_plan'],
+        config: {
+          llmTaskType: 'text',
+          outputMode: 'json'
+        }
+      },
+      {
+        id: 'generate_drama_episode',
+        type: 'llm',
+        name: 'Generate drama episode',
+        modelProfileId: 'qiu-video-generation-default',
+        inputVariables: ['factory_request', 'ai_drama_plan', 'start.images'],
+        outputVariables: ['ai_drama_video_result', 'generated_video_path', 'ai_drama_video_summary'],
+        config: {
+          llmTaskType: 'video_generation',
+          outputMode: 'json',
+          requiredModelProfileIds: ['qiu-audio-generation-default'],
+          concurrency: 2,
+          maxRetries: 0
+        }
+      },
+      {
+        id: 'factory_output',
+        type: 'output',
+        name: 'Return drama episode',
+        inputVariables: ['ai_drama_video_result', 'generated_video_path', 'ai_drama_video_summary'],
+        outputVariables: ['final_answer']
+      }
+    ],
+    edges: [
+      { id: 'start-input', sourceNodeId: 'start', targetNodeId: 'factory_input' },
+      { id: 'input-plan', sourceNodeId: 'factory_input', targetNodeId: 'draft_drama_plan' },
+      { id: 'plan-generate', sourceNodeId: 'draft_drama_plan', targetNodeId: 'generate_drama_episode' },
+      { id: 'generate-output', sourceNodeId: 'generate_drama_episode', targetNodeId: 'factory_output' }
+    ]
+  },
+  modelProfileIds: ['qiu-general-default', 'qiu-video-generation-default', 'qiu-audio-generation-default'],
+  toolIds: ['video-processing', 'local-filesystem'],
+  requiredKnowledgeSources: [],
+  defaultTaskTypes: ['video_generation'],
+  syncPolicy: 'summary_only'
+};
+let aiDramaTextCalls = 0;
+let aiDramaVideoCalls = 0;
+let aiDramaAudioCalls = 0;
+let aiDramaComposeCalls = 0;
+let aiDramaWriteCalls = 0;
+let aiDramaDownloadCalls = 0;
+const aiDramaTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-ai-drama-video-001',
+    roleCode: aiDramaRolePackage.roleCode,
+    roleName: aiDramaRolePackage.name,
+    title: 'Generate AI drama episode',
+    input: JSON.stringify({
+      factory_request: {
+        factoryKind: 'ai_drama_video_factory',
+        storyText: '男主被同事质疑，关键时刻用 AI 工具完成项目反转。',
+        genre: { key: 'urban_counterattack', label: '都市逆袭' },
+        qualityMode: { key: 'standard', label: '标准模式' },
+        videoGeneration: {
+          durationSeconds: 8,
+          shotDurationSeconds: 4,
+          ratio: { key: '9:16', label: '竖屏 9:16' },
+          outputResolution: '1080p'
+        },
+        voice: {
+          modelProfileId: 'qiu-audio-generation-default',
+          voicePresetId: 'male_pro_1',
+          language: 'zh'
+        },
+        output: {
+          folder: 'ai-drama-videos',
+          packageFormat: 'editable_video_project',
+          videoFormat: 'mp4'
+        },
+        attachments: [{
+          id: 'ref-image-1',
+          name: 'male-lead.png',
+          localPath: 'C:\\QiuAI\\factory\\male-lead.png',
+          kind: 'reference_image'
+        }]
+      }
+    }),
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0,
+    executionContext: {
+      modelProfileIds: ['qiu-general-default', 'qiu-video-generation-default', 'qiu-audio-generation-default'],
+      toolIds: ['video-processing', 'local-filesystem'],
+      knowledgeBindingIds: [],
+      attachmentPaths: ['C:\\QiuAI\\factory\\male-lead.png']
+    }
+  }),
+  rolePackage: aiDramaRolePackage,
+  modelProfiles: modelProfiles.concat([aiDramaVideoProfile, aiDramaAudioProfile]),
+  tools,
+  workspaceId: 'workspace-ai-drama-video',
+  enabledModelProfileIds: ['qiu-general-default', 'qiu-video-generation-default', 'qiu-audio-generation-default'],
+  enabledToolIds: ['video-processing', 'local-filesystem'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    if (request.taskKind === 'video_generation') {
+      aiDramaVideoCalls += 1;
+      assert.equal(request.profile.id, 'qiu-video-generation-default');
+      assert.equal(request.videoGeneration?.durationSeconds, 4);
+      assert.equal(request.videoGeneration?.aspectRatio, '9:16');
+      assert.equal(request.videoGeneration?.sourceImagePath, 'C:\\QiuAI\\factory\\male-lead.png');
+      return {
+        provider: request.profile.providerName,
+        modelName: request.profile.modelName,
+        content: JSON.stringify({ remoteUrl: `https://cdn.example.test/drama/shot-${aiDramaVideoCalls}.mp4` })
+      };
+    }
+    if (request.taskKind === 'audio_generation') {
+      aiDramaAudioCalls += 1;
+      assert.equal(request.profile.id, 'qiu-audio-generation-default');
+      assert.ok((request.audioGeneration?.text ?? '').trim().length > 0);
+      assert.equal(request.audioGeneration?.voicePresetId, 'male_pro_1');
+      return {
+        provider: request.profile.providerName,
+        modelName: request.profile.modelName,
+        content: JSON.stringify({ localPath: `C:\\QiuAI\\workspace\\drama\\voice-${aiDramaAudioCalls}.mp3` })
+      };
+    }
+
+    aiDramaTextCalls += 1;
+    assert.equal(request.profile.id, 'qiu-general-default');
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: JSON.stringify({
+        title: 'AI逆袭项目夜',
+        logline: '被质疑的男主用 AI 工具完成项目反转。',
+        characters: [{ name: '男主', description: '年轻产品经理' }],
+        scenes: [{ name: '办公室', description: '夜晚加班氛围' }],
+        shots: [
+          {
+            id: 'opening-conflict',
+            title: '被质疑',
+            durationSeconds: 4,
+            characters: ['男主'],
+            scene: '办公室',
+            action: '同事质疑男主，男主沉默看向电脑',
+            dialogue: '你们都觉得我做不到，但 AI 会给出答案。',
+            videoPrompt: '夜晚办公室，男主面对质疑，镜头缓慢推进'
+          },
+          {
+            id: 'ai-reversal',
+            title: 'AI反转',
+            durationSeconds: 4,
+            characters: ['男主'],
+            scene: '办公室',
+            action: '男主演示 AI 自动完成项目，众人震惊',
+            narration: '几分钟后，方案完整生成，局势彻底反转。',
+            videoPrompt: '电脑屏幕光照亮男主，团队成员震惊，短剧爽感'
+          }
+        ]
+      })
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    if (request.action === 'filesystem.download_remote_file') {
+      aiDramaDownloadCalls += 1;
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          localPath: `C:\\QiuAI\\workspace\\drama\\shot-${aiDramaDownloadCalls}.mp4`,
+          sourceUrl: request.input.url
+        }
+      };
+    }
+    if (request.action === 'video.compose_clips') {
+      aiDramaComposeCalls += 1;
+      assert.deepEqual(request.input.videoPaths, [
+        'C:\\QiuAI\\workspace\\drama\\shot-1.mp4',
+        'C:\\QiuAI\\workspace\\drama\\shot-2.mp4'
+      ]);
+      assert.deepEqual(request.input.clipAudioPaths, [
+        'C:\\QiuAI\\workspace\\drama\\voice-1.mp3',
+        'C:\\QiuAI\\workspace\\drama\\voice-2.mp3'
+      ]);
+      assert.equal(request.input.preserveOriginalAudio, false);
+      assert.equal(request.input.outputRatio, '9:16');
+      assert.equal(request.input.outputResolution, '1080p');
+      assert.equal(Array.isArray(request.input.subtitles), true);
+      assert.equal((request.input.subtitles as unknown[]).length, 2);
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          localPath: 'C:\\QiuAI\\workspace\\drama\\episode-preview.mp4'
+        }
+      };
+    }
+    if (request.action === 'filesystem.write_text_file') {
+      aiDramaWriteCalls += 1;
+      assert.equal(request.input.extension, 'json');
+      assert.match(String(request.input.content), /qiuai_video_project/);
+      assert.match(String(request.input.content), /AI逆袭项目夜/);
+      return {
+        toolId: request.toolId,
+        action: request.action,
+        ok: true,
+        output: {
+          localPath: 'C:\\QiuAI\\workspace\\drama\\episode-project.json'
+        }
+      };
+    }
+    throw new Error(`Unexpected desktop tool action: ${request.action}`);
+  },
+  completedAt: '2026-08-22T09:30:00.000Z'
+});
+assert.equal(
+  aiDramaTask.task.state,
+  'completed',
+  JSON.stringify(aiDramaTask.task.executionLogs.slice(-6), null, 2)
+);
+assert.equal(aiDramaTextCalls, 1);
+assert.equal(aiDramaVideoCalls, 2);
+assert.equal(aiDramaAudioCalls, 2);
+assert.equal(aiDramaDownloadCalls, 2);
+assert.equal(aiDramaComposeCalls, 1);
+assert.equal(aiDramaWriteCalls, 1);
+assert.ok(
+  aiDramaTask.task.artifacts.some(
+    (artifact) =>
+      artifact.type === 'video' &&
+      artifact.format === 'qiu-video-project' &&
+      artifact.editable === true &&
+      artifact.localPath?.endsWith('episode-preview.mp4') &&
+      artifact.sourcePayloadPath?.endsWith('episode-project.json')
+  )
+);
+assert.ok(
+  aiDramaTask.task.factoryOutputs?.some(
+    (item) =>
+      item.factoryKind === 'ai_drama_video_factory' &&
+      item.outputPath?.endsWith('episode-preview.mp4')
+  )
+);
+assert.ok(
+  aiDramaTask.task.executionLogs.some(
+    (log) => log.eventType === 'WORKFLOW_RUNTIME_AI_DRAMA_VIDEO_COMPLETED'
+  )
+);
+
 const aiVideoVoiceFailureTask = await runDesktopTask({
   task: createMockTaskDetail({
     taskId: 'task-runner-ai-video-project-voice-failure',

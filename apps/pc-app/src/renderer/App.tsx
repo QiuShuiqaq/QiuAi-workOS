@@ -405,6 +405,11 @@ interface FactoryRunFormValues {
   outputResolution?: string;
   voiceEnabled?: boolean;
   voicePresetId?: string;
+  dramaGenre?: string;
+  dramaQualityMode?: string;
+  shotDurationSeconds?: number;
+  characterNotes?: string;
+  sceneNotes?: string;
   sourceVideoPaths?: string[];
   introAssetPath?: string;
   outroAssetPath?: string;
@@ -2729,6 +2734,11 @@ const factoryRunRememberedFieldKeys: Array<keyof FactoryRunFormValues> = [
   'outputResolution',
   'voiceEnabled',
   'voicePresetId',
+  'dramaGenre',
+  'dramaQualityMode',
+  'shotDurationSeconds',
+  'characterNotes',
+  'sceneNotes',
   'introAssetPath',
   'outroAssetPath',
   'musicAssetPath',
@@ -9741,6 +9751,7 @@ export default function App() {
     const maxItems = readFactoryMaxItems(selectedFactoryManifest);
     const isMedicalVideoFactory = isMedicalCaseVideoFactory(selectedFactoryManifest);
     const isAiVideoProductionFactoryType = isAiVideoProductionFactory(selectedFactoryManifest);
+    const isAiDramaVideoFactoryType = isAiDramaVideoFactory(selectedFactoryManifest);
     const isEcommerceVideoFactory = isReferenceImageVideoFactory(selectedFactoryManifest);
     const isOperationFactory = isOperationVideoFactory(selectedFactoryManifest);
     const isImageFactory = isImageGenerationFactory(selectedFactoryManifest);
@@ -9755,6 +9766,9 @@ export default function App() {
     const aiVideoResolutionOptions = readFactoryVideoResolutionOptions(selectedFactoryManifest);
     const aiVideoVoicePresetOptions = readFactoryVoicePresetOptions(selectedFactoryManifest);
     const ecommerceVideoDurationOptions = readFactoryVideoDurationOptions(selectedFactoryManifest);
+    const aiDramaGenreOptions = readFactoryDramaGenres(selectedFactoryManifest);
+    const aiDramaQualityModeOptions = readFactoryDramaQualityModes(selectedFactoryManifest);
+    const aiDramaShotDurationOptions = readFactoryDramaShotDurationOptions(selectedFactoryManifest);
     const selectedFactoryPreparedPackage = selectedFactoryPackage
       ? {
           ...selectedFactoryPackage,
@@ -9804,7 +9818,7 @@ export default function App() {
         ? '.docx,.pdf,.xlsx,.csv'
       : isOperationFactory
         ? '.png,.jpg,.jpeg,.webp,.xlsx,.csv,.pdf,.doc,.docx,.ppt,.pptx,.txt,.md'
-      : isEcommerceVideoFactory || isImageFactory
+      : isEcommerceVideoFactory || isImageFactory || isAiDramaVideoFactoryType
         ? '.png,.jpg,.jpeg,.webp'
         : '.png,.jpg,.jpeg,.webp,.xlsx,.csv';
     const validFactoryAttachments = isMedicalVideoFactory
@@ -9815,6 +9829,8 @@ export default function App() {
         ? factoryAttachments.filter((attachment) => isFactoryAcademicDemoAttachment(attachment))
       : isOperationFactory
         ? factoryAttachments.filter((attachment) => isFactoryOperationAttachment(attachment))
+      : isAiDramaVideoFactoryType
+        ? factoryAttachments.filter((attachment) => isFactoryImageAttachment(attachment))
         : factoryAttachments.filter((attachment) => isFactoryImageAttachment(attachment));
     const invalidFactoryAttachmentCount = factoryAttachments.length - validFactoryAttachments.length;
     const aiVideoAssetVideoAttachments = factoryVideoAssetAttachments.filter((attachment) => isFactoryVideoAttachment(attachment));
@@ -10224,6 +10240,8 @@ export default function App() {
                                     ? '添加资料/图片/表格或拖拽到这里'
                                     : isAiVideoProductionFactoryType
                                       ? '添加分段视频或拖拽到这里'
+                                      : isAiDramaVideoFactoryType
+                                        ? '添加参考图或拖拽到这里'
                                       : isEcommerceVideoFactory || isImageFactory
                                         ? '添加图片或拖拽到这里'
                                         : '添加图片/表格或拖拽到这里'}
@@ -10237,6 +10255,8 @@ export default function App() {
                                     ? 'pdf、docx、pptx、图片、xlsx、csv、txt'
                                     : isAiVideoProductionFactoryType
                                       ? 'mp4、mov、mkv、avi、webm、m4v'
+                                      : isAiDramaVideoFactoryType
+                                        ? 'png、jpg、jpeg、webp'
                                       : isEcommerceVideoFactory || isImageFactory
                                         ? 'png、jpg、jpeg、webp'
                                         : 'png、jpg、webp、xlsx、csv'}
@@ -10290,6 +10310,8 @@ export default function App() {
                                     ? '尚未添加本次任务的视频片段'
                                     : isOperationFactory
                                       ? '可添加资料，也可以直接填写参数'
+                                      : isAiDramaVideoFactoryType
+                                        ? '可选添加角色或场景参考图'
                                       : isEcommerceVideoFactory
                                         ? '尚未添加商品参考图'
                                         : '尚未添加商品素材'}
@@ -10456,6 +10478,92 @@ export default function App() {
                               <Input.TextArea
                                 rows={3}
                                 placeholder="例如：优先保留使用前症状和使用后改善的片段；夸张医疗承诺请标记风险。"
+                              />
+                            </Form.Item>
+                          </>
+                        ) : isAiDramaVideoFactoryType ? (
+                          <>
+                            <Form.Item
+                              name="instruction"
+                              label="故事/剧本"
+                              rules={[{ required: true, message: '请填写漫剧故事或剧本要求' }]}
+                            >
+                              <Input.TextArea
+                                rows={5}
+                                placeholder="例如：都市逆袭短剧，男主被同事看不起，关键时刻用 AI 工具完成项目反转，结尾留下悬念。"
+                              />
+                            </Form.Item>
+                            <div className="factory-inline-form-grid compact">
+                              <Form.Item name="dramaGenre" label="漫剧类型" rules={[{ required: true }]}>
+                                <Select
+                                  size="large"
+                                  options={aiDramaGenreOptions.map((item) => ({ value: item.key, label: item.label }))}
+                                />
+                              </Form.Item>
+                              <Form.Item name="dramaQualityMode" label="质量模式" rules={[{ required: true }]}>
+                                <Select
+                                  size="large"
+                                  options={aiDramaQualityModeOptions.map((item) => ({ value: item.key, label: item.label }))}
+                                />
+                              </Form.Item>
+                            </div>
+                            <div className="factory-inline-form-grid compact">
+                              <Form.Item name="videoDurationSeconds" label="单集时长" rules={[{ required: true }]}>
+                                <Select
+                                  size="large"
+                                  options={ecommerceVideoDurationOptions.map((seconds) => ({
+                                    value: seconds,
+                                    label: `${seconds} 秒`
+                                  }))}
+                                />
+                              </Form.Item>
+                              <Form.Item name="videoRatio" label="画幅" rules={[{ required: true }]}>
+                                <Select
+                                  size="large"
+                                  options={operationRatios.map((item) => ({ value: item.key, label: item.label }))}
+                                />
+                              </Form.Item>
+                            </div>
+                            <div className="factory-inline-form-grid compact">
+                              <Form.Item name="outputResolution" label="清晰度" rules={[{ required: true }]}>
+                                <Select
+                                  size="large"
+                                  options={aiVideoResolutionOptions.map((item) => ({ value: item.key, label: item.label }))}
+                                />
+                              </Form.Item>
+                              <Form.Item name="shotDurationSeconds" label="单镜头" rules={[{ required: true }]}>
+                                <Select
+                                  size="large"
+                                  options={aiDramaShotDurationOptions.map((seconds) => ({
+                                    value: seconds,
+                                    label: `${seconds} 秒`
+                                  }))}
+                                />
+                              </Form.Item>
+                            </div>
+                            <Form.Item
+                              name="voicePresetId"
+                              label="口播音色"
+                              rules={[{ required: true, message: '请选择口播音色' }]}
+                            >
+                              <Select
+                                size="large"
+                                options={aiVideoVoicePresetOptions.map((item) => ({
+                                  value: item.key,
+                                  label: item.label
+                                }))}
+                              />
+                            </Form.Item>
+                            <Form.Item name="characterNotes" label="角色要求">
+                              <Input.TextArea
+                                rows={2}
+                                placeholder="可选：主角、反派、配角的人设、服装、年龄感、表演风格。"
+                              />
+                            </Form.Item>
+                            <Form.Item name="sceneNotes" label="场景要求">
+                              <Input.TextArea
+                                rows={2}
+                                placeholder="可选：办公室、街景、古风场景、灯光氛围、镜头风格。"
                               />
                             </Form.Item>
                           </>
@@ -11002,6 +11110,8 @@ export default function App() {
                           >
                             {isAcademicDemoFactoryType
                               ? '生成 Demo 演示文件'
+                              : isAiDramaVideoFactoryType
+                                ? '开始制作漫剧'
                               : isAiVideoProductionFactoryType
                                 ? '开始制作视频'
                                 : '开始任务'}
@@ -11026,7 +11136,7 @@ export default function App() {
                             const progress = factoryTaskProgressPercent(task);
                             const batchStats = buildFactoryTaskBatchStats(
                               task,
-                              isMedicalVideoFactory || isEcommerceVideoFactory || isAiVideoProductionFactoryType
+                              isMedicalVideoFactory || isEcommerceVideoFactory || isAiVideoProductionFactoryType || isAiDramaVideoFactoryType
                             );
                             return (
                               <button
@@ -11061,7 +11171,7 @@ export default function App() {
                                     task,
                                     isMedicalVideoFactory,
                                     isOperationFactory,
-                                    isEcommerceVideoFactory || isAiVideoProductionFactoryType
+                                    isEcommerceVideoFactory || isAiVideoProductionFactoryType || isAiDramaVideoFactoryType
                                   ).map((stage) => (
                                     <span key={stage.key} className={`factory-stage-pill ${stage.status}`}>
                                       {stage.label}
@@ -11127,11 +11237,11 @@ export default function App() {
                             </Typography.Text>
                           </Flex>
                           {renderFactoryOutputItems(focusedFactoryTask, {
-                            mode: isEcommerceVideoFactory || isAiVideoProductionFactoryType ? 'generated_video' : 'review'
+                            mode: isEcommerceVideoFactory || isAiVideoProductionFactoryType || isAiDramaVideoFactoryType ? 'generated_video' : 'review'
                           })}
                           {renderFactoryTaskArtifacts(focusedFactoryTask, {
                             showEmpty: focusedFactoryOutputs.length === 0,
-                            mode: isEcommerceVideoFactory || isAiVideoProductionFactoryType ? 'generated_video' : 'default'
+                            mode: isEcommerceVideoFactory || isAiVideoProductionFactoryType || isAiDramaVideoFactoryType ? 'generated_video' : 'default'
                           })}
                         </div>
                       ) : (
@@ -14240,6 +14350,31 @@ export default function App() {
       };
     }
 
+    if (isAiDramaVideoFactory(factory)) {
+      const genreOptions = readFactoryDramaGenres(factory);
+      const qualityModeOptions = readFactoryDramaQualityModes(factory);
+      const ratioOptions = readFactoryOperationRatios(factory);
+      const durationOptions = readFactoryVideoDurationOptions(factory);
+      const shotDurationOptions = readFactoryDramaShotDurationOptions(factory);
+      const resolutionOptions = readFactoryVideoResolutionOptions(factory);
+      const voicePresetOptions = readFactoryVoicePresetOptions(factory);
+
+      return {
+        roleCode,
+        useKnowledge: false,
+        dramaGenre: genreOptions[0]?.key ?? 'urban_counterattack',
+        dramaQualityMode: qualityModeOptions.find((item) => item.key === 'standard')?.key ?? qualityModeOptions[0]?.key ?? 'standard',
+        videoDurationSeconds: durationOptions.find((seconds) => seconds === 60) ?? durationOptions[0] ?? 60,
+        shotDurationSeconds: shotDurationOptions.find((seconds) => seconds === 4) ?? shotDurationOptions[0] ?? 4,
+        videoRatio: ratioOptions[0]?.key ?? '9:16',
+        outputResolution: resolutionOptions.find((item) => item.key === '1080p')?.key ?? resolutionOptions[0]?.key ?? '1080p',
+        voicePresetId: voicePresetOptions[0]?.key ?? 'male_pro_1',
+        characterNotes: '',
+        sceneNotes: '',
+        instruction: ''
+      };
+    }
+
     if (isOperationVideoFactory(factory)) {
       const packageOptions = readFactoryPackageOptions(factory);
       const packageDefinitions = readFactoryPackagePreset(roleCode, packageOptions);
@@ -14912,6 +15047,64 @@ export default function App() {
       });
       if (created) {
         rememberFactoryRunParameters(values, factory);
+        setFactoryAttachments([]);
+        setSelectedFactoryRoleCode(values.roleCode);
+        navigateToSection('factories');
+      }
+      return;
+    }
+
+    if (isAiDramaVideoFactory(factory)) {
+      const referenceImages = factoryAttachments.filter((attachment) => isFactoryImageAttachment(attachment));
+      const invalidAttachments = factoryAttachments.filter((attachment) => !isFactoryImageAttachment(attachment));
+      if (invalidAttachments.length > 0) {
+        message.warning('AI制作漫剧工厂只支持上传图片参考图，请移除不适用文件后再运行。');
+        return;
+      }
+      if (referenceImages.length > maxItems) {
+        message.warning(`单批最多添加 ${maxItems} 张参考图，请拆分批次。`);
+        return;
+      }
+      if (referenceImages.some((attachment) => !attachment.localPath)) {
+        message.warning('当前运行环境没有暴露参考图本地路径，请重新上传后再运行。');
+        return;
+      }
+      const storyText = values.instruction?.trim();
+      if (!storyText) {
+        message.warning('请先填写漫剧故事或剧本要求。');
+        return;
+      }
+
+      const dramaValues: FactoryRunFormValues = {
+        ...values,
+        dramaGenre: values.dramaGenre ?? readFactoryDramaGenres(factory)[0]?.key ?? 'urban_counterattack',
+        dramaQualityMode: values.dramaQualityMode ?? 'standard',
+        videoDurationSeconds: Number(values.videoDurationSeconds) || 60,
+        shotDurationSeconds: Number(values.shotDurationSeconds) || 4,
+        videoRatio: values.videoRatio ?? '9:16',
+        outputResolution: values.outputResolution ?? '1080p',
+        voicePresetId: values.voicePresetId ?? readFactoryVoicePresetOptions(factory)[0]?.key ?? 'male_pro_1',
+        instruction: storyText
+      };
+      const genreLabel =
+        readFactoryDramaGenres(factory).find((item) => item.key === dramaValues.dramaGenre)?.label ??
+        dramaValues.dramaGenre;
+      const title = `${template.name} - ${genreLabel ?? '漫剧'} - ${dramaValues.videoDurationSeconds} 秒`;
+      const input = buildAiDramaVideoFactoryTaskInput({
+        template,
+        factory,
+        values: dramaValues,
+        attachments: referenceImages
+      });
+      const created = createTask({
+        roleCode: values.roleCode,
+        title,
+        input,
+        attachments: referenceImages,
+        useKnowledge
+      });
+      if (created) {
+        rememberFactoryRunParameters(dramaValues, factory);
         setFactoryAttachments([]);
         setSelectedFactoryRoleCode(values.roleCode);
         navigateToSection('factories');
@@ -18089,6 +18282,44 @@ function buildAiPointFactoryConsumptionEstimate(input: {
       : hiddenEstimate;
   }
 
+  if (isAiDramaVideoFactory(input.factory)) {
+    const videoRouteKey = resolveOfficialRouteKeyForSemanticModel(
+      input.state,
+      input.roleCode,
+      'qiu-video-generation-default'
+    );
+    const audioRouteKey = resolveOfficialRouteKeyForSemanticModel(
+      input.state,
+      input.roleCode,
+      'qiu-audio-generation-default'
+    );
+    const textRouteKey = resolveOfficialRouteKeyForSemanticModel(
+      input.state,
+      input.roleCode,
+      'qiu-text-generation-default'
+    );
+    const targetDurationSeconds = Number(input.values.videoDurationSeconds) || 60;
+    const shotDurationSeconds = Number(input.values.shotDurationSeconds) || 4;
+    const shotCount = Math.max(1, Math.ceil(targetDurationSeconds / Math.max(1, shotDurationSeconds)));
+    const videoPointPrice =
+      resolveAiPointRoutePrice(input.overview, videoRouteKey, { durationSeconds: shotDurationSeconds }) ??
+      resolveAiPointRoutePrice(input.overview, videoRouteKey, { durationSeconds: 6 });
+    const audioPointPrice = resolveAiPointRoutePrice(input.overview, audioRouteKey) ?? 0;
+    const textPointPrice = resolveAiPointRoutePrice(input.overview, textRouteKey) ?? 0;
+    const unitPointPrice = (videoPointPrice ?? 0) + audioPointPrice;
+    return videoPointPrice && unitPointPrice > 0
+      ? {
+          visible: true,
+          label: `${routeLineLabel(input.overview, videoRouteKey, '视频线路')} + 口播线路`,
+          itemCount: shotCount,
+          unitPointPrice,
+          totalPoints: shotCount * unitPointPrice + textPointPrice,
+          availablePoints,
+          routeKey: videoRouteKey
+        }
+      : hiddenEstimate;
+  }
+
   if (isReferenceImageVideoFactory(input.factory)) {
     const durationOptions = readFactoryVideoDurationOptions(input.factory);
     const requestedDuration = Number(input.values.videoDurationSeconds);
@@ -19347,7 +19578,10 @@ interface DigitalFactoryManifest {
     goals?: Array<{ key: string; label: string }>;
     styles?: Array<{ key: string; label: string }>;
     ratios?: Array<{ key: string; label: string }>;
+    genres?: Array<{ key: string; label: string }>;
+    qualityModes?: Array<{ key: string; label: string }>;
     durationSecondOptions?: number[];
+    shotDurationSecondOptions?: number[];
     resolutions?: Array<{ key: string; label: string }>;
     voicePresets?: Array<{ key: string; label: string }>;
   };
@@ -19456,6 +19690,21 @@ const defaultAiVideoProductionVoicePresets = [
   { key: 'female_pro_2', label: '专业女声 - 柔和播报' },
   { key: 'funny_1', label: '搞怪声音 - 夸张解说' },
   { key: 'funny_2', label: '搞怪声音 - 活泼吐槽' }
+];
+
+const defaultAiDramaGenres = [
+  { key: 'urban_counterattack', label: '都市逆袭' },
+  { key: 'sweet_romance', label: '霸总甜宠' },
+  { key: 'fantasy_xuanhuan', label: '玄幻修仙' },
+  { key: 'suspense_reversal', label: '悬疑反转' },
+  { key: 'campus_romance', label: '校园恋爱' },
+  { key: 'comedy_drama', label: '搞笑爽剧' }
+];
+
+const defaultAiDramaQualityModes = [
+  { key: 'economy', label: '省钱模式' },
+  { key: 'standard', label: '标准模式' },
+  { key: 'premium', label: '高质量模式' }
 ];
 
 const academicDemoProjectTypeOptions = [
@@ -19803,7 +20052,10 @@ function readFactoryManifest(manifest: RoleTemplateDependencyManifest | undefine
       goals: readFactoryKeyLabelOptionsFromValue(contentControls?.goals),
       styles: readFactoryKeyLabelOptionsFromValue(contentControls?.styles),
       ratios: readFactoryKeyLabelOptionsFromValue(contentControls?.ratios),
+      genres: readFactoryKeyLabelOptionsFromValue(contentControls?.genres),
+      qualityModes: readFactoryKeyLabelOptionsFromValue(contentControls?.qualityModes),
       durationSecondOptions: readNumberArray(contentControls?.durationSecondOptions),
+      shotDurationSecondOptions: readNumberArray(contentControls?.shotDurationSecondOptions),
       resolutions: readFactoryKeyLabelOptionsFromValue(contentControls?.resolutions),
       voicePresets: readFactoryKeyLabelOptionsFromValue(contentControls?.voicePresets)
     },
@@ -19863,6 +20115,22 @@ function readFactoryVoicePresetOptions(factory: DigitalFactoryManifest) {
   return factory.contentControls?.voicePresets?.length
     ? factory.contentControls.voicePresets
     : defaultAiVideoProductionVoicePresets;
+}
+
+function readFactoryDramaGenres(factory: DigitalFactoryManifest) {
+  return factory.contentControls?.genres?.length ? factory.contentControls.genres : defaultAiDramaGenres;
+}
+
+function readFactoryDramaQualityModes(factory: DigitalFactoryManifest) {
+  return factory.contentControls?.qualityModes?.length
+    ? factory.contentControls.qualityModes
+    : defaultAiDramaQualityModes;
+}
+
+function readFactoryDramaShotDurationOptions(factory: DigitalFactoryManifest): number[] {
+  return factory.contentControls?.shotDurationSecondOptions?.length
+    ? factory.contentControls.shotDurationSecondOptions
+    : [3, 4, 5, 6];
 }
 
 function isReferenceImageVideoFactoryKind(kind: string | undefined): boolean {
@@ -20012,6 +20280,10 @@ function isEcommerceProductVideoFactory(factory: DigitalFactoryManifest) {
 
 function isAiVideoProductionFactory(factory: DigitalFactoryManifest) {
   return readFactoryKind(factory) === 'ai_video_production_factory';
+}
+
+function isAiDramaVideoFactory(factory: DigitalFactoryManifest) {
+  return readFactoryKind(factory) === 'ai_drama_video_factory';
 }
 
 function isReferenceImageVideoFactory(factory: DigitalFactoryManifest) {
@@ -20227,6 +20499,119 @@ function buildEcommerceProductVideoFactoryTaskInput({
         '每个视频产物包都包含独立的场景、动作、镜头和节奏要求；时长和画幅属于通用约束。',
         '严格使用当前产物包自己的提示词和反向提示词，不与其他产物包混用场景、动作、镜头或节奏要求。',
         '生成结果只保存视频 URL 元数据；大视频不经过服务端，PC 端按 URL 展示和导出。'
+      ]
+    },
+    null,
+    2
+  );
+}
+
+function buildAiDramaVideoFactoryTaskInput({
+  template,
+  factory,
+  values,
+  attachments
+}: {
+  template: DesktopRoleTemplate;
+  factory: DigitalFactoryManifest;
+  values: FactoryRunFormValues;
+  attachments: ComposerAttachment[];
+}) {
+  const genre =
+    readFactoryDramaGenres(factory).find((item) => item.key === values.dramaGenre) ??
+    readFactoryDramaGenres(factory)[0];
+  const qualityMode =
+    readFactoryDramaQualityModes(factory).find((item) => item.key === values.dramaQualityMode) ??
+    readFactoryDramaQualityModes(factory)[0];
+  const ratio =
+    readFactoryOperationRatios(factory).find((item) => item.key === values.videoRatio) ??
+    readFactoryOperationRatios(factory)[0];
+  const resolution =
+    readFactoryVideoResolutionOptions(factory).find((item) => item.key === values.outputResolution) ??
+    readFactoryVideoResolutionOptions(factory)[0];
+  const voicePreset =
+    readFactoryVoicePresetOptions(factory).find((item) => item.key === values.voicePresetId) ??
+    readFactoryVoicePresetOptions(factory)[0];
+  const durationOptions = readFactoryVideoDurationOptions(factory);
+  const requestedDuration = Number(values.videoDurationSeconds);
+  const videoDurationSeconds = durationOptions.includes(requestedDuration)
+    ? requestedDuration
+    : durationOptions.find((seconds) => seconds === 60) ?? durationOptions[0] ?? 60;
+  const shotDurationOptions = readFactoryDramaShotDurationOptions(factory);
+  const requestedShotDuration = Number(values.shotDurationSeconds);
+  const shotDurationSeconds = shotDurationOptions.includes(requestedShotDuration)
+    ? requestedShotDuration
+    : shotDurationOptions.find((seconds) => seconds === 4) ?? shotDurationOptions[0] ?? 4;
+  const imageAttachments = attachments.filter((attachment) => isFactoryImageAttachment(attachment));
+  const storyText = values.instruction?.trim() ?? '';
+  const factoryRequest = {
+    applicationType: 'digital_factory',
+    factoryKind: 'ai_drama_video_factory',
+    factoryName: template.name,
+    genre: {
+      key: genre?.key ?? values.dramaGenre ?? 'urban_counterattack',
+      label: genre?.label ?? values.dramaGenre ?? '都市逆袭'
+    },
+    qualityMode: {
+      key: qualityMode?.key ?? values.dramaQualityMode ?? 'standard',
+      label: qualityMode?.label ?? values.dramaQualityMode ?? '标准模式'
+    },
+    storyText,
+    characterNotes: values.characterNotes?.trim() || undefined,
+    sceneNotes: values.sceneNotes?.trim() || undefined,
+    videoGeneration: {
+      durationSeconds: videoDurationSeconds,
+      shotDurationSeconds,
+      ratio: {
+        key: ratio?.key ?? values.videoRatio ?? '9:16',
+        label: ratio?.label ?? values.videoRatio ?? '竖屏 9:16'
+      },
+      outputResolution: resolution?.key ?? values.outputResolution ?? '1080p',
+      outputResolutionLabel: resolution?.label ?? values.outputResolution ?? '1080P',
+      outputFormat: factory.output?.videoFormat ?? 'mp4'
+    },
+    voice: {
+      modelProfileId: 'qiu-audio-generation-default',
+      voicePresetId: voicePreset?.key ?? values.voicePresetId ?? 'male_pro_1',
+      voicePresetLabel: voicePreset?.label ?? values.voicePresetId ?? '专业男声',
+      language: 'zh'
+    },
+    concurrency: 2,
+    maxRetries: 0,
+    itemCount: imageAttachments.length,
+    maxItems: readFactoryMaxItems(factory),
+    output: {
+      folder: factory.output?.folder ?? 'ai-drama-videos',
+      packageFormat: 'editable_video_project',
+      videoFormat: factory.output?.videoFormat ?? 'mp4'
+    },
+    attachments: imageAttachments.map((attachment, index) => ({
+      id: attachment.id,
+      name: attachment.name,
+      size: attachment.size,
+      type: attachment.type,
+      localPath: attachment.localPath,
+      order: index + 1,
+      kind: 'reference_image'
+    }))
+  };
+  const taskBrief = `请运行「${template.name}」，根据用户故事生成一条 ${videoDurationSeconds} 秒 AI 漫剧短剧。`;
+
+  return JSON.stringify(
+    {
+      taskBrief,
+      factory_request: factoryRequest,
+      storyText,
+      referenceImages: factoryRequest.attachments,
+      output: {
+        format: 'mp4',
+        editable: true
+      },
+      instructions: [
+        '先把故事拆成可执行的短剧分镜 JSON，不要一次性要求视频模型生成整集。',
+        '每个镜头单独生成真实视频片段，失败镜头单独记录，不自动重试。',
+        '按镜头台词生成口播音频，并为每个镜头生成可编辑字幕。',
+        '将成功镜头合成为一个可编辑视频工程和 MP4 预览，最终发布前必须人工审核剧情、版权和平台规则。'
       ]
     },
     null,

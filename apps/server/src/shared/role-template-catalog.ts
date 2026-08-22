@@ -2248,6 +2248,64 @@ function buildAiVideoProductionFactoryManifest() {
   };
 }
 
+function buildAiDramaVideoFactoryManifest() {
+  return {
+    kind: 'ai_drama_video_factory',
+    version: '1.0.0',
+    title: 'AI制作漫剧工厂',
+    batch: {
+      maxItems: 12,
+      itemUnit: 'reference_asset',
+      inputFileKinds: ['image'],
+      imageExtensions: ['png', 'jpg', 'jpeg', 'webp']
+    },
+    contentControls: {
+      genres: [
+        { key: 'urban_counterattack', label: '都市逆袭' },
+        { key: 'sweet_romance', label: '霸总甜宠' },
+        { key: 'fantasy_xuanhuan', label: '玄幻修仙' },
+        { key: 'suspense_reversal', label: '悬疑反转' },
+        { key: 'campus_romance', label: '校园恋爱' },
+        { key: 'comedy_drama', label: '搞笑爽剧' }
+      ],
+      qualityModes: [
+        { key: 'economy', label: '省钱模式', description: '镜头更少，单镜头更短，适合快速试做。' },
+        { key: 'standard', label: '标准模式', description: '兼顾质量和成本，适合日常发布。' },
+        { key: 'premium', label: '高质量模式', description: '镜头更细，优先保留爆点镜头，成本更高。' }
+      ],
+      ratios: [
+        { key: '9:16', label: '竖屏 9:16' },
+        { key: '16:9', label: '横屏 16:9' }
+      ],
+      durationSecondOptions: [30, 60, 90],
+      shotDurationSecondOptions: [3, 4, 5, 6],
+      voicePresets: [
+        { key: 'male_pro_1', label: '旁白男声 - 沉稳短剧' },
+        { key: 'male_pro_2', label: '男主音色 - 清晰青年' },
+        { key: 'male_pro_3', label: '反派男声 - 压迫感' },
+        { key: 'male_pro_4', label: '成熟男声 - 低沉叙事' },
+        { key: 'female_pro_1', label: '女主音色 - 清亮自然' },
+        { key: 'female_pro_2', label: '御姐女声 - 稳重有戏' },
+        { key: 'funny_1', label: '搞笑男声 - 夸张吐槽' },
+        { key: 'funny_2', label: '系统音色 - 轻喜提示' }
+      ]
+    },
+    output: {
+      cacheDays: 30,
+      folder: 'ai-drama-videos',
+      packageFormat: 'editable_video_project',
+      videoFormat: 'mp4'
+    },
+    requiredCapabilities: ['text', 'video_generation', 'text_to_video', 'text_to_audio'],
+    optionalCapabilities: ['image_understanding'],
+    ui: {
+      primaryActionLabel: '开始制作漫剧',
+      uploadHint: '可选上传角色或场景参考图；故事、角色和分镜主要在参数区填写，最终产物为全视频 MP4。',
+      packageSelection: 'none'
+    }
+  };
+}
+
 type ReferenceVideoFactoryDefinition = {
   templateId: string;
   kind: string;
@@ -2887,6 +2945,120 @@ function buildAiVideoProductionFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
     runtimePolicy: {
       maxNodeExecutions: 24,
       maxLoopIterations: 4,
+      requireApprovalBeforeTools: false
+    }
+  };
+}
+
+function buildAiDramaVideoFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
+  const nodes: ServerRoleWorkflowGraphNode[] = [
+    {
+      id: 'start',
+      type: 'start',
+      name: '开始',
+      description: '工作流入口。'
+    },
+    {
+      id: 'factory_input',
+      type: 'input',
+      name: '接收漫剧故事',
+      instruction: '接收用户输入的故事梗概、题材、单集时长、画幅、质量模式、音色和可选角色/场景参考图。',
+      inputVariables: ['start.text', 'start.files', 'start.images'],
+      outputVariables: ['task_brief'],
+      config: {
+        acceptedFileKinds: ['image'],
+        maxItems: 12,
+        source: 'digital_factory'
+      }
+    },
+    {
+      id: 'draft_drama_plan',
+      type: 'llm',
+      name: '生成剧本分镜',
+      instruction: '把故事拆成一集竖屏 AI 漫剧短剧方案，输出结构化 JSON：标题、角色、场景、镜头列表、每镜头台词、动作、视频提示词和配音文本。必须控制镜头数量和单镜头时长，不能让视频模型一次生成整集。',
+      modelProfileId: 'qiu-general-default',
+      inputVariables: ['factory_request', 'task_brief', 'start.text', 'start.images'],
+      outputVariables: ['ai_drama_plan'],
+      config: {
+        llmTaskType: 'text',
+        outputMode: 'json',
+        schema: {
+          title: 'string',
+          logline: 'string',
+          characters: [{ name: 'string', description: 'string', voicePresetId: 'string' }],
+          scenes: [{ name: 'string', description: 'string' }],
+          shots: [{
+            id: 'string',
+            title: 'string',
+            durationSeconds: 4,
+            characters: ['string'],
+            scene: 'string',
+            action: 'string',
+            dialogue: 'string',
+            narration: 'string',
+            videoPrompt: 'string',
+            negativePrompt: 'string'
+          }]
+        }
+      }
+    },
+    {
+      id: 'generate_drama_episode',
+      type: 'llm',
+      name: '生成漫剧镜头',
+      instruction: 'PC 端按分镜逐镜头调用生视频模型，每个镜头都是真实视频片段；再按台词生成口播音频、叠加字幕并合成 MP4 预览。失败镜头单独记录，不影响已成功镜头。',
+      modelProfileId: 'qiu-video-generation-default',
+      inputVariables: ['factory_request', 'ai_drama_plan', 'start.images'],
+      outputVariables: ['ai_drama_video_result', 'generated_video_path', 'ai_drama_video_summary'],
+      config: {
+        llmTaskType: 'video_generation',
+        outputMode: 'json',
+        requiredModelProfileIds: ['qiu-audio-generation-default'],
+        requiredToolActions: [
+          { toolId: 'video-processing', action: 'video.compose_clips' },
+          { toolId: 'local-filesystem', action: 'filesystem.download_remote_file' },
+          { toolId: 'local-filesystem', action: 'filesystem.write_text_file' }
+        ],
+        concurrency: 2,
+        maxRetries: 0,
+        schema: {
+          projectPath: 'string',
+          previewPath: 'string',
+          shots: [{ id: 'string', status: 'completed', localPath: 'string' }]
+        }
+      }
+    },
+    {
+      id: 'factory_output',
+      type: 'output',
+      name: '返回漫剧成片',
+      instruction: '返回漫剧 MP4 预览、可编辑视频工程、镜头清单和失败镜头原因。最终发布前必须人工审核剧情、版权、平台规则和角色一致性。',
+      inputVariables: ['ai_drama_video_result', 'generated_video_path', 'ai_drama_video_summary'],
+      outputVariables: ['final_answer']
+    }
+  ];
+
+  return {
+    version: '1.0.0',
+    entryNodeId: 'start',
+    nodes,
+    edges: [
+      { id: 'start__factory_input', sourceNodeId: 'start', targetNodeId: 'factory_input', condition: { type: 'always' } },
+      { id: 'factory_input__draft_drama_plan', sourceNodeId: 'factory_input', targetNodeId: 'draft_drama_plan', condition: { type: 'always' } },
+      { id: 'draft_drama_plan__generate_drama_episode', sourceNodeId: 'draft_drama_plan', targetNodeId: 'generate_drama_episode', condition: { type: 'always' } },
+      { id: 'generate_drama_episode__factory_output', sourceNodeId: 'generate_drama_episode', targetNodeId: 'factory_output', condition: { type: 'always' } }
+    ],
+    variables: [
+      { name: 'factory_request', type: 'json', description: '工厂面板提交的漫剧制作参数。', required: true },
+      { name: 'task_brief', type: 'text', description: '用户故事和制作要求摘要。', required: true },
+      { name: 'ai_drama_plan', type: 'json', description: '剧本、角色、场景和镜头级分镜。', required: true },
+      { name: 'ai_drama_video_result', type: 'json', description: '镜头生成、配音、字幕和合成结果。', required: true },
+      { name: 'generated_video_path', type: 'text', description: 'MP4 预览本地路径。' },
+      { name: 'ai_drama_video_summary', type: 'text', description: '漫剧制作摘要。', required: true }
+    ],
+    runtimePolicy: {
+      maxNodeExecutions: 48,
+      maxLoopIterations: 8,
       requireApprovalBeforeTools: false
     }
   };
@@ -5637,6 +5809,63 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_BASIC_MONTHLY'),
     approvalPolicy: '本工厂只生成视频成片，不自动发布；对外发布前必须由用户人工确认事实、版权、平台规则和品牌口径。'
   },
+  {
+    templateId: 'factory_ai_drama_video_v1',
+    applicationType: 'DIGITAL_FACTORY',
+    version: DESIGNED_ROLE_TEMPLATE_VERSION,
+    name: 'AI制作漫剧工厂',
+    industry: '内容生产 / AI短剧',
+    scenario: '把故事梗概、小说片段或短剧脚本制作成红果/抖音风格的全视频 AI 漫剧短片',
+    description: '面向 AI 漫剧和短剧内容生产，把用户输入的故事拆成角色、场景和镜头级分镜，逐镜头调用视频模型生成真实视频片段，再生成配音、字幕并合成为可编辑的 MP4 漫剧成片。',
+    recommendedPlanCode: 'ENTERPRISE_PRO_MONTHLY',
+    businessGoal: '用镜头级流水线替代一次性大提示词生成，降低返工成本，提升角色、剧情节奏和成片完整度。',
+    knowledgeSources: [],
+    tools: ['video-processing', 'local-filesystem'],
+    skills: [
+      skill('drama_script_breakdown', '短剧剧本拆分', '把故事梗概拆成钩子、冲突、爽点、反转和结尾悬念，形成单集短剧结构。'),
+      skill('drama_storyboard_generation', '镜头级分镜', '生成角色、场景、台词、动作、镜头提示词和单镜头时长，避免一次性生成整集视频。'),
+      skill('drama_video_episode_assembly', '漫剧成片合成', '逐镜头调用生视频模型，生成口播、字幕和 MP4 成片，并保留可编辑工程。')
+    ],
+    workflowSteps: [
+      {
+        id: 'factory_input',
+        order: 1,
+        type: 'input',
+        name: '接收故事设定',
+        instruction: '接收故事梗概、题材、时长、画幅、质量模式、音色和可选角色/场景参考图。'
+      },
+      {
+        id: 'draft_drama_plan',
+        order: 2,
+        type: 'llm',
+        name: '生成剧本分镜',
+        instruction: '先用文本模型生成结构化剧本、角色、场景和镜头分解，让用户和系统都能按镜头复核。'
+      },
+      {
+        id: 'generate_drama_episode',
+        order: 3,
+        type: 'llm',
+        name: '逐镜头生成视频',
+        instruction: '按分镜逐镜头调用生视频模型；每个镜头必须是真实视频片段，失败镜头单独记录。'
+      },
+      {
+        id: 'factory_output',
+        order: 4,
+        type: 'output',
+        name: '返回漫剧成片',
+        instruction: '返回 MP4 预览、可编辑视频工程、镜头清单、字幕和失败镜头原因。'
+      }
+    ],
+    workflowGraph: buildAiDramaVideoFactoryWorkflowGraph(),
+    dependencyManifestFactory: buildAiDramaVideoFactoryManifest(),
+    sampleInputs: [
+      '请把这个都市逆袭故事做成 60 秒竖屏 AI 漫剧：男主被同事抢功后意外获得 AI 系统，三天内反杀项目组。',
+      '请做一集玄幻修仙爽剧，开场要有强钩子，结尾留下悬念，每个镜头都要适合生成视频。'
+    ],
+    outputFormat: '全视频 AI 漫剧 MP4 和可编辑视频工程，包含镜头视频、角色/场景分镜、配音、字幕、失败镜头记录和人工复核提示。',
+    allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_BASIC_MONTHLY'),
+    approvalPolicy: '不自动发布；发布前必须人工确认剧情版权、人物形象、平台规则、广告合规和生成视频中的异常画面。'
+  },
   ...horizontalVideoFactoryDefinitions.map(buildReferenceVideoFactoryTemplate),
   {
     templateId: 'factory_medical_case_video_screening_v1',
@@ -5893,6 +6122,7 @@ export const productionRoleTemplateIds = [
   'factory_artistic_creation_images_v1',
   'factory_ecommerce_product_videos_v1',
   'factory_ai_video_production_v1',
+  'factory_ai_drama_video_v1',
   'factory_digital_spokesperson_videos_v1',
   'factory_ad_social_media_videos_v1',
   'factory_medical_case_video_screening_v1',
