@@ -75,7 +75,25 @@ import Tooltip from 'antd/es/tooltip';
 import Tour from 'antd/es/tour';
 import Typography from 'antd/es/typography';
 import zhCN from 'antd/es/locale/zh_CN';
+import {
+  Background,
+  Controls,
+  Handle,
+  MiniMap,
+  Position,
+  ReactFlow,
+  ReactFlowProvider,
+  type Connection,
+  type Edge,
+  type Node,
+  type NodeProps,
+  type NodeTypes,
+  type ReactFlowInstance,
+  applyEdgeChanges,
+  applyNodeChanges
+} from '@xyflow/react';
 import { type ChangeEvent, type DragEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import '@xyflow/react/dist/style.css';
 
 import type {
   ListSoftwareCopilotsResponse,
@@ -407,6 +425,16 @@ interface FactoryRunFormValues {
   voicePresetId?: string;
   dramaGenre?: string;
   dramaQualityMode?: string;
+  dramaVisualStyle?: string;
+  dramaScriptDraft?: string;
+  dramaCharacterCards?: string;
+  dramaSceneCards?: string;
+  dramaStoryboard?: string;
+  dramaCanvas?: {
+    nodes: Array<Pick<AiDramaCanvasNode, 'id' | 'kind' | 'step' | 'title' | 'x' | 'y' | 'prompt' | 'generationSettings'>>;
+    edges: Array<{ source: string; target: string }>;
+  };
+  dramaNodeGenerationRequest?: AiDramaCanvasNodeGenerationRequest;
   shotDurationSeconds?: number;
   characterNotes?: string;
   sceneNotes?: string;
@@ -495,9 +523,575 @@ interface ComposerAttachment {
   progress: number;
   status: 'uploading' | 'ready';
   stagedAt: string;
+  dramaReferenceKind?: AiDramaReferenceKind;
 }
 
 type AiVideoAssetKind = 'intro' | 'outro' | 'music';
+type AiDramaReferenceKind = 'character' | 'scene';
+type AiDramaWorkbenchStep = 'setup' | 'script' | 'characters' | 'scenes' | 'storyboard' | 'generate';
+type AiDramaCanvasNodeKind = 'script' | 'character' | 'scene' | 'image' | 'video' | 'audio' | 'compose';
+type AiDramaCanvasNodeGenerationKind = 'character_image' | 'scene_image' | 'reference_image';
+type AiDramaNodeImageSize = '1K' | '2K' | '4K';
+
+interface AiDramaNodeGenerationSettings {
+  modelProfileId?: string;
+  ratio?: string;
+  imageSize?: AiDramaNodeImageSize;
+  visualStyle?: string;
+}
+
+interface AiDramaCanvasNode {
+  id: string;
+  kind: AiDramaCanvasNodeKind;
+  step: AiDramaWorkbenchStep;
+  title: string;
+  x: number;
+  y: number;
+  prompt?: string;
+  voicePresetId?: string;
+  generationSettings?: AiDramaNodeGenerationSettings;
+}
+
+interface AiDramaCanvasEdge {
+  id: string;
+  source: string;
+  target: string;
+}
+
+interface AiDramaCanvasMenuState {
+  open: boolean;
+  screenX: number;
+  screenY: number;
+  canvasX: number;
+  canvasY: number;
+}
+
+interface AiDramaCanvasNodeGenerationRequest {
+  nodeId: string;
+  nodeKind: AiDramaCanvasNodeKind;
+  generationKind: AiDramaCanvasNodeGenerationKind;
+  prompt: string;
+  voicePresetId?: string;
+  visualStyle?: string;
+  modelProfileId?: string;
+  ratio?: string;
+  imageSize?: AiDramaNodeImageSize;
+}
+
+interface AiDramaLocalProject {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  formValues: Partial<FactoryRunFormValues>;
+  attachments: ComposerAttachment[];
+  nodes: AiDramaCanvasNode[];
+  edges: AiDramaCanvasEdge[];
+  selectedNodeId?: string;
+  workbenchStep?: AiDramaWorkbenchStep;
+}
+
+interface AiDramaFlowNodeMeta {
+  icon: ReactNode;
+  tone: string;
+  status: string;
+  body: string;
+  sub: string;
+}
+
+interface AiDramaFlowReferencePreview {
+  item: FactoryArtifactPreviewItem;
+  label: string;
+}
+
+interface AiDramaFlowStoryboardPreview {
+  id: string;
+  order: string;
+  scene: string;
+}
+
+interface AiDramaFlowNodeData extends Record<string, unknown> {
+  canvasNode: AiDramaCanvasNode;
+  meta: AiDramaFlowNodeMeta;
+  selected: boolean;
+  removable: boolean;
+  characterPreviews: AiDramaFlowReferencePreview[];
+  scenePreviews: AiDramaFlowReferencePreview[];
+  generatedImage?: FactoryArtifactPreviewItem;
+  storyboardRows: AiDramaFlowStoryboardPreview[];
+  onRemove: (nodeId: string) => void;
+}
+
+type AiDramaFlowNode = Node<AiDramaFlowNodeData, 'aiDramaNode'>;
+type AiDramaFlowEdge = Edge<Record<string, unknown>, 'smoothstep'>;
+
+const AI_DRAMA_PROTECTED_NODE_IDS = new Set([
+  'script-root',
+  'character-root',
+  'scene-root',
+  'storyboard-root',
+  'compose-root'
+]);
+
+const DEFAULT_AI_DRAMA_CANVAS_NODES: AiDramaCanvasNode[] = [
+  { id: 'script-root', kind: 'script', step: 'script', title: '剧本', x: 180, y: 110 },
+  { id: 'character-root', kind: 'character', step: 'characters', title: '人物', x: 500, y: 70 },
+  { id: 'scene-root', kind: 'scene', step: 'scenes', title: '场景', x: 500, y: 280 },
+  { id: 'storyboard-root', kind: 'video', step: 'storyboard', title: '分镜视频', x: 840, y: 170 },
+  { id: 'compose-root', kind: 'compose', step: 'generate', title: '合成成片', x: 1160, y: 180 }
+];
+
+const DEFAULT_AI_DRAMA_CANVAS_EDGES: AiDramaCanvasEdge[] = [
+  { id: 'drama-edge-script-storyboard', source: 'script-root', target: 'storyboard-root' },
+  { id: 'drama-edge-character-storyboard', source: 'character-root', target: 'storyboard-root' },
+  { id: 'drama-edge-scene-storyboard', source: 'scene-root', target: 'storyboard-root' },
+  { id: 'drama-edge-storyboard-compose', source: 'storyboard-root', target: 'compose-root' }
+];
+
+const aiDramaProjectStorageKey = 'qiuai.pc.aiDramaProjects.v1';
+const aiDramaActiveProjectStorageKey = 'qiuai.pc.aiDramaActiveProjectId.v1';
+const aiDramaNodeImageSizeOptions: AiDramaNodeImageSize[] = ['1K', '2K', '4K'];
+const defaultAiDramaVisualStyles = [
+  { key: 'cinematic_realism', label: '电影写实', description: '真实光影、电影构图、细腻质感' },
+  { key: 'oriental_ink', label: '东方国风', description: '东方美学、淡雅色彩、层次清晰' },
+  { key: 'modern_2d', label: '现代 2D', description: '清晰线稿、平面色块、角色辨识度高' },
+  { key: 'anime_3d', label: '动漫 3D', description: '立体角色、柔和材质、连续镜头友好' },
+  { key: 'dark_suspense', label: '暗黑悬疑', description: '低饱和、强明暗、悬疑氛围' },
+  { key: 'warm_romance', label: '温暖言情', description: '柔和肤色、自然光、情绪氛围' },
+  { key: 'custom', label: '自定义风格', description: '在项目提示词中补充自己的风格要求' }
+] as const;
+
+function createDefaultAiDramaCanvasNodes() {
+  return DEFAULT_AI_DRAMA_CANVAS_NODES.map((node) => ({ ...node }));
+}
+
+function createDefaultAiDramaCanvasEdges() {
+  return DEFAULT_AI_DRAMA_CANVAS_EDGES.map((edge) => ({ ...edge }));
+}
+
+function createAiDramaProjectName(index: number) {
+  return `漫剧项目 ${index}`;
+}
+
+function createAiDramaLocalProject(name?: string): AiDramaLocalProject {
+  const now = new Date().toISOString();
+  return {
+    id: `ai-drama-project-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    name: name?.trim() || createAiDramaProjectName(1),
+    createdAt: now,
+    updatedAt: now,
+    formValues: {
+      projectName: name?.trim() || '',
+      instruction: '',
+      dramaScriptDraft: '',
+      dramaCharacterCards: '',
+      dramaSceneCards: '',
+      dramaStoryboard: '',
+      dramaVisualStyle: 'cinematic_realism'
+    },
+    attachments: [],
+    nodes: createDefaultAiDramaCanvasNodes(),
+    edges: createDefaultAiDramaCanvasEdges(),
+    selectedNodeId: 'script-root',
+    workbenchStep: 'script'
+  };
+}
+
+function normalizeAiDramaNodeGenerationSettings(value: unknown): AiDramaNodeGenerationSettings | undefined {
+  if (!isPlainObject(value)) {
+    return undefined;
+  }
+
+  const imageSize = typeof value.imageSize === 'string' && aiDramaNodeImageSizeOptions.includes(value.imageSize as AiDramaNodeImageSize)
+    ? value.imageSize as AiDramaNodeImageSize
+    : undefined;
+  const settings: AiDramaNodeGenerationSettings = {
+    modelProfileId: typeof value.modelProfileId === 'string' ? value.modelProfileId.trim() || undefined : undefined,
+    ratio: typeof value.ratio === 'string' ? value.ratio.trim() || undefined : undefined,
+    imageSize,
+    visualStyle: typeof value.visualStyle === 'string' ? value.visualStyle.trim() || undefined : undefined
+  };
+  return settings.modelProfileId || settings.ratio || settings.imageSize || settings.visualStyle ? settings : undefined;
+}
+
+function normalizeAiDramaCanvasNode(value: unknown): AiDramaCanvasNode | undefined {
+  if (!isPlainObject(value)) {
+    return undefined;
+  }
+
+  const id = typeof value.id === 'string' ? value.id.trim() : '';
+  const kind = typeof value.kind === 'string' ? value.kind as AiDramaCanvasNodeKind : undefined;
+  const step = typeof value.step === 'string' ? value.step as AiDramaWorkbenchStep : undefined;
+  const title = typeof value.title === 'string' ? value.title.trim() : '';
+  if (!id || !kind || !step || !title) {
+    return undefined;
+  }
+
+  return {
+    id,
+    kind,
+    step,
+    title,
+    x: Number.isFinite(Number(value.x)) ? Number(value.x) : 0,
+    y: Number.isFinite(Number(value.y)) ? Number(value.y) : 0,
+    prompt: typeof value.prompt === 'string' ? value.prompt : undefined,
+    voicePresetId: typeof value.voicePresetId === 'string' ? value.voicePresetId.trim() || undefined : undefined,
+    generationSettings: normalizeAiDramaNodeGenerationSettings(value.generationSettings)
+  };
+}
+
+function normalizeAiDramaCanvasEdge(value: unknown): AiDramaCanvasEdge | undefined {
+  if (!isPlainObject(value)) {
+    return undefined;
+  }
+  const id = typeof value.id === 'string' ? value.id.trim() : '';
+  const source = typeof value.source === 'string' ? value.source.trim() : '';
+  const target = typeof value.target === 'string' ? value.target.trim() : '';
+  return id && source && target ? { id, source, target } : undefined;
+}
+
+function normalizeAiDramaProject(value: unknown): AiDramaLocalProject | undefined {
+  if (!isPlainObject(value)) {
+    return undefined;
+  }
+
+  const id = typeof value.id === 'string' ? value.id.trim() : '';
+  const name = typeof value.name === 'string' ? value.name.trim() : '';
+  if (!id || !name) {
+    return undefined;
+  }
+
+  const nodes = Array.isArray(value.nodes)
+    ? value.nodes.map(normalizeAiDramaCanvasNode).filter((node): node is AiDramaCanvasNode => Boolean(node))
+    : [];
+  const edges = Array.isArray(value.edges)
+    ? value.edges.map(normalizeAiDramaCanvasEdge).filter((edge): edge is AiDramaCanvasEdge => Boolean(edge))
+    : [];
+  const attachments = Array.isArray(value.attachments)
+    ? value.attachments.filter((item): item is ComposerAttachment =>
+        isPlainObject(item) &&
+        typeof item.id === 'string' &&
+        typeof item.name === 'string' &&
+        typeof item.size === 'number' &&
+        typeof item.progress === 'number' &&
+        typeof item.status === 'string' &&
+        typeof item.stagedAt === 'string'
+      )
+    : [];
+
+  return {
+    id,
+    name,
+    createdAt: typeof value.createdAt === 'string' ? value.createdAt : new Date().toISOString(),
+    updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : new Date().toISOString(),
+    formValues: isPlainObject(value.formValues) ? normalizeFactoryRunParameterMemory(value.formValues) : {},
+    attachments,
+    nodes: nodes.length > 0 ? nodes : createDefaultAiDramaCanvasNodes(),
+    edges: edges.length > 0 ? edges : createDefaultAiDramaCanvasEdges(),
+    selectedNodeId: typeof value.selectedNodeId === 'string' ? value.selectedNodeId : 'script-root',
+    workbenchStep: typeof value.workbenchStep === 'string' ? value.workbenchStep as AiDramaWorkbenchStep : 'script'
+  };
+}
+
+function readAiDramaProjects(): AiDramaLocalProject[] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(aiDramaProjectStorageKey);
+    const parsed = rawValue ? JSON.parse(rawValue) : [];
+    return Array.isArray(parsed)
+      ? parsed.map(normalizeAiDramaProject).filter((project): project is AiDramaLocalProject => Boolean(project))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeAiDramaProjects(projects: AiDramaLocalProject[]) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(aiDramaProjectStorageKey, JSON.stringify(projects));
+  } catch {
+    // Local drama projects are convenience state; keep the editor usable if storage is unavailable.
+  }
+}
+
+function readActiveAiDramaProjectId(projects: AiDramaLocalProject[]) {
+  if (typeof window === 'undefined') {
+    return projects[0]?.id ?? '';
+  }
+
+  try {
+    const activeId = window.localStorage.getItem(aiDramaActiveProjectStorageKey)?.trim() ?? '';
+    return projects.some((project) => project.id === activeId) ? activeId : projects[0]?.id ?? '';
+  } catch {
+    return projects[0]?.id ?? '';
+  }
+}
+
+function writeActiveAiDramaProjectId(projectId: string) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(aiDramaActiveProjectStorageKey, projectId);
+  } catch {
+    // Active project selection is optional.
+  }
+}
+
+function initializeAiDramaProjects() {
+  const storedProjects = readAiDramaProjects();
+  const projects = storedProjects.length > 0 ? storedProjects : [createAiDramaLocalProject('我的漫剧项目')];
+  if (storedProjects.length === 0) {
+    writeAiDramaProjects(projects);
+  }
+  const activeProjectId = readActiveAiDramaProjectId(projects);
+  if (activeProjectId) {
+    writeActiveAiDramaProjectId(activeProjectId);
+  }
+  return { projects, activeProjectId };
+}
+
+function AiDramaFlowNodeCard({ data }: NodeProps<AiDramaFlowNode>) {
+  const { canvasNode, meta } = data;
+  const showCharacterThumbs = canvasNode.kind === 'character' || canvasNode.kind === 'image';
+  const showSceneThumbs = canvasNode.kind === 'scene' || canvasNode.kind === 'image';
+  const referencePreviews = [
+    ...(showCharacterThumbs ? data.characterPreviews.slice(0, canvasNode.kind === 'image' ? 2 : 4) : []),
+    ...(showSceneThumbs ? data.scenePreviews.slice(0, canvasNode.kind === 'image' ? 2 : 4) : [])
+  ];
+
+  return (
+    <div className={`factory-drama-node ${meta.tone} ${data.selected ? 'selected' : ''}`}>
+      <Handle className="factory-drama-handle" type="target" position={Position.Left} />
+      <div className="factory-drama-node-header">
+        <span className="factory-drama-node-icon">{meta.icon}</span>
+        <span>
+          <strong>{canvasNode.title}</strong>
+          <small>{meta.status}</small>
+        </span>
+        {data.removable ? (
+          <button
+            type="button"
+            className="factory-drama-node-delete nodrag"
+            aria-label={`删除${canvasNode.title}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              data.onRemove(canvasNode.id);
+            }}
+          >
+            <CloseOutlined />
+          </button>
+        ) : null}
+      </div>
+
+      <div className="factory-drama-node-body">
+        <span>{meta.body}</span>
+        <small>{meta.sub}</small>
+      </div>
+
+      {data.generatedImage ? (
+        <span className="factory-drama-generated-image" title={data.generatedImage.sourceName ?? data.generatedImage.sku}>
+          <FactoryPreviewImage
+            item={data.generatedImage}
+            alt={data.generatedImage.sourceName ?? data.generatedImage.sku}
+            className="factory-drama-reference-image"
+            loading="lazy"
+          />
+        </span>
+      ) : referencePreviews.length > 0 ? (
+        <span className="factory-drama-node-thumbs">
+          {referencePreviews.map((preview) => (
+            <span
+              key={`${canvasNode.id}-${preview.item.id}`}
+              className="factory-drama-reference-thumb compact"
+              title={preview.item.sourceName ?? preview.item.sku}
+            >
+              <FactoryPreviewImage
+                item={preview.item}
+                alt={preview.item.sourceName ?? preview.item.sku}
+                className="factory-drama-reference-image"
+                loading="lazy"
+              />
+              <span>{preview.label}</span>
+            </span>
+          ))}
+        </span>
+      ) : showCharacterThumbs || showSceneThumbs ? (
+        <span className="factory-drama-node-placeholder">
+          <FileImageOutlined />
+        </span>
+      ) : null}
+
+      {canvasNode.kind === 'video' && data.storyboardRows.length > 0 ? (
+        <span className="factory-drama-shot-list">
+          {data.storyboardRows.slice(0, 2).map((row) => (
+            <span key={row.id} className="factory-drama-shot-card">
+              <strong>{row.order}</strong>
+              <span>{row.scene}</span>
+            </span>
+          ))}
+        </span>
+      ) : null}
+      <Handle className="factory-drama-handle" type="source" position={Position.Right} />
+    </div>
+  );
+}
+
+const AI_DRAMA_FLOW_NODE_TYPES: NodeTypes = {
+  aiDramaNode: AiDramaFlowNodeCard
+};
+
+interface AiDramaFlowCanvasProps {
+  nodes: AiDramaFlowNode[];
+  edges: AiDramaFlowEdge[];
+  menuOpen: boolean;
+  onPaneClick: () => void;
+  onMenuRequest: (menu: AiDramaCanvasMenuState) => void;
+  onNodeSelect: (nodeId: string) => void;
+  onNodePositionCommit: (nodeId: string, position: { x: number; y: number }) => void;
+  onNodesRemove: (nodeIds: string[]) => void;
+  onEdgesRemove: (edgeIds: string[]) => void;
+  onConnect: (connection: Connection) => void;
+}
+
+function AiDramaFlowCanvas({
+  nodes,
+  edges,
+  menuOpen,
+  onPaneClick,
+  onMenuRequest,
+  onNodeSelect,
+  onNodePositionCommit,
+  onNodesRemove,
+  onEdgesRemove,
+  onConnect
+}: AiDramaFlowCanvasProps) {
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const flowInstanceRef = useRef<ReactFlowInstance<AiDramaFlowNode, AiDramaFlowEdge> | null>(null);
+  const [flowNodes, setFlowNodes] = useState<AiDramaFlowNode[]>(nodes);
+  const [flowEdges, setFlowEdges] = useState<AiDramaFlowEdge[]>(edges);
+
+  useEffect(() => {
+    setFlowNodes(nodes);
+  }, [nodes]);
+
+  useEffect(() => {
+    setFlowEdges(edges);
+  }, [edges]);
+
+  return (
+    <div className="factory-drama-flow-shell" ref={wrapperRef}>
+      <ReactFlowProvider>
+        <ReactFlow<AiDramaFlowNode, AiDramaFlowEdge>
+          className="factory-drama-flow"
+          nodes={flowNodes}
+          edges={flowEdges}
+          nodeTypes={AI_DRAMA_FLOW_NODE_TYPES}
+          fitView
+          fitViewOptions={{ padding: 0.18, minZoom: 0.45, maxZoom: 1 }}
+          minZoom={0.25}
+          maxZoom={1.45}
+          nodesDraggable
+          nodesConnectable
+          elementsSelectable
+          panOnDrag
+          zoomOnScroll
+          deleteKeyCode={['Backspace', 'Delete']}
+          connectionLineStyle={{ stroke: '#1677ff', strokeWidth: 2 }}
+          proOptions={{ hideAttribution: true }}
+          onInit={(instance) => {
+            flowInstanceRef.current = instance;
+          }}
+          onNodesChange={(changes) => {
+            const removedNodeIds = changes
+              .filter((change) => change.type === 'remove')
+              .map((change) => change.id)
+              .filter((nodeId) => !AI_DRAMA_PROTECTED_NODE_IDS.has(nodeId));
+            let selectedNodeId = '';
+            for (const change of changes) {
+              if (change.type === 'select' && change.selected) {
+                selectedNodeId = change.id;
+              }
+            }
+
+            setFlowNodes((current) => applyNodeChanges(changes, current));
+
+            if (selectedNodeId) {
+              onNodeSelect(selectedNodeId);
+            }
+            if (removedNodeIds.length > 0) {
+              onNodesRemove(removedNodeIds);
+            }
+          }}
+          onEdgesChange={(changes) => {
+            const removedEdgeIds = changes
+              .filter((change) => change.type === 'remove')
+              .map((change) => change.id);
+            setFlowEdges((current) => applyEdgeChanges(changes, current));
+            if (removedEdgeIds.length > 0) {
+              onEdgesRemove(removedEdgeIds);
+            }
+          }}
+          onConnect={onConnect}
+          onPaneClick={() => {
+            if (menuOpen) {
+              onPaneClick();
+            }
+          }}
+          onNodeClick={(_, flowNode) => {
+            onNodeSelect(flowNode.id);
+          }}
+          onNodeDragStop={(_, flowNode) => {
+            onNodePositionCommit(flowNode.id, flowNode.position);
+          }}
+          onPaneContextMenu={(event) => {
+            event.preventDefault();
+            const rect = wrapperRef.current?.getBoundingClientRect();
+            const flowPoint = flowInstanceRef.current?.screenToFlowPosition({
+              x: event.clientX,
+              y: event.clientY
+            }) ?? {
+              x: event.clientX - (rect?.left ?? 0),
+              y: event.clientY - (rect?.top ?? 0)
+            };
+            onMenuRequest({
+              open: true,
+              screenX: event.clientX - (rect?.left ?? 0),
+              screenY: event.clientY - (rect?.top ?? 0),
+              canvasX: flowPoint.x,
+              canvasY: flowPoint.y
+            });
+          }}
+        >
+          <Background gap={18} size={1} color="#d5dce7" />
+          <Controls position="bottom-left" />
+          <MiniMap
+            className="factory-drama-minimap"
+            pannable
+            zoomable
+            nodeColor={(flowNode) => {
+              const tone = (flowNode.data as AiDramaFlowNodeData).meta.tone;
+              if (tone === 'green') return '#16a34a';
+              if (tone === 'cyan') return '#0891b2';
+              if (tone === 'orange') return '#d48806';
+              if (tone === 'purple') return '#7c3aed';
+              if (tone === 'slate') return '#64748b';
+              return '#1677ff';
+            }}
+          />
+        </ReactFlow>
+      </ReactFlowProvider>
+    </div>
+  );
+}
 
 interface WorkflowRuntimeLogVariable {
   name: string;
@@ -2736,6 +3330,11 @@ const factoryRunRememberedFieldKeys: Array<keyof FactoryRunFormValues> = [
   'voicePresetId',
   'dramaGenre',
   'dramaQualityMode',
+  'dramaVisualStyle',
+  'dramaScriptDraft',
+  'dramaCharacterCards',
+  'dramaSceneCards',
+  'dramaStoryboard',
   'shotDurationSeconds',
   'characterNotes',
   'sceneNotes',
@@ -2862,6 +3461,7 @@ function normalizeFactoryRunParameterMemory(value: unknown): Partial<FactoryRunF
       key === 'editTargetSeconds' ||
       key === 'videoCount' ||
       key === 'videoDurationSeconds' ||
+      key === 'shotDurationSeconds' ||
       key === 'demoDurationMinutes' ||
       key === 'maxFormulaCount' ||
       key === 'maxChartCount' ||
@@ -3415,6 +4015,7 @@ export default function App() {
   const composerFileInputRef = useRef<HTMLInputElement | null>(null);
   const factoryFileInputRef = useRef<HTMLInputElement | null>(null);
   const factoryVideoAssetInputRef = useRef<HTMLInputElement | null>(null);
+  const factoryDramaReferenceInputRef = useRef<HTMLInputElement | null>(null);
   const [taskForm] = Form.useForm<TaskFormValues>();
   const [factoryRunForm] = Form.useForm<FactoryRunFormValues>();
   const [academicSectionEditorForm] = Form.useForm<AcademicSectionEditorFormValues>();
@@ -3491,6 +4092,32 @@ export default function App() {
   const [factoryVideoAssetAttachments, setFactoryVideoAssetAttachments] = useState<ComposerAttachment[]>([]);
   const [pendingFactoryVideoAssetKind, setPendingFactoryVideoAssetKind] =
     useState<AiVideoAssetKind>('intro');
+  const [pendingFactoryDramaReferenceKind, setPendingFactoryDramaReferenceKind] =
+    useState<AiDramaReferenceKind>('character');
+  const [aiDramaWorkbenchStep, setAiDramaWorkbenchStep] = useState<AiDramaWorkbenchStep>('script');
+  const [selectedAiDramaCanvasNodeId, setSelectedAiDramaCanvasNodeId] = useState('script-root');
+  const [aiDramaCanvasMenu, setAiDramaCanvasMenu] = useState<AiDramaCanvasMenuState>({
+    open: false,
+    screenX: 0,
+    screenY: 0,
+    canvasX: 0,
+    canvasY: 0
+  });
+  const [aiDramaCanvasNodes, setAiDramaCanvasNodes] =
+    useState<AiDramaCanvasNode[]>(createDefaultAiDramaCanvasNodes);
+  const [aiDramaCanvasEdges, setAiDramaCanvasEdges] =
+    useState<AiDramaCanvasEdge[]>(createDefaultAiDramaCanvasEdges);
+  const aiDramaFlowWrapperRef = useRef<HTMLDivElement | null>(null);
+  const aiDramaProjectInitialStateRef = useRef<ReturnType<typeof initializeAiDramaProjects> | null>(null);
+  if (!aiDramaProjectInitialStateRef.current) {
+    aiDramaProjectInitialStateRef.current = initializeAiDramaProjects();
+  }
+  const [aiDramaProjects, setAiDramaProjects] = useState<AiDramaLocalProject[]>(
+    () => aiDramaProjectInitialStateRef.current?.projects ?? []
+  );
+  const [activeAiDramaProjectId, setActiveAiDramaProjectId] = useState(
+    () => aiDramaProjectInitialStateRef.current?.activeProjectId ?? ''
+  );
   const [isFactoryDragOver, setIsFactoryDragOver] = useState(false);
   const [isFactoryVideoAssetDragOver, setIsFactoryVideoAssetDragOver] = useState(false);
   const [academicDemoImportingSection, setAcademicDemoImportingSection] = useState('');
@@ -3991,8 +4618,30 @@ export default function App() {
     flushFactoryRunParameterMemory();
     const defaultValues = buildFactoryRunDefaultValues(selectedFactoryRoleCode);
     if (defaultValues) {
-      factoryRunForm.setFieldsValue(applyFactoryRunParameterMemory(selectedFactoryRoleCode, defaultValues));
-      setFactoryAttachments([]);
+      const factory = readFactoryManifestForRoleCode(selectedFactoryRoleCode);
+      if (isAiDramaVideoFactory(factory)) {
+        const projects = readAiDramaProjects();
+        const activeProjectId = readActiveAiDramaProjectId(projects) || projects[0]?.id || '';
+        const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0];
+        if (projects.length > 0) {
+          setAiDramaProjects(projects);
+        }
+        if (activeProject) {
+          setActiveAiDramaProjectId(activeProject.id);
+          writeActiveAiDramaProjectId(activeProject.id);
+          applyAiDramaProjectToEditor(activeProject, defaultValues);
+        } else {
+          factoryRunForm.setFieldsValue(defaultValues);
+          setFactoryAttachments([]);
+          setAiDramaCanvasNodes(createDefaultAiDramaCanvasNodes());
+          setAiDramaCanvasEdges(createDefaultAiDramaCanvasEdges());
+          setSelectedAiDramaCanvasNodeId('script-root');
+          setAiDramaWorkbenchStep('script');
+        }
+      } else {
+        factoryRunForm.setFieldsValue(applyFactoryRunParameterMemory(selectedFactoryRoleCode, defaultValues));
+        setFactoryAttachments([]);
+      }
       setFactoryVideoAssetAttachments(readFactoryVideoAssetAttachments(selectedFactoryRoleCode));
     }
   }, [factoryRunForm, selectedFactoryRoleCode]);
@@ -4000,6 +4649,20 @@ export default function App() {
   useEffect(() => () => {
     flushFactoryRunParameterMemory();
   }, []);
+
+  useEffect(() => {
+    if (!selectedFactoryRoleCode || !isAiDramaVideoFactory(readFactoryManifestForRoleCode(selectedFactoryRoleCode))) {
+      return;
+    }
+    saveActiveAiDramaProjectSnapshot();
+  }, [
+    aiDramaCanvasEdges,
+    aiDramaCanvasNodes,
+    aiDramaWorkbenchStep,
+    factoryAttachments,
+    selectedAiDramaCanvasNodeId,
+    selectedFactoryRoleCode
+  ]);
 
   async function loadRuntimeState() {
     if (!window.qiuDesktop) {
@@ -4843,9 +5506,14 @@ export default function App() {
     const maxItems = readFactoryMaxItems(currentFactory);
     const sourceFiles = isAiVideoProductionFactory(currentFactory)
       ? files.filter((file) => isVideoFileCandidate(file))
+      : isAiDramaVideoFactory(currentFactory)
+        ? files.filter((file) => isImageFileCandidate(file))
       : files;
     if (isAiVideoProductionFactory(currentFactory) && sourceFiles.length < files.length) {
       message.warning('AI制作视频工厂的本次输入只支持视频格式文件。');
+    }
+    if (isAiDramaVideoFactory(currentFactory) && sourceFiles.length < files.length) {
+      message.warning('AI制作漫剧工厂的参考资产只支持图片格式文件。');
     }
     if (sourceFiles.length === 0) {
       return;
@@ -4862,8 +5530,69 @@ export default function App() {
       message.warning(`当前数字工厂最多添加 ${maxItems} 个文件，已忽略超出部分。`);
     }
 
-    const attachments = buildComposerAttachments(acceptedFiles);
+    const attachments = buildComposerAttachments(acceptedFiles).map((attachment) => (
+      isAiDramaVideoFactory(currentFactory)
+        ? { ...attachment, dramaReferenceKind: pendingFactoryDramaReferenceKind }
+        : attachment
+    ));
     setFactoryAttachments((current) => [...current, ...attachments]);
+    animateAttachmentReadiness(setFactoryAttachments, attachments);
+  }
+
+  function stageFactoryDramaReferenceFiles(fileList: FileList | File[], kind: AiDramaReferenceKind) {
+    const files = Array.from(fileList).filter((file) => file.size >= 0);
+    if (files.length === 0) {
+      return;
+    }
+
+    const acceptedFiles = files.filter((file) => isImageFileCandidate(file));
+    if (acceptedFiles.length < files.length) {
+      message.warning('角色和场景参考图只支持 png、jpg、jpeg、webp。');
+    }
+    if (acceptedFiles.length === 0) {
+      return;
+    }
+
+    const currentFactory = selectedFactoryRoleCode
+      ? readFactoryManifestForRoleCode(selectedFactoryRoleCode)
+      : {};
+    const maxItems = readFactoryMaxItems(currentFactory);
+    const remainingSlots = Math.max(0, maxItems - factoryAttachments.length);
+    if (remainingSlots === 0) {
+      message.warning(`当前数字工厂最多添加 ${maxItems} 张参考图。`);
+      return;
+    }
+
+    const nextFiles = acceptedFiles.slice(0, remainingSlots);
+    if (nextFiles.length < acceptedFiles.length) {
+      message.warning(`当前数字工厂最多添加 ${maxItems} 张参考图，已忽略超出部分。`);
+    }
+
+    const attachments = buildComposerAttachments(nextFiles).map((attachment) => ({
+      ...attachment,
+      dramaReferenceKind: kind
+    }));
+    setFactoryAttachments((current) => [...current, ...attachments]);
+    setAiDramaCanvasNodes((current) => {
+      const baseX = kind === 'character' ? 500 : 520;
+      const baseY = kind === 'character' ? 70 : 300;
+      const existingCount = current.filter((node) => node.kind === kind).length;
+      return [
+        ...current,
+        ...attachments.map((attachment, index) => ({
+          id: `drama-reference-node-${attachment.id}`,
+          kind,
+          step: kind === 'character' ? 'characters' : 'scenes',
+          title: `${kind === 'character' ? '人物图' : '场景图'} ${existingCount + index + 1}`,
+          x: baseX + ((existingCount + index) % 3) * 34,
+          y: baseY + Math.floor((existingCount + index) / 3) * 36
+        } satisfies AiDramaCanvasNode))
+      ];
+    });
+    if (attachments[0]) {
+      setSelectedAiDramaCanvasNodeId(`drama-reference-node-${attachments[0].id}`);
+      setAiDramaWorkbenchStep(kind === 'character' ? 'characters' : 'scenes');
+    }
     animateAttachmentReadiness(setFactoryAttachments, attachments);
   }
 
@@ -5075,6 +5804,14 @@ export default function App() {
   function handleFactoryVideoAssetInputChange(event: ChangeEvent<HTMLInputElement>) {
     if (event.target.files) {
       stageFactoryVideoAssetFiles(event.target.files);
+    }
+
+    event.target.value = '';
+  }
+
+  function handleFactoryDramaReferenceInputChange(event: ChangeEvent<HTMLInputElement>) {
+    if (event.target.files) {
+      stageFactoryDramaReferenceFiles(event.target.files, pendingFactoryDramaReferenceKind);
     }
 
     event.target.value = '';
@@ -9851,6 +10588,11 @@ export default function App() {
       label: aiVideoAssetKindLabel(kind),
       attachments: factoryVideoAssetAttachments.filter((attachment) => attachment.assetKind === kind)
     }));
+    const aiDramaReferenceGroups = (['character', 'scene'] as const).map((kind) => ({
+      kind,
+      label: kind === 'character' ? '人物参考图' : '场景参考图',
+      attachments: factoryAttachments.filter((attachment) => attachment.dramaReferenceKind === kind)
+    }));
     const factoryInputSummaryLimit = isAiVideoProductionFactoryType ? 2 : 3;
     const factoryInputSummaryNames = factoryAttachments
       .slice(0, factoryInputSummaryLimit)
@@ -9888,11 +10630,13 @@ export default function App() {
         ? '上传本次任务要拼接的视频片段；片头、片尾和背景音乐可在右侧资产区重复使用。'
         : isEcommerceVideoFactory
           ? `上传参考图，单批最多 ${maxItems} 张。`
-          : isAcademicDemoFactoryType
-            ? `上传 Word、PDF、Excel 或 CSV 项目资料，每次最多 ${maxItems} 个文件。`
-            : isOperationFactory
-              ? '上传产品资料、案例素材或参考文件，也可以只填写参数。'
-              : `上传商品图或表格，单批最多 ${maxItems} 个。`;
+        : isAcademicDemoFactoryType
+          ? `上传 Word、PDF、Excel 或 CSV 项目资料，每次最多 ${maxItems} 个文件。`
+        : isOperationFactory
+          ? '上传产品资料、案例素材或参考文件，也可以只填写参数。'
+        : isAiDramaVideoFactoryType
+          ? `可选上传人物或场景参考图，单批最多 ${maxItems} 张。`
+          : `上传商品图或表格，单批最多 ${maxItems} 个。`;
     const renderSelectedFactoryPackagePromptEditors = (mediaKind: 'image' | 'video') => (
       <Form.Item shouldUpdate noStyle>
         {({ getFieldValue }) => {
@@ -10057,6 +10801,1145 @@ export default function App() {
         )}
       </section>
     );
+    const renderAiDramaWorkbench = () => {
+      const currentDramaVisualStyle =
+        String(factoryRunForm.getFieldValue('dramaVisualStyle') ?? 'cinematic_realism');
+      const aiDramaVoicePresetOptions = readFactoryVoicePresetOptions(selectedFactoryManifest).map((item) => ({
+        value: item.key,
+        label: item.label
+      }));
+      const steps: Array<{
+        key: AiDramaWorkbenchStep;
+        title: string;
+        description: string;
+        icon: ReactNode;
+        tone: string;
+      }> = [
+        { key: 'setup', title: '项目', description: '规格', icon: <SettingOutlined />, tone: 'slate' },
+        { key: 'script', title: '文本', description: '故事与脚本', icon: <FileTextOutlined />, tone: 'blue' },
+        { key: 'characters', title: '人物', description: '角色卡与参考图', icon: <RobotOutlined />, tone: 'green' },
+        { key: 'scenes', title: '场景', description: '场景卡与参考图', icon: <FileImageOutlined />, tone: 'cyan' },
+        { key: 'storyboard', title: '分镜', description: '镜头、台词、画面', icon: <SnippetsOutlined />, tone: 'orange' },
+        { key: 'generate', title: '视频', description: '生成镜头并合成', icon: <VideoCameraOutlined />, tone: 'purple' }
+      ];
+
+      const getDramaReferenceGroup = (kind: AiDramaReferenceKind) =>
+        aiDramaReferenceGroups.find((group) => group.kind === kind) ?? {
+          kind,
+          label: kind === 'character' ? '人物参考图' : '场景参考图',
+          attachments: []
+        };
+
+      const getTextPreview = (value: unknown, fallback = '待填写') => {
+        const normalized = String(value ?? '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (!normalized) {
+          return fallback;
+        }
+        return normalized.length > 72 ? `${normalized.slice(0, 72)}...` : normalized;
+      };
+
+      const parseDramaStoryboardRows = (value: unknown) =>
+        String(value ?? '')
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .slice(0, 4)
+          .map((line, index) => {
+            const parts = line.split('|').map((part) => part.trim());
+            return {
+              id: `${index + 1}`,
+              order: parts[0] || `${index + 1}`.padStart(2, '0'),
+              scene: parts[1] || '场景',
+              action: parts[2] || line,
+              dialogue: parts[3] || '',
+              visual: parts[4] || ''
+            };
+          });
+
+      const toDramaReferencePreviewItem = (
+        attachment: ComposerAttachment,
+        index: number,
+        group: typeof aiDramaReferenceGroups[number]
+      ): FactoryArtifactPreviewItem => ({
+        id: attachment.id,
+        order: index + 1,
+        sku: attachment.name,
+        sourceName: attachment.name,
+        packageKey: `ai-drama-${group.kind}`,
+        packageLabel: group.label,
+        status: 'completed',
+        localPath: attachment.localPath,
+        createdAt: attachment.stagedAt
+      });
+
+      const generatedDramaNodeImageByNodeId = new Map<string, FactoryArtifactPreviewItem>();
+      for (const task of selectedFactoryTasks) {
+        for (const output of task.factoryOutputs ?? []) {
+          if (output.factoryKind !== 'ai_drama_video_factory' || output.kind !== 'image') {
+            continue;
+          }
+          const nodeId = typeof output.metadata?.nodeId === 'string' ? output.metadata.nodeId : '';
+          if (!nodeId || generatedDramaNodeImageByNodeId.has(nodeId)) {
+            continue;
+          }
+          generatedDramaNodeImageByNodeId.set(nodeId, {
+            id: output.id,
+            order: 1,
+            sku: output.title,
+            sourceName: output.title,
+            packageKey: 'ai-drama-node-image',
+            packageLabel: '节点图片',
+            status: output.status === 'processing_error' ? 'failed' : 'completed',
+            remoteUrl: output.outputUrl,
+            localPath: output.outputPath,
+            thumbnailPath: output.thumbnailPath,
+            prompt: typeof output.metadata?.prompt === 'string' ? output.metadata.prompt : undefined,
+            createdAt: output.createdAt
+          });
+        }
+      }
+
+      const renderDramaReferenceThumb = (
+        attachment: ComposerAttachment,
+        index: number,
+        group: typeof aiDramaReferenceGroups[number],
+        options?: { removable?: boolean; compact?: boolean }
+      ) => (
+        <div
+          key={attachment.id}
+          className={`factory-drama-reference-thumb ${options?.compact ? 'compact' : ''}`}
+          title={attachment.name}
+        >
+          <FactoryPreviewImage
+            item={toDramaReferencePreviewItem(attachment, index, group)}
+            alt={attachment.name}
+            className="factory-drama-reference-image"
+            loading="lazy"
+          />
+          <span>{index + 1}</span>
+          {options?.removable ? (
+            <Button
+              size="small"
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              aria-label={`移除${attachment.name}`}
+              onClick={() => removeFactoryAttachment(attachment.id)}
+            />
+          ) : null}
+        </div>
+      );
+
+      const renderReferenceGroup = (group: typeof aiDramaReferenceGroups[number]) => (
+        <div key={group.kind} className="factory-drama-reference-group">
+          <Flex align="center" justify="space-between" gap={10}>
+            <Typography.Text strong>{group.label}</Typography.Text>
+            <Button
+              size="small"
+              icon={<FileImageOutlined />}
+              onClick={() => {
+                setPendingFactoryDramaReferenceKind(group.kind);
+                factoryDramaReferenceInputRef.current?.click();
+              }}
+            >
+              上传
+            </Button>
+          </Flex>
+          {group.attachments.length > 0 ? (
+            <div className="factory-drama-reference-list">
+              {group.attachments.map((attachment, index) => (
+                renderDramaReferenceThumb(attachment, index, group, { removable: true })
+              ))}
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="factory-drama-empty-asset"
+              onClick={() => {
+                setPendingFactoryDramaReferenceKind(group.kind);
+                factoryDramaReferenceInputRef.current?.click();
+              }}
+            >
+              <FileImageOutlined />
+              <span>{group.kind === 'character' ? '添加人物图' : '添加场景图'}</span>
+            </button>
+          )}
+        </div>
+      );
+
+      const buildDramaCanvasSnapshot = () => {
+        const nodes = aiDramaCanvasNodes.map((node) => ({
+          id: node.id,
+          kind: node.kind,
+          step: node.step,
+          title: node.title,
+          x: node.x,
+          y: node.y,
+          prompt: node.prompt?.trim() || undefined,
+          voicePresetId: node.voicePresetId?.trim() || undefined,
+          generationSettings: node.generationSettings
+        }));
+        const nodeIds = new Set(nodes.map((node) => node.id));
+        const edges = aiDramaCanvasEdges
+          .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
+          .map((edge) => ({ source: edge.source, target: edge.target }));
+
+        return { nodes, edges };
+      };
+
+      const addDramaCanvasNode = (kind: AiDramaCanvasNodeKind, x?: number, y?: number) => {
+        const definitions: Record<
+          AiDramaCanvasNodeKind,
+          { title: string; step: AiDramaWorkbenchStep; fallbackX: number; fallbackY: number }
+        > = {
+          script: { title: '文本', step: 'script', fallbackX: 180, fallbackY: 110 },
+          character: { title: '人物', step: 'characters', fallbackX: 500, fallbackY: 70 },
+          scene: { title: '场景', step: 'scenes', fallbackX: 500, fallbackY: 280 },
+          image: { title: '图片参考', step: 'scenes', fallbackX: 720, fallbackY: 90 },
+          video: { title: '视频片段', step: 'storyboard', fallbackX: 880, fallbackY: 170 },
+          audio: { title: '音频', step: 'setup', fallbackX: 720, fallbackY: 360 },
+          compose: { title: '合成成片', step: 'generate', fallbackX: 1160, fallbackY: 180 }
+        };
+        const definition = definitions[kind];
+        const id = `drama-node-${kind}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+        const nextNode: AiDramaCanvasNode = {
+          id,
+          kind,
+          step: definition.step,
+          title: definition.title,
+          x: Math.max(24, Math.round(x ?? definition.fallbackX)),
+          y: Math.max(24, Math.round(y ?? definition.fallbackY))
+        };
+        setAiDramaCanvasNodes((current) => [...current, nextNode]);
+        setSelectedAiDramaCanvasNodeId(id);
+        setAiDramaWorkbenchStep(definition.step);
+        setAiDramaCanvasMenu((current) => ({ ...current, open: false }));
+      };
+
+      const removeDramaCanvasNode = (nodeId: string) => {
+        if (AI_DRAMA_PROTECTED_NODE_IDS.has(nodeId)) {
+          return;
+        }
+        setAiDramaCanvasNodes((current) => {
+          const next = current.filter((node) => node.id !== nodeId);
+          if (selectedAiDramaCanvasNodeId === nodeId) {
+            const fallback = next[0];
+            setSelectedAiDramaCanvasNodeId(fallback?.id ?? '');
+            if (fallback) {
+              setAiDramaWorkbenchStep(fallback.step);
+            }
+          }
+          return next;
+        });
+        setAiDramaCanvasEdges((current) =>
+          current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId)
+        );
+      };
+
+      const getDramaNodeMeta = (
+        node: AiDramaCanvasNode,
+        values: FactoryRunFormValues,
+        storyboardRows: ReturnType<typeof parseDramaStoryboardRows>,
+        referenceGroups: Record<AiDramaReferenceKind, typeof aiDramaReferenceGroups[number]>
+      ) => {
+        if (node.kind === 'script') {
+          return {
+            icon: <FileTextOutlined />,
+            tone: 'blue',
+            status: String(values.instruction ?? values.dramaScriptDraft ?? '').trim() ? '已就绪' : '待补充',
+            body: getTextPreview(values.instruction, '故事梗概'),
+            sub: getTextPreview(values.dramaScriptDraft, '单集脚本')
+          };
+        }
+        if (node.kind === 'character') {
+          return {
+            icon: <RobotOutlined />,
+            tone: 'green',
+            status: referenceGroups.character.attachments.length > 0 ? '已就绪' : '待补充',
+            body: getTextPreview(values.dramaCharacterCards, '角色卡'),
+            sub: `${referenceGroups.character.attachments.length} 张人物参考图`
+          };
+        }
+        if (node.kind === 'scene') {
+          return {
+            icon: <FileImageOutlined />,
+            tone: 'cyan',
+            status: referenceGroups.scene.attachments.length > 0 ? '已就绪' : '待补充',
+            body: getTextPreview(values.dramaSceneCards, '场景卡'),
+            sub: `${referenceGroups.scene.attachments.length} 张场景参考图`
+          };
+        }
+        if (node.kind === 'image') {
+          return {
+            icon: <FileImageOutlined />,
+            tone: 'slate',
+            status: referenceGroups.scene.attachments.length > 0 || referenceGroups.character.attachments.length > 0 ? '已就绪' : '待补充',
+            body: '关键帧 / 首帧参考',
+            sub: `${referenceGroups.character.attachments.length + referenceGroups.scene.attachments.length} 张可用图片`
+          };
+        }
+        if (node.kind === 'audio') {
+          return {
+            icon: <AudioOutlined />,
+            tone: 'orange',
+            status: values.voicePresetId ? '已就绪' : '待补充',
+            body: '旁白音色',
+            sub: values.voicePresetId ?? '未选择'
+          };
+        }
+        if (node.kind === 'compose') {
+          return {
+            icon: <VideoCameraOutlined />,
+            tone: 'purple',
+            status: storyboardRows.length > 0 ? '可生成' : '待补充',
+            body: '镜头合成 MP4',
+            sub: `${storyboardRows.length} 个预览镜头`
+          };
+        }
+        return {
+          icon: <PlayCircleOutlined />,
+          tone: 'purple',
+          status: storyboardRows.length > 0 ? '已就绪' : '待补充',
+          body: storyboardRows[0]?.action ?? '视频片段',
+          sub: storyboardRows[0] ? `${storyboardRows[0].order} · ${storyboardRows[0].scene}` : '等待分镜'
+        };
+      };
+
+      const getDramaNodeSize = (node: AiDramaCanvasNode) => {
+        if (node.kind === 'character' || node.kind === 'scene' || node.kind === 'image') {
+          return { width: 232, height: 210 };
+        }
+        if (node.kind === 'video') {
+          return { width: 180, height: 224 };
+        }
+        return { width: 220, height: 158 };
+      };
+
+      const renderDramaCanvas = (values: FactoryRunFormValues) => {
+        const characterGroup = getDramaReferenceGroup('character');
+        const sceneGroup = getDramaReferenceGroup('scene');
+        const referenceGroups = {
+          character: characterGroup,
+          scene: sceneGroup
+        };
+        const storyboardRows = parseDramaStoryboardRows(values.dramaStoryboard);
+        const nodes = aiDramaCanvasNodes.length > 0 ? aiDramaCanvasNodes : createDefaultAiDramaCanvasNodes();
+        const nodeIds = new Set(nodes.map((node) => node.id));
+        const characterPreviews = characterGroup.attachments.map((attachment, index) => ({
+          item: toDramaReferencePreviewItem(attachment, index, characterGroup),
+          label: `${index + 1}`
+        }));
+        const scenePreviews = sceneGroup.attachments.map((attachment, index) => ({
+          item: toDramaReferencePreviewItem(attachment, index, sceneGroup),
+          label: `${index + 1}`
+        }));
+        const flowNodes: AiDramaFlowNode[] = nodes.map((node) => {
+          const size = getDramaNodeSize(node);
+          return {
+            id: node.id,
+            type: 'aiDramaNode',
+            position: { x: node.x, y: node.y },
+            selected: selectedAiDramaCanvasNodeId === node.id,
+            deletable: !AI_DRAMA_PROTECTED_NODE_IDS.has(node.id),
+            style: { width: size.width, minHeight: size.height },
+            data: {
+              canvasNode: node,
+              meta: getDramaNodeMeta(node, values, storyboardRows, referenceGroups),
+              selected: selectedAiDramaCanvasNodeId === node.id,
+              removable: !AI_DRAMA_PROTECTED_NODE_IDS.has(node.id),
+              characterPreviews,
+              scenePreviews,
+              generatedImage: generatedDramaNodeImageByNodeId.get(node.id),
+              storyboardRows: storyboardRows.map((row) => ({
+                id: row.id,
+                order: row.order,
+                scene: row.scene
+              })),
+              onRemove: removeDramaCanvasNode
+            }
+          };
+        });
+        const flowEdges: AiDramaFlowEdge[] = aiDramaCanvasEdges
+          .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
+          .map((edge) => ({
+            id: edge.id,
+            source: edge.source,
+            target: edge.target,
+            type: 'smoothstep',
+            className: 'factory-drama-flow-edge',
+            interactionWidth: 28
+          }));
+
+        const handleNodeSelect = (nodeId: string) => {
+          const selectedNode = nodes.find((node) => node.id === nodeId);
+          if (!selectedNode) {
+            return;
+          }
+          setSelectedAiDramaCanvasNodeId(selectedNode.id);
+          setAiDramaWorkbenchStep(selectedNode.step);
+          setAiDramaCanvasMenu((current) => ({ ...current, open: false }));
+        };
+
+        const handleNodePositionCommit = (nodeId: string, position: { x: number; y: number }) => {
+          setAiDramaCanvasNodes((current) =>
+            current.map((node) =>
+              node.id === nodeId
+                ? {
+                    ...node,
+                    x: Math.max(0, Math.round(position.x)),
+                    y: Math.max(0, Math.round(position.y))
+                  }
+                : node
+            )
+          );
+        };
+
+        const removeDramaCanvasNodes = (nodeIds: string[]) => {
+          const removableNodeIds = new Set(nodeIds.filter((nodeId) => !AI_DRAMA_PROTECTED_NODE_IDS.has(nodeId)));
+          if (removableNodeIds.size === 0) {
+            return;
+          }
+          setAiDramaCanvasNodes((current) => {
+            const next = current.filter((node) => !removableNodeIds.has(node.id));
+            if (removableNodeIds.has(selectedAiDramaCanvasNodeId)) {
+              const fallback = next[0];
+              setSelectedAiDramaCanvasNodeId(fallback?.id ?? '');
+              if (fallback) {
+                setAiDramaWorkbenchStep(fallback.step);
+              }
+            }
+            return next;
+          });
+          setAiDramaCanvasEdges((current) =>
+            current.filter((edge) => !removableNodeIds.has(edge.source) && !removableNodeIds.has(edge.target))
+          );
+        };
+
+        const handleEdgesRemove = (edgeIds: string[]) => {
+          const removedEdgeIds = new Set(edgeIds);
+          if (removedEdgeIds.size === 0) {
+            return;
+          }
+          setAiDramaCanvasEdges((current) => current.filter((edge) => !removedEdgeIds.has(edge.id)));
+        };
+
+        const handleConnect = (connection: Connection) => {
+          const source = connection.source?.trim();
+          const target = connection.target?.trim();
+          if (!source || !target || source === target) {
+            return;
+          }
+          setAiDramaCanvasEdges((current) => {
+            if (current.some((edge) => edge.source === source && edge.target === target)) {
+              return current;
+            }
+            return [
+              ...current,
+              {
+                id: `drama-edge-${source}-${target}-${Date.now().toString(36)}`,
+                source,
+                target
+              }
+            ];
+          });
+        };
+
+        return (
+          <div className="factory-drama-canvas" ref={aiDramaFlowWrapperRef}>
+            <AiDramaFlowCanvas
+              nodes={flowNodes}
+              edges={flowEdges}
+              menuOpen={aiDramaCanvasMenu.open}
+              onPaneClick={() => setAiDramaCanvasMenu((current) => ({ ...current, open: false }))}
+              onMenuRequest={setAiDramaCanvasMenu}
+              onNodeSelect={handleNodeSelect}
+              onNodePositionCommit={handleNodePositionCommit}
+              onNodesRemove={removeDramaCanvasNodes}
+              onEdgesRemove={handleEdgesRemove}
+              onConnect={handleConnect}
+            />
+
+            {aiDramaCanvasMenu.open ? (
+              <div
+                className="factory-drama-context-menu"
+                style={{
+                  left: Math.min(
+                    aiDramaCanvasMenu.screenX,
+                    Math.max(12, (aiDramaFlowWrapperRef.current?.clientWidth ?? 220) - 176)
+                  ),
+                  top: Math.min(
+                    aiDramaCanvasMenu.screenY,
+                    Math.max(12, (aiDramaFlowWrapperRef.current?.clientHeight ?? 360) - 332)
+                  )
+                }}
+                onClick={(event) => event.stopPropagation()}
+                >
+                  <Typography.Text type="secondary">添加节点</Typography.Text>
+                  {[
+                    { kind: 'script' as const, label: '文本', icon: <FileTextOutlined /> },
+                    { kind: 'character' as const, label: '角色', icon: <RobotOutlined /> },
+                    { kind: 'scene' as const, label: '场景', icon: <FileImageOutlined /> },
+                    { kind: 'image' as const, label: '图片', icon: <FileImageOutlined /> },
+                    { kind: 'video' as const, label: '视频', icon: <VideoCameraOutlined /> },
+                    { kind: 'audio' as const, label: '音频', icon: <AudioOutlined /> },
+                    { kind: 'compose' as const, label: '合成', icon: <PlayCircleOutlined /> }
+                  ].map((item) => (
+                    <button
+                      key={item.kind}
+                      type="button"
+                      onClick={() => addDramaCanvasNode(item.kind, aiDramaCanvasMenu.canvasX, aiDramaCanvasMenu.canvasY)}
+                    >
+                      {item.icon}
+                      <span>{item.label}</span>
+                    </button>
+                  ))}
+                  <Divider />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingFactoryDramaReferenceKind('character');
+                      setAiDramaCanvasMenu((current) => ({ ...current, open: false }));
+                      factoryDramaReferenceInputRef.current?.click();
+                    }}
+                  >
+                    <FileImageOutlined />
+                    <span>上传人物图</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingFactoryDramaReferenceKind('scene');
+                      setAiDramaCanvasMenu((current) => ({ ...current, open: false }));
+                      factoryDramaReferenceInputRef.current?.click();
+                    }}
+                  >
+                    <FileImageOutlined />
+                    <span>上传场景图</span>
+                  </button>
+                </div>
+            ) : null}
+          </div>
+        );
+      };
+
+      const renderAiDramaCostEstimate = () => (
+        <Form.Item shouldUpdate noStyle>
+          {({ getFieldsValue }) => {
+            const estimate = buildAiPointFactoryConsumptionEstimate({
+              state: runtimeState,
+              roleCode: selectedFactoryCode,
+              factory: selectedFactoryManifest,
+              values: getFieldsValue(true) as FactoryRunFormValues,
+              attachments: factoryAttachments,
+              overview: aiPointOverview
+            });
+
+            if (!estimate.visible) {
+              return null;
+            }
+
+            const insufficient = hasInsufficientAiPoints(estimate);
+            return (
+              <div className={`factory-cost-summary ${insufficient ? 'insufficient' : ''}`}>
+                <Typography.Text type="secondary">AI 点数预估</Typography.Text>
+                <Space size={6} wrap>
+                  <Tag color="blue">预计生成 {estimate.itemCount} 个镜头</Tag>
+                  <Tag>{estimate.label}</Tag>
+                  <Tag>{formatAiPoints(estimate.unitPointPrice)} / 镜头</Tag>
+                </Space>
+                <Typography.Text strong>预计消耗 {formatAiPoints(estimate.totalPoints)}</Typography.Text>
+                {estimate.availablePoints !== undefined ? (
+                  <Typography.Text type={insufficient ? 'danger' : 'secondary'}>
+                    当前可用 {formatAiPoints(estimate.availablePoints)}
+                    {insufficient ? '，点数不足。' : '。'}
+                  </Typography.Text>
+                ) : (
+                  <Typography.Text type="secondary">
+                    余额尚未读取，可在 Q 面板或购买中心刷新 AI 点数。
+                  </Typography.Text>
+                )}
+              </div>
+            );
+          }}
+        </Form.Item>
+      );
+
+      const selectedDramaCanvasNode =
+        aiDramaCanvasNodes.find((node) => node.id === selectedAiDramaCanvasNodeId) ?? aiDramaCanvasNodes[0];
+      const selectedDramaNodeCanGenerateImage =
+        selectedDramaCanvasNode &&
+        ['character', 'scene', 'image'].includes(selectedDramaCanvasNode.kind);
+      const aiDramaImageModelProfiles = runtimeState.modelProfiles
+        .filter((profile) => modelProfileSupportsFactoryImageGeneration(profile))
+        .sort((left, right) => {
+          const leftOfficial = isOfficialPointsModelProfile(left) ? 1 : 0;
+          const rightOfficial = isOfficialPointsModelProfile(right) ? 1 : 0;
+          return rightOfficial - leftOfficial || left.modelName.localeCompare(right.modelName);
+        });
+      const aiDramaImageModelOptions = aiDramaImageModelProfiles.map((profile) => ({
+        value: profile.id,
+        label: modelProfileDisplayName(profile)
+      }));
+      const getSelectedDramaNodeGenerationKind = (): AiDramaCanvasNodeGenerationKind => {
+        if (selectedDramaCanvasNode?.kind === 'character') return 'character_image';
+        if (selectedDramaCanvasNode?.kind === 'scene') return 'scene_image';
+        return 'reference_image';
+      };
+      const resolveAiDramaNodeSettings = (node: AiDramaCanvasNode | undefined): Required<AiDramaNodeGenerationSettings> => {
+        const fallbackProfileId =
+          aiDramaImageModelProfiles.find((profile) => profile.id === 'qiu-official-image-1')?.id ??
+          aiDramaImageModelProfiles.find((profile) => profile.id === 'qiu-image-generation-default')?.id ??
+          aiDramaImageModelProfiles[0]?.id ??
+          'qiu-image-generation-default';
+        const modelProfileId = node?.generationSettings?.modelProfileId &&
+          aiDramaImageModelProfiles.some((profile) => profile.id === node.generationSettings?.modelProfileId)
+          ? node.generationSettings.modelProfileId
+          : fallbackProfileId;
+        const routeKey = resolveOfficialRouteKeyForModelProfileId(runtimeState, selectedFactoryCode, modelProfileId);
+        return {
+          modelProfileId,
+          ratio: node?.generationSettings?.ratio ?? '9:16',
+          imageSize: resolveAiPointImageSize(aiPointOverview, routeKey, node?.generationSettings?.imageSize),
+          visualStyle: node?.generationSettings?.visualStyle ?? currentDramaVisualStyle
+        };
+      };
+      const updateSelectedDramaNodeGenerationSettings = (patch: Partial<AiDramaNodeGenerationSettings>) => {
+        if (!selectedDramaCanvasNode) return;
+        setAiDramaCanvasNodes((current) =>
+          current.map((node) => {
+            if (node.id !== selectedDramaCanvasNode.id) {
+              return node;
+            }
+            const generationSettings = {
+              ...resolveAiDramaNodeSettings(node),
+              ...patch
+            };
+            return {
+              ...node,
+              generationSettings
+            };
+          })
+        );
+      };
+      const updateSelectedDramaNodePrompt = (prompt: string) => {
+        if (!selectedDramaCanvasNode) return;
+        setAiDramaCanvasNodes((current) =>
+          current.map((node) => node.id === selectedDramaCanvasNode.id ? { ...node, prompt } : node)
+        );
+      };
+      const updateSelectedDramaNodeVoice = (voicePresetId: string) => {
+        if (!selectedDramaCanvasNode || selectedDramaCanvasNode.kind !== 'character') {
+          return;
+        }
+        setAiDramaCanvasNodes((current) =>
+          current.map((node) =>
+            node.id === selectedDramaCanvasNode.id
+              ? { ...node, voicePresetId }
+              : node
+          )
+        );
+      };
+      const submitSelectedDramaNodeImageGeneration = () => {
+        if (!selectedDramaNodeCanGenerateImage || !selectedDramaCanvasNode) {
+          return;
+        }
+        const prompt = selectedDramaCanvasNode.prompt?.trim();
+        if (!prompt) {
+          message.warning('请先输入这个节点要生成的画面。');
+          return;
+        }
+        const generationSettings = resolveAiDramaNodeSettings(selectedDramaCanvasNode);
+        const currentValues = factoryRunForm.getFieldsValue(true) as FactoryRunFormValues;
+        submitFactoryRun({
+          ...currentValues,
+          roleCode: selectedFactoryCode,
+          instruction: currentValues.instruction?.trim() || prompt,
+          dramaCanvas: buildDramaCanvasSnapshot(),
+          dramaNodeGenerationRequest: {
+            nodeId: selectedDramaCanvasNode.id,
+            nodeKind: selectedDramaCanvasNode.kind,
+            generationKind: getSelectedDramaNodeGenerationKind(),
+            prompt,
+            voicePresetId: selectedDramaCanvasNode.voicePresetId,
+            visualStyle: generationSettings.visualStyle,
+            modelProfileId: generationSettings.modelProfileId,
+            ratio: generationSettings.ratio,
+            imageSize: generationSettings.imageSize
+          }
+        });
+      };
+      const renderDramaNodeImagePromptComposer = () => {
+        if (!selectedDramaNodeCanGenerateImage || !selectedDramaCanvasNode) {
+          return null;
+        }
+        const generationSettings = resolveAiDramaNodeSettings(selectedDramaCanvasNode);
+        const selectedRouteKey = resolveOfficialRouteKeyForModelProfileId(
+          runtimeState,
+          selectedFactoryCode,
+          generationSettings.modelProfileId
+        );
+        const imageSizeOptions = buildAiPointImageSizeOptions(aiPointOverview, selectedRouteKey);
+        const selectedImageModelProfile = aiDramaImageModelProfiles.find(
+          (profile) => profile.id === generationSettings.modelProfileId
+        );
+        const selectedModelLabel = selectedImageModelProfile
+          ? modelProfileDisplayName(selectedImageModelProfile)
+          : '图片线路';
+
+        const placeholder =
+          selectedDramaCanvasNode.kind === 'character'
+            ? '描述要生成的人物形象，例如：17岁短发女孩，现代校园制服，干净五官，短剧质感，全身站姿'
+            : selectedDramaCanvasNode.kind === 'scene'
+              ? '描述要生成的场景，例如：夜晚老旧街巷，雨后地面反光，电影感灯光，适合AI短剧背景'
+              : '描述要生成的关键帧画面内容';
+
+        return (
+          <div className="factory-drama-prompt-composer">
+            <Input.TextArea
+              autoSize={{ minRows: 2, maxRows: 4 }}
+              value={selectedDramaCanvasNode.prompt ?? ''}
+              placeholder={placeholder}
+              onChange={(event) => updateSelectedDramaNodePrompt(event.target.value)}
+            />
+            <div className="factory-drama-prompt-toolbar">
+              <Space size={8} wrap className="factory-drama-prompt-tags">
+                <Tag>{selectedDramaCanvasNode.kind === 'character' ? '人物图' : selectedDramaCanvasNode.kind === 'scene' ? '场景图' : '参考图'}</Tag>
+                <Tag>{selectedModelLabel}</Tag>
+                <Tag>{generationSettings.ratio}</Tag>
+                <Tag>
+                  {defaultAiDramaVisualStyles.find((item) => item.key === generationSettings.visualStyle)?.label ??
+                    '自定义风格'}
+                </Tag>
+              </Space>
+              <div className="factory-drama-prompt-controls">
+                <Select
+                  size="small"
+                  className="factory-drama-prompt-model"
+                  value={generationSettings.modelProfileId}
+                  options={aiDramaImageModelOptions}
+                  disabled={aiDramaImageModelOptions.length === 0}
+                  placeholder="图片线路"
+                  onChange={(modelProfileId) => {
+                    const routeKey = resolveOfficialRouteKeyForModelProfileId(runtimeState, selectedFactoryCode, modelProfileId);
+                    updateSelectedDramaNodeGenerationSettings({
+                      modelProfileId,
+                      imageSize: resolveAiPointImageSize(aiPointOverview, routeKey, generationSettings.imageSize)
+                    });
+                  }}
+                />
+                <Select
+                  size="small"
+                  className="factory-drama-prompt-ratio"
+                  value={generationSettings.ratio}
+                  options={[
+                    { value: 'auto', label: '自动' },
+                    { value: '9:16', label: '9:16' },
+                    { value: '16:9', label: '16:9' },
+                    { value: '21:9', label: '21:9' },
+                    { value: '4:3', label: '4:3' },
+                    { value: '3:4', label: '3:4' },
+                    { value: '1:1', label: '1:1' }
+                  ]}
+                  onChange={(ratio) => updateSelectedDramaNodeGenerationSettings({ ratio })}
+                />
+                <Select
+                  size="small"
+                  className="factory-drama-prompt-style"
+                  value={generationSettings.visualStyle}
+                  options={defaultAiDramaVisualStyles.map((item) => ({
+                    value: item.key,
+                    label: item.label
+                  }))}
+                  onChange={(visualStyle) => updateSelectedDramaNodeGenerationSettings({ visualStyle })}
+                />
+                {selectedDramaCanvasNode.kind === 'character' ? (
+                  <Select
+                    size="small"
+                    className="factory-drama-prompt-voice"
+                    value={selectedDramaCanvasNode.voicePresetId ?? aiDramaVoicePresetOptions[0]?.value}
+                    options={aiDramaVoicePresetOptions}
+                    placeholder="绑定音色"
+                    onChange={updateSelectedDramaNodeVoice}
+                  />
+                ) : null}
+                <Select
+                  size="small"
+                  className="factory-drama-prompt-size"
+                  value={generationSettings.imageSize}
+                  options={imageSizeOptions}
+                  onChange={(imageSize) => updateSelectedDramaNodeGenerationSettings({ imageSize })}
+                />
+              </div>
+              <Button
+                type="primary"
+                shape="circle"
+                icon={<UpOutlined />}
+                disabled={selectedFactoryDeleted}
+                onClick={submitSelectedDramaNodeImageGeneration}
+                aria-label="生成图片"
+              />
+            </div>
+          </div>
+        );
+      };
+      const activeAiDramaProject =
+        aiDramaProjects.find((project) => project.id === activeAiDramaProjectId) ?? aiDramaProjects[0];
+
+      return (
+        <Form<FactoryRunFormValues>
+          form={factoryRunForm}
+          layout="vertical"
+          className="factory-drama-form"
+          onFinish={(values) =>
+            submitFactoryRun({
+              ...values,
+              dramaCanvas: buildDramaCanvasSnapshot()
+            })
+          }
+          onValuesChange={(_, allValues) => {
+            const values = allValues as FactoryRunFormValues;
+            scheduleFactoryRunParameterMemory(values);
+            saveActiveAiDramaProjectSnapshot(values);
+          }}
+        >
+          <Form.Item name="roleCode" hidden>
+            <Input />
+          </Form.Item>
+          <input
+            ref={factoryDramaReferenceInputRef}
+            type="file"
+            multiple
+            accept=".png,.jpg,.jpeg,.webp"
+            hidden
+            onChange={handleFactoryDramaReferenceInputChange}
+          />
+
+          <div className="factory-drama-workbench">
+            <aside className="factory-drama-toolrail">
+              <Tooltip title="添加文本节点" placement="right">
+                <button
+                  type="button"
+                  className={aiDramaWorkbenchStep === 'script' ? 'active' : ''}
+                  onClick={() => addDramaCanvasNode('script')}
+                >
+                  <FileTextOutlined />
+                </button>
+              </Tooltip>
+              <Tooltip title="添加角色节点" placement="right">
+                <button
+                  type="button"
+                  className={aiDramaWorkbenchStep === 'characters' ? 'active' : ''}
+                  onClick={() => addDramaCanvasNode('character')}
+                >
+                  <RobotOutlined />
+                </button>
+              </Tooltip>
+              <Tooltip title="添加场景节点" placement="right">
+                <button
+                  type="button"
+                  className={aiDramaWorkbenchStep === 'scenes' ? 'active' : ''}
+                  onClick={() => addDramaCanvasNode('scene')}
+                >
+                  <FileImageOutlined />
+                </button>
+              </Tooltip>
+              <Tooltip title="添加视频节点" placement="right">
+                <button
+                  type="button"
+                  className={aiDramaWorkbenchStep === 'storyboard' ? 'active' : ''}
+                  onClick={() => addDramaCanvasNode('video')}
+                >
+                  <VideoCameraOutlined />
+                </button>
+              </Tooltip>
+              <Tooltip title="添加合成节点" placement="right">
+                <button
+                  type="button"
+                  className={aiDramaWorkbenchStep === 'generate' ? 'active' : ''}
+                  onClick={() => addDramaCanvasNode('compose')}
+                >
+                  <PlayCircleOutlined />
+                </button>
+              </Tooltip>
+              <Divider />
+              <Tooltip title="上传人物参考图" placement="right">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPendingFactoryDramaReferenceKind('character');
+                    factoryDramaReferenceInputRef.current?.click();
+                  }}
+                >
+                  <PlusOutlined />
+                </button>
+              </Tooltip>
+              <Tooltip title="上传场景参考图" placement="right">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPendingFactoryDramaReferenceKind('scene');
+                    factoryDramaReferenceInputRef.current?.click();
+                  }}
+                >
+                  <PaperClipOutlined />
+                </button>
+              </Tooltip>
+              <span className="factory-drama-zoom">37%</span>
+            </aside>
+
+            <section className="factory-panel factory-drama-canvas-panel">
+              <Flex align="center" justify="space-between" gap={12} className="factory-drama-project-bar">
+                <Space size={8} className="factory-drama-project-main">
+                  <Typography.Text strong>AI漫剧画布</Typography.Text>
+                  <Select
+                    size="small"
+                    className="factory-drama-project-select"
+                    value={activeAiDramaProject?.id}
+                    options={aiDramaProjects.map((project) => ({
+                      value: project.id,
+                      label: project.name
+                    }))}
+                    onChange={switchAiDramaProject}
+                  />
+                  <Tag>{aiDramaCanvasNodes.length} 个节点</Tag>
+                </Space>
+                <Space size={8} wrap>
+                  <Button size="small" icon={<PlusOutlined />} onClick={createNewAiDramaProject}>
+                    新建项目
+                  </Button>
+                  <Button size="small" onClick={duplicateActiveAiDramaProject}>
+                    复制项目
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<PlusOutlined />}
+                    onClick={() => addDramaCanvasNode('video')}
+                  >
+                    视频节点
+                  </Button>
+                  <Button size="small" onClick={() => clearFactoryRunFormForRole(selectedFactoryCode)}>
+                    清空当前
+                  </Button>
+                </Space>
+              </Flex>
+              <Form.Item shouldUpdate noStyle>
+                {({ getFieldsValue }) => renderDramaCanvas(getFieldsValue(true) as FactoryRunFormValues)}
+              </Form.Item>
+              {renderDramaNodeImagePromptComposer()}
+            </section>
+
+            <aside className="factory-panel factory-drama-inspector">
+              <Flex align="center" justify="space-between" gap={12}>
+                <InlineHelpTitle help="选中画布节点后，在这里编辑对应的剧本、人物、场景、分镜或生成设置。">
+                  <Typography.Text strong>
+                    {steps.find((step) => step.key === aiDramaWorkbenchStep)?.title ?? '节点属性'}
+                  </Typography.Text>
+                </InlineHelpTitle>
+                <Tag>{steps.find((step) => step.key === aiDramaWorkbenchStep)?.description ?? '属性'}</Tag>
+              </Flex>
+
+              {aiDramaWorkbenchStep === 'setup' ? (
+                <>
+                  <Form.Item name="projectName" label="项目名称">
+                    <Input placeholder="例如：AI逆袭项目夜 第1集" />
+                  </Form.Item>
+                  <Form.Item name="dramaVisualStyle" label="画面风格" rules={[{ required: true }]}>
+                    <Select
+                      size="large"
+                      options={defaultAiDramaVisualStyles.map((item) => ({
+                        value: item.key,
+                        label: item.label
+                      }))}
+                    />
+                  </Form.Item>
+                  <div className="factory-inline-form-grid compact">
+                    <Form.Item name="dramaGenre" label="漫剧类型" rules={[{ required: true }]}>
+                      <Select
+                        size="large"
+                        options={aiDramaGenreOptions.map((item) => ({ value: item.key, label: item.label }))}
+                      />
+                    </Form.Item>
+                    <Form.Item name="dramaQualityMode" label="质量模式" rules={[{ required: true }]}>
+                      <Select
+                        size="large"
+                        options={aiDramaQualityModeOptions.map((item) => ({ value: item.key, label: item.label }))}
+                      />
+                    </Form.Item>
+                  </div>
+                  <div className="factory-inline-form-grid compact">
+                    <Form.Item name="videoDurationSeconds" label="单集时长" rules={[{ required: true }]}>
+                      <Select
+                        size="large"
+                        options={ecommerceVideoDurationOptions.map((seconds) => ({
+                          value: seconds,
+                          label: `${seconds} 秒`
+                        }))}
+                      />
+                    </Form.Item>
+                    <Form.Item name="shotDurationSeconds" label="单镜头" rules={[{ required: true }]}>
+                      <Select
+                        size="large"
+                        options={aiDramaShotDurationOptions.map((seconds) => ({
+                          value: seconds,
+                          label: `${seconds} 秒`
+                        }))}
+                      />
+                    </Form.Item>
+                  </div>
+                  <div className="factory-inline-form-grid compact">
+                    <Form.Item name="videoRatio" label="画幅" rules={[{ required: true }]}>
+                      <Select
+                        size="large"
+                        options={operationRatios.map((item) => ({ value: item.key, label: item.label }))}
+                      />
+                    </Form.Item>
+                    <Form.Item name="outputResolution" label="清晰度" rules={[{ required: true }]}>
+                      <Select
+                        size="large"
+                        options={aiVideoResolutionOptions.map((item) => ({ value: item.key, label: item.label }))}
+                      />
+                    </Form.Item>
+                  </div>
+                  <Form.Item
+                    name="voicePresetId"
+                    label="旁白/口播音色"
+                    rules={[{ required: true, message: '请选择口播音色' }]}
+                  >
+                    <Select
+                      size="large"
+                      options={aiVideoVoicePresetOptions.map((item) => ({
+                        value: item.key,
+                        label: item.label
+                      }))}
+                    />
+                  </Form.Item>
+                </>
+              ) : null}
+
+              {aiDramaWorkbenchStep === 'script' ? (
+                <>
+                  <Form.Item
+                    name="instruction"
+                    label="故事梗概"
+                    rules={[{ required: true, message: '请填写漫剧故事或剧本要求' }]}
+                  >
+                    <Input.TextArea
+                      rows={5}
+                      placeholder="例如：都市逆袭短剧，男主被同事看不起，关键时刻用 AI 工具完成项目反转，结尾留下悬念。"
+                    />
+                  </Form.Item>
+                  <Form.Item name="dramaScriptDraft" label="单集脚本">
+                    <Input.TextArea
+                      rows={9}
+                      placeholder="可直接写完整脚本、剧情节拍或对白。AI 会优先按这里的内容拆分镜头。"
+                    />
+                  </Form.Item>
+                </>
+              ) : null}
+
+              {aiDramaWorkbenchStep === 'characters' ? (
+                <>
+                  <div className="factory-drama-reference-grid">
+                    {aiDramaReferenceGroups
+                      .filter((group) => group.kind === 'character')
+                      .map(renderReferenceGroup)}
+                  </div>
+                  <Form.Item name="characterNotes" label="角色总要求">
+                    <Input.TextArea
+                      rows={3}
+                      placeholder="例如：角色外形要稳定，现代短剧质感，服装简洁，不要夸张动漫化。"
+                    />
+                  </Form.Item>
+                  <Form.Item name="dramaCharacterCards" label="角色卡">
+                    <Input.TextArea
+                      rows={10}
+                      placeholder={'每行一个角色，例如：\n男主：27岁产品经理，黑色短发，白衬衫，表面沉默但内心坚定。\n反派同事：35岁，精致西装，语气压迫，表情傲慢。'}
+                    />
+                  </Form.Item>
+                </>
+              ) : null}
+
+              {aiDramaWorkbenchStep === 'scenes' ? (
+                <>
+                  <div className="factory-drama-reference-grid">
+                    {aiDramaReferenceGroups
+                      .filter((group) => group.kind === 'scene')
+                      .map(renderReferenceGroup)}
+                  </div>
+                  <Form.Item name="sceneNotes" label="场景总要求">
+                    <Input.TextArea
+                      rows={3}
+                      placeholder="例如：夜晚办公室、冷色灯光、玻璃会议室、屏幕光突出科技感。"
+                    />
+                  </Form.Item>
+                  <Form.Item name="dramaSceneCards" label="场景卡">
+                    <Input.TextArea
+                      rows={10}
+                      placeholder={'每行一个场景，例如：\n办公室：夜晚加班，冷色灯光，电脑屏幕反光，压迫感强。\n会议室：玻璃墙，大屏幕展示方案，团队成员围坐。'}
+                    />
+                  </Form.Item>
+                </>
+              ) : null}
+
+              {aiDramaWorkbenchStep === 'storyboard' ? (
+                <Form.Item
+                  name="dramaStoryboard"
+                  label="分镜表"
+                  rules={[{ required: true, message: '请填写至少一条分镜。' }]}
+                >
+                  <Input.TextArea
+                    rows={18}
+                    placeholder={'建议每行一个镜头，用 | 分隔：\n01 | 办公室 | 男主被同事嘲笑，低头看向电脑 | 你们都觉得我做不到，但 AI 会给出答案。 | 夜晚办公室，近景推进，压迫感强\n02 | 会议室 | 男主演示 AI 自动生成完整方案，众人震惊 | 几分钟后，局势彻底反转。 | 屏幕光照亮男主，团队成员表情震惊'}
+                  />
+                </Form.Item>
+              ) : null}
+
+              {aiDramaWorkbenchStep === 'generate' ? (
+                <>
+                  <div className="factory-drama-review-grid">
+                    <div>
+                      <Typography.Text strong>阶段产物</Typography.Text>
+                      <div className="factory-stage-strip">
+                        <span className="factory-stage-pill completed">项目设置</span>
+                        <span className="factory-stage-pill completed">剧本</span>
+                        <span className="factory-stage-pill completed">角色</span>
+                        <span className="factory-stage-pill completed">场景</span>
+                        <span className="factory-stage-pill running">分镜</span>
+                      </div>
+                    </div>
+                    <div>
+                      <Typography.Text strong>参考图</Typography.Text>
+                      <div className="factory-stage-strip">
+                        <span className="factory-stage-pill">
+                          人物 {aiDramaReferenceGroups.find((group) => group.kind === 'character')?.attachments.length ?? 0}
+                        </span>
+                        <span className="factory-stage-pill">
+                          场景 {aiDramaReferenceGroups.find((group) => group.kind === 'scene')?.attachments.length ?? 0}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  {renderAiDramaCostEstimate()}
+                  <Button
+                    block
+                    type="primary"
+                    htmlType="submit"
+                    icon={<PlayCircleOutlined />}
+                    disabled={selectedFactoryDeleted}
+                    onClick={() => factoryRunForm.setFieldsValue({ roleCode: selectedFactoryCode })}
+                  >
+                    生成镜头并合成 MP4
+                  </Button>
+                </>
+              ) : null}
+            </aside>
+
+          </div>
+        </Form>
+      );
+    };
 
     return (
       <div className="workbench-page factory-page">
@@ -10157,6 +12040,8 @@ export default function App() {
                           ? '视频质检'
                           : isAiVideoProductionFactoryType
                             ? '视频制作'
+                          : isAiDramaVideoFactoryType
+                            ? '漫剧项目'
                           : isEcommerceVideoFactory
                             ? '视频生成'
                             : isAcademicDemoFactoryType
@@ -10202,6 +12087,7 @@ export default function App() {
                     </Button>
                   </Space>
                 </div>
+                {isAiDramaVideoFactoryType ? renderAiDramaWorkbench() : (
                 <div className="factory-console-grid">
                   <section className="factory-console-column factory-console-left">
                     <section
@@ -11255,6 +13141,7 @@ export default function App() {
                     {renderFactoryLogPanel()}
                   </aside>
                 </div>
+                )}
               </div>
               <Drawer
                 className="factory-side-drawer"
@@ -14369,6 +16256,11 @@ export default function App() {
         videoRatio: ratioOptions[0]?.key ?? '9:16',
         outputResolution: resolutionOptions.find((item) => item.key === '1080p')?.key ?? resolutionOptions[0]?.key ?? '1080p',
         voicePresetId: voicePresetOptions[0]?.key ?? 'male_pro_1',
+        dramaVisualStyle: 'cinematic_realism',
+        dramaScriptDraft: '',
+        dramaCharacterCards: '',
+        dramaSceneCards: '',
+        dramaStoryboard: '',
         characterNotes: '',
         sceneNotes: '',
         instruction: ''
@@ -14448,6 +16340,130 @@ export default function App() {
     };
   }
 
+  function applyAiDramaProjectToEditor(project: AiDramaLocalProject, defaultValues?: FactoryRunFormValues) {
+    const fallbackValues = defaultValues ?? buildFactoryRunDefaultValues(selectedFactoryRoleCode);
+    factoryRunForm.resetFields();
+    factoryRunForm.setFieldsValue({
+      ...(fallbackValues ?? { roleCode: selectedFactoryRoleCode }),
+      ...project.formValues,
+      roleCode: selectedFactoryRoleCode,
+      projectName: project.formValues.projectName?.trim() || project.name
+    });
+    setFactoryAttachments(project.attachments);
+    setAiDramaCanvasNodes(project.nodes.length > 0 ? project.nodes : createDefaultAiDramaCanvasNodes());
+    setAiDramaCanvasEdges(project.edges.length > 0 ? project.edges : createDefaultAiDramaCanvasEdges());
+    setSelectedAiDramaCanvasNodeId(project.selectedNodeId || project.nodes[0]?.id || 'script-root');
+    setAiDramaWorkbenchStep(project.workbenchStep || project.nodes[0]?.step || 'script');
+  }
+
+  function buildAiDramaProjectSnapshot(values?: Partial<FactoryRunFormValues>): AiDramaLocalProject | undefined {
+  const currentProject = aiDramaProjects.find((project) => project.id === activeAiDramaProjectId);
+    if (!currentProject) {
+      return undefined;
+    }
+
+    const currentValues = {
+      ...(factoryRunForm.getFieldsValue(true) as FactoryRunFormValues),
+      ...(values ?? {}),
+      roleCode: selectedFactoryRoleCode
+    };
+    const projectName = currentValues.projectName?.trim() || currentProject.name;
+    return {
+      ...currentProject,
+      name: projectName,
+      updatedAt: new Date().toISOString(),
+      formValues: normalizeFactoryRunParameterMemory(currentValues),
+      attachments: factoryAttachments,
+      nodes: aiDramaCanvasNodes,
+      edges: aiDramaCanvasEdges,
+      selectedNodeId: selectedAiDramaCanvasNodeId,
+      workbenchStep: aiDramaWorkbenchStep
+    };
+  }
+
+  function saveActiveAiDramaProjectSnapshot(values?: Partial<FactoryRunFormValues>) {
+    if (!activeAiDramaProjectId || !isAiDramaVideoFactory(readFactoryManifestForRoleCode(selectedFactoryRoleCode))) {
+      return;
+    }
+
+    const snapshot = buildAiDramaProjectSnapshot(values);
+    if (!snapshot) {
+      return;
+    }
+
+    setAiDramaProjects((current) => {
+      const next = current.map((project) => project.id === snapshot.id ? snapshot : project);
+      writeAiDramaProjects(next);
+      return next;
+    });
+    writeActiveAiDramaProjectId(snapshot.id);
+  }
+
+  function createNewAiDramaProject() {
+    const snapshot = buildAiDramaProjectSnapshot();
+    const baseProjects = snapshot
+      ? aiDramaProjects.map((project) => project.id === snapshot.id ? snapshot : project)
+      : aiDramaProjects;
+    const nextProject = createAiDramaLocalProject(createAiDramaProjectName(baseProjects.length + 1));
+    const nextProjects = [...baseProjects, nextProject];
+    setAiDramaProjects(nextProjects);
+    setActiveAiDramaProjectId(nextProject.id);
+    writeAiDramaProjects(nextProjects);
+    writeActiveAiDramaProjectId(nextProject.id);
+    applyAiDramaProjectToEditor(nextProject);
+    message.success('已新建漫剧项目。');
+  }
+
+  function duplicateActiveAiDramaProject() {
+    const currentProject = buildAiDramaProjectSnapshot();
+    if (!currentProject) {
+      createNewAiDramaProject();
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const nextProject: AiDramaLocalProject = {
+      ...currentProject,
+      id: `ai-drama-project-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      name: `${currentProject.name} 副本`,
+      createdAt: now,
+      updatedAt: now,
+      formValues: {
+        ...currentProject.formValues,
+        projectName: `${currentProject.name} 副本`
+      },
+      nodes: currentProject.nodes.map((node) => ({ ...node, generationSettings: node.generationSettings ? { ...node.generationSettings } : undefined })),
+      edges: currentProject.edges.map((edge) => ({ ...edge })),
+      attachments: currentProject.attachments.map((attachment) => ({ ...attachment }))
+    };
+    const baseProjects = aiDramaProjects.map((project) =>
+      project.id === currentProject.id ? currentProject : project
+    );
+    const nextProjects = [...baseProjects, nextProject];
+    setAiDramaProjects(nextProjects);
+    setActiveAiDramaProjectId(nextProject.id);
+    writeAiDramaProjects(nextProjects);
+    writeActiveAiDramaProjectId(nextProject.id);
+    applyAiDramaProjectToEditor(nextProject);
+    message.success('已复制当前漫剧项目。');
+  }
+
+  function switchAiDramaProject(projectId: string) {
+    const targetProject = aiDramaProjects.find((project) => project.id === projectId);
+    if (!targetProject || targetProject.id === activeAiDramaProjectId) {
+      return;
+    }
+
+    const snapshot = buildAiDramaProjectSnapshot();
+    const nextProjects = aiDramaProjects.map((project) => project.id === snapshot?.id ? snapshot : project);
+    const latestTarget = nextProjects.find((project) => project.id === projectId) ?? targetProject;
+    setAiDramaProjects(nextProjects);
+    setActiveAiDramaProjectId(projectId);
+    writeAiDramaProjects(nextProjects);
+    writeActiveAiDramaProjectId(projectId);
+    applyAiDramaProjectToEditor(latestTarget);
+  }
+
   function clearFactoryRunFormForRole(roleCode: string) {
     const defaultValues = buildFactoryRunDefaultValues(roleCode);
     if (!defaultValues) {
@@ -14460,6 +16476,7 @@ export default function App() {
     removeFactoryPackageSelection(roleCode);
     factoryRunForm.resetFields();
     factoryRunForm.setFieldsValue({
+      ...defaultValues,
       roleCode,
       packageDefinitions: defaultValues.packageDefinitions ?? [],
       packageKeys: [],
@@ -14467,6 +16484,12 @@ export default function App() {
       instruction: ''
     });
     setFactoryAttachments([]);
+    if (isAiDramaVideoFactory(readFactoryManifestForRoleCode(roleCode))) {
+      setAiDramaCanvasNodes(createDefaultAiDramaCanvasNodes());
+      setAiDramaCanvasEdges(createDefaultAiDramaCanvasEdges());
+      setSelectedAiDramaCanvasNodeId('script-root');
+      setAiDramaWorkbenchStep('script');
+    }
     message.success('已清空当前工厂的参数和上传文件。');
     return true;
   }
@@ -15069,14 +17092,20 @@ export default function App() {
         message.warning('当前运行环境没有暴露参考图本地路径，请重新上传后再运行。');
         return;
       }
+      const nodeGenerationRequest = values.dramaNodeGenerationRequest;
+      if (nodeGenerationRequest && !nodeGenerationRequest.prompt.trim()) {
+        message.warning('请先填写节点生图提示词。');
+        return;
+      }
       const storyText = values.instruction?.trim();
-      if (!storyText) {
+      if (!storyText && !nodeGenerationRequest) {
         message.warning('请先填写漫剧故事或剧本要求。');
         return;
       }
 
       const dramaValues: FactoryRunFormValues = {
         ...values,
+        dramaVisualStyle: values.dramaVisualStyle ?? 'cinematic_realism',
         dramaGenre: values.dramaGenre ?? readFactoryDramaGenres(factory)[0]?.key ?? 'urban_counterattack',
         dramaQualityMode: values.dramaQualityMode ?? 'standard',
         videoDurationSeconds: Number(values.videoDurationSeconds) || 60,
@@ -15084,12 +17113,17 @@ export default function App() {
         videoRatio: values.videoRatio ?? '9:16',
         outputResolution: values.outputResolution ?? '1080p',
         voicePresetId: values.voicePresetId ?? readFactoryVoicePresetOptions(factory)[0]?.key ?? 'male_pro_1',
-        instruction: storyText
+        instruction: storyText || nodeGenerationRequest?.prompt || ''
       };
       const genreLabel =
         readFactoryDramaGenres(factory).find((item) => item.key === dramaValues.dramaGenre)?.label ??
         dramaValues.dramaGenre;
-      const title = `${template.name} - ${genreLabel ?? '漫剧'} - ${dramaValues.videoDurationSeconds} 秒`;
+      const projectTitle = dramaValues.projectName?.trim();
+      const title = projectTitle
+        ? `${template.name} - ${projectTitle}`
+        : nodeGenerationRequest
+          ? `${template.name} - ${nodeGenerationRequest.generationKind === 'character_image' ? '人物图' : nodeGenerationRequest.generationKind === 'scene_image' ? '场景图' : '参考图'}`
+        : `${template.name} - ${genreLabel ?? '漫剧'} - ${dramaValues.videoDurationSeconds} 秒`;
       const input = buildAiDramaVideoFactoryTaskInput({
         template,
         factory,
@@ -15101,7 +17135,17 @@ export default function App() {
         title,
         input,
         attachments: referenceImages,
-        useKnowledge
+        useKnowledge,
+        executionModelProfileIds: nodeGenerationRequest
+          ? [
+              'qiu-image-generation-default',
+              nodeGenerationRequest.modelProfileId ?? ''
+            ]
+          : undefined,
+        executionToolIds: nodeGenerationRequest &&
+          runtimeState.localRuntime.enabledToolIds.includes('local-filesystem')
+          ? ['local-filesystem']
+          : undefined
       });
       if (created) {
         rememberFactoryRunParameters(dramaValues, factory);
@@ -16383,7 +18427,13 @@ export default function App() {
     return rolePackage ? normalizeRolePackageRequiredModelProfiles(rolePackage) : undefined;
   }
 
-  function prepareRoleForTaskRun(roleCode: string): DesktopRuntimeState | undefined {
+  function prepareRoleForTaskRun(
+    roleCode: string,
+    options: {
+      modelProfileIds?: string[];
+      toolIds?: string[];
+    } = {}
+  ): DesktopRuntimeState | undefined {
     const rolePackage = getPreparedInstalledRolePackage(roleCode);
     if (!rolePackage) {
       message.warning('该应用未安装在当前电脑，请先安装后再执行任务。');
@@ -16394,7 +18444,38 @@ export default function App() {
       message.warning(`该${roleApplicationLabel}已被服务端删除，不能继续执行。`);
       return undefined;
     }
-    const preparedRolePackage = rolePackage;
+    const scopedModelProfileIds = options.modelProfileIds?.filter(Boolean);
+    const scopedToolIds = options.toolIds?.filter(Boolean);
+    const requirementRolePackage = scopedModelProfileIds?.length
+      ? {
+          ...rolePackage,
+          toolIds: scopedToolIds ?? [],
+          workflowGraph: {
+            version: '1.0.0' as const,
+            entryNodeId: 'start',
+            nodes: [
+              { id: 'start', type: 'start' as const, name: 'Start' },
+              {
+                id: 'node-image',
+                type: 'llm' as const,
+                name: 'AI drama node image',
+                modelProfileId: 'qiu-image-generation-default',
+                config: {
+                  llmTaskType: 'image_generation'
+                }
+              }
+            ],
+            edges: [
+              {
+                id: 'start-node-image',
+                sourceNodeId: 'start',
+                targetNodeId: 'node-image'
+              }
+            ]
+          }
+        }
+      : rolePackage;
+    const preparedRolePackage = requirementRolePackage;
     const preparedModelProfiles = ensureModelProfilesForRolePackage(
       runtimeState.modelProfiles,
       preparedRolePackage
@@ -16412,12 +18493,24 @@ export default function App() {
     const firstUnreadyModel = modelReadiness.find((requirement) => !requirement.ready);
     const preparedState = replaceRolePackageAndModelProfiles(
       runtimeState,
-      preparedRolePackage,
+      rolePackage,
       preparedModelProfiles
     );
+    const preparedStateWithScopedModels = scopedModelProfileIds?.length
+      ? {
+          ...preparedState,
+          localRuntime: {
+            ...preparedState.localRuntime,
+            enabledModelProfileIds: mergeUniqueStrings(
+              preparedState.localRuntime.enabledModelProfileIds,
+              scopedModelProfileIds
+            )
+          }
+        }
+      : preparedState;
 
     if (firstUnreadyModel) {
-      setRuntimeState(preparedState);
+      setRuntimeState(preparedStateWithScopedModels);
       setSelectedModelId(getRuntimeRequirementEffectiveProfile(firstUnreadyModel).id);
       setModelConfigOpen(true);
       setModelTestNotice(
@@ -16429,9 +18522,9 @@ export default function App() {
       return undefined;
     }
 
-    const runtimeReadiness = buildRoleRuntimeReadiness(preparedState, preparedRolePackage);
+    const runtimeReadiness = buildRoleRuntimeReadiness(preparedStateWithScopedModels, preparedRolePackage);
     if (!runtimeReadiness.ready) {
-      setRuntimeState(preparedState);
+      setRuntimeState(preparedStateWithScopedModels);
       message.warning(runtimeReadiness.issueText || `该${roleApplicationLabel}运行所需配置不完整。`);
       navigateToSection(
         runtimeReadiness.missingToolIds.length > 0 || runtimeReadiness.disabledToolIds.length > 0
@@ -16441,7 +18534,7 @@ export default function App() {
       return undefined;
     }
 
-    return preparedState;
+    return preparedStateWithScopedModels;
   }
 
   function prepareRoleForWatchRun(
@@ -16779,6 +18872,8 @@ export default function App() {
       attachments?: ComposerAttachment[];
       extraModelProfileIds?: string[];
       useKnowledge?: boolean;
+      executionModelProfileIds?: string[];
+      executionToolIds?: string[];
     }
   ): boolean {
     const title = values.title.trim();
@@ -16787,7 +18882,10 @@ export default function App() {
     }
 
     const roleCode = values.roleCode;
-    const preparedState = prepareRoleForTaskRun(roleCode);
+    const preparedState = prepareRoleForTaskRun(roleCode, {
+      modelProfileIds: values.executionModelProfileIds,
+      toolIds: values.executionToolIds
+    });
     if (!preparedState) {
       return false;
     }
@@ -16797,7 +18895,10 @@ export default function App() {
     const executionContext = buildTaskExecutionContextWithAttachments(
       buildTaskExecutionContextWithKnowledgeUsage(
         buildTaskExecutionContextWithExtraModels(
-          buildExecutionContextForRole(preparedState.rolePackages, roleCode, preparedState),
+        buildExecutionContextForRole(preparedState.rolePackages, roleCode, preparedState, {
+          modelProfileIds: values.executionModelProfileIds,
+          toolIds: values.executionToolIds
+        }),
           values.extraModelProfileIds ?? []
         ),
         values.useKnowledge
@@ -18195,6 +20296,38 @@ function resolveOfficialRouteKeyForSemanticModel(
     state.modelProfiles.find((item) => item.id === runtimeProfileId) ??
     state.modelProfiles.find((item) => item.id === semanticModelProfileId);
   return profile && isOfficialPointsModelProfile(profile) ? profile.officialRouteKey : undefined;
+}
+
+function resolveOfficialRouteKeyForModelProfileId(
+  state: DesktopRuntimeState,
+  roleCode: string,
+  modelProfileId: string | undefined
+): string | undefined {
+  if (!modelProfileId) {
+    return undefined;
+  }
+
+  const profile = state.modelProfiles.find((item) => item.id === modelProfileId);
+  if (profile && isOfficialPointsModelProfile(profile)) {
+    return profile.officialRouteKey;
+  }
+
+  return resolveOfficialRouteKeyForSemanticModel(state, roleCode, modelProfileId);
+}
+
+function modelProfileSupportsFactoryImageGeneration(profile: ModelProfile): boolean {
+  if (isOfficialPointsModelProfile(profile) && profile.officialRouteKey?.startsWith('official-image-')) {
+    return true;
+  }
+
+  const explicitCapabilities = new Set(
+    [
+      ...(profile.verifiedCapabilities ?? []),
+      ...(profile.capabilities ?? []),
+      ...readModelProfileCapabilities(profile)
+    ].map((capability) => String(capability).trim())
+  );
+  return explicitCapabilities.has('image_generation') || explicitCapabilities.has('text_to_image');
 }
 
 function buildAiPointFactoryConsumptionEstimate(input: {
@@ -20197,6 +22330,15 @@ function isFactoryImageAttachment(attachment: ComposerAttachment) {
   return factoryImageExtensions.has(extension);
 }
 
+function isImageFileCandidate(file: File) {
+  if (file.type?.toLowerCase().startsWith('image/')) {
+    return true;
+  }
+
+  const extension = file.name.split('.').pop()?.trim().toLowerCase() ?? '';
+  return factoryImageExtensions.has(extension);
+}
+
 function isFactoryVideoAttachment(attachment: ComposerAttachment) {
   if (attachment.type?.toLowerCase().startsWith('video/')) {
     return true;
@@ -20544,10 +22686,25 @@ function buildAiDramaVideoFactoryTaskInput({
     : shotDurationOptions.find((seconds) => seconds === 4) ?? shotDurationOptions[0] ?? 4;
   const imageAttachments = attachments.filter((attachment) => isFactoryImageAttachment(attachment));
   const storyText = values.instruction?.trim() ?? '';
+  const projectTitle = values.projectName?.trim() || undefined;
+  const project = {
+    title: projectTitle,
+    visualStyle: values.dramaVisualStyle?.trim() || 'cinematic_realism',
+    scriptDraft: values.dramaScriptDraft?.trim() || undefined,
+    characterCards: values.dramaCharacterCards?.trim() || undefined,
+    sceneCards: values.dramaSceneCards?.trim() || undefined,
+    storyboardDraft: values.dramaStoryboard?.trim() || undefined,
+    canvas: values.dramaCanvas,
+    nodeGenerationRequest: values.dramaNodeGenerationRequest,
+    reviewMode: 'stage_locked'
+  };
   const factoryRequest = {
     applicationType: 'digital_factory',
     factoryKind: 'ai_drama_video_factory',
     factoryName: template.name,
+    project,
+    nodeGenerationRequest: values.dramaNodeGenerationRequest,
+    visualStyle: values.dramaVisualStyle?.trim() || 'cinematic_realism',
     genre: {
       key: genre?.key ?? values.dramaGenre ?? 'urban_counterattack',
       label: genre?.label ?? values.dramaGenre ?? '都市逆袭'
@@ -20592,7 +22749,7 @@ function buildAiDramaVideoFactoryTaskInput({
       type: attachment.type,
       localPath: attachment.localPath,
       order: index + 1,
-      kind: 'reference_image'
+      kind: attachment.dramaReferenceKind === 'scene' ? 'scene_reference_image' : 'character_reference_image'
     }))
   };
   const taskBrief = `请运行「${template.name}」，根据用户故事生成一条 ${videoDurationSeconds} 秒 AI 漫剧短剧。`;
@@ -20602,13 +22759,15 @@ function buildAiDramaVideoFactoryTaskInput({
       taskBrief,
       factory_request: factoryRequest,
       storyText,
+      project,
       referenceImages: factoryRequest.attachments,
       output: {
         format: 'mp4',
         editable: true
       },
       instructions: [
-        '先把故事拆成可执行的短剧分镜 JSON，不要一次性要求视频模型生成整集。',
+        '先按用户在项目工作台确认过的剧本、角色、场景和分镜拆成可执行短剧 JSON，不要一次性要求视频模型生成整集。',
+        '如果用户已经填写分镜草稿，必须优先遵守分镜草稿；只在缺失信息处补全镜头细节。',
         '每个镜头单独生成真实视频片段，失败镜头单独记录，不自动重试。',
         '按镜头台词生成口播音频，并为每个镜头生成可编辑字幕。',
         '将成功镜头合成为一个可编辑视频工程和 MP4 预览，最终发布前必须人工审核剧情、版权和平台规则。'
@@ -22286,14 +24445,20 @@ function getDefaultUseKnowledgeForRolePackage(rolePackage: RolePackageManifest |
 function buildExecutionContextForRole(
   rolePackages: RolePackageManifest[],
   roleCode: string,
-  state?: DesktopRuntimeState
+  state?: DesktopRuntimeState,
+  overrides: {
+    modelProfileIds?: string[];
+    toolIds?: string[];
+  } = {}
 ): NonNullable<DesktopTaskDetail['executionContext']> | undefined {
   const rolePackage = rolePackages.find((item) => item.roleCode === roleCode);
   if (!rolePackage) {
     return undefined;
   }
 
-  const roleModelProfileIds = readRequiredModelProfileIdsForRolePackage(rolePackage);
+  const roleModelProfileIds = overrides.modelProfileIds?.filter(Boolean).length
+    ? [...new Set(overrides.modelProfileIds.filter(Boolean))]
+    : readRequiredModelProfileIdsForRolePackage(rolePackage);
   const runtimeModelProfileIds = state
     ? readRuntimeModelProfileIdsForRole(
         rolePackage.roleCode,
@@ -22304,7 +24469,9 @@ function buildExecutionContextForRole(
 
   return {
     modelProfileIds: mergeUniqueStrings(roleModelProfileIds, runtimeModelProfileIds),
-    toolIds: [...rolePackage.toolIds],
+    toolIds: overrides.toolIds?.filter(Boolean).length
+      ? [...new Set(overrides.toolIds.filter(Boolean))]
+      : [...rolePackage.toolIds],
     knowledgeBindingIds: rolePackage.requiredKnowledgeSources.map((source) => getKnowledgeBindingId(source)),
     useKnowledge: getDefaultUseKnowledgeForRolePackage(rolePackage)
   };

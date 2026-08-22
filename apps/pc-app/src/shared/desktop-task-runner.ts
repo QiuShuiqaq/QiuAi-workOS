@@ -1822,7 +1822,7 @@ function completeWorkflowRuntimeAcademicDemoMaterialsNode(input: {
   currentResponse: DesktopModelChatResponse;
   primaryProfile: ModelProfile;
 }): WorkflowRuntimeNodeResult | undefined {
-  const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
+  const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request')) ?? {};
   if (readWorkflowRuntimeString(factoryRequest?.factoryKind) !== 'academic_project_demo_factory') {
     return undefined;
   }
@@ -3392,6 +3392,21 @@ async function invokeWorkflowRuntimeModelNode(input: {
   }
 
   if (['image_generation', 'image_editing'].includes(readWorkflowRuntimeString(input.node.config?.llmTaskType) ?? '')) {
+    const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
+    const factoryKind = readWorkflowRuntimeString(factoryRequest?.factoryKind);
+    if (
+      factoryKind === 'ai_drama_video_factory' &&
+      readAiDramaNodeImageGenerationRequest(factoryRequest)
+    ) {
+      const aiDramaNodeImageResult = await invokeWorkflowRuntimeAiDramaVideoFactoryNode({
+        ...input,
+        profile
+      });
+      if (aiDramaNodeImageResult) {
+        return aiDramaNodeImageResult;
+      }
+    }
+
     const factoryResult = await invokeWorkflowRuntimeFactoryImageGenerationNode({
       ...input,
       profile
@@ -3492,7 +3507,7 @@ async function invokeWorkflowRuntimeAiVideoProductionProjectNode(input: {
   outputVariables: string[];
   message: string;
 } | undefined> {
-  const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
+  const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request')) ?? {};
   if (readWorkflowRuntimeString(factoryRequest?.factoryKind) !== 'ai_video_production_factory') {
     return undefined;
   }
@@ -3933,6 +3948,241 @@ function normalizeVideoProjectSubtitles(
     : [];
 }
 
+async function invokeWorkflowRuntimeAiDramaNodeImageGeneration(input: {
+  task: DesktopTaskDetail;
+  node: WorkflowGraphNode;
+  pool: WorkflowVariablePool;
+  binding: ResolvedRuntimeBinding;
+  rolePackage?: RolePackageManifest;
+  profiles: ModelProfile[];
+  roleModelCredentialBindings?: RoleModelCredentialBinding[];
+  modelInvoker: DesktopModelInvoker;
+  desktopToolInvoker?: DesktopToolInvoker;
+  workspaceId?: string;
+  createdAt: string;
+  currentResponse: DesktopModelChatResponse;
+  factoryRequest: Record<string, unknown>;
+  request: AiDramaNodeImageGenerationRequest;
+}): Promise<WorkflowRuntimeNodeResult> {
+  const nodeFactoryRequest = {
+    ...input.factoryRequest,
+    imageGenerationModelProfileId:
+      input.request.modelProfileId ?? input.factoryRequest.imageGenerationModelProfileId
+  };
+  const imageProfile = selectFactoryImageGenerationProfile(
+    input.profiles,
+    nodeFactoryRequest,
+    input.task.roleCode,
+    input.roleModelCredentialBindings
+  );
+  if (!imageProfile) {
+    throw new Error('未配置图片生成模型，无法生成漫剧人物图或场景图。');
+  }
+
+  const settings = readAiDramaVideoSettings(input.factoryRequest);
+  const aspectRatio = input.request.ratio ?? settings.ratio;
+  const imageSize = input.request.imageSize ?? '1K';
+  const visualStyle = input.request.visualStyle ?? settings.visualStyle;
+  const label =
+    input.request.generationKind === 'character_image'
+      ? '人物图'
+      : input.request.generationKind === 'scene_image'
+        ? '场景图'
+        : '参考图';
+  const prompt = [
+    input.request.prompt,
+    `用途：AI漫剧${label}节点。`,
+    `画面风格：${visualStyle}。`,
+    `画幅：${aspectRatio}。`,
+    input.request.voicePresetId ? `角色绑定音色：${input.request.voicePresetId}。` : undefined,
+    '要求：人物、场景、画面风格稳定，适合后续图生视频，不要生成无关文字。'
+  ].filter(Boolean).join('\n');
+  const startedLog = createLog(
+    input.task.taskId,
+    'info',
+    'WORKFLOW_RUNTIME_AI_DRAMA_NODE_IMAGE_STARTED',
+    `AI drama node image generation started: ${label}.`,
+    input.createdAt,
+    sanitizeLogSuffix(`${input.node.id}-${input.request.nodeId}`)
+  );
+  const response = await input.modelInvoker({
+    profile: imageProfile,
+    taskKind: 'image_generation',
+    imageGeneration: {
+      prompt,
+      aspectRatio,
+      size: imageSize,
+      responseFormat: 'url'
+    },
+    messages: [
+      {
+        role: 'system',
+        content: [
+          'You are a QiuAI WorkOS AI drama image generation executor.',
+          'Generate exactly one image for the selected drama canvas node.',
+          'Return JSON only: {"remoteUrl":"https://...","thumbnailPath":"https://..."} or {"localPath":"C:\\\\...\\\\image.png"}.'
+        ].join('\n')
+      },
+      {
+        role: 'user',
+        content: prompt
+      }
+    ],
+    timeoutMs: readWorkflowRuntimeModelTimeoutMs(input.node.config?.timeoutMs ?? 180_000)
+  });
+  let imageResult = readFactoryImageGenerationResponse(response);
+  if (!imageResult.remoteUrl && !imageResult.localPath) {
+    throw new Error('漫剧节点生图没有返回可用图片。');
+  }
+
+  if (
+    imageResult.remoteUrl &&
+    !imageResult.localPath &&
+    input.desktopToolInvoker &&
+    input.workspaceId &&
+    canUseFactoryRemoteAssetDownload(input.binding)
+  ) {
+    try {
+      const downloadResult = await input.desktopToolInvoker({
+        workspaceId: input.workspaceId,
+        toolId: 'local-filesystem',
+        action: 'filesystem.download_remote_file',
+        input: {
+          url: imageResult.remoteUrl,
+          folder: 'ai-drama-images',
+          fileName: buildWorkflowArtifactFileName(input.task.title, `${label}-${input.request.nodeId}`),
+          mediaKind: 'image'
+        }
+      });
+      const localPath = readWorkflowRuntimeString(downloadResult.output?.localPath);
+      if (downloadResult.ok && localPath) {
+        imageResult = {
+          ...imageResult,
+          localPath,
+          thumbnailPath: imageResult.thumbnailPath ?? localPath
+        };
+      }
+    } catch {
+      // Keep the remote image when local download is unavailable.
+    }
+  }
+
+  const previewItem: FactoryArtifactPreviewItem = {
+    id: `${input.task.taskId}-${sanitizeLogSuffix(input.request.nodeId)}-image`,
+    order: 1,
+    sku: input.request.nodeId,
+    sourceName: input.request.nodeKind,
+    packageKey: input.request.generationKind,
+    packageLabel: label,
+    imageSize,
+    status: 'completed',
+    remoteUrl: imageResult.remoteUrl,
+    localPath: imageResult.localPath,
+    thumbnailPath: imageResult.thumbnailPath,
+    prompt,
+    providerJobId: imageResult.providerJobId,
+    providerStatus: imageResult.providerStatus,
+    createdAt: input.createdAt
+  };
+  const summaryContent = [
+    `AI漫剧${label}生成完成。`,
+    `节点：${input.request.nodeId}`,
+    `画幅：${aspectRatio}`,
+    imageResult.localPath ? `本地文件：${imageResult.localPath}` : undefined,
+    imageResult.remoteUrl ? `远程结果：${imageResult.remoteUrl}` : undefined
+  ].filter(Boolean).join('\n');
+  const artifact: DesktopArtifactSummary = {
+    id: `${input.task.taskId}-ai-drama-node-image-${Date.parse(input.createdAt) || Date.now()}`,
+    type: 'image',
+    title: `${input.task.title} ${label}`,
+    content: summaryContent,
+    createdAt: input.createdAt,
+    remoteUrl: imageResult.remoteUrl,
+    localPath: imageResult.localPath,
+    format: 'png',
+    mimeType: 'image/png',
+    factoryPreview: {
+      kind: 'digital_factory_image_batch',
+      title: `${input.task.title} ${label}`,
+      platformLabel: aspectRatio,
+      concurrency: 1,
+      total: 1,
+      completed: 1,
+      failed: 0,
+      items: [previewItem]
+    }
+  };
+  const outputPayload = {
+    kind: 'ai_drama_node_image',
+    nodeId: input.request.nodeId,
+    nodeKind: input.request.nodeKind,
+    generationKind: input.request.generationKind,
+    prompt,
+    remoteUrl: imageResult.remoteUrl,
+    localPath: imageResult.localPath,
+    thumbnailPath: imageResult.thumbnailPath
+  };
+  const outputVariables = writeWorkflowNodeOutputs({
+    pool: input.pool,
+    node: input.node,
+    text: summaryContent,
+    json: outputPayload,
+    result: outputPayload,
+    outputValue: outputPayload
+  });
+  input.pool.set('runtime.previous_text', summaryContent);
+  input.pool.set('runtime.last_model_node', input.node.id);
+  input.pool.set('ai_drama_node_image_result', outputPayload);
+
+  return {
+    response: mergeWorkflowRuntimeResponses(input.currentResponse, {
+      provider: response.provider,
+      modelName: response.modelName,
+      content: summaryContent,
+      artifacts: response.artifacts
+    }),
+    primaryProfile: imageProfile,
+    logs: [
+      startedLog,
+      createLog(
+        input.task.taskId,
+        'info',
+        'WORKFLOW_RUNTIME_AI_DRAMA_NODE_IMAGE_COMPLETED',
+        summaryContent,
+        input.createdAt,
+        sanitizeLogSuffix(`${input.node.id}-${input.request.nodeId}-completed`),
+        { nodeId: input.request.nodeId, generationKind: input.request.generationKind }
+      )
+    ],
+    usedToolIds: imageResult.localPath ? ['local-filesystem'] : [],
+    generatedArtifacts: [artifact],
+    factoryOutputs: [{
+      id: `${input.task.taskId}-ai-drama-node-image-output`,
+      factoryKind: 'ai_drama_video_factory',
+      kind: 'image',
+      title: `${label}：${input.request.nodeId}`,
+      status: 'qualified',
+      originalStatus: 'qualified',
+      outputPath: imageResult.localPath,
+      outputUrl: imageResult.remoteUrl,
+      thumbnailPath: imageResult.thumbnailPath,
+      summary: summaryContent,
+      metadata: {
+        nodeId: input.request.nodeId,
+        nodeKind: input.request.nodeKind,
+        generationKind: input.request.generationKind,
+        prompt
+      },
+      auditTrail: [],
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt
+    }],
+    inputVariables: ['factory_request'],
+    outputVariables: [...new Set([...outputVariables, 'ai_drama_node_image_result'])],
+    message: `AI drama node image generation finished: ${label}.`
+  };
+}
+
 async function invokeWorkflowRuntimeAiDramaVideoFactoryNode(input: {
   task: DesktopTaskDetail;
   node: WorkflowGraphNode;
@@ -3949,9 +4199,17 @@ async function invokeWorkflowRuntimeAiDramaVideoFactoryNode(input: {
   primaryProfile: ModelProfile;
   profile: ModelProfile;
 }): Promise<WorkflowRuntimeNodeResult | undefined> {
-  const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request'));
+  const factoryRequest = readFactoryRuntimeObject(input.pool.get('factory_request')) ?? {};
   if (readWorkflowRuntimeString(factoryRequest?.factoryKind) !== 'ai_drama_video_factory') {
     return undefined;
+  }
+  const nodeImageRequest = readAiDramaNodeImageGenerationRequest(factoryRequest);
+  if (nodeImageRequest) {
+    return invokeWorkflowRuntimeAiDramaNodeImageGeneration({
+      ...input,
+      factoryRequest,
+      request: nodeImageRequest
+    });
   }
   if (!input.desktopToolInvoker || !input.workspaceId) {
     throw new Error('桌面端视频处理工具不可用，无法制作 AI 漫剧。');
@@ -4260,10 +4518,32 @@ interface AiDramaVideoSettings {
   ratio: string;
   outputResolution: string;
   voicePresetId: string;
+  visualStyle: string;
   outputFolder: string;
   storyText: string;
   characterNotes?: string;
   sceneNotes?: string;
+}
+
+interface AiDramaNodeImageGenerationRequest {
+  nodeId: string;
+  nodeKind: string;
+  generationKind: 'character_image' | 'scene_image' | 'reference_image';
+  prompt: string;
+  voicePresetId?: string;
+  visualStyle?: string;
+  modelProfileId?: string;
+  ratio?: string;
+  imageSize?: '1K' | '2K' | '4K';
+}
+
+interface AiDramaVideoProjectDraft {
+  title?: string;
+  visualStyle?: string;
+  scriptDraft?: string;
+  characterCards?: string;
+  sceneCards?: string;
+  storyboardDraft?: string;
 }
 
 interface AiDramaVideoShot {
@@ -4296,6 +4576,11 @@ function readAiDramaVideoSettings(factoryRequest: Record<string, unknown> | unde
     : readWorkflowRuntimeString(videoGeneration.ratio);
   const voice = isWorkflowRuntimeRecord(factoryRequest?.voice) ? factoryRequest.voice : {};
   const output = isWorkflowRuntimeRecord(factoryRequest?.output) ? factoryRequest.output : {};
+  const project = readAiDramaVideoProjectDraft(factoryRequest);
+  const visualStyle =
+    readWorkflowRuntimeString(factoryRequest?.visualStyle) ??
+    readWorkflowRuntimeString(project.visualStyle) ??
+    'cinematic_realism';
 
   return {
     genreLabel: readAiDramaOptionLabel(factoryRequest?.genre, 'AI漫剧'),
@@ -4312,15 +4597,71 @@ function readAiDramaVideoSettings(factoryRequest: Record<string, unknown> | unde
       2,
       8
     ),
-    ratio: ratioValue === '16:9' || ratioValue === '1:1' ? ratioValue : '9:16',
+    ratio: normalizeAiDramaAspectRatio(ratioValue),
     outputResolution: readWorkflowRuntimeString(videoGeneration.outputResolution) ?? '1080p',
     voicePresetId: readWorkflowRuntimeString(voice.voicePresetId) ?? 'male_pro_1',
+    visualStyle,
     outputFolder: readWorkflowRuntimeString(output.folder) ?? 'ai-drama-videos',
     storyText: readWorkflowRuntimeString(factoryRequest?.storyText)
       ?? readWorkflowRuntimeString(factoryRequest?.instruction)
+      ?? project.scriptDraft
       ?? '',
     characterNotes: readWorkflowRuntimeString(factoryRequest?.characterNotes),
     sceneNotes: readWorkflowRuntimeString(factoryRequest?.sceneNotes)
+  };
+}
+
+function readAiDramaNodeImageGenerationRequest(
+  factoryRequest: Record<string, unknown> | undefined
+): AiDramaNodeImageGenerationRequest | undefined {
+  const request = isWorkflowRuntimeRecord(factoryRequest?.nodeGenerationRequest)
+    ? factoryRequest.nodeGenerationRequest
+    : undefined;
+  const prompt = readWorkflowRuntimeString(request?.prompt);
+  if (!request || !prompt) {
+    return undefined;
+  }
+
+  const generationKind = readWorkflowRuntimeString(request.generationKind);
+  const imageSize = readWorkflowRuntimeString(request.imageSize);
+  return {
+    nodeId: readWorkflowRuntimeString(request.nodeId) ?? 'selected-node',
+    nodeKind: readWorkflowRuntimeString(request.nodeKind) ?? 'image',
+    generationKind:
+      generationKind === 'character_image' || generationKind === 'scene_image'
+        ? generationKind
+        : 'reference_image',
+    prompt,
+    voicePresetId: readWorkflowRuntimeString(request.voicePresetId),
+    visualStyle: readWorkflowRuntimeString(request.visualStyle),
+    modelProfileId: readWorkflowRuntimeString(request.modelProfileId),
+    ratio: normalizeAiDramaAspectRatio(readWorkflowRuntimeString(request.ratio)),
+    imageSize: imageSize === '1K' || imageSize === '2K' || imageSize === '4K' ? imageSize : undefined
+  };
+}
+
+function normalizeAiDramaAspectRatio(value: string | undefined): string {
+  const normalized = value?.trim();
+  return normalized === '16:9' ||
+    normalized === '21:9' ||
+    normalized === '4:3' ||
+    normalized === '3:4' ||
+    normalized === '1:1'
+    ? normalized
+    : '9:16';
+}
+
+function readAiDramaVideoProjectDraft(
+  factoryRequest: Record<string, unknown> | undefined
+): AiDramaVideoProjectDraft {
+  const project = isWorkflowRuntimeRecord(factoryRequest?.project) ? factoryRequest.project : {};
+  return {
+    title: readWorkflowRuntimeString(project.title),
+    visualStyle: readWorkflowRuntimeString(project.visualStyle),
+    scriptDraft: readWorkflowRuntimeString(project.scriptDraft),
+    characterCards: readWorkflowRuntimeString(project.characterCards),
+    sceneCards: readWorkflowRuntimeString(project.sceneCards),
+    storyboardDraft: readWorkflowRuntimeString(project.storyboardDraft)
   };
 }
 
@@ -4372,6 +4713,7 @@ function normalizeAiDramaVideoPlan(input: {
 }): AiDramaVideoPlan {
   const normalizedValue = readFactoryRuntimeJsonValue(input.value);
   const record = isWorkflowRuntimeRecord(normalizedValue) ? normalizedValue : {};
+  const project = readAiDramaVideoProjectDraft(input.factoryRequest);
   const maxShotCount = clampWorkflowRuntimeLimit(
     Math.ceil(input.settings.targetDurationSeconds / Math.max(1, input.settings.shotDurationSeconds)),
     12,
@@ -4386,18 +4728,172 @@ function normalizeAiDramaVideoPlan(input: {
   const shots = rawShots
     .flatMap((item, index) => normalizeAiDramaVideoShot(item, index, input.settings))
     .slice(0, maxShotCount);
+  const projectShots = buildAiDramaShotsFromStoryboardDraft(
+    project.storyboardDraft,
+    input.settings,
+    maxShotCount
+  );
+  const projectCharacters = parseAiDramaCharacterCards(project.characterCards);
+  const projectScenes = parseAiDramaSceneCards(project.sceneCards);
 
   return {
-    title: readWorkflowRuntimeString(record.title) ?? `${input.settings.genreLabel}短剧`,
-    logline: readWorkflowRuntimeString(record.logline)
+    title: project.title
+      ?? readWorkflowRuntimeString(record.title)
+      ?? `${input.settings.genreLabel}短剧`,
+    logline: project.scriptDraft?.slice(0, 180)
+      ?? readWorkflowRuntimeString(record.logline)
       ?? readWorkflowRuntimeString(record.summary)
       ?? input.settings.storyText.slice(0, 120),
-    characters: normalizeAiDramaCharacters(record.characters),
-    scenes: normalizeAiDramaScenes(record.scenes),
-    shots: shots.length > 0
+    characters: mergeAiDramaNamedItems(projectCharacters, normalizeAiDramaCharacters(record.characters)),
+    scenes: mergeAiDramaNamedItems(projectScenes, normalizeAiDramaScenes(record.scenes)),
+    shots: projectShots.length > 0
+      ? projectShots
+      : shots.length > 0
       ? shots
       : buildFallbackAiDramaVideoShots(input.settings, maxShotCount)
   };
+}
+
+function mergeAiDramaNamedItems<T extends { name: string }>(primary: T[], fallback: T[]): T[] {
+  const result: T[] = [];
+  const seen = new Set<string>();
+  for (const item of [...primary, ...fallback]) {
+    const key = item.name.trim().toLowerCase();
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(item);
+  }
+  return result;
+}
+
+function parseAiDramaCharacterCards(value: string | undefined): AiDramaVideoPlan['characters'] {
+  return splitAiDramaDraftLines(value).flatMap((line) => {
+    const card = parseAiDramaNamedDraftLine(line);
+    return card
+      ? [{ name: card.name, description: card.description }]
+      : [];
+  });
+}
+
+function parseAiDramaSceneCards(value: string | undefined): AiDramaVideoPlan['scenes'] {
+  return splitAiDramaDraftLines(value).flatMap((line) => {
+    const card = parseAiDramaNamedDraftLine(line);
+    return card
+      ? [{ name: card.name, description: card.description }]
+      : [];
+  });
+}
+
+function parseAiDramaNamedDraftLine(line: string): { name: string; description?: string } | undefined {
+  const normalized = stripAiDramaLinePrefix(line);
+  const separatorIndex = ['：', ':', '|'].map((separator) => normalized.indexOf(separator))
+    .filter((index) => index >= 0)
+    .sort((left, right) => left - right)[0];
+  const name = separatorIndex === undefined
+    ? normalized.trim()
+    : normalized.slice(0, separatorIndex).trim();
+  if (!name) {
+    return undefined;
+  }
+  const description = separatorIndex === undefined
+    ? undefined
+    : normalized.slice(separatorIndex + 1).trim() || undefined;
+  return { name, description };
+}
+
+function buildAiDramaShotsFromStoryboardDraft(
+  draft: string | undefined,
+  settings: AiDramaVideoSettings,
+  maxShotCount: number
+): AiDramaVideoShot[] {
+  return splitAiDramaDraftLines(draft)
+    .slice(0, maxShotCount)
+    .flatMap((line, index) => {
+      const cells = line.split('|').map((item) => item.trim()).filter(Boolean);
+      const order = index + 1;
+      const fallbackTitle = `镜头 ${order}`;
+      if (cells.length >= 4) {
+        const first = stripAiDramaLinePrefix(cells[0]);
+        const firstIsOnlyIndex = /^\d{1,2}$/.test(first);
+        const scene = cells[firstIsOnlyIndex ? 1 : 0] ?? '';
+        const action = cells[firstIsOnlyIndex ? 2 : 1] ?? '';
+        const dialogue = cells[firstIsOnlyIndex ? 3 : 2] ?? '';
+        const videoPrompt = cells[firstIsOnlyIndex ? 4 : 3] ?? action;
+        return [createAiDramaDraftShot({
+          order,
+          title: firstIsOnlyIndex ? fallbackTitle : first || fallbackTitle,
+          scene,
+          action,
+          dialogue,
+          videoPrompt,
+          settings
+        })];
+      }
+
+      const normalized = stripAiDramaLinePrefix(line);
+      if (!normalized) {
+        return [];
+      }
+      return [createAiDramaDraftShot({
+        order,
+        title: fallbackTitle,
+        scene: settings.sceneNotes ?? '',
+        action: normalized,
+        dialogue: '',
+        videoPrompt: normalized,
+        settings
+      })];
+    });
+}
+
+function createAiDramaDraftShot(input: {
+  order: number;
+  title: string;
+  scene: string;
+  action: string;
+  dialogue: string;
+  videoPrompt: string;
+  settings: AiDramaVideoSettings;
+}): AiDramaVideoShot {
+  return {
+    id: `shot-${input.order}`,
+    title: input.title || `镜头 ${input.order}`,
+    durationSeconds: input.settings.shotDurationSeconds,
+    characters: extractAiDramaShotCharacters(input.action, input.dialogue, input.settings.characterNotes),
+    scene: input.scene,
+    action: input.action,
+    dialogue: input.dialogue,
+    narration: input.dialogue ? '' : input.action,
+    videoPrompt: input.videoPrompt || input.action || input.title,
+    negativePrompt: undefined
+  };
+}
+
+function extractAiDramaShotCharacters(...values: Array<string | undefined>): string[] {
+  const text = values.filter(Boolean).join(' ');
+  const names = new Set<string>();
+  for (const match of text.matchAll(/([\u4e00-\u9fa5A-Za-z0-9_]{1,12})(?:说|问|喊|看|走|拿|展示|沉默|震惊|嘲笑|质疑)/g)) {
+    const name = match[1]?.trim();
+    if (name && !['镜头', '场景', '众人', '团队'].includes(name)) {
+      names.add(name);
+    }
+  }
+  return [...names].slice(0, 4);
+}
+
+function splitAiDramaDraftLines(value: string | undefined): string[] {
+  return (value ?? '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#') && !line.startsWith('//'));
+}
+
+function stripAiDramaLinePrefix(line: string): string {
+  return line
+    .replace(/^\s*(?:[-*]|\d{1,2}[.、)]|镜头\s*\d{1,2}[:：、.-]?)\s*/i, '')
+    .trim();
 }
 
 function normalizeAiDramaCharacters(value: unknown): AiDramaVideoPlan['characters'] {
@@ -4558,19 +5054,26 @@ function buildAiDramaVideoShotPrompt(input: {
   const sceneSummary = input.plan.scenes
     .map((item) => `${item.name}${item.description ? `：${item.description}` : ''}`)
     .join('；');
+  const referenceKind = readWorkflowRuntimeString(input.referenceImage?.metadata?.referenceKind);
+  const referenceLabel = referenceKind?.includes('scene')
+    ? '场景参考图'
+    : referenceKind?.includes('character')
+      ? '人物参考图'
+      : '参考图';
   return [
     '生成一个完整的 AI 漫剧短剧视频镜头，必须是真实连续视频，不是静态漫画、不是幻灯片、不是分镜图。',
     `剧集标题：${input.plan.title}`,
     input.plan.logline ? `故事梗概：${input.plan.logline}` : undefined,
     `类型：${input.settings.genreLabel}`,
     `质量模式：${input.settings.qualityModeLabel}`,
+    `风格：${input.settings.visualStyle}`,
     `画幅：${input.settings.ratio}`,
     `时长：${input.shot.durationSeconds} 秒`,
     characterSummary ? `角色设定：${characterSummary}` : undefined,
     input.settings.characterNotes ? `用户角色要求：${input.settings.characterNotes}` : undefined,
     sceneSummary ? `场景设定：${sceneSummary}` : undefined,
     input.settings.sceneNotes ? `用户场景要求：${input.settings.sceneNotes}` : undefined,
-    input.referenceImage ? `参考图用于保持角色或场景一致性：${input.referenceImage.name}` : undefined,
+    input.referenceImage ? `${referenceLabel}用于保持一致性：${input.referenceImage.name}` : undefined,
     '',
     `本镜头标题：${input.shot.title}`,
     input.shot.scene ? `本镜头场景：${input.shot.scene}` : undefined,
@@ -7808,7 +8311,12 @@ function readFactoryRuntimeItemImage(value: unknown): WorkflowFileValue | undefi
     kind: 'image',
     uri: localPath.startsWith('http://') || localPath.startsWith('https://') ? localPath : `local://${localPath}`,
     localPath,
-    mimeType: readWorkflowRuntimeString(value.mimeType) ?? inferFactoryImageMimeType(name)
+    mimeType: readWorkflowRuntimeString(value.mimeType) ?? inferFactoryImageMimeType(name),
+    metadata: {
+      referenceKind: readWorkflowRuntimeString(value.kind)
+        ?? readWorkflowRuntimeString(value.referenceKind)
+        ?? readWorkflowRuntimeString(value.assetKind)
+    }
   };
 }
 
@@ -8120,6 +8628,43 @@ function selectFactoryAudioGenerationProfile(
   }
 
   return profiles.find((profile) => modelProfileSupportsAnyCapability(profile, ['text_to_audio']));
+}
+
+function selectFactoryImageGenerationProfile(
+  profiles: ModelProfile[],
+  factoryRequest: Record<string, unknown> | undefined,
+  roleCode?: string,
+  roleModelCredentialBindings: RoleModelCredentialBinding[] = []
+): ModelProfile | undefined {
+  const requestedProfileId =
+    readWorkflowRuntimeString(factoryRequest?.imageGenerationModelProfileId) ??
+    'qiu-image-generation-default';
+  const capabilities = ['text_to_image', 'image_generation'];
+  const requestedProfile = profiles.find(
+    (profile) => profile.id === requestedProfileId && modelProfileSupportsFactoryImageGeneration(profile, capabilities)
+  );
+  if (requestedProfile) {
+    return requestedProfile;
+  }
+
+  const boundRuntimeProfileId = roleCode
+    ? roleModelCredentialBindings.find(
+        (binding) =>
+          binding.roleCode === roleCode &&
+          binding.modelProfileId === requestedProfileId &&
+          binding.runtimeModelProfileId?.trim()
+      )?.runtimeModelProfileId?.trim()
+    : undefined;
+  if (boundRuntimeProfileId) {
+    const boundProfile = profiles.find(
+      (profile) => profile.id === boundRuntimeProfileId && modelProfileSupportsFactoryImageGeneration(profile, capabilities)
+    );
+    if (boundProfile) {
+      return boundProfile;
+    }
+  }
+
+  return profiles.find((profile) => modelProfileSupportsFactoryImageGeneration(profile, capabilities));
 }
 
 interface AiVideoProductionSettings {
@@ -13298,6 +13843,23 @@ function getWorkflowSemanticDefaultProfileId(node: WorkflowGraphNode): string | 
 
 function modelProfileSupportsAnyCapability(profile: ModelProfile, capabilities: string[]): boolean {
   return modelProfileSupportsRequiredCapabilities(profile, capabilities);
+}
+
+function modelProfileSupportsFactoryImageGeneration(profile: ModelProfile, capabilities: string[]): boolean {
+  if (isOfficialImageFactoryModelProfile(profile)) {
+    return true;
+  }
+
+  const explicitCapabilities = new Set(
+    [
+      ...(profile.verifiedCapabilities ?? []),
+      ...(profile.capabilities ?? [])
+    ].map((capability) => String(capability).trim())
+  );
+  return (
+    capabilities.some((capability) => explicitCapabilities.has(capability)) ||
+    modelProfileSupportsAnyCapability(profile, capabilities)
+  );
 }
 
 function readDependencyManifestModelProfileIdForNode(

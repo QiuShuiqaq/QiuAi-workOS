@@ -2251,7 +2251,7 @@ function buildAiVideoProductionFactoryManifest() {
 function buildAiDramaVideoFactoryManifest() {
   return {
     kind: 'ai_drama_video_factory',
-    version: '1.0.0',
+    version: '1.1.0',
     title: 'AI制作漫剧工厂',
     batch: {
       maxItems: 12,
@@ -2300,7 +2300,7 @@ function buildAiDramaVideoFactoryManifest() {
     optionalCapabilities: ['image_understanding'],
     ui: {
       primaryActionLabel: '开始制作漫剧',
-      uploadHint: '可选上传角色或场景参考图；故事、角色和分镜主要在参数区填写，最终产物为全视频 MP4。',
+      uploadHint: '按项目步骤编辑故事、剧本、角色、场景和分镜；可选上传人物或场景参考图，最终产物为全视频 MP4。',
       packageSelection: 'none'
     }
   };
@@ -2961,8 +2961,8 @@ function buildAiDramaVideoFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
     {
       id: 'factory_input',
       type: 'input',
-      name: '接收漫剧故事',
-      instruction: '接收用户输入的故事梗概、题材、单集时长、画幅、质量模式、音色和可选角色/场景参考图。',
+      name: '接收漫剧项目',
+      instruction: '接收用户在项目工作台确认过的故事、剧本、角色卡、场景卡、分镜表、题材、单集时长、画幅、质量模式、音色和可选人物/场景参考图。',
       inputVariables: ['start.text', 'start.files', 'start.images'],
       outputVariables: ['task_brief'],
       config: {
@@ -2974,8 +2974,8 @@ function buildAiDramaVideoFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
     {
       id: 'draft_drama_plan',
       type: 'llm',
-      name: '生成剧本分镜',
-      instruction: '把故事拆成一集竖屏 AI 漫剧短剧方案，输出结构化 JSON：标题、角色、场景、镜头列表、每镜头台词、动作、视频提示词和配音文本。必须控制镜头数量和单镜头时长，不能让视频模型一次生成整集。',
+      name: '整理剧本分镜',
+      instruction: '优先遵守用户在项目工作台确认过的剧本、角色卡、场景卡和分镜表，只补齐缺失镜头细节。输出结构化 JSON：标题、角色、场景、镜头列表、每镜头台词、动作、视频提示词和配音文本。必须控制镜头数量和单镜头时长，不能让视频模型一次生成整集。',
       modelProfileId: 'qiu-general-default',
       inputVariables: ['factory_request', 'task_brief', 'start.text', 'start.images'],
       outputVariables: ['ai_drama_plan'],
@@ -3032,7 +3032,7 @@ function buildAiDramaVideoFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
       id: 'factory_output',
       type: 'output',
       name: '返回漫剧成片',
-      instruction: '返回漫剧 MP4 预览、可编辑视频工程、镜头清单和失败镜头原因。最终发布前必须人工审核剧情、版权、平台规则和角色一致性。',
+      instruction: '返回漫剧 MP4 预览、可编辑视频工程、镜头清单、字幕、口播音频和失败镜头原因。最终发布前必须人工审核剧情、版权、平台规则和角色一致性。',
       inputVariables: ['ai_drama_video_result', 'generated_video_path', 'ai_drama_video_summary'],
       outputVariables: ['final_answer']
     }
@@ -3049,9 +3049,9 @@ function buildAiDramaVideoFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
       { id: 'generate_drama_episode__factory_output', sourceNodeId: 'generate_drama_episode', targetNodeId: 'factory_output', condition: { type: 'always' } }
     ],
     variables: [
-      { name: 'factory_request', type: 'json', description: '工厂面板提交的漫剧制作参数。', required: true },
-      { name: 'task_brief', type: 'text', description: '用户故事和制作要求摘要。', required: true },
-      { name: 'ai_drama_plan', type: 'json', description: '剧本、角色、场景和镜头级分镜。', required: true },
+      { name: 'factory_request', type: 'json', description: '漫剧项目工作台提交的制作参数和阶段草稿。', required: true },
+      { name: 'task_brief', type: 'text', description: '用户故事、项目阶段和制作要求摘要。', required: true },
+      { name: 'ai_drama_plan', type: 'json', description: '确认后的剧本、角色、场景和镜头级分镜。', required: true },
       { name: 'ai_drama_video_result', type: 'json', description: '镜头生成、配音、字幕和合成结果。', required: true },
       { name: 'generated_video_path', type: 'text', description: 'MP4 预览本地路径。' },
       { name: 'ai_drama_video_summary', type: 'text', description: '漫剧制作摘要。', required: true }
@@ -5831,15 +5831,15 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
         id: 'factory_input',
         order: 1,
         type: 'input',
-        name: '接收故事设定',
-        instruction: '接收故事梗概、题材、时长、画幅、质量模式、音色和可选角色/场景参考图。'
+        name: '接收漫剧项目',
+        instruction: '接收项目设置、故事梗概、单集脚本、角色卡、场景卡、分镜表和可选人物/场景参考图。'
       },
       {
         id: 'draft_drama_plan',
         order: 2,
         type: 'llm',
-        name: '生成剧本分镜',
-        instruction: '先用文本模型生成结构化剧本、角色、场景和镜头分解，让用户和系统都能按镜头复核。'
+        name: '整理剧本分镜',
+        instruction: '优先遵守用户确认过的阶段草稿，只补齐缺失镜头细节，形成可逐镜头复核的结构化分镜。'
       },
       {
         id: 'generate_drama_episode',

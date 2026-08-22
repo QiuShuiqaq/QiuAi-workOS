@@ -6081,6 +6081,16 @@ const aiDramaTask = await runDesktopTask({
       factory_request: {
         factoryKind: 'ai_drama_video_factory',
         storyText: '男主被同事质疑，关键时刻用 AI 工具完成项目反转。',
+        project: {
+          title: 'AI逆袭项目夜',
+          scriptDraft: '男主先被质疑，再用 AI 工具完成反转。',
+          characterCards: '男主：年轻产品经理，黑色短发，白衬衫，沉稳坚定。',
+          sceneCards: '办公室：夜晚加班，冷色灯光，电脑屏幕反光。',
+          storyboardDraft: [
+            '01 | 办公室 | 男主被同事嘲笑，低头看向电脑 | 你们都觉得我做不到，但 AI 会给出答案。 | 用户确认镜头一，夜晚办公室，近景推进',
+            '02 | 办公室 | 男主演示 AI 自动生成完整方案，众人震惊 | 几分钟后，局势彻底反转。 | 用户确认镜头二，屏幕光照亮男主'
+          ].join('\n')
+        },
         genre: { key: 'urban_counterattack', label: '都市逆袭' },
         qualityMode: { key: 'standard', label: '标准模式' },
         videoGeneration: {
@@ -6103,7 +6113,7 @@ const aiDramaTask = await runDesktopTask({
           id: 'ref-image-1',
           name: 'male-lead.png',
           localPath: 'C:\\QiuAI\\factory\\male-lead.png',
-          kind: 'reference_image'
+          kind: 'character_reference_image'
         }]
       }
     }),
@@ -6131,6 +6141,7 @@ const aiDramaTask = await runDesktopTask({
       assert.equal(request.videoGeneration?.durationSeconds, 4);
       assert.equal(request.videoGeneration?.aspectRatio, '9:16');
       assert.equal(request.videoGeneration?.sourceImagePath, 'C:\\QiuAI\\factory\\male-lead.png');
+      assert.match(request.videoGeneration?.prompt ?? '', /用户确认镜头/);
       return {
         provider: request.profile.providerName,
         modelName: request.profile.modelName,
@@ -6270,6 +6281,132 @@ assert.ok(
 assert.ok(
   aiDramaTask.task.executionLogs.some(
     (log) => log.eventType === 'WORKFLOW_RUNTIME_AI_DRAMA_VIDEO_COMPLETED'
+  )
+);
+
+const aiDramaNodeImageProfile = getOfficialPreflightModelProfile('qiu-official-image-3');
+let aiDramaNodeImageCalls = 0;
+const aiDramaNodeImageTask = await runDesktopTask({
+  task: createMockTaskDetail({
+    taskId: 'task-runner-ai-drama-node-image-001',
+    roleCode: 'ai-drama-node-image-factory',
+    roleName: 'AI Drama Node Image Factory',
+    title: 'Generate AI drama scene node image',
+    input: JSON.stringify({
+      factory_request: {
+        factoryKind: 'ai_drama_video_factory',
+        videoGeneration: {
+          ratio: '9:16'
+        },
+        nodeGenerationRequest: {
+          nodeId: 'scene-node-01',
+          nodeKind: 'scene',
+          generationKind: 'scene_image',
+          prompt: '雨夜城市天台，霓虹反光，适合短剧高潮对峙镜头。',
+          visualStyle: 'warm_romance',
+          modelProfileId: 'qiu-official-image-3',
+          ratio: '16:9',
+          imageSize: '4K'
+        }
+      }
+    }),
+    state: 'queued',
+    artifactCount: 0,
+    costCents: 0
+  }),
+  rolePackage: {
+    roleCode: 'ai-drama-node-image-factory',
+    applicationType: 'digital_factory',
+    name: 'AI Drama Node Image Factory',
+    version: '1.0.0',
+    workflowGraph: {
+      version: '1.0.0',
+      entryNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', name: 'Start' },
+        {
+          id: 'receive_input',
+          type: 'input',
+          name: 'Receive node image request',
+          inputVariables: ['start.text', 'start.images'],
+          outputVariables: ['task_brief']
+        },
+        {
+          id: 'generate_node_image',
+          type: 'llm',
+          name: 'Generate node image',
+          modelProfileId: 'qiu-video-generation-default',
+          inputVariables: ['factory_request', 'task_brief'],
+          outputVariables: ['ai_drama_node_image_result'],
+          config: {
+            llmTaskType: 'video_generation',
+            outputMode: 'json'
+          }
+        }
+      ],
+      edges: [
+        { id: 'start-receive', sourceNodeId: 'start', targetNodeId: 'receive_input' },
+        { id: 'receive-generate', sourceNodeId: 'receive_input', targetNodeId: 'generate_node_image' }
+      ]
+    },
+    modelProfileIds: ['qiu-video-generation-default', 'qiu-official-image-3'],
+    toolIds: ['local-filesystem'],
+    requiredKnowledgeSources: [],
+    defaultTaskTypes: ['image_generation'],
+    syncPolicy: 'summary_only'
+  },
+  modelProfiles: modelProfiles.concat([aiDramaVideoProfile, aiDramaNodeImageProfile]),
+  tools,
+  workspaceId: 'workspace-ai-drama-node-image',
+  enabledModelProfileIds: ['qiu-video-generation-default', 'qiu-official-image-3'],
+  enabledToolIds: ['local-filesystem'],
+  enabledKnowledgeBindingIds: [],
+  modelInvoker: async (request) => {
+    aiDramaNodeImageCalls += 1;
+    assert.equal(request.profile.id, 'qiu-official-image-3');
+    assert.equal(request.taskKind, 'image_generation');
+    assert.equal(request.imageGeneration?.aspectRatio, '16:9');
+    assert.equal(request.imageGeneration?.size, '4K');
+    assert.ok(request.imageGeneration?.prompt.includes('画面风格：warm_romance'));
+    return {
+      provider: request.profile.providerName,
+      modelName: request.profile.modelName,
+      content: JSON.stringify({
+        remoteUrl: 'https://cdn.example.test/drama/scene-node-01.png'
+      })
+    };
+  },
+  desktopToolInvoker: async (request) => {
+    assert.equal(request.action, 'filesystem.download_remote_file');
+    return {
+      toolId: request.toolId,
+      action: request.action,
+      ok: true,
+      output: {
+        localPath: 'C:\\QiuAI\\workspace\\ai-drama-images\\scene-node-01.png',
+        sourceUrl: request.input.url
+      }
+    };
+  },
+  completedAt: '2026-08-22T10:00:00.000Z'
+});
+assert.equal(
+  aiDramaNodeImageTask.task.state,
+  'completed',
+  JSON.stringify(aiDramaNodeImageTask.task.executionLogs.slice(-8), null, 2)
+);
+assert.equal(aiDramaNodeImageCalls, 1);
+const aiDramaNodeImageArtifact = aiDramaNodeImageTask.task.artifacts.find(
+  (artifact) => artifact.type === 'image' && artifact.factoryPreview?.kind === 'digital_factory_image_batch'
+);
+assert.equal(aiDramaNodeImageArtifact?.factoryPreview?.platformLabel, '16:9');
+assert.equal(aiDramaNodeImageArtifact?.factoryPreview?.items[0]?.imageSize, '4K');
+assert.ok(
+  aiDramaNodeImageTask.task.factoryOutputs?.some(
+    (item) =>
+      item.factoryKind === 'ai_drama_video_factory' &&
+      item.kind === 'image' &&
+      item.outputPath?.endsWith('scene-node-01.png')
   )
 );
 

@@ -228,6 +228,14 @@ export function buildWorkflowExecutionPlan(input: {
     };
   }
 
+  if (isAiDramaNodeImageTask(input.task)) {
+    return buildAiDramaNodeImageExecutionPlan({
+      graph,
+      task: input.task,
+      createdAt: input.createdAt
+    });
+  }
+
   const selection = selectWorkflowGraphNodes({
     graph,
     task: input.task,
@@ -294,6 +302,106 @@ function createEmptyWorkflowExecutionPlan(): WorkflowExecutionPlan {
     logs: [],
     promptContext: '',
     requiredModelProfileIds: [],
+    requiredToolIds: []
+  };
+}
+
+function isAiDramaNodeImageTask(task: DesktopTaskDetail): boolean {
+  const inputObject = parseWorkflowTaskInputObject(task.input);
+  const factoryRequest = readRecord(inputObject?.factory_request);
+  const nodeRequest = readRecord(factoryRequest?.nodeGenerationRequest);
+  return (
+    readTrimmedString(factoryRequest?.factoryKind) === 'ai_drama_video_factory' &&
+    Boolean(readTrimmedString(nodeRequest?.prompt))
+  );
+}
+
+function buildAiDramaNodeImageExecutionPlan(input: {
+  graph: WorkflowGraph;
+  task: DesktopTaskDetail;
+  createdAt: string;
+}): WorkflowExecutionPlan {
+  const startNode =
+    input.graph.nodes.find((node) => node.type === 'start') ??
+    {
+      id: 'start',
+      type: 'start' as const,
+      name: 'Start'
+    };
+  const inputNode =
+    input.graph.nodes.find((node) => node.type === 'input') ??
+    {
+      id: 'factory_input',
+      type: 'input' as const,
+      name: 'Receive AI drama node request',
+      inputVariables: ['start.text', 'start.images'],
+      outputVariables: ['task_brief']
+    };
+  const outputNode =
+    input.graph.nodes.find((node) => node.type === 'output') ??
+    {
+      id: 'factory_output',
+      type: 'output' as const,
+      name: 'Return AI drama node image',
+      inputVariables: ['ai_drama_node_image_result'],
+      outputVariables: ['final_answer']
+    };
+  const nodeImageNode: WorkflowGraphNode = {
+    id: 'generate_drama_node_image',
+    type: 'llm',
+    name: 'Generate AI drama node image',
+    instruction:
+      'Generate exactly one image for the selected AI drama canvas node. Do not run the full drama script, video generation, voiceover, or composition workflow.',
+    modelProfileId: 'qiu-image-generation-default',
+    inputVariables: ['factory_request', 'task_brief'],
+    outputVariables: ['ai_drama_node_image_result'],
+    config: {
+      llmTaskType: 'image_generation',
+      outputMode: 'json',
+      timeoutMs: 180000
+    }
+  };
+  const orderedNodes = [startNode, inputNode, nodeImageNode, outputNode];
+  const requiredModelProfileIds = ['qiu-image-generation-default'];
+  const promptContext = [
+    'AI drama node image task:',
+    'Only execute the selected character, scene, or reference image generation request.',
+    'Do not execute the full drama planning, video generation, voiceover, or composition stages.',
+    ...orderedNodes
+      .filter((node) => node.type !== 'start')
+      .map((node, index) => formatWorkflowNodeForPrompt(node, index))
+  ].join('\n');
+  const nodeLogs = orderedNodes
+    .filter((node) => node.type !== 'start')
+    .map((node, index) =>
+      createWorkflowLog(
+        input.task.taskId,
+        'info',
+        'WORKFLOW_GRAPH_NODE_PLANNED',
+        `${index + 1}. ${node.name} was included in the AI drama node image execution plan.`,
+        input.createdAt,
+        sanitizeLogSuffix(`drama-node-image-${node.id}`)
+      )
+    );
+
+  return {
+    enabled: true,
+    orderedNodes,
+    orderedNodeSummaries: orderedNodes.map(toWorkflowExecutionNodeSummary),
+    logs: [
+      createWorkflowLog(
+        input.task.taskId,
+        'info',
+        'WORKFLOW_GRAPH_LOADED',
+        'AI drama node image execution plan loaded.',
+        input.createdAt,
+        'drama-node-image'
+      ),
+      ...nodeLogs
+    ],
+    promptContext,
+    preferredModelProfileId: 'qiu-image-generation-default',
+    requiredModelProfileIds,
     requiredToolIds: []
   };
 }
