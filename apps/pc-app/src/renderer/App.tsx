@@ -222,6 +222,7 @@ import zhipuLogoUrl from './assets/model-providers/zhipu-color.svg';
 import ArtifactWorkspace, {
   type ArtifactRevisionDraft
 } from './ArtifactWorkspace';
+import VideoProjectEditor from './VideoProjectEditor';
 import {
   getFactoryPreviewRemoteSrc,
   hasFactoryPreviewSource
@@ -402,6 +403,7 @@ interface FactoryRunFormValues {
   videoDurationSeconds?: number;
   videoRatio?: string;
   outputResolution?: string;
+  voiceEnabled?: boolean;
   voicePresetId?: string;
   sourceVideoPaths?: string[];
   introAssetPath?: string;
@@ -2725,6 +2727,7 @@ const factoryRunRememberedFieldKeys: Array<keyof FactoryRunFormValues> = [
   'videoDurationSeconds',
   'videoRatio',
   'outputResolution',
+  'voiceEnabled',
   'voicePresetId',
   'introAssetPath',
   'outroAssetPath',
@@ -4860,17 +4863,9 @@ export default function App() {
       return;
     }
 
-    const acceptedFiles = files.filter((file) =>
-      pendingFactoryVideoAssetKind === 'music'
-        ? isAudioFileCandidate(file)
-        : isVideoFileCandidate(file)
-    );
+    const acceptedFiles = files.filter((file) => isVideoFileCandidate(file));
     if (acceptedFiles.length < files.length) {
-      message.warning(
-        pendingFactoryVideoAssetKind === 'music'
-          ? '背景音乐只支持音频格式文件。'
-          : '片头和片尾只支持视频格式文件。'
-      );
+      message.warning('片头和片尾只支持视频格式文件。');
     }
     if (acceptedFiles.length === 0) {
       return;
@@ -9670,25 +9665,37 @@ export default function App() {
           </Form>
         </section>
         {selectedConversationArtifact && conversationTask && conversationRole ? (
-          <ArtifactWorkspace
-            artifact={selectedConversationArtifact}
-            workspaceId={runtimeState.localRuntime.workspaceId}
-            desktopToolInvoker={window.qiuDesktop?.invokeDesktopTool}
-            getPreviewUrl={window.qiuDesktop?.getArtifactPreviewUrl}
-            onClose={() => setSelectedConversationArtifactId('')}
-            onOpenLocal={(targetPath) => void openLocalPath(targetPath)}
-            onSaveAs={() => void saveArtifactAs(selectedConversationArtifact)}
-            onSaveRevision={(draft) =>
-              saveConversationArtifactRevision(
-                conversationTask,
-                selectedConversationArtifact,
-                draft
-              )
-            }
-            onAiRewrite={(input) =>
-              rewriteConversationArtifactSelection(conversationRole, input)
-            }
-          />
+          selectedConversationArtifact.format === 'qiu-video-project' ? (
+            <VideoProjectEditor
+              artifact={selectedConversationArtifact}
+              workspaceId={runtimeState.localRuntime.workspaceId}
+              desktopToolInvoker={window.qiuDesktop?.invokeDesktopTool}
+              getPreviewUrl={window.qiuDesktop?.getArtifactPreviewUrl}
+              onClose={() => setSelectedConversationArtifactId('')}
+              onOpenLocal={(targetPath) => void openLocalPath(targetPath)}
+              onSaveAs={() => void saveArtifactAs(selectedConversationArtifact)}
+            />
+          ) : (
+            <ArtifactWorkspace
+              artifact={selectedConversationArtifact}
+              workspaceId={runtimeState.localRuntime.workspaceId}
+              desktopToolInvoker={window.qiuDesktop?.invokeDesktopTool}
+              getPreviewUrl={window.qiuDesktop?.getArtifactPreviewUrl}
+              onClose={() => setSelectedConversationArtifactId('')}
+              onOpenLocal={(targetPath) => void openLocalPath(targetPath)}
+              onSaveAs={() => void saveArtifactAs(selectedConversationArtifact)}
+              onSaveRevision={(draft) =>
+                saveConversationArtifactRevision(
+                  conversationTask,
+                  selectedConversationArtifact,
+                  draft
+                )
+              }
+              onAiRewrite={(input) =>
+                rewriteConversationArtifactSelection(conversationRole, input)
+              }
+            />
+          )
         ) : null}
         </div>
       </div>
@@ -9823,7 +9830,7 @@ export default function App() {
       factoryVideoAssetAttachments.filter((attachment) => attachment.assetKind === 'music'),
       '音乐'
     );
-    const aiVideoAssetGroups = (['intro', 'outro', 'music'] as const).map((kind) => ({
+    const aiVideoAssetGroups = (['intro', 'outro'] as const).map((kind) => ({
       kind,
       label: aiVideoAssetKindLabel(kind),
       attachments: factoryVideoAssetAttachments.filter((attachment) => attachment.assetKind === kind)
@@ -10297,14 +10304,14 @@ export default function App() {
                             onDragLeave={handleFactoryVideoAssetDragLeave}
                             onDrop={handleFactoryVideoAssetDrop}
                           >
-                            <Typography.Text strong>上传固定资产</Typography.Text>
+                            <Typography.Text strong>上传固定视频</Typography.Text>
                             <Space direction="vertical" size={6} className="factory-video-asset-actions">
                               {aiVideoAssetGroups.map((group) => (
                                 <Button
                                   key={group.kind}
                                   block
                                   size="small"
-                                  icon={group.kind === 'music' ? <AudioOutlined /> : <VideoCameraOutlined />}
+                                  icon={<VideoCameraOutlined />}
                                   onClick={() => {
                                     setPendingFactoryVideoAssetKind(group.kind);
                                     factoryVideoAssetInputRef.current?.click();
@@ -10323,7 +10330,7 @@ export default function App() {
                               ref={factoryVideoAssetInputRef}
                               type="file"
                               multiple
-                              accept=".mp4,.mov,.mkv,.avi,.webm,.m4v,.mp3,.wav,.m4a,.aac,.ogg"
+                              accept=".mp4,.mov,.mkv,.avi,.webm,.m4v"
                               hidden
                               onChange={handleFactoryVideoAssetInputChange}
                             />
@@ -10455,51 +10462,15 @@ export default function App() {
                         ) : isAiVideoProductionFactoryType ? (
                           <>
                             <div className="factory-inline-form-grid compact">
-                              <Form.Item name="platform" label="制作类型" rules={[{ required: true }]}>
+                              <Form.Item name="dialect" label="字幕语言" rules={[{ required: true }]}>
                                 <Select
                                   size="large"
-                                  options={platformOptions.map((item) => ({ value: item.key, label: item.label }))}
-                                />
-                              </Form.Item>
-                              <Form.Item name="videoRatio" label="画幅" rules={[{ required: true }]}>
-                                <Select
-                                  size="large"
-                                  options={operationRatios.map((item) => ({ value: item.key, label: item.label }))}
-                                />
-                              </Form.Item>
-                            </div>
-                            <div className="factory-inline-form-grid compact">
-                              <Form.Item name="videoDurationSeconds" label="目标时长" rules={[{ required: true }]}>
-                                <Select
-                                  size="large"
-                                  options={ecommerceVideoDurationOptions.map((seconds) => ({
-                                    value: seconds,
-                                    label: `${seconds} 秒`
+                                  options={dialectOptions.map((item) => ({
+                                    value: item.key,
+                                    label: item.label
                                   }))}
                                 />
                               </Form.Item>
-                              <Form.Item name="outputResolution" label="清晰度" rules={[{ required: true }]}>
-                                <Select
-                                  size="large"
-                                  options={aiVideoResolutionOptions.map((item) => ({ value: item.key, label: item.label }))}
-                                />
-                              </Form.Item>
-                            </div>
-                            <Form.Item name="voicePresetId" label="口播音色" rules={[{ required: true, message: '请选择口播音色' }]}>
-                              <Select
-                                size="large"
-                                options={aiVideoVoicePresetOptions.map((item) => ({ value: item.key, label: item.label }))}
-                              />
-                            </Form.Item>
-                            <div className="factory-inline-form-grid compact">
-                              <Form.Item name="introAssetPath" label="片头选择">
-                                <Select allowClear size="large" placeholder="不使用片头" options={aiVideoIntroOptions} />
-                              </Form.Item>
-                              <Form.Item name="outroAssetPath" label="片尾选择">
-                                <Select allowClear size="large" placeholder="不使用片尾" options={aiVideoOutroOptions} />
-                              </Form.Item>
-                            </div>
-                            <div className="factory-inline-form-grid compact">
                               <Form.Item name="transitionEffect" label="过场效果">
                                 <Select
                                   size="large"
@@ -10511,13 +10482,44 @@ export default function App() {
                                   ]}
                                 />
                               </Form.Item>
-                              <Form.Item name="musicAssetPath" label="背景音乐">
-                                <Select allowClear size="large" placeholder="不使用音乐" options={aiVideoMusicOptions} />
+                            </div>
+                            <Form.Item
+                              name="voiceEnabled"
+                              label="声音处理"
+                              valuePropName="checked"
+                            >
+                              <Switch
+                                checkedChildren="AI口播"
+                                unCheckedChildren="保留原声"
+                              />
+                            </Form.Item>
+                            <Form.Item shouldUpdate noStyle>
+                              {({ getFieldValue }) =>
+                                getFieldValue('voiceEnabled') ? (
+                                  <Form.Item
+                                    name="voicePresetId"
+                                    label="口播音色"
+                                    rules={[{ required: true, message: '请选择口播音色' }]}
+                                  >
+                                    <Select
+                                      size="large"
+                                      options={aiVideoVoicePresetOptions.map((item) => ({
+                                        value: item.key,
+                                        label: item.label
+                                      }))}
+                                    />
+                                  </Form.Item>
+                                ) : null
+                              }
+                            </Form.Item>
+                            <div className="factory-inline-form-grid compact">
+                              <Form.Item name="introAssetPath" label="片头选择">
+                                <Select allowClear size="large" placeholder="不使用片头" options={aiVideoIntroOptions} />
+                              </Form.Item>
+                              <Form.Item name="outroAssetPath" label="片尾选择">
+                                <Select allowClear size="large" placeholder="不使用片尾" options={aiVideoOutroOptions} />
                               </Form.Item>
                             </div>
-                            <Form.Item name="instruction" label="补充要求">
-                              <Input.TextArea rows={2} placeholder="例如：重点突出自动完成结果，节奏快一点，避免太像教程口吻。" />
-                            </Form.Item>
                           </>
                         ) : isEcommerceVideoFactory ? (
                           <>
@@ -14222,23 +14224,17 @@ export default function App() {
     }
 
     if (isAiVideoProductionFactory(factory)) {
-      const platformOptions = readFactoryPlatformOptions(factory);
-      const ratios = readFactoryOperationRatios(factory);
-      const durationOptions = readFactoryVideoDurationOptions(factory);
-      const resolutionOptions = readFactoryVideoResolutionOptions(factory);
       const voicePresetOptions = readFactoryVoicePresetOptions(factory);
+      const dialectOptions = readFactoryAsrDialectOptions(factory);
 
       return {
         roleCode,
         useKnowledge: false,
-        platform: platformOptions[0]?.key ?? 'bilibili',
-        videoDurationSeconds: durationOptions.includes(180) ? 180 : durationOptions[0] ?? 180,
-        videoRatio: platformOptions[0]?.imageRatio ?? ratios[0]?.key ?? '16:9',
-        outputResolution: resolutionOptions.find((item) => item.key === '1080p')?.key ?? resolutionOptions[0]?.key ?? '1080p',
+        dialect: dialectOptions[0]?.key ?? 'zh',
+        voiceEnabled: false,
         voicePresetId: voicePresetOptions[0]?.key ?? 'male_pro_1',
         introAssetPath: undefined,
         outroAssetPath: undefined,
-        musicAssetPath: undefined,
         transitionEffect: 'fade',
         instruction: ''
       };
@@ -15004,12 +15000,11 @@ export default function App() {
 
       const aiVideoValues: FactoryRunFormValues = {
         ...values,
-        videoDurationSeconds: Number(values.videoDurationSeconds) || 180,
-        outputResolution: values.outputResolution ?? '1080p',
+        dialect: values.dialect ?? 'zh',
+        voiceEnabled: values.voiceEnabled === true,
         voicePresetId: values.voicePresetId ?? 'male_pro_1'
       };
-      const platform = readFactoryPlatformOptions(factory).find((item) => item.key === aiVideoValues.platform);
-      const title = `${template.name} - ${platform?.label ?? aiVideoValues.platform ?? '视频制作'} - ${videoAttachments.length} 段视频`;
+      const title = `${template.name} - ${videoAttachments.length} 段视频`;
       const input = buildAiVideoProductionFactoryTaskInput({
         template,
         factory,
@@ -20255,49 +20250,33 @@ function buildAiVideoProductionFactoryTaskInput({
   const sourceVideos = attachments.filter((attachment) => isFactoryVideoAttachment(attachment));
   const introAsset = findFactoryAttachmentByPath(videoAssets, values.introAssetPath);
   const outroAsset = findFactoryAttachmentByPath(videoAssets, values.outroAssetPath);
-  const musicAsset = findFactoryAttachmentByPath(videoAssets, values.musicAssetPath);
-  const platform = readFactoryPlatformOptions(factory).find((item) => item.key === values.platform);
-  const ratio = readFactoryOperationRatios(factory).find((item) => item.key === values.videoRatio);
-  const resolution =
-    readFactoryVideoResolutionOptions(factory).find((item) => item.key === values.outputResolution) ??
-    readFactoryVideoResolutionOptions(factory).find((item) => item.key === '1080p') ??
-    readFactoryVideoResolutionOptions(factory)[0];
   const voicePreset =
     readFactoryVoicePresetOptions(factory).find((item) => item.key === values.voicePresetId) ??
     readFactoryVoicePresetOptions(factory)[0];
-  const targetDurationSeconds = Math.max(15, Math.min(Number(values.videoDurationSeconds) || 180, 600));
   const factoryRequest = {
     applicationType: 'digital_factory',
     factoryKind: 'ai_video_production_factory',
     factoryName: template.name,
-    platform: platform?.key ?? values.platform ?? 'bilibili',
-    platformLabel: platform?.label ?? values.platform ?? 'B站教程',
-    outputRatio: ratio?.key ?? values.videoRatio ?? platform?.imageRatio ?? '16:9',
-    outputRatioLabel: ratio?.label ?? values.videoRatio ?? platform?.imageRatio ?? '横屏 16:9',
-    outputResolution: resolution?.key ?? values.outputResolution ?? '1080p',
-    outputResolutionLabel: resolution?.label ?? values.outputResolution ?? '1080P',
-    targetDurationSeconds,
-    videoDurationSeconds: targetDurationSeconds,
+    voiceEnabled: values.voiceEnabled === true,
     voicePresetId: voicePreset?.key ?? values.voicePresetId ?? 'male_pro_1',
     voicePresetLabel: voicePreset?.label ?? values.voicePresetId ?? '专业男声',
     transitionEffect: values.transitionEffect ?? 'fade',
     asr: {
       modelProfileId: 'qiu-asr-default',
       language: factory.asr?.defaultLanguage ?? 'zh',
-      dialect: factory.asr?.defaultDialect ?? 'auto'
+      dialect: values.dialect ?? factory.asr?.defaultDialect ?? 'auto',
+      retryDelaysMs: [0]
     },
     materials: {
       introPath: introAsset?.localPath,
       introName: introAsset?.name,
       outroPath: outroAsset?.localPath,
-      outroName: outroAsset?.name,
-      musicPath: musicAsset?.localPath,
-      musicName: musicAsset?.name
+      outroName: outroAsset?.name
     },
     output: {
       folder: factory.output?.folder ?? 'ai-video-production',
-      packageFormat: factory.output?.packageFormat ?? 'single_mp4',
-      videoFormat: factory.output?.videoFormat ?? 'mp4'
+      packageFormat: 'editable_video_project',
+      videoFormat: 'mp4'
     },
     attachments: sourceVideos.map((sourceVideo, index) => ({
       id: sourceVideo.id,
@@ -20310,7 +20289,7 @@ function buildAiVideoProductionFactoryTaskInput({
     })),
     instruction: values.instruction?.trim() || undefined
   };
-  const taskBrief = `请运行「${template.name}」，按上传顺序把 ${sourceVideos.length} 段视频制作成 ${factoryRequest.platformLabel} MP4。`;
+  const taskBrief = `请运行「${template.name}」，按上传顺序处理 ${sourceVideos.length} 段视频素材。`;
 
   return JSON.stringify(
     {
@@ -20318,23 +20297,17 @@ function buildAiVideoProductionFactoryTaskInput({
       factory_request: factoryRequest,
       sourceVideo: factoryRequest.attachments[0],
       sourceVideos: factoryRequest.attachments,
-      platform: {
-        key: factoryRequest.platform,
-        label: factoryRequest.platformLabel
-      },
       output: {
-        ratio: factoryRequest.outputRatio,
-        resolution: factoryRequest.outputResolution,
-        durationSeconds: targetDurationSeconds
+        format: 'mp4',
+        editable: true
       },
       materials: factoryRequest.materials,
       instructions: [
-        '只使用 ASR 转写文本和时间轴分析视频内容，不调用图像理解或视频理解。',
-        '一次任务只产出一个 MP4，不导出字幕文件，不自动发布。',
-        '口播音色必须按 voicePresetId 生成，口播模型不可用时任务硬失败。',
-        '片头和片尾按用户上传的视频资产做确定式合成；过场使用无独立音频的确定式效果。',
-        '每段视频生成对应的口播音频，整片只叠加一条背景音乐，不保留原始视频音频。',
-        '最终输出只返回 MP4 产物，标题、简介、发布文案由用户自行填写。'
+        '每段视频完整保留，不做内容分析、不自动裁剪、不生成新视频内容。',
+        '每段视频单独执行 ASR，生成带时间轴的字幕并保存到可编辑视频工程。',
+        'voiceEnabled 为 false 时保留原声；为 true 时按每段字幕生成一条完整 AI 口播并替换原声。',
+        '片头、片尾按用户上传的视频资产确定式拼接；过场使用无独立音频的本地效果。',
+        '先生成可编辑视频工程和本地预览 MP4，用户在编辑器确认后再导出最终 MP4。'
       ]
     },
     null,

@@ -192,6 +192,7 @@ const llmTaskTypes = new Set<string>([
 ]);
 
 export function getDefaultModelProfileIdForWorkflowLlmTask(taskType: string): string {
+  if (taskType === 'ai_video_production') return 'qiu-asr-default';
   if (taskType === 'vision') return 'qiu-vision-default';
   if (taskType === 'reasoning') return 'qiu-reasoning-default';
   if (taskType === 'audio_transcription') return 'qiu-asr-default';

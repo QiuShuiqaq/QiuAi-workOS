@@ -626,6 +626,7 @@ function readWorkflowNodeSemanticModelProfileIds(node: WorkflowGraphNode): strin
 }
 
 function getSemanticModelProfileIdForTaskType(taskType: string | undefined): string {
+  if (taskType === 'ai_video_production') return 'qiu-asr-default';
   if (taskType === 'vision') return 'qiu-vision-default';
   if (taskType === 'reasoning') return 'qiu-reasoning-default';
   if (taskType === 'audio_transcription') return 'qiu-asr-default';

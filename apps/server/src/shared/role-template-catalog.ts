@@ -2196,7 +2196,7 @@ function buildEcommerceProductVideoFactoryManifest() {
 function buildAiVideoProductionFactoryManifest() {
   return {
     kind: 'ai_video_production_factory',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'AI制作视频工厂',
     batch: {
       maxItems: 30,
@@ -2204,22 +2204,7 @@ function buildAiVideoProductionFactoryManifest() {
       inputFileKinds: ['video'],
       videoExtensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v']
     },
-    platforms: [
-      { key: 'bilibili', label: 'B站教程', imageRatio: '16:9', notes: '适合完整教学、教程拆章和横屏讲解。' },
-      { key: 'douyin', label: '抖音宣传', imageRatio: '9:16', notes: '适合短视频宣传、结果展示和竖屏传播。' }
-    ],
     contentControls: {
-      ratios: [
-        { key: '16:9', label: '横屏 16:9' },
-        { key: '9:16', label: '竖屏 9:16' },
-        { key: '1:1', label: '方图 1:1' }
-      ],
-      durationSecondOptions: [30, 60, 90, 120, 180, 300],
-      resolutions: [
-        { key: '720p', label: '720P' },
-        { key: '1080p', label: '1080P' },
-        { key: '2k', label: '2K' }
-      ],
       voicePresets: [
         { key: 'male_pro_1', label: '专业男声 - 沉稳讲解' },
         { key: 'male_pro_2', label: '专业男声 - 清晰播报' },
@@ -2246,24 +2231,18 @@ function buildAiVideoProductionFactoryManifest() {
         extensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v'],
         optional: true
       },
-      {
-        key: 'music',
-        label: '背景音乐',
-        mimeTypes: ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/aac', 'audio/ogg'],
-        extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg'],
-        optional: true
-      }
     ],
     output: {
       cacheDays: 30,
       folder: 'ai-video-production',
-      packageFormat: 'single_mp4',
+      packageFormat: 'editable_video_project',
       videoFormat: 'mp4'
     },
-    requiredCapabilities: ['text', 'audio_to_text', 'text_to_audio'],
+    requiredCapabilities: ['audio_to_text'],
+    optionalCapabilities: ['text_to_audio'],
     ui: {
       primaryActionLabel: '开始制作',
-      uploadHint: '输入区上传本次任务的一段段视频；固定片头、片尾和背景音乐在资产区上传并重复使用。',
+      uploadHint: '输入区上传本次任务的一段段视频；片头和片尾在右侧视频资产区上传并重复使用。',
       packageSelection: 'none'
     }
   };
@@ -2844,7 +2823,7 @@ function buildAiVideoProductionFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
       id: 'factory_input',
       type: 'input',
       name: '接收原始视频',
-      instruction: '接收用户上传的一段段视频，以及平台、画幅、时长、清晰度、口播音色、片头、片尾、过场效果和背景音乐选择。',
+      instruction: '接收用户上传的一段段视频，以及字幕语言、声音处理、片头、片尾和过场效果选择。',
       inputVariables: ['start.text', 'start.files', 'start.videos'],
       outputVariables: ['task_brief'],
       config: {
@@ -2857,27 +2836,25 @@ function buildAiVideoProductionFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
       id: 'produce_video',
       type: 'llm',
       name: 'AI制作视频',
-      instruction: 'PC 端按固定流程执行：逐段视频探测、音频抽取、ASR 转写、文本结构分析、按成片片段分别生成口播音频、按顺序拼接视频并在片段之间插入过场效果，最后合成片头、片尾和背景音乐并导出单个 MP4。只依据 ASR 文本分析内容，不使用图像理解或视频理解。',
-      modelProfileId: 'qiu-general-default',
+      instruction: 'PC 端按固定流程执行：逐段视频探测、音频抽取、ASR 转写、生成完整字幕；用户开启 AI 口播时，按每段字幕生成一条口播音频并替换原声；最后把片头、视频片段、过场效果和片尾保存为可编辑视频工程，并生成 MP4 预览。不做内容分析、不自动裁剪、不生成新视频内容。',
+      modelProfileId: 'qiu-asr-default',
       inputVariables: ['factory_request', 'start.files', 'task_brief'],
       outputVariables: ['ai_video_production_result', 'generated_video_path', 'video_production_summary'],
       config: {
         llmTaskType: 'ai_video_production',
         outputMode: 'json',
-        requiredModelProfileIds: ['qiu-asr-default', 'qiu-audio-generation-default'],
+        requiredModelProfileIds: ['qiu-asr-default'],
         requiredToolActions: [
           { toolId: 'video-processing', action: 'video.probe' },
           { toolId: 'video-processing', action: 'video.extract_audio' },
           { toolId: 'video-processing', action: 'video.compose_clips' },
-          { toolId: 'local-filesystem', action: 'filesystem.download_remote_file' }
+          { toolId: 'local-filesystem', action: 'filesystem.write_text_file' }
         ],
         schema: {
-          platform: 'bilibili | douyin',
-          transcript: 'string',
-          cutPlan: [{ sourceIndex: 1, start: 0, end: 30, label: 'string', reason: 'string' }],
-          narrationScript: 'string',
-          narrationSegments: [{ sourceIndex: 1, segmentIndex: 1, text: 'string' }],
-          outputVideoPath: 'string'
+          projectPath: 'string',
+          previewPath: 'string',
+          sourceClips: [{ id: 'string', durationSeconds: 0, subtitles: [] }],
+          voiceEnabled: false
         }
       }
     },
@@ -2885,7 +2862,7 @@ function buildAiVideoProductionFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
       id: 'factory_output',
       type: 'output',
       name: '返回结果',
-      instruction: '返回单个 MP4 成品地址和必要的处理状态，不输出额外字幕文件或复杂总结。',
+      instruction: '返回可编辑视频工程和 MP4 预览。字幕保存在工程内，不单独导出字幕文件。',
       inputVariables: ['ai_video_production_result', 'generated_video_path', 'video_production_summary'],
       outputVariables: ['final_answer']
     }
@@ -2903,9 +2880,9 @@ function buildAiVideoProductionFactoryWorkflowGraph(): ServerRoleWorkflowGraph {
     variables: [
       { name: 'factory_request', type: 'json', description: '工厂面板提交的视频制作参数。', required: true },
       { name: 'task_brief', type: 'text', description: '用户任务摘要。', required: true },
-      { name: 'ai_video_production_result', type: 'json', description: 'ASR、结构分析、剪辑计划、口播和渲染结果。', required: true },
-      { name: 'generated_video_path', type: 'text', description: '最终 MP4 本地路径。', required: true },
-      { name: 'video_production_summary', type: 'text', description: '视频制作摘要。', required: true }
+      { name: 'ai_video_production_result', type: 'json', description: '字幕、口播、视频工程和预览结果。', required: true },
+      { name: 'generated_video_path', type: 'text', description: 'MP4 预览本地路径。', required: true },
+      { name: 'video_production_summary', type: 'text', description: '视频工程处理摘要。', required: true }
     ],
     runtimePolicy: {
       maxNodeExecutions: 24,
@@ -5617,15 +5594,15 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
     name: 'AI制作视频工厂',
     industry: '内容生产 / 视频制作',
     scenario: '把原始录屏或视频素材制作成 B站教程或抖音宣传 MP4',
-    description: '面向软件教程、产品演示和宣传素材，把用户上传的一段段视频按 ASR 内容分析、口播音色和固定视频资产配置，制作成单个 MP4 成品。',
+    description: '面向软件教程、产品演示和宣传素材，把用户上传的一段段视频生成完整字幕，可选替换为 AI 口播，并按固定视频资产拼接成可继续编辑的视频工程。',
     recommendedPlanCode: 'ENTERPRISE_PRO_MONTHLY',
-    businessGoal: '把一次录屏转换成可发布的视频成片，减少脚本整理、口播重录和基础剪辑成本。',
-    knowledgeSources: ['企业知识库', '产品资料', '品牌口径', '历史视频内容规范'],
+    businessGoal: '把一段段录屏快速整理成带字幕、口播和片头片尾的可编辑视频，减少重复剪辑成本。',
+    knowledgeSources: [],
     tools: ['video-processing', 'local-filesystem'],
     skills: [
-      skill('asr_timeline_analysis', '语音转写分析', '只依据 ASR 文本和时间信息分析原始视频结构，不做图像理解。'),
-      skill('narration_generation', '口播脚本生成', '根据平台目标生成专业口播脚本，并调用口播模型生成音频。'),
-      skill('deterministic_video_rendering', '确定式视频合成', '按用户选择的片头、片尾、过场效果、背景音乐、画幅、时长和清晰度导出单个 MP4。')
+      skill('asr_subtitle_generation', '语音转写字幕', '逐段执行 ASR，保存完整字幕文本和时间轴，不改写用户原始表达。'),
+      skill('optional_voiceover', '可选 AI 口播', '用户开启后，按每段完整字幕生成一条口播音频并替换原声。'),
+      skill('editable_video_project', '可编辑视频工程', '按用户上传顺序拼接视频、片头、片尾和无独立音频的过场效果，保存工程时间轴并生成 MP4 预览。')
     ],
     workflowSteps: [
       {
@@ -5633,30 +5610,30 @@ const digitalFactoryRoleTemplates: BaseServerRoleTemplateCatalogEntry[] = [
         order: 1,
         type: 'input',
         name: '接收原始视频',
-        instruction: '接收一段段原始录屏或视频，以及平台、画幅、时长、清晰度、口播音色、片头、片尾、过场效果和背景音乐选择。'
+        instruction: '接收一段段原始录屏或视频，以及字幕语言、声音处理、片头、片尾和过场效果选择。'
       },
       {
         id: 'produce_video',
         order: 2,
         type: 'llm',
         name: 'AI制作视频',
-        instruction: 'PC 端按固定流程执行 ASR、内容结构分析、口播生成和视频合成，最终只导出一个 MP4。'
+        instruction: 'PC 端按固定流程执行逐段 ASR、字幕生成、可选口播、视频拼接和工程保存，生成可编辑工程及 MP4 预览。'
       },
       {
         id: 'factory_output',
         order: 3,
         type: 'output',
         name: '返回结果',
-        instruction: '返回最终 MP4 成品，不单独导出字幕或复杂内容包。'
+        instruction: '返回可编辑视频工程和 MP4 预览；字幕保存在工程内，不单独导出字幕文件。'
       }
     ],
     workflowGraph: buildAiVideoProductionFactoryWorkflowGraph(),
     dependencyManifestFactory: buildAiVideoProductionFactoryManifest(),
     sampleInputs: [
-      '请把这段 QiuAI-workOS 使用录屏制作成 B站教程视频，横屏 1080P，保留重点操作步骤。',
-      '请把这段产品演示视频制作成抖音宣传短视频，竖屏 60 秒，突出 AI 自动完成工作的结果。'
+      '请把这些 QiuAI-workOS 录屏按上传顺序拼接，生成完整字幕并保留原声。',
+      '请把这些录屏生成完整字幕，并使用专业男声替换原声，再加入片头片尾。'
     ],
-    outputFormat: '单个 MP4 成片，包含可选片头、片尾、过场效果、背景音乐和口播音频。',
+    outputFormat: '可编辑视频工程和 MP4 预览，包含视频片段、字幕、可选口播、片头、片尾和过场效果。',
     allowedPlanCodes: allowedPlanCodesFrom('ENTERPRISE_BASIC_MONTHLY'),
     approvalPolicy: '本工厂只生成视频成片，不自动发布；对外发布前必须由用户人工确认事实、版权、平台规则和品牌口径。'
   },

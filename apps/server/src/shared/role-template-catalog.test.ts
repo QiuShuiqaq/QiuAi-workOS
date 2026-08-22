@@ -284,7 +284,7 @@ test('server role template catalog only exposes the approved production set', ()
       workflowGraph: aiVideoProductionTemplate.workflowGraph,
       generatedAt: '2026-08-17T00:00:00.000Z'
     }).modelAssets.map((asset) => asset.modelProfileId),
-    ['qiu-asr-default', 'qiu-audio-generation-default', 'qiu-general-default']
+    ['qiu-asr-default']
   );
   const aiVideoProductionManifest = readRecord(aiVideoProductionTemplate.dependencyManifestFactory);
   const reusableAssets = Array.isArray(aiVideoProductionManifest?.reusableAssets)
@@ -292,25 +292,18 @@ test('server role template catalog only exposes the approved production set', ()
     : [];
   assert.deepEqual(
     reusableAssets.map((asset) => readRecord(asset)?.key),
-    ['intro', 'outro', 'music']
+    ['intro', 'outro']
   );
   for (const asset of reusableAssets) {
     const record = readRecord(asset);
     const mimeTypes = record?.mimeTypes;
     const key = readRecord(asset)?.key;
-    if (key === 'music') {
-      assert.deepEqual(record?.extensions, ['mp3', 'wav', 'm4a', 'aac', 'ogg']);
-      assert.ok(
-        Array.isArray(mimeTypes) &&
-        mimeTypes.every((mimeType) => String(mimeType).startsWith('audio/'))
-      );
-    } else {
-      assert.deepEqual(record?.extensions, ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v']);
-      assert.ok(
-        Array.isArray(mimeTypes) &&
-        mimeTypes.every((mimeType) => String(mimeType).startsWith('video/'))
-      );
-    }
+    assert.equal(key === 'intro' || key === 'outro', true);
+    assert.deepEqual(record?.extensions, ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v']);
+    assert.ok(
+      Array.isArray(mimeTypes) &&
+      mimeTypes.every((mimeType) => String(mimeType).startsWith('video/'))
+    );
   }
 
   const factoryManifestKinds = new Set([
